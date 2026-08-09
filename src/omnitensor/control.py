@@ -8,7 +8,9 @@ around this class so the policy logic is fully testable off the bus.
 
 from __future__ import annotations
 
+import copy
 import json
+import re
 import time
 from pathlib import Path
 
@@ -18,10 +20,23 @@ from .state import MAX_WEIGHT, MIN_WEIGHT, PolicyState, PolicyStore, ProfilePoli
 
 CONTROL_VERSION = 1
 REVISION_MISMATCH_MESSAGE = "Runtime policy revision changed; refresh and retry"
+PERSIST_FAILURE_MESSAGE = "Could not persist the policy; nothing was applied"
+INTERNAL_ERROR_MESSAGE = "Internal error while applying the command"
+COMMAND_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
+MAX_MESSAGE_LENGTH = 240
 
 
 def _now_ms() -> int:
     return max(1, int(time.time() * 1000))
+
+
+def _sanitized_command_id(command: dict) -> str:
+    """The command's ``id`` when it is echoable inside a contract-valid
+    acknowledgement, ``"invalid"`` otherwise."""
+    candidate = command.get("id")
+    if isinstance(candidate, str) and COMMAND_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return "invalid"
 
 
 class ControlService:
@@ -35,7 +50,10 @@ class ControlService:
         return self._state
 
     def apply_command_text(self, text: str) -> str:
-        acknowledgement = self._apply(text)
+        try:
+            acknowledgement = self._apply(text)
+        except Exception:  # noqa: BLE001 - transport must always get a contract-valid reply
+            acknowledgement = self._rejection("invalid", INTERNAL_ERROR_MESSAGE)
         violations = validate_document("runtime-acknowledgement.schema.json", acknowledgement)
         if violations:  # pragma: no cover - contract self-check, never expected
             raise RuntimeError(f"acknowledgement violates contract: {violations}")
@@ -48,27 +66,33 @@ class ControlService:
             return self._rejection("invalid", "Command is not valid JSON")
         if not isinstance(command, dict):
             return self._rejection("invalid", "Command is not an object")
-        command_id = command.get("id")
-        command_id = command_id if isinstance(command_id, str) and command_id else "invalid"
+        command_id = _sanitized_command_id(command)
         violations = validate_document("runtime-command.schema.json", command)
         if violations:
             return self._rejection(command_id, "Command does not match the version 1 contract")
         if command["expectedRevision"] != self._state.revision:
             return self._rejection(command_id, REVISION_MISMATCH_MESSAGE)
-        message = self._execute(command)
+        # Commit protocol: mutate a copy, persist it, only then publish it in
+        # memory — a failed save leaves the served state untouched.
+        candidate = copy.deepcopy(self._state)
+        message = self._execute(candidate, command)
         if message is not None:
             return self._rejection(command_id, message)
-        self._state.revision += 1
-        self._store.save(self._state)
+        candidate.revision += 1
+        try:
+            self._store.save(candidate)
+        except OSError:
+            return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
+        self._state = candidate
         return self._acknowledgement(command_id, "applied", "Policy applied")
 
-    def _execute(self, command: dict) -> str | None:
+    def _execute(self, state: PolicyState, command: dict) -> str | None:
         operation = command["operation"]
         if operation == "set-paused":
-            self._state.paused = command["value"] is True
+            state.paused = command["value"] is True
             return None
         profile_id = command["profileId"]
-        policy = self._state.profiles.get(profile_id)
+        policy = state.profiles.get(profile_id)
         if policy is None:
             return f"Unknown workload profile: {profile_id}"
         if operation == "set-profile-enabled":
@@ -90,7 +114,7 @@ class ControlService:
             "status": status,
             "revision": self._state.revision,
             "appliedAt": _now_ms(),
-            "message": message,
+            "message": message[:MAX_MESSAGE_LENGTH],
             "portfolio": self._state.portfolio(),
         }
 

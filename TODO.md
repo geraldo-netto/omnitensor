@@ -4,9 +4,7 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0001 | open | high | s | OMNI-0003 | control: `apply_command_text` raises `RuntimeError` (crossing D-Bus as a generic error) when the command `id` violates the acknowledgement schema pattern/length — the id is echoed into `commandId` unsanitized (verified: `{"id":"bad id"}` and a 200-char id both raise). |
-| OMNI-0002 | open | medium | xs | OMNI-0001 | state: `PolicyStore.load` accepts JSON `true`/`false` as `revision` (`bool` passes `isinstance(int)`); every later acknowledgement then violates the contract (`revision: True is not of type 'integer'`) and raises. |
-| OMNI-0003 | open | high | s | OMNI-0001 | control: `_apply` mutates profiles/paused and increments `revision` before `store.save`; a save failure (disk full, permissions) leaves in-memory state diverged from disk and propagates the exception across the bus instead of returning a rejection acknowledgement. |
+| OMNI-0002 | open | medium | xs | — | state: `PolicyStore.load` accepts JSON `true`/`false` as `revision` (`bool` passes `isinstance(int)`); every later acknowledgement then violates the contract (`revision: True is not of type 'integer'`) and raises. |
 | OMNI-0004 | open | low | xs | — | snapshot: `build_snapshot` raises `TypeError`, not `ValueError`, for non-numeric metrics (`int(None)`, `int(complex)`), breaking its documented "schema-valid or ValueError" contract. |
 | OMNI-0005 | open | low | xs | — | registry: `load_workloads` raises raw `json.JSONDecodeError` for malformed manifest JSON instead of `ManifestError`, unlike every other manifest failure path. |
 | OMNI-0006 | open | low | xs | — | discovery: `device_utilization` parses sysfs content `nan`/`inf` as load `100.0` (clamp of NaN returns the bound) instead of `None`. |

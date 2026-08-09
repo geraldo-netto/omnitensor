@@ -4,9 +4,15 @@ import json
 
 import pytest
 
-from omnitensor.control import REVISION_MISMATCH_MESSAGE, build_control_service
+from omnitensor.control import (
+    INTERNAL_ERROR_MESSAGE,
+    PERSIST_FAILURE_MESSAGE,
+    REVISION_MISMATCH_MESSAGE,
+    ControlService,
+    build_control_service,
+)
 from omnitensor.registry import validate_document
-from omnitensor.state import PolicyStore, ProfilePolicy
+from omnitensor.state import PolicyState, PolicyStore, ProfilePolicy
 
 
 @pytest.fixture
@@ -91,3 +97,41 @@ def test_rejection_leaves_revision_untouched(control):
     assert control.state.revision == 0
     applied = apply(control, command("set-paused", None, True))
     assert applied["revision"] == 1
+
+
+@pytest.mark.parametrize("bad_id", ["bad id with spaces", "", "a" * 200, 7, None, "tab\tchar"])
+def test_unechoable_command_ids_never_break_the_acknowledgement(control, bad_id):
+    acknowledgement = apply(control, json.dumps({"id": bad_id}))
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["commandId"] == "invalid"
+
+
+class FailingStorage:
+    """PolicyStorage whose save always fails."""
+
+    def __init__(self, error):
+        self._error = error
+
+    def load(self):
+        return PolicyState(profiles={"visual-library": ProfilePolicy(enabled=False, weight=3)})
+
+    def save(self, state):
+        raise self._error
+
+
+def test_save_failure_rejects_and_keeps_served_state_consistent():
+    control = ControlService(FailingStorage(OSError("disk full")), {})
+    acknowledgement = apply(control, command("set-profile-enabled", "visual-library", True))
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == PERSIST_FAILURE_MESSAGE
+    assert acknowledgement["revision"] == 0
+    assert control.state.revision == 0
+    assert control.state.profiles["visual-library"].enabled is False
+
+
+def test_unexpected_handler_failure_returns_internal_error_rejection():
+    control = ControlService(FailingStorage(RuntimeError("boom")), {})
+    acknowledgement = apply(control, command("set-paused", None, True))
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == INTERNAL_ERROR_MESSAGE
+    assert control.state.paused is False
