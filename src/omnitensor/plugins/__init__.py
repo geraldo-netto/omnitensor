@@ -1,5 +1,14 @@
 """Stable contracts for workload plugins."""
 
+from .artifact_compatibility import (
+    AcceleratorRuntime,
+    ArtifactCompatibility,
+    ArtifactCompatibilityChecker,
+    ArtifactCompatibilityDecision,
+    CompatibleArtifactResolver,
+    TensorContract,
+    TensorSpec,
+)
 from .artifact_installation import (
     ArtifactActivation,
     ArtifactInstallation,
@@ -148,6 +157,10 @@ from .triggers import (
 
 __all__ = [
     "AsyncioSubprocessLauncher",
+    "AcceleratorRuntime",
+    "ArtifactCompatibility",
+    "ArtifactCompatibilityChecker",
+    "ArtifactCompatibilityDecision",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
     "DEFAULT_MAX_FRAME_BYTES",
@@ -176,6 +189,7 @@ __all__ = [
     "CollectedOutput",
     "CollectionOutcome",
     "CollectionStatus",
+    "CompatibleArtifactResolver",
     "Collector",
     "CollectorReadiness",
     "DeliveredOutput",
@@ -237,6 +251,8 @@ __all__ = [
     "ResolvedOutput",
     "SETTINGS_DOCUMENT_VERSION",
     "StageOutput",
+    "TensorContract",
+    "TensorSpec",
     "SourceStatus",
     "Trigger",
     "TriggerCoordinator",
