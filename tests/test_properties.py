@@ -144,7 +144,7 @@ def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
     served = dict.fromkeys(plan, 0)
     popped = 0
     while True:
-        all_pending = all(queue.profiles[profile_id] for profile_id in plan)
+        all_pending = all(queue.profiles.get(profile_id) for profile_id in plan)
         job = queue.pop_weighted(lambda profile_id: weights[profile_id])
         if job is None:
             break
@@ -160,6 +160,43 @@ def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
     assert queue.depth() == 0
     assert queue.pop_weighted(lambda profile_id: weights[profile_id]) is None
     assert served == {profile_id: jobs for profile_id, (_w, jobs) in plan.items()}
+    # Drained profiles are pruned: no unbounded passes/order/profiles growth.
+    assert queue.profiles == {}
+    assert queue.order == []
+    assert queue.passes == {}
+
+
+@given(
+    weight_a=st.integers(min_value=1, max_value=5),
+    weight_b=st.integers(min_value=1, max_value=5),
+    pre_served=st.integers(min_value=1, max_value=20),
+    a_jobs=st.integers(min_value=1, max_value=15),
+    b_jobs=st.integers(min_value=1, max_value=15),
+)
+def test_stride_late_joiner_gets_no_catchup_burst(
+    weight_a, weight_b, pre_served, a_jobs, b_jobs,
+):
+    weights = {"a": weight_a, "b": weight_b}
+    queue = _BackendQueue()
+    for index in range(pre_served + a_jobs):
+        queue.push(_Job("a", f"a-{index}", [], future=None))
+    for _ in range(pre_served):
+        assert queue.pop_weighted(lambda p: weights[p]).workload_id == "a"
+    for index in range(b_jobs):
+        queue.push(_Job("b", f"b-{index}", [], future=None))
+
+    served_since_join = {"a": 0, "b": 0}
+    while True:
+        both_pending = bool(queue.profiles.get("a")) and bool(queue.profiles.get("b"))
+        job = queue.pop_weighted(lambda p: weights[p])
+        if job is None:
+            break
+        if both_pending:
+            served_since_join[job.workload_id] += 1
+            # From the join point, while both stay pending, normalized service
+            # never diverges by more than one stride — no newcomer burst.
+            normalized = [served_since_join[p] / weights[p] for p in weights]
+            assert max(normalized) - min(normalized) <= 1.0 + 1e-9
 
 
 @given(plan=profile_plan, data=st.data())

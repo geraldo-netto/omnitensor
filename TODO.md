@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0008 | open | medium | m | — | scheduler: stride newcomer burst — a profile first submitting after others advanced their pass starts at pass 0 and monopolizes the device until it catches up (verified: `BBBBBBBBBBAAAAAAAAAA` with equal weights); `passes`/`order`/`profiles` entries are also never pruned for departed profiles. |
 | OMNI-0011 | open | medium | s | — | service: `_publisher` skips publishing when no devices are detected (snapshot schema requires ≥1 device), so the last snapshot file goes silently stale after all accelerators vanish — the applet has no staleness/absence signal from the service. |
 | OMNI-0012 | open | medium | s | — | service: an exception escaping `_publisher` (e.g. `write_snapshot` OSError) propagates out of `asyncio.gather`, leaving the sibling `_rediscover` task running while `finally` stops the scheduler and disconnects the bus (orphan pending task at shutdown). |
 | OMNI-0013 | open | low | s | OMNI-0007 | scheduler: `_running` is a set of workload ids — the same profile running on two backends concurrently is counted once and discarded when the first job finishes, undercounting `runningProfiles`. |
@@ -14,6 +13,7 @@
 | OMNI-0018 | open | low | xs | — | systemd: unit is `WantedBy=default.target` but only ordered `After=graphical-session.target`; in a non-graphical session the session bus may be absent, producing a restart loop. |
 | OMNI-0019 | open | medium | s | — | service: `profile_statuses` hardcodes `"queued": 0` and derives `running`/`watching` from the global `runningProfiles` count rather than per-profile queue depth/running state — the snapshot misleads the applet under load. |
 | OMNI-0022 | open | low | xs | — | control: `ControlService.__init__` stores `defaults` as `self._defaults` but never reads it (defaults are consumed by `PolicyStore` only) — dead parameter state; mutation testing flags it as an equivalent-mutant source (verified: no other `_defaults` reference in control.py). |
+| OMNI-0023 | open | low | s | — | quality gates: mutmut 3.7 generates no mutants for methods of decorated classes — `_BackendQueue` (`@dataclass`) has zero `xǁ_BackendQueueǁ*` keys in `mutants/src/omnitensor/scheduler.py.meta`, so the stride push/pop logic is invisible to the mutation gate (covered by unit + hypothesis tests instead). |
 | OMNI-0021 | open | low | m | — | executors: no model caching — TPU loads the delegate and builds an interpreter per inference, NPU recompiles the model per inference; latency and device churn under steady load. |
 
 ## Rejected / Won't fix

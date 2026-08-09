@@ -388,6 +388,37 @@ def test_update_executors_cancels_queued_jobs_of_removed_backends():
     asyncio.run(scenario())
 
 
+def test_stride_late_joiner_alternates_instead_of_bursting():
+    from omnitensor.scheduler import _BackendQueue, _Job
+
+    queue = _BackendQueue()
+    for index in range(20):
+        queue.push(_Job("a", f"a-{index}", [], future=None))
+    for _ in range(10):
+        assert queue.pop_weighted(lambda _p: 1).workload_id == "a"
+    for index in range(10):
+        queue.push(_Job("b", f"b-{index}", [], future=None))
+    served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(20)]
+    # Regression (OMNI-0008): with equal weights the late joiner used to be
+    # served ten times in a row ("catching up" from pass 0).
+    assert served == ["a", "b"] * 10
+
+
+def test_queue_prunes_drained_profiles_and_rejoins_at_virtual_time():
+    from omnitensor.scheduler import _BackendQueue, _Job
+
+    queue = _BackendQueue()
+    queue.push(_Job("a", "a-0", [], future=None))
+    queue.push(_Job("b", "b-0", [], future=None))
+    assert queue.pop_weighted(lambda _p: 1) is not None
+    assert queue.pop_weighted(lambda _p: 1) is not None
+    assert queue.profiles == {}
+    assert queue.order == []
+    assert queue.passes == {}
+    queue.push(_Job("a", "a-1", [], future=None))
+    assert queue.passes == {"a": 0.0}
+
+
 def test_scheduler_holds_non_admitted_jobs_and_resumes_on_kick():
     async def scenario():
         executor = SlowExecutor()

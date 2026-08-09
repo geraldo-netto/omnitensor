@@ -61,7 +61,11 @@ class _BackendQueue:
         if job.workload_id not in self.profiles:
             self.profiles[job.workload_id] = deque()
             self.order.append(job.workload_id)
-            self.passes[job.workload_id] = 0.0
+            # Anti-burst: a newcomer joins at the device's current virtual
+            # time (the smallest tracked pass) rather than 0, so it cannot
+            # monopolize the device "catching up" on service it never queued
+            # for while others advanced their passes.
+            self.passes[job.workload_id] = min(self.passes.values(), default=0.0)
         self.profiles[job.workload_id].append(job)
 
     def depth(self) -> int:
@@ -85,7 +89,14 @@ class _BackendQueue:
         )
         stride = 1.0 / max(1, min(5, weight_of(chosen)))
         self.passes[chosen] += stride
-        return self.profiles[chosen].popleft()
+        job = self.profiles[chosen].popleft()
+        if not self.profiles[chosen]:
+            # Prune drained profiles so profiles/order/passes cannot grow
+            # without bound; a returning profile re-joins at virtual time.
+            del self.profiles[chosen]
+            self.order.remove(chosen)
+            del self.passes[chosen]
+        return job
 
 
 class Scheduler:
