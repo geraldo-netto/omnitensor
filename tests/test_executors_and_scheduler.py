@@ -993,3 +993,78 @@ def test_a_healthy_backend_reports_no_degradation():
         await scheduler.stop()
 
     asyncio.run(scenario())
+
+
+class _FlakyDelegateRuntime:
+    """A delegate that fails a fixed number of times, then loads."""
+
+    def __init__(self, failures):
+        self.remaining_failures = failures
+        self.delegate_loads = 0
+
+    def load_delegate(self, name):
+        assert name == "libedgetpu.so.1"
+        if self.remaining_failures:
+            self.remaining_failures -= 1
+            raise OSError("device is busy")
+        self.delegate_loads += 1
+        return object()
+
+    def Interpreter(self, model_path, experimental_delegates):  # noqa: N802
+        return FakeTfliteInterpreter(model_path, experimental_delegates)
+
+
+def test_a_transient_delegate_failure_does_not_disable_the_backend_forever():
+    """The failure used to latch until the device set changed."""
+    now = [100.0]
+    runtime = _FlakyDelegateRuntime(failures=1)
+    executor = TpuExecutor(
+        device_present=True,
+        runtime=runtime,
+        delegate_retry_seconds=30.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(RuntimeError, match="Could not load"):
+        executor.run("model.tflite", [[1]])
+    assert executor.availability().available is False
+
+    now[0] += 30.0
+    assert executor.availability().available is True
+    assert executor.run("model.tflite", [[1]]).outputs == [[2]]
+    assert runtime.delegate_loads == 1
+
+
+def test_a_delegate_failure_is_reported_within_its_retry_window():
+    now = [100.0]
+    executor = TpuExecutor(
+        device_present=True,
+        runtime=_FlakyDelegateRuntime(failures=5),
+        delegate_retry_seconds=30.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(RuntimeError):
+        executor.run("model.tflite", [[1]])
+
+    now[0] += 29.0
+    availability = executor.availability()
+    assert availability.available is False
+    assert "Could not load libedgetpu.so.1" in availability.reason
+
+
+def test_a_successful_delegate_load_clears_an_earlier_failure():
+    now = [100.0]
+    executor = TpuExecutor(
+        device_present=True,
+        runtime=_FlakyDelegateRuntime(failures=1),
+        delegate_retry_seconds=0.0,
+        clock=lambda: now[0],
+    )
+
+    with pytest.raises(RuntimeError):
+        executor.run("model.tflite", [[1]])
+    executor.run("model.tflite", [[1]])
+
+    assert executor._delegate_error is None
+    assert executor.availability().available is True

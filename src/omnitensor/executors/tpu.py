@@ -14,6 +14,11 @@ import time
 from .base import Availability, InferenceResult, require_available
 
 EDGETPU_DELEGATE = "libedgetpu.so.1"
+# How long a delegate-load failure is trusted before the next run retries it.
+# Latching the failure forever turned one transient error — a device reset, a
+# momentarily busy USB accelerator — into a backend that stayed disabled until
+# the device set changed.
+DELEGATE_RETRY_SECONDS = 30.0
 
 
 def _import_tflite():  # pragma: no cover - trivial import shim
@@ -28,13 +33,23 @@ class TpuExecutor:
     backend = "tpu"
     model_formats = frozenset({"tflite-edgetpu"})
 
-    def __init__(self, device_present: bool, runtime=None):
+    def __init__(
+        self,
+        device_present: bool,
+        runtime=None,
+        *,
+        delegate_retry_seconds: float = DELEGATE_RETRY_SECONDS,
+        clock=time.monotonic,
+    ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_tflite()
+        self._delegate_retry_seconds = delegate_retry_seconds
+        self._clock = clock
         # Written by run() in a worker thread (asyncio.to_thread) and read by
         # availability() on the event loop thread; the lock makes the
-        # publication of the error text safe across threads.
-        self._delegate_error: str | None = None
+        # publication of the error text safe across threads.  The timestamp is
+        # what keeps the failure from latching.
+        self._delegate_error: tuple[str, float] | None = None
         self._delegate_error_lock = threading.Lock()
         # Interpreters are expensive model-specific runtime state.  The
         # scheduler serializes TPU work; this lock also preserves that safety
@@ -48,9 +63,9 @@ class TpuExecutor:
         if self._runtime is None:
             return Availability(False, "tflite-runtime is not installed")
         with self._delegate_error_lock:
-            delegate_error = self._delegate_error
-        if delegate_error is not None:
-            return Availability(False, delegate_error)
+            failure = self._delegate_error
+        if failure is not None and self._clock() - failure[1] < self._delegate_retry_seconds:
+            return Availability(False, failure[0])
         return Availability(True)
 
     def _interpreter_for(self, model_path: str):
@@ -62,8 +77,10 @@ class TpuExecutor:
         except (ValueError, OSError) as error:
             message = f"Could not load {EDGETPU_DELEGATE}: {error}"
             with self._delegate_error_lock:
-                self._delegate_error = message
+                self._delegate_error = (message, self._clock())
             raise RuntimeError(message) from error
+        with self._delegate_error_lock:
+            self._delegate_error = None
         interpreter = self._runtime.Interpreter(
             model_path=model_path,
             experimental_delegates=[delegate],
