@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import json
 import math
@@ -26,6 +27,8 @@ MAX_DESCRIPTORS_LIMIT = 65_536
 MAX_OUTPUT_BYTES_LIMIT = 64 * 1024 * 1024
 MAX_CONCURRENCY_LIMIT = 32
 MAX_PROCFS_PROCESSES = 4096
+CGROUP_PROCS_FILE = "cgroup.procs"
+CGROUP_MEMORY_FILE = "memory.current"
 
 
 class WorkerBudgetCode(StrEnum):
@@ -303,12 +306,83 @@ class ProcfsWorkerUsageProbe:
         raise OSError("VmRSS is unavailable")
 
     def _descriptor_count(self, pid: int) -> int:
-        try:
-            return sum(1 for _entry in (self._root / str(pid) / "fd").iterdir())
-        except OSError as error:
-            if _vanished(error):
-                return 0
-            raise
+        return _descriptor_count(self._root, pid)
+
+
+class CgroupWorkerUsageProbe:
+    """Account one worker by cgroup membership instead of process parentage.
+
+    Walking ``children`` links cannot see a process that double-forked or was
+    reparented: severing the parent link is precisely what daemonising does,
+    so a plugin that daemonises escapes every process, memory, and descriptor
+    limit.  Cgroup membership survives both, so a worker cannot leave its
+    accounting by forking.
+
+    The service must run with a delegated cgroup subtree (``Delegate=yes``)
+    and place each worker in its own sub-cgroup for this to observe anything.
+    """
+
+    def __init__(self, cgroup: Path, *, proc_root: Path = Path("/proc")) -> None:
+        self._cgroup = Path(cgroup)
+        self._root = Path(proc_root)
+
+    def __call__(self) -> WorkerResourceUsage:
+        members = self._members()
+        descriptors = sum(_descriptor_count(self._root, pid) for pid in members)
+        return WorkerResourceUsage(len(members), self._memory_bytes(), descriptors)
+
+    def _members(self) -> tuple[int, ...]:
+        text = (self._cgroup / CGROUP_PROCS_FILE).read_text(encoding="ascii")
+        members = tuple(int(entry) for entry in text.split())
+        if len(members) > MAX_PROCFS_PROCESSES:
+            raise OSError(f"worker cgroup exceeds {MAX_PROCFS_PROCESSES} entries")
+        return members
+
+    def _memory_bytes(self) -> int:
+        text = (self._cgroup / CGROUP_MEMORY_FILE).read_text(encoding="ascii").strip()
+        # The controller reports "max" when it is enabled but unbounded; that
+        # is a configuration state, not a measurement.
+        if not text.isdigit():
+            raise OSError(f"cgroup memory accounting is unavailable: {text!r}")
+        return int(text)
+
+
+def create_worker_cgroup(parent: Path, name: str) -> Path:
+    """Create the sub-cgroup one worker will be confined to.
+
+    ``parent`` is the service's own delegated cgroup.  The directory is the
+    entire creation protocol: the kernel populates its interface files.
+    """
+    if not name or "/" in name or name in (".", ".."):
+        raise ValueError(f"invalid worker cgroup name: {name!r}")
+    cgroup = Path(parent) / name
+    cgroup.mkdir(parents=False, exist_ok=True)
+    return cgroup
+
+
+def join_worker_cgroup(cgroup: Path) -> None:
+    """Move the calling process into ``cgroup``.
+
+    Written from the child between fork and exec, this closes the window in
+    which a worker could fork before it has been confined.
+    """
+    with open(Path(cgroup) / CGROUP_PROCS_FILE, "w", encoding="ascii") as stream:
+        stream.write("0")
+
+
+def remove_worker_cgroup(cgroup: Path) -> None:
+    """Remove an empty worker cgroup, tolerating one that is already gone."""
+    with contextlib.suppress(FileNotFoundError):
+        Path(cgroup).rmdir()
+
+
+def _descriptor_count(proc_root: Path, pid: int) -> int:
+    try:
+        return sum(1 for _entry in (proc_root / str(pid) / "fd").iterdir())
+    except OSError as error:
+        if _vanished(error):
+            return 0
+        raise
 
 
 def _vanished(error: OSError) -> bool:

@@ -42,3 +42,8 @@ def test_unit_install_and_hardening_are_intact():
         "%h/.local/state/omnitensor",
         "%h/.local/state/tpu-workload-manager",
     }
+
+
+def test_unit_delegates_a_cgroup_subtree_for_worker_accounting():
+    """Per-worker cgroup accounting needs a subtree the service may write to."""
+    assert _load_unit()["Service"]["Delegate"] == "yes"
