@@ -28,6 +28,7 @@ from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import validate_document
 from omnitensor.scheduler import Scheduler, _BackendQueue, _Job
+from omnitensor.service import build_executors
 from omnitensor.snapshot import build_snapshot
 from omnitensor.state import (
     MAX_WEIGHT,
@@ -317,6 +318,29 @@ def test_executor_model_caches_create_once_per_distinct_path(paths):
 
     assert tflite.delegate_loads == len(set(paths))
     assert npu._core.compile_calls == list(dict.fromkeys(paths))
+
+
+@settings(max_examples=30)
+@given(states=st.lists(st.none() | st.sampled_from(["tpu-a", "tpu-b"]), min_size=1, max_size=20))
+def test_executor_reconciliation_reuses_exactly_unchanged_device_states(states):
+    previous_devices = None
+    previous_executors = None
+    for device_id in states:
+        devices = [] if device_id is None else [
+            Device(id=device_id, backend="tpu", name=device_id, kind="pcie"),
+        ]
+        executors = build_executors(
+            devices,
+            previous_devices=previous_devices,
+            previous_executors=previous_executors,
+        )
+        if previous_executors is not None:
+            unchanged = devices == previous_devices
+            assert (executors["tpu"] is previous_executors["tpu"]) is unchanged
+            assert executors["npu"] is previous_executors["npu"]
+            assert executors["gpu"] is previous_executors["gpu"]
+        previous_devices = devices
+        previous_executors = executors
 
 
 device_entries = st.builds(

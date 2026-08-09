@@ -99,15 +99,16 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
             publish_interval_s=0.01,
             discovery_interval_s=0.01,
         )
+        original_tpu = service._executors["tpu"]
         runner = asyncio.get_running_loop().create_task(service.run())
         await asyncio.sleep(0.08)
         discovery.devices.append(npu_device())
         await asyncio.sleep(0.05)
         service._stopping.set()
         await asyncio.wait_for(runner, timeout=2)
-        return service
+        return service, original_tpu
 
-    service = asyncio.run(scenario())
+    service, original_tpu = asyncio.run(scenario())
     assert transport.started == 1
     assert transport.stopped == 1
     assert transport.handler is service.control
@@ -117,6 +118,7 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     assert discovery.detect_calls >= 2
     backends = {device.backend for device in service._devices}
     assert backends == {"tpu", "npu"}
+    assert service._executors["tpu"] is original_tpu
     assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
 
 

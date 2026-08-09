@@ -5,7 +5,7 @@ import json
 
 from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
 
-from omnitensor.discovery import detect_devices
+from omnitensor.discovery import Device, detect_devices
 from omnitensor.registry import validate_document
 from omnitensor.service import OmniTensorService, build_executors, profile_statuses
 
@@ -80,6 +80,34 @@ def test_build_executors_marks_absent_backends(fake_nodes):
     executors = build_executors([])
     for executor in executors.values():
         assert executor.availability().available is False
+
+
+def test_build_executors_reuses_only_unchanged_device_adapters():
+    tpu = Device(id="tpu-a", backend="tpu", name="TPU A", kind="pcie")
+    first = build_executors([tpu])
+    cached = object()
+    first["tpu"]._interpreters["model.tflite"] = cached
+
+    same = build_executors(
+        [tpu], previous_devices=[tpu], previous_executors=first,
+    )
+    assert same["tpu"] is first["tpu"]
+    assert same["tpu"]._interpreters["model.tflite"] is cached
+    assert same["npu"] is first["npu"]
+    assert same["gpu"] is first["gpu"]
+
+    incomplete_history = build_executors([tpu], previous_executors=first)
+    assert incomplete_history["tpu"] is not first["tpu"]
+    assert incomplete_history["npu"] is not first["npu"]
+    assert incomplete_history["gpu"] is not first["gpu"]
+
+    replacement = Device(id="tpu-b", backend="tpu", name="TPU B", kind="usb")
+    changed = build_executors(
+        [replacement], previous_devices=[tpu], previous_executors=same,
+    )
+    assert changed["tpu"] is not same["tpu"]
+    assert changed["npu"] is same["npu"]
+    assert changed["gpu"] is same["gpu"]
 
 
 def test_publish_prefers_kernel_gpu_utilization(fake_nodes, tmp_path):

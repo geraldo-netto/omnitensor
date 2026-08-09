@@ -29,7 +29,7 @@ from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService
-from .discovery import Device, DiscoveryPaths, detect_devices, device_utilization
+from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -139,18 +139,35 @@ class DbusControlTransport:
             self._bus = None
 
 
-def build_executors(devices) -> dict:
-    present = {device.backend for device in devices}
-    gpu_present = "gpu" in present
-    return {
-        "tpu": TpuExecutor("tpu" in present),
-        "npu": NpuExecutor("npu" in present),
+def _build_executor(backend: str, device_present: bool):
+    if backend == "tpu":
+        return TpuExecutor(device_present)
+    if backend == "npu":
+        return NpuExecutor(device_present)
+    return CompositeGpuExecutor([
         # Vulkan (ncnn) first so any Mesa/RADV/ANV driver serves GPU work;
         # ONNX Runtime with CUDA/ROCm providers is the optional second lane.
-        "gpu": CompositeGpuExecutor([
-            VulkanGpuExecutor(gpu_present),
-            GpuExecutor(gpu_present),
-        ]),
+        VulkanGpuExecutor(device_present),
+        GpuExecutor(device_present),
+    ])
+
+
+def build_executors(
+    devices,
+    *,
+    previous_devices=None,
+    previous_executors: dict | None = None,
+) -> dict:
+    """Build changed backend adapters and preserve unchanged runtime state."""
+    current = {device.backend: device for device in devices}
+    previous = {device.backend: device for device in previous_devices or []}
+    existing = previous_executors or {}
+    can_reuse = previous_devices is not None and previous_executors is not None
+    return {
+        backend: existing[backend]
+        if can_reuse and backend in existing and previous.get(backend) == current.get(backend)
+        else _build_executor(backend, backend in current)
+        for backend in BACKENDS
     }
 
 
@@ -295,8 +312,13 @@ class OmniTensorService:
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._discovery_interval_s)
             except TimeoutError:
-                self._devices = self._discovery.detect()
-                self._executors = build_executors(self._devices)
+                devices = self._discovery.detect()
+                self._executors = build_executors(
+                    devices,
+                    previous_devices=self._devices,
+                    previous_executors=self._executors,
+                )
+                self._devices = devices
                 self._scheduler.update_executors(self._executors)
 
     async def run(self) -> None:
