@@ -1,0 +1,65 @@
+{
+  "manifestVersion": 2,
+  "id": "template-workload",
+  "version": "0.1.0",
+  "capabilities": ["bounded-scoring"],
+  "plugin": {
+    "entryPoint": "template-workload",
+    "protocol": {"minimum": 1, "maximum": 1},
+    "schemas": {
+      "configuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}
+        }
+      },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["values"],
+        "properties": {
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {"type": "number", "minimum": -1000000, "maximum": 1000000}
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["score"],
+        "properties": {
+          "score": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "triggers": ["manual"],
+    "artifacts": [],
+    "permissions": []
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": ["gpu", "npu", "tpu"],
+    "minimumDevices": 0,
+    "model": null
+  },
+  "ui": {
+    "title": "Template workload",
+    "group": "Examples",
+    "description": "Bounded plugin packaging and pipeline example",
+    "icon": "applications-science-symbolic",
+    "order": 900
+  },
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Validate the manifest and entry-point identity",
+      "Enforce process, permission, and result bounds"
+    ]
+  },
+  "acceptance": []
+}

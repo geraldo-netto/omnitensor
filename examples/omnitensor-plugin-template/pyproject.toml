@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-plugin-template"
+version = "0.1.0"
+description = "Minimal separately packaged OmniTensor workload plugin"
+requires-python = ">=3.11"
+dependencies = ["omnitensor>=0.1,<1"]
+
+[project.optional-dependencies]
+test = ["mutmut>=3.2,<4", "pytest>=8", "pytest-cov>=5"]
+
+[project.entry-points."omnitensor.workloads"]
+template-workload = "omnitensor_template.plugin:TemplatePlugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnitensor_template"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"omnitensor-plugin.json" = "omnitensor-plugin.json"
+
+[tool.mutmut]
+source_paths = ["src/omnitensor_template/"]
+pytest_add_cli_args_test_selection = ["tests/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
