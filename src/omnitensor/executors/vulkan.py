@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .base import Availability, InferenceResult, require_available
+from .base import Availability, InferenceResult
 
 # ncnn VkGpuInfo.type(): 0 discrete, 1 integrated, 2 virtual, 3 cpu (software).
 _DEVICE_PREFERENCE = {0: 0, 1: 1, 2: 2}
@@ -55,18 +55,23 @@ class VulkanGpuExecutor:
         return min(candidates)[1], ""
 
     def availability(self) -> Availability:
+        device, reason = self._available_device()
+        return Availability(device is not None, reason)
+
+    def _available_device(self) -> tuple[int | None, str]:
         if not self._device_present:
-            return Availability(False, "No GPU render node detected")
+            return None, "No GPU render node detected"
         if self._runtime is None:
-            return Availability(False, "ncnn is not installed")
-        device, reason = self._select_device()
-        if device is None:
-            return Availability(False, reason)
-        return Availability(True)
+            return None, "ncnn is not installed"
+        return self._select_device()
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
-        require_available(self)
-        device, _reason = self._select_device()
+        # Resolve availability and device index in one enumeration.  Calling
+        # availability() first would enumerate twice and let a hotplug event
+        # shift the chosen index before set_vulkan_device().
+        device, reason = self._available_device()
+        if device is None:
+            raise RuntimeError(f"{self.backend} executor unavailable: {reason}")
         param_path = Path(model_path)
         bin_path = param_path.with_suffix(".bin")
         net = self._runtime.Net()

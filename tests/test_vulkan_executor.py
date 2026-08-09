@@ -89,6 +89,23 @@ def test_vulkan_prefers_discrete_and_never_selects_software_devices():
     assert result.outputs == [[1, 2, 3]]
 
 
+def test_vulkan_run_enumerates_devices_once():
+    class CountingNcnn(FakeNcnn):
+        def __init__(self):
+            super().__init__([INTEGRATED, DISCRETE])
+            self.enumerations = 0
+
+        def get_gpu_count(self):
+            self.enumerations += 1
+            return super().get_gpu_count()
+
+    runtime = CountingNcnn()
+    result = VulkanGpuExecutor(device_present=True, runtime=runtime).run("model.param", [[1]])
+    assert runtime.enumerations == 1
+    assert runtime.selected_device == 1
+    assert result.outputs == [[1]]
+
+
 def test_vulkan_software_only_reports_no_cpu_rule():
     executor = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([CPU]))
     availability = executor.availability()
@@ -97,10 +114,14 @@ def test_vulkan_software_only_reports_no_cpu_rule():
 
 
 def test_vulkan_degrades_without_device_runtime_or_gpus():
-    assert "render node" in VulkanGpuExecutor(device_present=False).availability().reason
+    absent = VulkanGpuExecutor(device_present=False).availability()
+    assert absent == Availability(False, "No GPU render node detected")
     missing = VulkanGpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
-    assert "ncnn is not installed" in missing.availability().reason
+    assert missing.availability() == Availability(False, "ncnn is not installed")
+    with pytest.raises(RuntimeError) as raised:
+        missing.run("model.param", [])
+    assert str(raised.value) == "gpu executor unavailable: ncnn is not installed"
     empty = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([]))
     assert "No Vulkan device" in empty.availability().reason
 

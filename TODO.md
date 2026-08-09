@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0015 | open | low | s | — | executors: `VulkanGpuExecutor.run` enumerates Vulkan devices twice (`require_available` → `_select_device`, then again) — TOCTOU: the chosen index can shift between enumeration and `net.set_vulkan_device` on device-set change; the second enumeration does re-filter software devices, so the no-CPU rule holds at selection time. |
 | OMNI-0017 | open | low | s | — | registry: `SCHEMA_DIR` is resolved at import time preferring `<pkg>/../../schemas` over the packaged copy — in an installed layout an unrelated `schemas` directory two levels up would shadow the canonical contracts; `@cache` on `load_schema`/`_validator` means any schema change requires a restart. |
 | OMNI-0023 | open | low | s | — | quality gates: mutmut 3.7 generates no mutants for methods of decorated classes — `_BackendQueue` (`@dataclass`) has zero `xǁ_BackendQueueǁ*` keys in `mutants/src/omnitensor/scheduler.py.meta`, so the stride push/pop logic is invisible to the mutation gate (covered by unit + hypothesis tests instead). |
 | OMNI-0021 | open | low | m | OMNI-0024 | executors: no model caching — TPU loads the delegate and builds an interpreter per inference, NPU recompiles the model per inference; latency and device churn under steady load. |
