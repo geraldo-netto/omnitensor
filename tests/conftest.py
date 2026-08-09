@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, settings
 
 from omnitensor.discovery import DiscoveryPaths
+
+# Deterministic, faster hypothesis runs under mutation testing so kills are
+# reproducible and the mutmut wall clock stays bounded.
+settings.register_profile(
+    "mutmut",
+    deadline=None,
+    derandomize=True,
+    max_examples=20,
+    suppress_health_check=list(HealthCheck),
+)
+if os.environ.get("MUTANT_UNDER_TEST"):
+    settings.load_profile("mutmut")
 
 
 @pytest.fixture

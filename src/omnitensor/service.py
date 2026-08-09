@@ -242,10 +242,14 @@ def _env_path(name: str, fallback: str) -> Path:
     return Path(os.environ.get(name, fallback)).expanduser()
 
 
-def main() -> None:  # pragma: no cover - process entry point
-    service = OmniTensorService(
+def build_service_from_env() -> OmniTensorService:
+    """The production service instance, configured from the environment."""
+    return OmniTensorService(
         snapshot_path=_env_path("OMNITENSOR_STATE_PATH", DEFAULT_STATE_PATH),
         policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
         workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
     )
-    asyncio.run(service.run())
+
+
+def main() -> None:  # pragma: no cover - process entry point
+    asyncio.run(build_service_from_env().run())

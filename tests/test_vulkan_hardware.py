@@ -7,9 +7,17 @@ proves the actual Vulkan compute path end to end.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from omnitensor.executors.vulkan import VulkanGpuExecutor
+
+if os.environ.get("MUTANT_UNDER_TEST"):
+    pytest.skip(
+        "real-hardware smoke test segfaults native code under mutated inputs",
+        allow_module_level=True,
+    )
 
 ncnn = pytest.importorskip("ncnn")
 
