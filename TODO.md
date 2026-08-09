@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0064 | open | high | s | OMNI-0061, OMNI-0074 | network/exec sandbox: deny networking, command execution, child processes, and ambient capabilities by default and selectively enable only declared, granted operations. |
-| OMNI-0067 | open | high | s | OMNI-0036, OMNI-0038 | inference dispatch: resolve only allowlisted artifacts, select a format-compatible accelerator, submit through the bounded scheduler, and map executor outcomes back to plugin jobs. |
 | OMNI-0068 | open | high | s | OMNI-0038 | pipeline policy: apply pause, profile enablement, weight, consent, and artifact readiness consistently before collection and at every queued stage. |
 | OMNI-0069 | open | high | s | OMNI-0038, OMNI-0066 | pipeline flow control: enforce per-plugin backpressure, deadlines, drop/coalescing rules, idempotency keys, and bounded retry semantics without duplicate delivery. |
 | OMNI-0070 | open | high | s | OMNI-0038, OMNI-0065 | pipeline cancellation: propagate caller, policy, deadline, worker, and shutdown cancellation through every stage and recover queued/in-flight state cleanly after restart. |
@@ -60,6 +59,12 @@
 | OMNI-0123 | blocked | high | s | OMNI-0122 | system acceptance resilience: exercise device/source loss and recovery, worker crash, backpressure, cancellation, service/Cinnamon restart, and in-flight cleanup across representative plugins. — blocked on the bundled artifacts, which are not published yet. |
 | OMNI-0124 | blocked | high | s | OMNI-0122 | system acceptance lifecycle: verify plugin/artifact/service upgrade, configuration migration, rollback, revocation, cache cleanup, and offline startup without losing valid prior state. — blocked on the bundled artifacts, which are not published yet. |
 | OMNI-0125 | blocked | high | s | OMNI-0087, OMNI-0090, OMNI-0093, OMNI-0096, OMNI-0101, OMNI-0106, OMNI-0111, OMNI-0115, OMNI-0121 | system acceptance hardware: run the reproducible TPU/NPU/GPU matrix, archive evidence, and prevent any profile from claiming operational readiness until its own model, pipeline, safety, and acceptance gates pass. — blocked: the GPU lane is available (Vulkan/ncnn) but no TPU or NPU device is present, so the full matrix cannot be run. |
+
+| OMNI-0160 | open | high | s | OMNI-0067 | model digest coverage: `requirements.model` in a v1 manifest carries no `sha256`, so dispatch can only fall back to `resolve_active` and trust the digest recorded at install; add the declared digest to the v1 model requirement, or migrate the bundled catalog to manifest v2 so every dispatch verifies the exact artifact. |
+| OMNI-0161 | open | medium | s | OMNI-0067, OMNI-0069 | executor result mapping: `inference_result_payload` returns raw executor output tensors, which are backend-native objects (ncnn Mat, numpy array) and are not guaranteed JSON-encodable for a plugin result or a D-Bus reply; define the tensor wire encoding and convert at the boundary. |
+| OMNI-0162 | open | medium | s | OMNI-0067 | dispatch input validation: submitted tensors are passed to the executor unvalidated, so shape, dtype, and element bounds are only checked by the backend; validate inputs against the model's declared tensor contract before queueing. |
+| OMNI-0163 | open | medium | s | OMNI-0052, OMNI-0067 | artifact root configuration: `OmniTensorService` only dispatches inference when `artifact_root` is injected, and no environment variable wires it, so a packaged service is permanently fail-closed; add `OMNITENSOR_ARTIFACT_ROOT` and document it. |
+| OMNI-0164 | open | low | xs | OMNI-0072 | inventory artifact readiness: `_resolve_artifact` resolves by artifact id alone, so `DescribePlugins` reports readiness without checking the declared digest that `dispatch` enforces; resolve the declared reference so the inventory and dispatch agree. |
 
 ## Rejected / Won't fix
 

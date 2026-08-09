@@ -1101,3 +1101,29 @@ def test_an_unwired_inspector_reports_an_empty_inventory_rather_than_failing():
 
     assert document == {"version": 1, "generatedAt": 1, "plugins": []}
     assert validate_document("plugin-inventory.schema.json", document) == []
+
+
+def test_without_an_artifact_store_inference_stays_fail_closed(tmp_path):
+    """Nothing can prove a file is the declared model, so nothing is executed."""
+    from omnitensor.jobs import UnavailableJobDispatcher
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    assert isinstance(service.jobs._dispatcher, UnavailableJobDispatcher)
+
+
+def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
+    from omnitensor.dispatch import InferenceJobDispatcher
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+        artifact_root=tmp_path / "artifacts",
+    )
+    assert isinstance(service.jobs._dispatcher, InferenceJobDispatcher)

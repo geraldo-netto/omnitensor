@@ -1,0 +1,158 @@
+"""Turn an admitted job into inference on a real accelerator.
+
+This is the join between four things that each already fail closed on their
+own: the workload catalog says which model a profile may run, the artifact
+store proves the file on disk is that exact model, the executors say which
+backends can run its format and are healthy, and the scheduler serializes work
+onto the one physical device.  The dispatcher's whole job is to keep those
+guarantees intact across the join rather than re-deciding any of them.
+
+Two rules it never relaxes.  A job runs only the artifact its own manifest
+declares — a payload cannot name a model — so a plugin cannot reach another
+profile's weights.  And the backend must both support the model's format and
+be available for it; there is no CPU fallback when nothing qualifies, only a
+stable refusal naming why each candidate was rejected.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Mapping
+from typing import Protocol, runtime_checkable
+
+from .executors.base import Executor, InferenceResult
+from .jobs import JobDispatchError
+from .plugins.artifacts import ArtifactReference, ArtifactResolution
+from .registry import Workload
+from .scheduler import QueueFullError, Scheduler, pick_backend
+
+MAX_INPUT_TENSORS = 64
+
+
+@runtime_checkable
+class ArtifactSource(Protocol):
+    """The artifact store, narrowed to what dispatch is allowed to ask it."""
+
+    def resolve(self, reference: ArtifactReference) -> ArtifactResolution: ...
+
+    def resolve_active(self, artifact_id: str) -> ArtifactResolution: ...
+
+
+class InferenceJobDispatcher:
+    """:class:`~omnitensor.jobs.JobDispatcher` backed by verified artifacts."""
+
+    def __init__(
+        self,
+        workloads: Mapping[str, Workload],
+        scheduler: Scheduler,
+        executors: Mapping[str, Executor],
+        artifacts: ArtifactSource,
+        *,
+        max_input_tensors: int = MAX_INPUT_TENSORS,
+    ) -> None:
+        if max_input_tensors < 1:
+            raise ValueError("max_input_tensors must be positive")
+        self._workloads = workloads
+        self._scheduler = scheduler
+        self._executors = executors
+        self._artifacts = artifacts
+        self._max_input_tensors = max_input_tensors
+
+    def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
+        """Admit, resolve, route, and queue one job; never run it inline."""
+        workload = self._workloads.get(workload_id)
+        if workload is None:
+            raise JobDispatchError(
+                "workload-unknown", f"No such workload profile: {workload_id}"
+            )
+        model = workload.model
+        if model is None:
+            raise JobDispatchError(
+                "workload-has-no-model",
+                f"{workload_id} declares no model and cannot run inference",
+            )
+        inputs = self._inputs(payload)
+        backend, reason = pick_backend(workload, dict(self._executors))
+        if backend is None:
+            # No CPU fallback exists by design, so an unroutable job is refused
+            # with the reason each candidate backend was rejected.
+            raise JobDispatchError("no-backend-available", reason)
+        path = self._model_path(workload, model)
+        try:
+            return self._scheduler.submit(backend, workload_id, path, inputs)
+        except QueueFullError as error:
+            raise JobDispatchError("backend-queue-full", str(error)) from error
+        except RuntimeError as error:
+            raise JobDispatchError("scheduler-unavailable", str(error)) from error
+
+    def _inputs(self, payload: dict) -> list:
+        if not isinstance(payload, dict):
+            raise JobDispatchError("payload-invalid", "Job payload must be an object")
+        inputs = payload.get("inputs")
+        if not isinstance(inputs, list):
+            raise JobDispatchError(
+                "payload-invalid", "Job payload must contain an inputs array"
+            )
+        if len(inputs) > self._max_input_tensors:
+            raise JobDispatchError(
+                "payload-invalid",
+                f"At most {self._max_input_tensors} input tensors may be submitted",
+            )
+        return list(inputs)
+
+    def _model_path(self, workload: Workload, model: dict) -> str:
+        """Resolve the model this manifest declares, and only that one."""
+        workload_id = workload.id
+        reference = declared_artifact_reference(workload, model)
+        try:
+            if reference is not None:
+                resolution = self._artifacts.resolve(reference)
+            else:
+                # A v1 manifest carries no per-model digest, so the strongest
+                # available guarantee is the store's own: the active version was
+                # digest-verified when it was installed and is re-verified here.
+                resolution = self._artifacts.resolve_active(model["id"])
+        except Exception as error:  # noqa: BLE001 - store failures are arbitrary
+            raise JobDispatchError(
+                "artifact-unavailable",
+                f"{workload_id}: artifact store is unreadable: {type(error).__name__}",
+            ) from error
+        if not resolution.ready or resolution.path is None:
+            raise JobDispatchError(
+                "artifact-unavailable", f"{workload_id}: {resolution.reason}"
+            )
+        return str(resolution.path)
+
+
+def declared_artifact_reference(
+    workload: Workload, model: dict
+) -> ArtifactReference | None:
+    """The allowlisted artifact entry matching this workload's model.
+
+    Returns ``None`` when the manifest declares no digest for it, which is the
+    v1 shape.  Returning ``None`` rather than inventing a digest keeps the
+    weaker guarantee visible at the call site instead of pretending to verify.
+    """
+    declared = workload.manifest.get("plugin", {}).get("artifacts") or ()
+    for entry in declared:
+        if (
+            entry["id"] == model["id"]
+            and entry["version"] == model["version"]
+            and entry["format"] == model["format"]
+        ):
+            return ArtifactReference(
+                entry["id"], entry["version"], entry["format"], entry["sha256"]
+            )
+    return None
+
+
+def inference_result_payload(result: InferenceResult) -> dict:
+    """Map an executor outcome back into a plugin-facing job result."""
+    if not isinstance(result, InferenceResult):
+        raise JobDispatchError(
+            "executor-result-invalid", "Executor returned a non-result value"
+        )
+    return {
+        "outputs": list(result.outputs),
+        "durationMs": round(float(result.duration_ms), 3),
+    }

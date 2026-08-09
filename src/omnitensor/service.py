@@ -34,6 +34,7 @@ from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService
 from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
+from .dispatch import InferenceJobDispatcher
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -43,7 +44,9 @@ from .jobs import (
     JobDispatcher,
     JobSubmissionService,
     PredicateJobAuthorizer,
+    UnavailableJobDispatcher,
 )
+from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactResolution
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.summaries import ResultSummaryRegistry
@@ -284,6 +287,7 @@ class OmniTensorService:
         policy_storage: PolicyStorage | None = None,
         plugin_runtime: PluginRuntime | None = None,
         job_dispatcher: JobDispatcher | None = None,
+        artifact_root: Path | None = None,
         result_summaries: ResultSummaryRegistry | None = None,
         plugin_telemetry: PluginTelemetryRegistry | None = None,
         transport: ControlTransport | None = None,
@@ -308,8 +312,9 @@ class OmniTensorService:
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
+        self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
         self.jobs = JobSubmissionService(
-            job_dispatcher,
+            job_dispatcher or self._default_dispatcher(),
             PredicateJobAuthorizer(self._job_authorized),
         )
         self.runtime_api = RuntimeAPI(self.control, self.jobs, self._describe_plugins)
@@ -351,6 +356,19 @@ class OmniTensorService:
         """Applied policy commands wake the workers so held jobs re-evaluate."""
         self._scheduler.kick()
 
+    def _default_dispatcher(self) -> JobDispatcher:
+        """Route inference only when an artifact store is configured.
+
+        Without one there is nothing that can prove a model file is the model
+        the manifest declares, so the fail-closed dispatcher stays in place
+        rather than executing an unverified file.
+        """
+        if self._artifact_store is None:
+            return UnavailableJobDispatcher()
+        return InferenceJobDispatcher(
+            self._workloads, self._scheduler, self._executors, self._artifact_store
+        )
+
     def _describe_plugins(self) -> str:
         """Answer DescribePlugins from installed metadata only.
 
@@ -368,9 +386,11 @@ class OmniTensorService:
         return json.dumps(document, separators=(",", ":"))
 
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
-        return ArtifactResolution(
-            False, None, "no artifact store is configured for this service", 0
-        )
+        if self._artifact_store is None:
+            return ArtifactResolution(
+                False, None, "no artifact store is configured for this service", 0
+            )
+        return self._artifact_store.resolve_active(artifact_id)
 
     def _build_runtime_snapshot(self) -> dict:
         self._scheduler.tick()
