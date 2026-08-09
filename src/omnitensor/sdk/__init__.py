@@ -62,6 +62,12 @@ from .helpers import (
     failed_result,
     succeeded_result,
 )
+from .smoke import (
+    MAX_SMOKE_DOCUMENT_BYTES,
+    PluginSmokeError,
+    parse_smoke_document,
+    run_installed_plugin_smoke,
+)
 from .testing import (
     DEFAULT_MAX_RECORDED_PROGRESS,
     DEFAULT_MAX_RECORDED_RESULTS,
@@ -82,6 +88,7 @@ __all__ = [
     "MAX_PROGRESS_DETAIL_CHARS",
     "MAX_PROGRESS_STAGE_CHARS",
     "MAX_RESULT_DETAIL_CHARS",
+    "MAX_SMOKE_DOCUMENT_BYTES",
     "DEFAULT_MAX_RECORDED_PROGRESS",
     "DEFAULT_MAX_RECORDED_RESULTS",
     "DEFAULT_CONTRACT_TIMEOUT_SECONDS",
@@ -132,6 +139,7 @@ __all__ = [
     "PluginRequest",
     "PluginResult",
     "PluginResultStatus",
+    "PluginSmokeError",
     "PostprocessedOutput",
     "PreprocessedOutput",
     "ProgressEmitter",
@@ -152,7 +160,9 @@ __all__ = [
     "changed_function_targets",
     "failed_result",
     "mutmut_function_patterns",
+    "parse_smoke_document",
     "run_cancellation_contract",
     "run_plugin_contract",
+    "run_installed_plugin_smoke",
     "succeeded_result",
 ]

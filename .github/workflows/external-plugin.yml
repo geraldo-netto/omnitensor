@@ -1,0 +1,38 @@
+name: external-plugin
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  clean-wheel-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build OmniTensor and external template wheels
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel --outdir dist .
+          python -m build --wheel --outdir examples/omnitensor-plugin-template/dist examples/omnitensor-plugin-template
+      - name: Install into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/omnitensor-external"
+          "$RUNNER_TEMP/omnitensor-external/bin/python" -m pip install \
+            dist/omnitensor-*.whl \
+            examples/omnitensor-plugin-template/dist/omnitensor_plugin_template-*.whl
+      - name: Execute one installed plugin job outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/omnitensor-external/bin/omnitensor-plugin-smoke" \
+            --plugin-id template-workload \
+            --payload '{"values":[-1,0,1]}' \
+            --configuration '{"scale":2}'

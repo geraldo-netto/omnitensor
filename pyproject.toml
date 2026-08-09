@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 omnitensor = "omnitensor.service:main"
+omnitensor-plugin-smoke = "omnitensor.sdk.smoke:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnitensor"]
@@ -47,6 +48,7 @@ also_copy = [
     "schemas/",
     "systemd/",
     "workloads/",
+    ".github/workflows/",
     "docs/",
     "examples/omnitensor-plugin-template/",
     "README.md",
