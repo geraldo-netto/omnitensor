@@ -112,7 +112,7 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     service, original_tpu = asyncio.run(scenario())
     assert transport.started == 1
     assert transport.stopped == 1
-    assert transport.handler is service.control
+    assert transport.handler is service.runtime_api
     assert len(publisher.published) >= 2
     for snapshot in publisher.published:
         assert validate_document("runtime-snapshot.schema.json", snapshot) == []
@@ -429,13 +429,76 @@ def test_dbus_interface_is_a_pure_passthrough_shim():
             self.seen.append(text)
             return '{"echo":true}'
 
+        async def submit_job_text(self, text: str) -> str:
+            self.seen.append(f"submit:{text}")
+            return '{"submitted":true}'
+
+        async def cancel_job_text(self, text: str) -> str:
+            self.seen.append(f"cancel:{text}")
+            return '{"cancelled":true}'
+
     control = FakeControl()
     interface = OmniTensorInterface(control)
     # dbus-fast's @method() wrapper swallows return values on direct calls;
     # the bus dispatches to the wrapped function, so test that path.
     reply = interface.ApplyCommand.__wrapped__(interface, '{"id":"x"}')
     assert reply == '{"echo":true}'
-    assert control.seen == ['{"id":"x"}']
+
+    async def jobs():
+        submitted = await interface.SubmitJob.__wrapped__(interface, '{"id":"y"}')
+        cancelled = await interface.CancelJob.__wrapped__(interface, '{"id":"z"}')
+        return submitted, cancelled
+
+    assert asyncio.run(jobs()) == ('{"submitted":true}', '{"cancelled":true}')
+    assert control.seen == [
+        '{"id":"x"}',
+        'submit:{"id":"y"}',
+        'cancel:{"id":"z"}',
+    ]
+
+
+def test_runtime_job_boundary_authorizes_catalog_and_fails_closed_without_dispatcher(
+    tmp_path,
+):
+    async def scenario():
+        service = build_service(tmp_path, [sample_manifest()])
+        known = await service.runtime_api.submit_job_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "requestId": "known",
+                    "workloadId": "sample-workload",
+                    "payload": {},
+                }
+            )
+        )
+        unknown = await service.runtime_api.submit_job_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "requestId": "unknown",
+                    "workloadId": "missing-workload",
+                    "payload": {},
+                }
+            )
+        )
+        missing = await service.runtime_api.cancel_job_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "requestId": "cancel",
+                    "jobId": "missing-job",
+                }
+            )
+        )
+        policy = service.runtime_api.apply_command_text("not-json")
+        return tuple(json.loads(reply) for reply in (known, unknown, missing, policy))
+
+    known, unknown, missing, policy = asyncio.run(scenario())
+    assert known["code"] == "dispatch-unavailable"
+    assert unknown["code"] == "not-authorized"
+    assert missing["code"] == "job-not-found"
+    assert policy["status"] == "rejected"
 
 
 def test_sysfs_discovery_adapter_detects_and_reads_utilization(fake_nodes):

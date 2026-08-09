@@ -20,7 +20,7 @@ trusted integrations unless explicitly listed below.
 | Routing | Ordered `tpu`, `npu`, `gpu` selection constrained by model format; never CPU fallback |
 | Scheduling | Serialized dispatch per backend with weighted soft shares |
 | Observation | Contract-valid devices, queue depth, profile state, and routing detail in snapshots |
-| Inference pipeline | Backend executors and in-process scheduler exist; no version 1 public job-submission D-Bus method or host use-case pipeline ships |
+| Inference pipeline | Version 1 bounded `SubmitJob`/`CancelJob` D-Bus methods and backend scheduler exist; verified artifact dispatch and host use-case pipelines remain readiness-gated |
 
 `idle` with `no model bundled` means the catalog profile has no concrete model
 selection. `watching` means a manifest names a model format and a compatible

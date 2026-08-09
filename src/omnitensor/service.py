@@ -4,7 +4,7 @@ Entry point ``omnitensor`` runs an asyncio loop that
 - rediscovers accelerators every ``DISCOVERY_INTERVAL_S``,
 - publishes a schema-valid snapshot atomically every ``PUBLISH_INTERVAL_S``,
 - owns ``org.cinnamon.OmniTensor1`` on the session bus and answers
-  ``ApplyCommand`` through :class:`omnitensor.control.ControlService`.
+  ``ApplyCommand``, ``SubmitJob``, and ``CancelJob`` through a versioned facade.
 
 :class:`OmniTensorService` depends on the ports in :mod:`omnitensor.ports`;
 the filesystem, sysfs, and D-Bus adapters defined here are only the default
@@ -34,13 +34,18 @@ from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .jobs import (
+    JobDispatcher,
+    JobSubmissionService,
+    PredicateJobAuthorizer,
+)
 from .plugins.loading import InstalledPluginRuntime
 from .ports import (
-    CommandHandler,
     ControlTransport,
     DeviceDiscovery,
     PluginRuntime,
     PolicyStorage,
+    RuntimeHandler,
     SnapshotPublisher,
 )
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
@@ -60,16 +65,41 @@ DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
 
 
+class RuntimeAPI:
+    """Transport-neutral facade retaining policy control while adding jobs."""
+
+    def __init__(self, control: ControlService, jobs: JobSubmissionService) -> None:
+        self._control = control
+        self._jobs = jobs
+
+    def apply_command_text(self, text: str) -> str:
+        return self._control.apply_command_text(text)
+
+    async def submit_job_text(self, text: str) -> str:
+        return await self._jobs.submit_job_text(text)
+
+    async def cancel_job_text(self, text: str) -> str:
+        return await self._jobs.cancel_job_text(text)
+
+
 class OmniTensorInterface(ServiceInterface):
     """Transport-only D-Bus shim; all logic stays in the injected handler."""
 
-    def __init__(self, control: CommandHandler):
+    def __init__(self, runtime: RuntimeAPI):
         super().__init__(BUS_NAME)
-        self._control = control
+        self._runtime = runtime
 
     @method()
     def ApplyCommand(self, command: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return self._control.apply_command_text(command)
+        return self._runtime.apply_command_text(command)
+
+    @method()
+    async def SubmitJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return await self._runtime.submit_job_text(request)
+
+    @method()
+    async def CancelJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return await self._runtime.cancel_job_text(request)
 
 
 class SysfsDeviceDiscovery:
@@ -113,7 +143,7 @@ class DbusControlTransport:
         self._bus_name = bus_name
         self._bus = None
 
-    async def start(self, handler: CommandHandler) -> None:
+    async def start(self, handler: RuntimeHandler) -> None:
         if self._bus_factory is not None:
             bus = await self._bus_factory()
         else:
@@ -224,6 +254,7 @@ class OmniTensorService:
         publisher: SnapshotPublisher | None = None,
         policy_storage: PolicyStorage | None = None,
         plugin_runtime: PluginRuntime | None = None,
+        job_dispatcher: JobDispatcher | None = None,
         transport: ControlTransport | None = None,
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
@@ -246,6 +277,11 @@ class OmniTensorService:
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
+        self.jobs = JobSubmissionService(
+            job_dispatcher,
+            PredicateJobAuthorizer(self._job_authorized),
+        )
+        self.runtime_api = RuntimeAPI(self.control, self.jobs)
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
@@ -267,6 +303,11 @@ class OmniTensorService:
             return False
         policy = state.profiles.get(workload_id)
         return policy is None or policy.enabled
+
+    def _job_authorized(self, action: str, workload_id: str) -> bool:
+        if workload_id not in self._workloads:
+            return False
+        return action == "cancel" or self._admits(workload_id)
 
     def _policy_changed(self) -> None:
         """Applied policy commands wake the workers so held jobs re-evaluate."""
@@ -333,7 +374,7 @@ class OmniTensorService:
                 self._scheduler.update_executors(self._executors)
 
     async def run(self) -> None:
-        await self._transport.start(self.control)
+        await self._transport.start(self.runtime_api)
         try:
             await self._plugin_runtime.start()
             self._scheduler.start()
@@ -355,6 +396,7 @@ class OmniTensorService:
                 await asyncio.wait(tasks)
                 await self._scheduler.stop()
         finally:
+            await self.jobs.stop()
             await self._plugin_runtime.stop()
             await self._transport.stop()
 

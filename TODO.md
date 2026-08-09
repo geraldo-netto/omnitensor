@@ -10,7 +10,6 @@
 | OMNI-0068 | open | high | s | OMNI-0038 | pipeline policy: apply pause, profile enablement, weight, consent, and artifact readiness consistently before collection and at every queued stage. |
 | OMNI-0069 | open | high | s | OMNI-0038, OMNI-0066 | pipeline flow control: enforce per-plugin backpressure, deadlines, drop/coalescing rules, idempotency keys, and bounded retry semantics without duplicate delivery. |
 | OMNI-0070 | open | high | s | OMNI-0038, OMNI-0065 | pipeline cancellation: propagate caller, policy, deadline, worker, and shutdown cancellation through every stage and recover queued/in-flight state cleanly after restart. |
-| OMNI-0039 | open | high | s | OMNI-0038 | D-Bus jobs: version and implement bounded authorized submission and cancellation methods while retaining the existing `ApplyCommand` contract. |
 | OMNI-0071 | open | high | s | OMNI-0039 | D-Bus results: expose bounded progress and terminal-result retrieval with ownership checks, expiry, deterministic not-found semantics, and no unbounded in-memory history. |
 | OMNI-0072 | open | medium | s | OMNI-0039, OMNI-0055 | D-Bus inspection: expose plugin capabilities, artifact readiness, configuration schemas, and permission requirements without leaking secrets or importing plugin workers. |
 | OMNI-0073 | open | high | s | OMNI-0039, OMNI-0071 | D-Bus hardening: bind jobs to caller identity, enforce method/payload/rate quotas, prevent spoofing, and return stable versioned error codes for every rejected boundary. |

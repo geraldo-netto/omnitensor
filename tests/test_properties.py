@@ -30,6 +30,7 @@ from omnitensor.executors.base import Availability, availability_for_model
 from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
+from omnitensor.jobs import JobSubmissionService
 from omnitensor.registry import merge_workloads, validate_document
 from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
@@ -189,6 +190,19 @@ def test_control_never_raises_on_arbitrary_command_documents(command):
     for policy in state.profiles.values():
         assert MIN_WEIGHT <= policy.weight <= MAX_WEIGHT
     assert state.revision >= 0
+
+
+@given(text=st.text(max_size=300))
+def test_job_boundaries_never_raise_and_always_return_versioned_contracts(text):
+    async def scenario():
+        service = JobSubmissionService()
+        return await service.submit_job_text(text), await service.cancel_job_text(text)
+
+    for reply in asyncio.run(scenario()):
+        acknowledgement = json.loads(reply)
+        assert validate_document(
+            "runtime-job-acknowledgement.schema.json", acknowledgement
+        ) == []
 
 
 @given(document=json_values)

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/runtime-job-submit.schema.json",
+  "title": "OmniTensor runtime job submission version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "workloadId", "payload"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,120}$"
+    },
+    "workloadId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "payload": {
+      "type": "object",
+      "maxProperties": 64
+    }
+  }
+}

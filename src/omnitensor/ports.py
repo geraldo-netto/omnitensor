@@ -54,10 +54,20 @@ class CommandHandler(Protocol):
         """Never raises; always returns contract-valid acknowledgement JSON."""
 
 
-class ControlTransport(Protocol):
-    """Exposes a :class:`CommandHandler` to external callers (e.g. D-Bus)."""
+class RuntimeHandler(CommandHandler, Protocol):
+    """Versioned runtime control and bounded job boundary."""
 
-    async def start(self, handler: CommandHandler) -> None:
+    async def submit_job_text(self, text: str) -> str:
+        """Submit one versioned job request and return an acknowledgement."""
+
+    async def cancel_job_text(self, text: str) -> str:
+        """Cancel one active job and return an acknowledgement."""
+
+
+class ControlTransport(Protocol):
+    """Exposes a :class:`RuntimeHandler` to external callers (e.g. D-Bus)."""
+
+    async def start(self, handler: RuntimeHandler) -> None:
         """Connect the transport and begin serving ``handler``."""
 
     async def stop(self) -> None:
