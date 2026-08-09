@@ -14,6 +14,8 @@ MAX_PLUGIN_QUEUE_DEPTH = 1_000_000
 MAX_PLUGIN_ACTIVE_JOBS = 1024
 MAX_TELEMETRY_COUNTER = 1_000_000_000
 MAX_TELEMETRY_DETAIL_CHARS = 240
+MAX_TELEMETRY_TIMESTAMP_MS = 9_007_199_254_740_991
+PLUGIN_TELEMETRY_CONTRACT_VERSION = 1
 _PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ERROR_CODE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -117,6 +119,10 @@ class PluginTelemetryRegistry:
     def snapshots(self) -> tuple[PluginTelemetry, ...]:
         with self._lock:
             return tuple(self._items[key] for key in sorted(self._items))
+
+    def documents(self) -> list[dict[str, object]]:
+        """Return the fixed, public snapshot contract without private detail."""
+        return [_telemetry_document(snapshot) for snapshot in self.snapshots()]
 
     def set_health(
         self, plugin_id: str, health: PluginTelemetryHealth
@@ -296,6 +302,26 @@ def _increment(value: int) -> int:
     return min(MAX_TELEMETRY_COUNTER, value + 1)
 
 
+def _telemetry_document(snapshot: PluginTelemetry) -> dict[str, object]:
+    return {
+        "id": snapshot.plugin_id,
+        "health": snapshot.health.value,
+        "stage": snapshot.current_stage.value if snapshot.current_stage is not None else None,
+        "artifactReadiness": snapshot.artifact_readiness.value,
+        "queuedJobs": snapshot.queued_jobs,
+        "activeJobs": snapshot.active_jobs,
+        "lastSuccessAt": snapshot.last_success_at_ms,
+        "lastErrorCode": snapshot.last_error_code,
+        "lastErrorAt": snapshot.last_error_at_ms,
+        "deadlineExceeded": snapshot.deadline_exceeded,
+        "retries": snapshot.retries,
+        "cancellations": snapshot.cancellations,
+        "drops": snapshot.drops,
+        "successes": snapshot.successes,
+        "failures": snapshot.failures,
+    }
+
+
 def _validate_plugin_id(plugin_id: object) -> None:
     if (
         not isinstance(plugin_id, str)
@@ -317,5 +343,11 @@ def _validate_error(code: object, detail: object) -> None:
 
 
 def _validate_timestamp(value: object) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError("telemetry timestamp must be a non-negative integer")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= MAX_TELEMETRY_TIMESTAMP_MS
+    ):
+        raise ValueError(
+            "telemetry timestamp must be a non-negative JavaScript-safe integer"
+        )

@@ -7,6 +7,7 @@ from conftest import add_pcie_tpu, sample_manifest, sample_plugin_manifest, writ
 
 import omnitensor.registry as registry
 from omnitensor.discovery import detect_devices
+from omnitensor.plugins import PluginTelemetryRegistry
 from omnitensor.registry import (
     MAX_WORKLOADS,
     ManifestError,
@@ -37,6 +38,70 @@ def test_snapshot_is_contract_valid_and_written_atomically(fake_nodes, tmp_path)
     assert json.loads(target.read_text()) == snapshot
     leftovers = [entry for entry in target.parent.iterdir() if entry.name.startswith(".snapshot-")]
     assert leftovers == []
+
+
+def test_snapshot_optionally_publishes_versioned_bounded_plugin_telemetry(fake_nodes):
+    add_pcie_tpu(fake_nodes)
+    telemetry = PluginTelemetryRegistry()
+    telemetry.register("hardware-health")
+
+    snapshot = build_snapshot(
+        devices=detect_devices(fake_nodes),
+        metrics={},
+        profiles={},
+        plugin_telemetry=telemetry.documents(),
+        generated_at_ms=1,
+    )
+
+    assert snapshot["pluginTelemetry"] == {
+        "version": 1,
+        "plugins": telemetry.documents(),
+    }
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+
+
+def test_snapshot_without_plugin_telemetry_keeps_the_version_one_shape(fake_nodes):
+    add_pcie_tpu(fake_nodes)
+
+    snapshot = build_snapshot(
+        devices=detect_devices(fake_nodes),
+        metrics={},
+        profiles={},
+        generated_at_ms=1,
+    )
+
+    assert snapshot["version"] == 1
+    assert "pluginTelemetry" not in snapshot
+
+
+def test_plugin_telemetry_schema_rejects_excess_cardinality(fake_nodes):
+    add_pcie_tpu(fake_nodes)
+    document = {
+        "id": "plugin",
+        "health": "healthy",
+        "stage": None,
+        "artifactReadiness": "ready",
+        "queuedJobs": 0,
+        "activeJobs": 0,
+        "lastSuccessAt": None,
+        "lastErrorCode": None,
+        "lastErrorAt": None,
+        "deadlineExceeded": 0,
+        "retries": 0,
+        "cancellations": 0,
+        "drops": 0,
+        "successes": 0,
+        "failures": 0,
+    }
+
+    with pytest.raises(ValueError, match="too long"):
+        build_snapshot(
+            devices=detect_devices(fake_nodes),
+            metrics={},
+            profiles={},
+            plugin_telemetry=[document] * 129,
+            generated_at_ms=1,
+        )
 
 
 def test_snapshot_with_no_devices_is_rejected_by_contract(tmp_path):

@@ -16,6 +16,7 @@ from .discovery import Device
 from .registry import validate_document
 
 SNAPSHOT_VERSION = 1
+PLUGIN_TELEMETRY_VERSION = 1
 MAX_DEVICE_ENTRIES = 16
 
 
@@ -35,6 +36,7 @@ def build_snapshot(
     metrics: dict,
     profiles: dict[str, dict],
     alerts: list[dict] | None = None,
+    plugin_telemetry: list[dict] | None = None,
     generated_at_ms: int | None = None,
 ) -> dict:
     """Build a contract-valid snapshot document.
@@ -53,6 +55,11 @@ def build_snapshot(
         "profiles": profiles,
         "alerts": alerts or [],
     }
+    if plugin_telemetry is not None:
+        snapshot["pluginTelemetry"] = {
+            "version": PLUGIN_TELEMETRY_VERSION,
+            "plugins": plugin_telemetry,
+        }
     violations = validate_document("runtime-snapshot.schema.json", snapshot)
     if violations:
         raise ValueError(f"snapshot violates contract: {'; '.join(violations)}")

@@ -39,6 +39,9 @@ mirror copies. OmniTensor:
   applet's default `~/.local/state/tpu-workload-manager/state.json` path
   (overridable with `OMNITENSOR_STATE_PATH`), validated against
   `runtime-snapshot.schema.json` before every write;
+- publishes bounded, independently versioned plugin telemetry as an optional
+  runtime-snapshot extension described in
+  [docs/runtime-snapshot.md](docs/runtime-snapshot.md);
 - owns the D-Bus name `org.cinnamon.OmniTensor1` and answers `ApplyCommand`
   with optimistic-concurrency revision checks, persisting policy state
   atomically.

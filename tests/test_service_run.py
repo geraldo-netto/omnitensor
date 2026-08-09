@@ -10,7 +10,13 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
+from conftest import (
+    add_npu,
+    add_pcie_tpu,
+    sample_manifest,
+    sample_plugin_manifest,
+    write_workload,
+)
 
 from omnitensor.discovery import Device
 from omnitensor.registry import validate_document
@@ -450,6 +456,30 @@ def test_runtime_snapshot_publishes_only_result_summary_documents(tmp_path):
 
     snapshot = asyncio.run(scenario())
     assert snapshot["alerts"] == summaries.documents()
+
+
+def test_runtime_snapshot_registers_and_publishes_installed_plugin_telemetry(tmp_path):
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            manifests=[sample_plugin_manifest("observed-plugin")],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+        )
+        service._scheduler.start()
+        snapshot = service.publish_once()
+        await service._scheduler.stop()
+        return service, snapshot
+
+    service, snapshot = asyncio.run(scenario())
+    assert snapshot["pluginTelemetry"] == {
+        "version": 1,
+        "plugins": service.plugin_telemetry.documents(),
+    }
+    assert [item["id"] for item in snapshot["pluginTelemetry"]["plugins"]] == [
+        "observed-plugin"
+    ]
 
 
 def test_dbus_interface_is_a_pure_passthrough_shim():

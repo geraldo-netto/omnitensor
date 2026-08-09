@@ -12,6 +12,7 @@ from omnitensor.plugins import (
     MAX_PLUGIN_QUEUE_DEPTH,
     MAX_TELEMETRY_COUNTER,
     MAX_TELEMETRY_DETAIL_CHARS,
+    MAX_TELEMETRY_TIMESTAMP_MS,
     ArtifactReadiness,
     PipelineStage,
     PluginTelemetry,
@@ -78,6 +79,47 @@ def test_health_and_artifact_readiness_are_typed_and_replace_snapshots():
         registry.set_health("health-plugin", "healthy")
     with pytest.raises(TypeError, match="readiness must"):
         registry.set_artifact_readiness("health-plugin", "ready")
+
+
+def test_public_documents_are_sorted_fixed_and_exclude_private_error_detail():
+    registry = PluginTelemetryRegistry()
+    registry.register("zeta-plugin")
+    registry.register("alpha-plugin")
+    registry.queue_job("alpha-plugin")
+    registry.start_job("alpha-plugin")
+    registry.fail(
+        "alpha-plugin",
+        "source-failed",
+        "private path and secret-bearing diagnostics",
+        completed_at_ms=12,
+    )
+
+    documents = registry.documents()
+
+    assert [document["id"] for document in documents] == [
+        "alpha-plugin",
+        "zeta-plugin",
+    ]
+    assert documents[0] == {
+        "id": "alpha-plugin",
+        "health": "degraded",
+        "stage": "terminal",
+        "artifactReadiness": "unknown",
+        "queuedJobs": 0,
+        "activeJobs": 0,
+        "lastSuccessAt": None,
+        "lastErrorCode": "source-failed",
+        "lastErrorAt": 12,
+        "deadlineExceeded": 0,
+        "retries": 0,
+        "cancellations": 0,
+        "drops": 0,
+        "successes": 0,
+        "failures": 1,
+    }
+    assert "lastErrorDetail" not in documents[0]
+    documents[0]["health"] = "tampered"
+    assert registry.documents()[0]["health"] == "degraded"
 
 
 def test_success_lifecycle_tracks_stage_queue_deadline_retry_and_last_success():
@@ -177,7 +219,10 @@ def test_active_operations_reject_impossible_state_and_invalid_inputs():
             registry.advance("strict-plugin", stage)
 
 
-@pytest.mark.parametrize("timestamp", [-1, True, 1.5, "1", None])
+@pytest.mark.parametrize(
+    "timestamp",
+    [-1, True, 1.5, "1", None, MAX_TELEMETRY_TIMESTAMP_MS + 1],
+)
 def test_telemetry_timestamps_are_non_negative_integers(timestamp):
     registry = PluginTelemetryRegistry()
     registry.register("time-plugin")

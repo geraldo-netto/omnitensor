@@ -42,6 +42,7 @@ from .jobs import (
 )
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.summaries import ResultSummaryRegistry
+from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
     ControlTransport,
     DeviceDiscovery,
@@ -258,6 +259,7 @@ class OmniTensorService:
         plugin_runtime: PluginRuntime | None = None,
         job_dispatcher: JobDispatcher | None = None,
         result_summaries: ResultSummaryRegistry | None = None,
+        plugin_telemetry: PluginTelemetryRegistry | None = None,
         transport: ControlTransport | None = None,
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
@@ -288,6 +290,10 @@ class OmniTensorService:
         self.result_summaries = result_summaries or ResultSummaryRegistry(
             alert_id_factory=lambda: f"alert-{secrets.token_hex(16)}"
         )
+        self.plugin_telemetry = plugin_telemetry or PluginTelemetryRegistry()
+        for workload in self._workloads.values():
+            if workload.manifest["manifestVersion"] >= 2:
+                self.plugin_telemetry.register(workload.id)
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
@@ -333,6 +339,7 @@ class OmniTensorService:
                 self._workloads, self._executors, self._scheduler, self.control.state,
             ),
             alerts=self.result_summaries.documents(),
+            plugin_telemetry=self.plugin_telemetry.documents(),
         )
 
     def publish_once(self) -> dict:
