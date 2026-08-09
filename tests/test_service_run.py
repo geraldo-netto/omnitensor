@@ -48,9 +48,13 @@ class FakeDiscovery:
 class FakePublisher:
     def __init__(self):
         self.published: list[dict] = []
+        self.retracted = 0
 
     def publish(self, snapshot: dict) -> None:
         self.published.append(snapshot)
+
+    def retract(self) -> None:
+        self.retracted += 1
 
 
 class FakeTransport:
@@ -143,7 +147,7 @@ def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
     assert service._executors["npu"]._device_present is True
 
 
-def test_publisher_loop_skips_when_no_devices_are_present(tmp_path):
+def test_publisher_loop_retracts_once_when_no_devices_are_present(tmp_path, caplog):
     publisher = FakePublisher()
 
     async def scenario():
@@ -160,8 +164,69 @@ def test_publisher_loop_skips_when_no_devices_are_present(tmp_path):
         service._stopping.set()
         await asyncio.wait_for(runner, timeout=2)
 
-    asyncio.run(scenario())
+    with caplog.at_level("WARNING", logger="omnitensor.service"):
+        asyncio.run(scenario())
     assert publisher.published == []
+    # Startup with zero devices clears any stale file from a previous run,
+    # exactly once, and logs the outage exactly once.
+    assert publisher.retracted == 1
+    outage_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "accelerator" in record.getMessage().lower()
+    ]
+    assert outage_messages == [
+        "No accelerator devices present; retracted the runtime snapshot"
+        " so readers observe absence instead of stale data",
+    ]
+
+
+def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplog):
+    publisher = FakePublisher()
+    discovery = FakeDiscovery([tpu_device()])
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=discovery,
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        assert service._snapshot_retracted is False
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.05)
+        published_before_loss = len(publisher.published)
+        assert published_before_loss >= 1
+        discovery.devices.clear()
+        await asyncio.sleep(0.06)
+        assert publisher.retracted == 1
+        stale_count = len(publisher.published)
+        await asyncio.sleep(0.03)
+        # No devices: nothing new is published and the retract is not repeated.
+        assert len(publisher.published) == stale_count
+        assert publisher.retracted == 1
+        discovery.devices.append(tpu_device())
+        await asyncio.sleep(0.06)
+        assert len(publisher.published) > stale_count
+        assert service._snapshot_retracted is False
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+
+    with caplog.at_level("INFO", logger="omnitensor.service"):
+        asyncio.run(scenario())
+    warnings = [
+        r.getMessage() for r in caplog.records if "No accelerator devices present" in r.message
+    ]
+    resumes = [
+        r.getMessage() for r in caplog.records if "devices returned" in r.message
+    ]
+    assert warnings == [
+        "No accelerator devices present; retracted the runtime snapshot"
+        " so readers observe absence instead of stale data",
+    ]
+    assert resumes == ["Accelerator devices returned; publishing snapshots again"]
 
 
 def test_run_stops_cleanly_when_stopped_before_first_interval(tmp_path):
@@ -240,6 +305,16 @@ def test_file_snapshot_publisher_writes_atomically(tmp_path):
     target = tmp_path / "state/runtime-snapshot.json"
     FileSnapshotPublisher(target).publish({"version": 1})
     assert json.loads(target.read_text()) == {"version": 1}
+
+
+def test_file_snapshot_publisher_retracts_the_published_file(tmp_path):
+    target = tmp_path / "state/runtime-snapshot.json"
+    publisher = FileSnapshotPublisher(target)
+    publisher.retract()  # no-op when nothing is published
+    assert not target.exists()
+    publisher.publish({"version": 1})
+    publisher.retract()
+    assert not target.exists()
 
 
 def test_service_control_round_trip_through_injected_ports(tmp_path):

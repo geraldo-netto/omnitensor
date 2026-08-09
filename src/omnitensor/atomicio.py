@@ -31,6 +31,14 @@ def write_json_atomic(path: Path, payload: dict, prefix: str) -> None:
     _fsync_directory(path.parent)
 
 
+def remove_durable(path: Path) -> None:
+    """Remove ``path`` (a no-op when absent) and fsync the parent directory
+    so the removal itself survives a power failure."""
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
 def _fsync_directory(directory: Path) -> None:
     # Best effort: some filesystems refuse directory fsync; the data file
     # itself is already synced.

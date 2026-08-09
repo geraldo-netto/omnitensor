@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import os
 from pathlib import Path
 
@@ -42,8 +43,10 @@ from .ports import (
 )
 from .registry import Workload, load_workloads
 from .scheduler import Scheduler, pick_backend
-from .snapshot import build_snapshot, write_snapshot
+from .snapshot import build_snapshot, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
+
+LOGGER = logging.getLogger(__name__)
 
 BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"
@@ -88,6 +91,9 @@ class FileSnapshotPublisher:
 
     def publish(self, snapshot: dict) -> None:
         write_snapshot(self._path, snapshot)
+
+    def retract(self) -> None:
+        remove_snapshot(self._path)
 
 
 class DbusControlTransport:
@@ -210,6 +216,7 @@ class OmniTensorService:
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
+        self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
     def _device_load(self, device, stats) -> float | None:
@@ -253,9 +260,24 @@ class OmniTensorService:
         return snapshot
 
     async def _publisher(self) -> None:
+        # Honest-absence decision (OMNI-0011): with zero devices no
+        # schema-valid snapshot exists (the contract requires >=1 device), so
+        # rather than letting the last document go silently stale we retract
+        # it — readers observe absence, exactly as when the service is down —
+        # and log the outage once.  Publishing resumes when devices return.
         while not self._stopping.is_set():
             if self._devices:
+                if self._snapshot_retracted:
+                    LOGGER.info("Accelerator devices returned; publishing snapshots again")
+                    self._snapshot_retracted = False
                 self.publish_once()
+            elif not self._snapshot_retracted:
+                self._publisher_port.retract()
+                self._snapshot_retracted = True
+                LOGGER.warning(
+                    "No accelerator devices present; retracted the runtime snapshot"
+                    " so readers observe absence instead of stale data",
+                )
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._publish_interval_s)
             except TimeoutError:

@@ -32,6 +32,10 @@ class SnapshotPublisher(Protocol):
     def publish(self, snapshot: dict) -> None:
         """Publish ``snapshot`` so readers never observe a partial document."""
 
+    def retract(self) -> None:
+        """Withdraw any published snapshot so readers observe absence rather
+        than a silently stale document; a no-op when nothing is published."""
+
 
 class PolicyStorage(Protocol):
     """Loads and durably persists :class:`~omnitensor.state.PolicyState`."""

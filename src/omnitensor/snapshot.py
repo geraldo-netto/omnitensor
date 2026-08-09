@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .atomicio import write_json_atomic
+from .atomicio import remove_durable, write_json_atomic
 from .discovery import Device
 from .registry import validate_document
 
@@ -62,3 +62,9 @@ def build_snapshot(
 def write_snapshot(path: Path, snapshot: dict) -> None:
     """Atomically publish ``snapshot`` to ``path``."""
     write_json_atomic(path, snapshot, prefix=".snapshot-")
+
+
+def remove_snapshot(path: Path) -> None:
+    """Durably remove a published snapshot so readers observe absence
+    instead of a stale document; a no-op when nothing is published."""
+    remove_durable(path)
