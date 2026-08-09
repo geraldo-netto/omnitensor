@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0054 | open | high | s | OMNI-0034, OMNI-0053 | plugin compatibility: adapt existing v1 catalog manifests, negotiate protocol capabilities, reject incompatible versions with stable reasons, and test migration without breaking current policy state. |
-| OMNI-0055 | open | high | s | OMNI-0035 | plugin identity: validate manifest, distribution, and entry-point identity; reject duplicate IDs and incompatible/broken plugins independently so one package cannot hide the remaining catalog. |
 | OMNI-0056 | open | high | s | OMNI-0035, OMNI-0055 | external-plugin loading: integration-test installing a third-party wheel, restarting the service, discovering it, and loading its worker without any OmniTensor source or catalog edit. |
 | OMNI-0057 | open | high | s | OMNI-0036 | artifact installation: stage downloads/imports, verify them before atomic activation, preserve the previous version, and provide deterministic rollback after interrupted or invalid installation. |
 | OMNI-0058 | open | high | s | OMNI-0036, OMNI-0057 | artifact trust: verify configured publisher signatures/trust roots, persist provenance, reject unsigned or revoked artifacts according to policy, and support offline verification. |
