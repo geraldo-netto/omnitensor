@@ -118,6 +118,7 @@ from .loading import (
     MAX_WORKER_IMPORT_PATHS,
     InstalledPluginRuntime,
     InstalledPluginSnapshot,
+    PermissionGrantSource,
     entry_points_from_distributions,
     external_worker_specs,
 )
@@ -162,6 +163,12 @@ from .protocol import (
     PluginResultStatus,
     ProgressReporter,
     WorkloadPlugin,
+)
+from .sandbox import (
+    BWRAP_PATH,
+    MAX_SANDBOX_PATHS,
+    FilesystemSandbox,
+    SandboxPolicyError,
 )
 from .secrets import (
     MAX_REDACTION_DEPTH,
@@ -339,6 +346,7 @@ __all__ = [
     "IPCProtocolError",
     "InstalledPluginRuntime",
     "InstalledPluginSnapshot",
+    "PermissionGrantSource",
     "InferenceOutput",
     "MAX_MIGRATIONS",
     "MAX_CALL_TIMEOUT_SECONDS",
@@ -367,6 +375,7 @@ __all__ = [
     "MAX_ENTRY_POINT_TARGET_LENGTH",
     "MAX_PLUGIN_CANDIDATES",
     "MAX_SUPERVISED_WORKERS",
+    "MAX_SANDBOX_PATHS",
     "MAX_TELEMETRY_COUNTER",
     "MAX_TELEMETRY_DETAIL_CHARS",
     "MAX_TELEMETRY_PLUGINS",
@@ -400,6 +409,7 @@ __all__ = [
     "PluginSettings",
     "PluginSettingsError",
     "PluginSettingsStore",
+    "FilesystemSandbox",
     "PluginSource",
     "PluginTelemetry",
     "PluginTelemetryHealth",
@@ -436,6 +446,7 @@ __all__ = [
     "SecretProvider",
     "SecretRedactor",
     "SecretReference",
+    "SandboxPolicyError",
     "SecretResolutionError",
     "Trigger",
     "TriggerCoordinator",
@@ -462,6 +473,7 @@ __all__ = [
     "WorkerState",
     "WorkerStatus",
     "WorkerResourceUsage",
+    "BWRAP_PATH",
     "artifact_filename",
     "artifact_provenance_document",
     "artifact_reference_document",

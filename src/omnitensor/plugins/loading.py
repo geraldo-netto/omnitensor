@@ -3,18 +3,37 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
+from typing import Protocol
 
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
+from .sandbox import FilesystemSandbox
 from .supervisor import PluginWorkerSupervisor, WorkerSpec, WorkerStatus
 
 MAX_WORKER_IMPORT_PATHS = 16
 WORKER_CAPABILITIES = frozenset({"cancel", "health"})
+
+
+class PermissionGrantSource(Protocol):
+    def active_permissions(
+        self,
+        plugin_id: str,
+        declared_permissions: set[str],
+    ) -> frozenset[str]: ...
+
+
+class _DenyAllGrants:
+    def active_permissions(
+        self,
+        plugin_id: str,
+        declared_permissions: set[str],
+    ) -> frozenset[str]:
+        return frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +55,14 @@ class InstalledPluginRuntime:
         entry_points_provider: Callable[..., Iterable] = metadata.entry_points,
         python_executable: str | Path = sys.executable,
         worker_import_paths: Sequence[Path] = (),
+        grant_source: PermissionGrantSource | None = None,
     ) -> None:
         self._bundled_root = Path(bundled_root)
         self._supervisor = supervisor or PluginWorkerSupervisor()
         self._entry_points_provider = entry_points_provider
         self._python_executable = _executable(python_executable)
         self._worker_import_paths = _import_paths(worker_import_paths)
+        self._grant_source = grant_source or _DenyAllGrants()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
 
     @property
@@ -54,11 +75,20 @@ class InstalledPluginRuntime:
             entry_points_provider=self._entry_points_provider,
         )
         catalog = resolve_plugin_compatibility(resolve_plugin_identities(candidates))
+        granted_permissions = {
+            plugin.plugin_id: self._grant_source.active_permissions(
+                plugin.plugin_id,
+                set(plugin.manifest["plugin"]["permissions"]),
+            )
+            for plugin in catalog.plugins
+            if plugin.source is PluginSource.EXTERNAL
+        }
         workers = await self._supervisor.start(
             external_worker_specs(
                 catalog.plugins,
                 python_executable=self._python_executable,
                 worker_import_paths=self._worker_import_paths,
+                granted_permissions=granted_permissions,
             )
         )
         self._snapshot = InstalledPluginSnapshot(catalog, workers)
@@ -75,15 +105,19 @@ def external_worker_specs(
     *,
     python_executable: str | Path = sys.executable,
     worker_import_paths: Sequence[Path] = (),
+    granted_permissions: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[WorkerSpec, ...]:
     """Build deterministic argv without importing plugin code in the service."""
     executable = _executable(python_executable)
     import_paths = _import_paths(worker_import_paths)
+    permissions_by_plugin = granted_permissions or {}
     specs = []
     for plugin in plugins:
         if plugin.source is not PluginSource.EXTERNAL:
             continue
         protocol = plugin.manifest["plugin"]["protocol"]
+        declared = frozenset(plugin.manifest["plugin"]["permissions"])
+        granted = frozenset(permissions_by_plugin.get(plugin.plugin_id, ()))
         argv = [
             executable,
             "-m",
@@ -99,6 +133,8 @@ def external_worker_specs(
         ]
         for path in import_paths:
             argv.extend(("--import-path", path))
+        for permission in sorted(granted):
+            argv.extend(("--permission", permission))
         specs.append(
             WorkerSpec(
                 plugin.plugin_id,
@@ -107,6 +143,11 @@ def external_worker_specs(
                 maximum_protocol=protocol["maximum"],
                 capabilities=(
                     frozenset(protocol.get("capabilities", ())) & WORKER_CAPABILITIES
+                ),
+                sandbox=FilesystemSandbox.from_permissions(
+                    declared,
+                    granted,
+                    runtime_paths=_trusted_runtime_paths(import_paths),
                 ),
             )
         )
@@ -150,3 +191,11 @@ def _import_paths(paths: Sequence[Path]) -> tuple[str, ...]:
     if len(set(resolved)) != len(resolved):
         raise ValueError("worker import paths must be unique")
     return tuple(resolved)
+
+
+def _trusted_runtime_paths(import_paths: Sequence[str]) -> tuple[Path | str, ...]:
+    return (
+        Path(sys.prefix),
+        Path(__file__).resolve().parents[2],
+        *import_paths,
+    )

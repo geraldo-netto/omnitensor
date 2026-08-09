@@ -104,6 +104,15 @@ def test_undeclared_permission_is_denied_before_persistence(tmp_path):
     assert not path.exists()
 
 
+def test_active_permissions_returns_only_declared_current_grants(tmp_path):
+    ledger = GrantLedger(tmp_path / "grants.json")
+    grant_once(ledger)
+    assert ledger.active_permissions("hardware-health", DECLARED) == frozenset(
+        {READ_SENSOR}
+    )
+    assert ledger.active_permissions("hardware-health", set()) == frozenset()
+
+
 def test_manifest_removal_immediately_denies_a_stale_persisted_grant(tmp_path):
     ledger = GrantLedger(tmp_path / "grants.json")
     grant_once(ledger)

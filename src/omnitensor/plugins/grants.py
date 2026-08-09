@@ -174,6 +174,17 @@ class GrantLedger:
         if not self.is_granted(plugin_id, permission, declared_permissions):
             raise GrantError("permission-denied", f"{plugin_id} lacks grant for {permission}")
 
+    def active_permissions(
+        self,
+        plugin_id: str,
+        declared_permissions: set[str],
+    ) -> frozenset[str]:
+        """Return only active declarations for sandbox construction."""
+        return frozenset(
+            grant.permission
+            for grant in self.snapshot(plugin_id, declared_permissions).active
+        )
+
     def _check_revision(self, expected_revision: int) -> None:
         _validate_non_negative_integer(expected_revision, "expected_revision")
         if expected_revision != self._revision:

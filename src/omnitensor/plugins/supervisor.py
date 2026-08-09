@@ -21,6 +21,7 @@ from .ipc import (
     perform_service_handshake,
     write_frame,
 )
+from .sandbox import FilesystemSandbox
 
 MAX_SUPERVISED_WORKERS = 128
 MAX_WORKER_ARGUMENTS = 128
@@ -102,6 +103,7 @@ class WorkerSpec:
     minimum_protocol: int = 1
     maximum_protocol: int = 1
     capabilities: frozenset[str] = frozenset()
+    sandbox: FilesystemSandbox | None = None
 
     def offer(self) -> HandshakeOffer:
         return HandshakeOffer(
@@ -187,8 +189,9 @@ class AsyncioSubprocessLauncher:
     """Launch workers without a shell, inherited descriptors, or a shared session."""
 
     async def launch(self, spec: WorkerSpec) -> WorkerProcess:
+        argv = spec.sandbox.wrap(spec.argv) if spec.sandbox is not None else spec.argv
         process = await asyncio.create_subprocess_exec(
-            *spec.argv,
+            *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

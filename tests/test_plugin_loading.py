@@ -136,6 +136,7 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
     assert spec.minimum_protocol == 2
     assert spec.maximum_protocol == 4
     assert spec.capabilities == frozenset({"cancel", "health"})
+    assert spec.sandbox is not None
     assert spec.argv == (
         "/usr/bin/python3",
         "-m",
@@ -151,6 +152,35 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
         "--import-path",
         str(site),
     )
+
+
+def test_external_worker_specs_pass_only_granted_declared_permissions(tmp_path):
+    site = tmp_path / "site"
+    source = tmp_path / "source"
+    site.mkdir()
+    source.mkdir()
+    plugin = _resolved(tmp_path=tmp_path)
+    permission = f"read:{source}"
+    plugin.manifest["plugin"]["permissions"] = [permission]
+
+    [spec] = external_worker_specs(
+        (plugin,),
+        worker_import_paths=(site,),
+        granted_permissions={plugin.plugin_id: {permission}},
+    )
+
+    assert spec.argv[-2:] == ("--permission", permission)
+    assert spec.sandbox is not None
+    assert spec.sandbox.read_paths == (str(source),)
+
+
+def test_external_worker_specs_fail_closed_on_undeclared_grant(tmp_path):
+    plugin = _resolved(tmp_path=tmp_path)
+    with pytest.raises(ValueError, match="undeclared"):
+        external_worker_specs(
+            (plugin,),
+            granted_permissions={plugin.plugin_id: {f"read:{tmp_path}"}},
+        )
 
 
 def test_worker_spec_inputs_are_bounded(tmp_path):
@@ -296,6 +326,21 @@ def test_worker_starts_before_handshake_and_stops_on_cancel():
     }
 
 
+def test_worker_receives_only_the_service_supplied_active_permissions():
+    service_offer = HandshakeOffer("external-example", 1, 1, frozenset())
+    reader = io.BytesIO(encode_frame(handshake_frame(service_offer)))
+    plugin = TrackingPlugin()
+
+    serve_worker(
+        plugin,
+        reader,
+        io.BytesIO(),
+        permissions=frozenset({"read:/allowed"}),
+    )
+
+    assert plugin.events[0][1].permissions == frozenset({"read:/allowed"})
+
+
 def test_worker_default_protocol_and_eof_shutdown():
     service_offer = HandshakeOffer(
         "external-example", 1, 1, frozenset({"cancel", "health"})
@@ -358,8 +403,8 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
         loaded.append(identity)
         return plugin
 
-    def serve(candidate, reader, writer):
-        served.append((candidate, reader, writer))
+    def serve(candidate, reader, writer, **options):
+        served.append((candidate, reader, writer, options))
 
     stdin = type("Input", (), {"buffer": io.BytesIO()})()
     stdout = type("Output", (), {"buffer": io.BytesIO()})()
@@ -392,7 +437,9 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
             "external-dist",
         )
     ]
-    assert served == [(plugin, stdin.buffer, stdout.buffer)]
+    assert served == [
+        (plugin, stdin.buffer, stdout.buffer, {"permissions": frozenset()})
+    ]
     assert worker_module.sys.path[0] == str(site)
 
 

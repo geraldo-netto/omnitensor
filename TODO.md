@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0063 | open | high | s | OMNI-0061, OMNI-0074 | filesystem/device sandbox: derive read/write/device access from granted permissions and prevent undeclared paths, accelerator nodes, and host namespaces from reaching plugin workers. |
 | OMNI-0064 | open | high | s | OMNI-0061, OMNI-0074 | network/exec sandbox: deny networking, command execution, child processes, and ambient capabilities by default and selectively enable only declared, granted operations. |
 | OMNI-0067 | open | high | s | OMNI-0036, OMNI-0038 | inference dispatch: resolve only allowlisted artifacts, select a format-compatible accelerator, submit through the bounded scheduler, and map executor outcomes back to plugin jobs. |
 | OMNI-0068 | open | high | s | OMNI-0038 | pipeline policy: apply pause, profile enablement, weight, consent, and artifact readiness consistently before collection and at every queued stage. |

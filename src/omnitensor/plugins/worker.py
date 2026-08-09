@@ -76,6 +76,7 @@ def serve_worker(
     *,
     minimum_protocol: int = 1,
     maximum_protocol: int = 1,
+    permissions: frozenset[str] = frozenset(),
 ) -> HandshakeAgreement:
     """Handshake only after plugin startup, then serve bounded control frames."""
     offer = HandshakeOffer(
@@ -88,7 +89,7 @@ def serve_worker(
     agreement = negotiate_handshake(service, offer)
     asyncio.run(
         plugin.start(
-            PluginContext(plugin.plugin_id, agreement.protocol_version, {}, frozenset())
+            PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions)
         )
     )
     _write_frame(writer, handshake_frame(offer))
@@ -152,6 +153,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", required=True)
     parser.add_argument("--distribution", required=True)
     parser.add_argument("--import-path", action="append", default=[])
+    parser.add_argument("--permission", action="append", default=[])
     return parser
 
 
@@ -165,7 +167,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         arguments.target,
         arguments.distribution,
     )
-    serve_worker(plugin, sys.stdin.buffer, sys.stdout.buffer)
+    serve_worker(
+        plugin,
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+        permissions=frozenset(arguments.permission),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - module process entry point

@@ -720,6 +720,39 @@ def test_asyncio_launcher_uses_isolated_bounded_process_options(monkeypatch):
     run_scenario(scenario())
 
 
+def test_asyncio_launcher_wraps_a_sandboxed_worker(monkeypatch, tmp_path):
+    from omnitensor.plugins import FilesystemSandbox
+
+    async def scenario():
+        reader = asyncio.StreamReader()
+        owner = type("Owner", (), {"plugin_id": "real", "reader": reader})()
+        process = StubSubprocess(stdout=reader, stdin=FakeWriter(owner, None, []))
+        calls = []
+
+        async def create(*argv, **options):
+            calls.append((argv, options))
+            return process
+
+        permission = f"read:{tmp_path}"
+        sandbox = FilesystemSandbox.from_permissions({permission}, {permission})
+        original = worker_spec("real")
+        spec = WorkerSpec(
+            original.plugin_id,
+            original.argv,
+            original.minimum_protocol,
+            original.maximum_protocol,
+            original.capabilities,
+            sandbox,
+        )
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+
+        await AsyncioSubprocessLauncher().launch(spec)
+
+        assert calls[0][0] == sandbox.wrap(spec.argv)
+
+    run_scenario(scenario())
+
+
 def test_asyncio_launcher_rejects_missing_process_pipes(monkeypatch):
     async def scenario():
         async def create(*_argv, **_options):
