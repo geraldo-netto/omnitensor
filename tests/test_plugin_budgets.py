@@ -369,3 +369,42 @@ def test_output_limit_has_its_own_ceiling():
     WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT)
     with pytest.raises(ValueError, match="max_output_bytes"):
         WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT + 1)
+
+
+def test_cancelling_a_call_does_not_leak_its_concurrency_slot():
+    """The decrement sat behind two awaits, so cancellation there leaked a slot."""
+
+    async def scenario():
+        enforcer = WorkerBudgetEnforcer(
+            WorkerBudgetLimits(max_concurrency=1),
+            lambda: WorkerResourceUsage(1, 0, 0),
+        )
+        started = asyncio.Event()
+
+        async def slow_to_cancel():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # Cleanup that outlives the first cancellation, so run()'s
+                # own cleanup is still suspended when the second one lands.
+                await asyncio.sleep(0.05)
+                raise
+
+        call = asyncio.create_task(enforcer.run(slow_to_cancel))
+        await started.wait()
+        assert enforcer.snapshot().active_calls == 1
+
+        call.cancel()
+        await asyncio.sleep(0.01)
+        call.cancel()
+        await asyncio.gather(call, return_exceptions=True)
+
+        assert enforcer.snapshot().active_calls == 0, "a concurrency slot was leaked"
+        assert await enforcer.run(lambda: _completed_value("second call")) == "second call"
+
+    asyncio.run(asyncio.wait_for(scenario(), timeout=5))
+
+
+async def _completed_value(value):
+    return value

@@ -147,11 +147,16 @@ class WorkerBudgetEnforcer:
             self._completed += 1
             return result
         finally:
+            # Release the slot before any await, and without the lock: taking
+            # the lock is itself a suspension point, so cancellation delivered
+            # there — or at the task cleanup below — would abandon the
+            # decrement and leak a concurrency slot for the life of the
+            # enforcer.  A bare decrement runs to completion between awaits,
+            # which is all the mutual exclusion this counter needs.
+            self._active -= 1
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            async with self._lock:
-                self._active -= 1
 
     async def _enter(self) -> None:
         async with self._lock:
