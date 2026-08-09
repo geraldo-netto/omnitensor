@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 omnitensor = "omnitensor.service:main"
 omnitensor-plugin-smoke = "omnitensor.sdk.smoke:main"
+omnitensor-verify-install = "omnitensor.acceptance:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnitensor"]

@@ -49,3 +49,24 @@ def test_extension_guide_covers_the_publishing_lifecycle():
 def test_readme_links_the_extension_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "[extension guide](docs/extension-guide.md)" in readme
+
+
+def test_installation_guide_documents_every_verifier_check():
+    """The guide must explain what each automated check failing means."""
+    from omnitensor.acceptance import REQUIRED_SCHEMAS
+
+    guide = (ROOT / "docs/installation.md").read_text(encoding="utf-8")
+    for check in (
+        "executable",
+        "service",
+        "schemas",
+        "workloads",
+        "discovery",
+        "isolation",
+        "dbus",
+        "snapshot",
+        "applet",
+    ):
+        assert f"`{check}`" in guide, f"the guide must explain the {check} check"
+    assert "omnitensor-verify-install" in guide
+    assert REQUIRED_SCHEMAS  # the verifier checks a non-empty schema set
