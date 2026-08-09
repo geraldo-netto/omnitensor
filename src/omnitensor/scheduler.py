@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 
 from .executors.base import Executor, InferenceResult, supports_model
@@ -105,7 +105,9 @@ class Scheduler:
         self._weight_of = weight_of
         self._admits = admits
         self._queues: dict[str, _BackendQueue] = {backend: _BackendQueue() for backend in executors}
-        self._running: set[str] = set()
+        # Per-profile count of in-flight jobs: the same profile can run on
+        # several backends at once, so membership alone would undercount.
+        self._running: Counter[str] = Counter()
         self._workers: dict[str, asyncio.Task] = {}
         self._retired: list[asyncio.Task] = []
         self._wakeups: dict[str, asyncio.Event] = {
@@ -193,9 +195,9 @@ class Scheduler:
             for profile_id, jobs in queue.profiles.items():
                 entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
                 entry["queued"] += len(jobs)
-        for profile_id in self._running:
+        for profile_id, count in self._running.items():
             entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
-            entry["running"] += 1
+            entry["running"] += count
         return stats
 
     def tick(self) -> None:
@@ -228,7 +230,7 @@ class Scheduler:
 
     async def _execute(self, backend: str, queue: _BackendQueue, job: _Job) -> None:
         executor = self._executors[backend]
-        self._running.add(job.workload_id)
+        self._running[job.workload_id] += 1
         started = time.monotonic()
         try:
             result: InferenceResult = await asyncio.to_thread(
@@ -252,4 +254,9 @@ class Scheduler:
                 job.future.set_result(result)
         finally:
             queue.busy_ms += (time.monotonic() - started) * 1000
-            self._running.discard(job.workload_id)
+            self._job_finished(job.workload_id)
+
+    def _job_finished(self, workload_id: str) -> None:
+        self._running[workload_id] -= 1
+        if self._running[workload_id] <= 0:
+            del self._running[workload_id]

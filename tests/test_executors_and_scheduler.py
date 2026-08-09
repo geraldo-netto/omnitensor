@@ -464,6 +464,52 @@ def test_profile_stats_report_running_with_no_backlog():
     asyncio.run(scenario())
 
 
+def test_same_profile_on_two_backends_counts_until_both_finish():
+    import threading
+
+    gates = {"tpu": threading.Event(), "npu": threading.Event()}
+    started = {"tpu": threading.Event(), "npu": threading.Event()}
+
+    def blocking_executor(backend_name):
+        class BlockingExecutor(SlowExecutor):
+            backend = backend_name
+
+            def run(self, model_path, inputs):
+                started[backend_name].set()
+                gates[backend_name].wait(timeout=5)
+                return super().run(model_path, inputs)
+
+        return BlockingExecutor()
+
+    async def scenario():
+        scheduler = Scheduler(
+            {"tpu": blocking_executor("tpu"), "npu": blocking_executor("npu")},
+            weight_of=lambda _profile: 1,
+        )
+        scheduler.start()
+        tpu_future = scheduler.submit("tpu", "profile-a", "job-tpu", [])
+        npu_future = scheduler.submit("npu", "profile-a", "job-npu", [])
+        await asyncio.to_thread(started["tpu"].wait, 5)
+        await asyncio.to_thread(started["npu"].wait, 5)
+        # One profile running on two backends is one running profile with two
+        # in-flight jobs.
+        assert scheduler.stats()["runningProfiles"] == 1
+        assert scheduler.profile_stats() == {"profile-a": {"queued": 0, "running": 2}}
+        gates["tpu"].set()
+        await tpu_future
+        # Regression (OMNI-0013): finishing the first job used to discard the
+        # profile from the running set while the second was still in flight.
+        assert scheduler.stats()["runningProfiles"] == 1
+        assert scheduler.profile_stats() == {"profile-a": {"queued": 0, "running": 1}}
+        gates["npu"].set()
+        await npu_future
+        assert scheduler.stats()["runningProfiles"] == 0
+        assert scheduler.profile_stats() == {}
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
 def test_stride_late_joiner_alternates_instead_of_bursting():
     from omnitensor.scheduler import _BackendQueue, _Job
 
