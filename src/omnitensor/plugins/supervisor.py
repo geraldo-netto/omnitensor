@@ -17,6 +17,7 @@ from .ipc import (
     IPCFrame,
     IPCProtocolError,
     WorkerMessageType,
+    await_worker_ready,
     handshake_frame,
     perform_service_handshake,
     write_frame,
@@ -27,6 +28,9 @@ MAX_SUPERVISED_WORKERS = 128
 MAX_WORKER_ARGUMENTS = 128
 MAX_WORKER_ARGUMENT_CHARS = 4096
 DEFAULT_HANDSHAKE_TIMEOUT_SECONDS = 5.0
+# Startup may load a model or open a device; it is not protocol negotiation
+# and must not share the handshake's deadline.
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
 DEFAULT_STOP_TIMEOUT_SECONDS = 2.0
 DEFAULT_MAX_RESTARTS = 3
 DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS = 0.1
@@ -53,6 +57,7 @@ class WorkerDiagnosticCode(StrEnum):
     RECOVERED = "worker-recovered"
     EXHAUSTED = "restart-budget-exhausted"
     STOP_FAILED = "worker-stop-failed"
+    STARTUP_TIMEOUT = "worker-startup-timeout"
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,10 +216,15 @@ class _WorkerSlot:
 
 
 class _WorkerStartError(Exception):
-    def __init__(self, detail: str, pid: int | None) -> None:
+    def __init__(self, detail: str, pid: int | None, *, charges_restart: bool = True) -> None:
         super().__init__(detail)
         self.detail = detail
         self.pid = pid
+        # A plugin that exceeds its startup deadline will do so again on every
+        # attempt.  Charging that to the restart budget converts one slow
+        # plugin into a run of identical failures reported as an exhausted
+        # budget, which hides the real cause.
+        self.charges_restart = charges_restart
 
 
 class PluginWorkerSupervisor:
@@ -225,14 +235,17 @@ class PluginWorkerSupervisor:
         launcher: WorkerLauncher | None = None,
         *,
         handshake_timeout: float = DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
+        startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
         stop_timeout: float = DEFAULT_STOP_TIMEOUT_SECONDS,
         recovery_policy: WorkerRecoveryPolicy | None = None,
         failure_observer: WorkerFailureObserver | None = None,
     ) -> None:
         _validate_timeout("handshake_timeout", handshake_timeout)
+        _validate_timeout("startup_timeout", startup_timeout)
         _validate_timeout("stop_timeout", stop_timeout)
         self._launcher = launcher or AsyncioSubprocessLauncher()
         self._handshake_timeout = handshake_timeout
+        self._startup_timeout = startup_timeout
         self._stop_timeout = stop_timeout
         self._recovery_policy = recovery_policy or WorkerRecoveryPolicy()
         self._failure_observer = failure_observer or _NullWorkerFailureObserver()
@@ -359,6 +372,24 @@ class PluginWorkerSupervisor:
             raise _WorkerStartError(
                 _handshake_failure(error), process.pid
             ) from error
+        # Plugin startup is bounded separately: it may legitimately load a
+        # model or open a device, work that the handshake deadline must not
+        # have to accommodate.
+        try:
+            await asyncio.wait_for(
+                await_worker_ready(process.reader, spec.plugin_id),
+                timeout=self._startup_timeout,
+            )
+        except asyncio.CancelledError:
+            await _force_stop(process, self._stop_timeout)
+            raise
+        except Exception as error:
+            await _force_stop(process, self._stop_timeout)
+            raise _WorkerStartError(
+                _startup_failure(error),
+                process.pid,
+                charges_restart=not isinstance(error, TimeoutError),
+            ) from error
         return process, agreement
 
     def _install_ready_slot(
@@ -427,6 +458,31 @@ class PluginWorkerSupervisor:
                 )
                 self._recoveries[plugin_id] = recovery
 
+    async def _fail_startup(
+        self,
+        plugin_id: str,
+        error: _WorkerStartError,
+        attempt: int,
+    ) -> None:
+        """End recovery on a startup deadline without spending restart budget.
+
+        Retrying would reproduce the same deadline and report the result as an
+        exhausted restart budget, which describes the wrong failure.
+        """
+        async with self._lock:
+            if self._recoveries.get(plugin_id) is not asyncio.current_task():
+                return
+            previous = self._statuses[plugin_id]
+            self._statuses[plugin_id] = WorkerStatus(
+                plugin_id,
+                WorkerState.FAILED,
+                error.pid,
+                previous.protocol_version,
+                error.detail,
+                attempt - 1,
+            )
+            self._recoveries.pop(plugin_id, None)
+
     async def _recover(self, spec: WorkerSpec, failure_detail: str) -> None:
         plugin_id = spec.plugin_id
         await self._cancel_orphaned_jobs(plugin_id, failure_detail)
@@ -455,13 +511,18 @@ class PluginWorkerSupervisor:
                 self._record_diagnostic(
                     WorkerDiagnostic(
                         plugin_id,
-                        WorkerDiagnosticCode.RESTART_FAILED,
+                        WorkerDiagnosticCode.RESTART_FAILED
+                        if error.charges_restart
+                        else WorkerDiagnosticCode.STARTUP_TIMEOUT,
                         error.detail,
                         error.pid,
                         None,
                         attempt,
                     )
                 )
+                if not error.charges_restart:
+                    await self._fail_startup(plugin_id, error, attempt)
+                    return
                 continue
             # From here the worker is alive but not yet owned by a slot.  stop()
             # cancels recovery precisely in this window, and it awaits the lock
@@ -604,6 +665,14 @@ def _handshake_failure(error: Exception) -> str:
     if isinstance(error, IPCProtocolError):
         return f"worker handshake rejected: {error.code}"
     return f"worker handshake failed: {type(error).__name__}"
+
+
+def _startup_failure(error: Exception) -> str:
+    if isinstance(error, TimeoutError):
+        return "worker startup timed out"
+    if isinstance(error, IPCProtocolError):
+        return f"worker startup rejected: {error.code}"
+    return f"worker startup failed: {type(error).__name__}"
 
 
 async def _cancel_monitor(task: asyncio.Task | None) -> None:

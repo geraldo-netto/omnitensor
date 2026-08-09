@@ -284,7 +284,7 @@ def test_worker_contains_enumeration_load_and_contract_failures():
         )
 
 
-def test_worker_starts_before_handshake_and_stops_on_cancel():
+def test_worker_acknowledges_the_handshake_before_starting_the_plugin():
     service_offer = HandshakeOffer(
         "external-example", 1, 3, frozenset({"cancel", "progress"})
     )
@@ -318,11 +318,14 @@ def test_worker_starts_before_handshake_and_stops_on_cancel():
     assert plugin.events[0][1].configuration == {}
     assert plugin.events[0][1].permissions == frozenset()
     output = _frames(writer.getvalue())
-    assert len(output) == 2
-    assert output[0].type is WorkerMessageType.HELLO
-    assert output[1].type is WorkerMessageType.ERROR
-    assert output[1].request_id == "request-1"
-    assert output[1].payload == {
+    assert [frame.type for frame in output] == [
+        WorkerMessageType.HELLO,
+        WorkerMessageType.READY,
+        WorkerMessageType.ERROR,
+    ]
+    assert output[1].payload == {"pluginId": "external-example"}
+    assert output[2].request_id == "request-1"
+    assert output[2].payload == {
         "code": "unsupported-message",
         "detail": "message is not implemented",
     }
@@ -358,7 +361,10 @@ def test_worker_default_protocol_and_eof_shutdown():
 
     assert agreement.protocol_version == 1
     assert [event[0] for event in plugin.events] == ["start", "stop"]
-    assert len(_frames(writer.getvalue())) == 1
+    assert [frame.type for frame in _frames(writer.getvalue())] == [
+        WorkerMessageType.HELLO,
+        WorkerMessageType.READY,
+    ]
 
 
 class _ChunkedReader:
@@ -676,6 +682,7 @@ def test_plugin_stdout_never_reaches_the_frame_channel(tmp_path):
         worker.stdin.write(encode_frame(handshake_frame(offer)))
         worker.stdin.flush()
         agreement = _read_frame(worker.stdout)
+        ready = _read_frame(worker.stdout)
         worker.stdin.close()
         stdout_tail = worker.stdout.read()
         stderr = worker.stderr.read().decode()
@@ -684,6 +691,34 @@ def test_plugin_stdout_never_reaches_the_frame_channel(tmp_path):
         worker.wait(timeout=30)
 
     assert agreement.payload["pluginId"] == "chatty-plugin"
+    assert ready.type is WorkerMessageType.READY
     assert stdout_tail == b"", "plugin output leaked into the frame channel"
     assert "noise from import" in stderr
     assert "noise from start" in stderr
+
+
+def test_worker_answers_the_handshake_before_its_plugin_starts():
+    """Startup time used to be charged to the service's handshake deadline."""
+    service_offer = HandshakeOffer("external-example", 1, 1, frozenset({"cancel"}))
+    writer = io.BytesIO()
+
+    class ObservantPlugin(TrackingPlugin):
+        frames_at_start = None
+
+        async def start(self, context):
+            type(self).frames_at_start = _frames(writer.getvalue())
+            await super().start(context)
+
+    serve_worker(
+        ObservantPlugin(),
+        io.BytesIO(encode_frame(handshake_frame(service_offer))),
+        writer,
+    )
+
+    assert [frame.type for frame in ObservantPlugin.frames_at_start] == [
+        WorkerMessageType.HELLO
+    ]
+    assert [frame.type for frame in _frames(writer.getvalue())] == [
+        WorkerMessageType.HELLO,
+        WorkerMessageType.READY,
+    ]

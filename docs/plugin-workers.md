@@ -25,6 +25,15 @@ IPC handshake confirms its plugin identity and protocol range. A failed or
 incompatible worker becomes an isolated status record and does not prevent
 later plugins from starting.
 
+Handshake and startup are separate phases with separate deadlines. The worker
+answers the `hello` as soon as the protocol is settled, then runs the plugin's
+`start` and sends a `ready` frame when it completes. Protocol negotiation is
+therefore bounded in milliseconds while a plugin that loads a model or opens a
+device gets the far longer startup budget. A worker that never reports ready
+fails with its own reason rather than as a handshake failure, and because the
+same deadline would be missed on every attempt, a startup timeout ends recovery
+instead of spending the restart budget on identical retries.
+
 The supervisor monitors every accepted child for exit. Shutdown proceeds in
 reverse startup order: send a bounded cancellation frame, close the IPC input,
 wait for graceful exit, then terminate and finally kill after bounded waits.

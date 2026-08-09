@@ -22,6 +22,7 @@ from omnitensor.plugins import (
     decode_frame,
     encode_frame,
     handshake_frame,
+    ready_frame,
 )
 
 
@@ -48,6 +49,16 @@ class FakeWriter:
         if self.response_offer is not None and not self._responded:
             self._responded = True
             self.process.reader.feed_data(encode_frame(handshake_frame(self.response_offer)))
+            if self.process.reports_ready:
+                ready = encode_frame(ready_frame(self.response_offer.plugin_id))
+                if self.process.ready_delay:
+                    asyncio.get_running_loop().call_later(
+                        self.process.ready_delay,
+                        self.process.reader.feed_data,
+                        ready,
+                    )
+                else:
+                    self.process.reader.feed_data(ready)
 
     async def drain(self):
         if self.drain_error is not None:
@@ -76,9 +87,13 @@ class FakeProcess:
         exit_on_terminate=True,
         drain_error=None,
         close_error=None,
+        reports_ready=True,
+        ready_delay=0.0,
     ):
         self.plugin_id = plugin_id
         self.pid = pid
+        self.reports_ready = reports_ready
+        self.ready_delay = ready_delay
         self.reader = asyncio.StreamReader()
         self.returncode = None
         self.exit_on_close = exit_on_close
@@ -897,5 +912,97 @@ def test_a_failed_handshake_reports_its_own_error_when_the_child_will_not_die():
 
         assert started[0].state is WorkerState.FAILED
         assert started[0].detail == "worker handshake timed out"
+
+    run_scenario(scenario())
+
+
+def test_slow_plugin_startup_is_not_bounded_by_the_handshake_deadline():
+    """One deadline over handshake plus startup made a slow plugin unstartable."""
+
+    async def scenario():
+        events = []
+        slow = FakeProcess("alpha", worker_offer("alpha"), events, pid=80, ready_delay=0.05)
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"alpha": slow}),
+            handshake_timeout=0.01,
+            startup_timeout=1.0,
+            stop_timeout=0.01,
+        )
+
+        started = await supervisor.start([worker_spec("alpha")])
+
+        assert started[0].state is WorkerState.READY
+        assert started[0].protocol_version == 2
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_a_worker_that_never_reports_ready_fails_with_its_own_reason():
+    async def scenario():
+        events = []
+        stuck = FakeProcess(
+            "alpha",
+            worker_offer("alpha"),
+            events,
+            pid=81,
+            reports_ready=False,
+        )
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"alpha": stuck}),
+            startup_timeout=0.01,
+            stop_timeout=0.01,
+        )
+
+        started = await supervisor.start([worker_spec("alpha")])
+
+        assert started[0].state is WorkerState.FAILED
+        assert started[0].detail == "worker startup timed out"
+        assert started[0].pid == 81
+        assert stuck.returncode is not None, "the stuck worker was not reaped"
+
+    run_scenario(scenario())
+
+
+def test_a_startup_timeout_does_not_consume_the_restart_budget():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("alpha", worker_offer("alpha"), events, pid=82)
+        replacement = FakeProcess(
+            "alpha",
+            worker_offer("alpha"),
+            events,
+            pid=83,
+            reports_ready=False,
+        )
+        launcher = SequencedLauncher([crashed, replacement])
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            startup_timeout=0.01,
+            stop_timeout=0.01,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=3,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+            ),
+        )
+        await supervisor.start([worker_spec("alpha")])
+        crashed.exit(2)
+        for _ in range(200):
+            if supervisor.statuses()[0].state is WorkerState.FAILED:
+                break
+            await asyncio.sleep(0.001)
+
+        status = supervisor.statuses()[0]
+        assert status.state is WorkerState.FAILED
+        assert status.detail == "worker startup timed out"
+        assert launcher.calls == ["alpha", "alpha"], "the budget was spent on retries"
+        codes = [item.code for item in supervisor.diagnostics("alpha")]
+        assert codes == [
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.STARTUP_TIMEOUT,
+        ]
+        assert WorkerDiagnosticCode.EXHAUSTED not in codes
+        await supervisor.stop()
 
     run_scenario(scenario())

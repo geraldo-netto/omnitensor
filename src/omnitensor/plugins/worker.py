@@ -23,6 +23,7 @@ from .ipc import (
     handshake_frame,
     negotiate_handshake,
     parse_handshake,
+    ready_frame,
 )
 from .protocol import PluginContext, WorkloadPlugin
 
@@ -82,7 +83,12 @@ def serve_worker(
     maximum_protocol: int = 1,
     permissions: frozenset[str] = frozenset(),
 ) -> HandshakeAgreement:
-    """Handshake only after plugin startup, then serve bounded control frames."""
+    """Acknowledge the handshake, start the plugin, then serve control frames.
+
+    The handshake is answered before ``start`` runs so the service can bound
+    protocol negotiation and plugin startup separately; a plugin that takes
+    seconds to load a model no longer looks like a failed handshake.
+    """
     offer = HandshakeOffer(
         plugin.plugin_id,
         minimum_protocol,
@@ -91,12 +97,13 @@ def serve_worker(
     )
     service = parse_handshake(_read_frame(reader))
     agreement = negotiate_handshake(service, offer)
+    _write_frame(writer, handshake_frame(offer))
     asyncio.run(
         plugin.start(
             PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions)
         )
     )
-    _write_frame(writer, handshake_frame(offer))
+    _write_frame(writer, ready_frame(plugin.plugin_id))
     try:
         while True:
             try:

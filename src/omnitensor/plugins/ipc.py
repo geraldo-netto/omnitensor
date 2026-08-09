@@ -24,6 +24,7 @@ class WorkerMessageType(StrEnum):
     """Complete message vocabulary shared by service and worker."""
 
     HELLO = "hello"
+    READY = "ready"
     CONFIGURE = "configure"
     COLLECT = "collect"
     PREPROCESS = "preprocess"
@@ -199,6 +200,45 @@ def parse_handshake(frame: IPCFrame) -> HandshakeOffer:
     )
     _validate_offer(offer)
     return offer
+
+
+def ready_frame(plugin_id: str) -> IPCFrame:
+    """Encode the worker's signal that its plugin finished starting.
+
+    Startup is a separate phase from the handshake: the handshake settles the
+    protocol in milliseconds, while a plugin's ``start`` may legitimately load
+    models or open devices.  Signalling them with distinct frames lets each be
+    bounded by its own deadline.
+    """
+    return IPCFrame(FRAME_FORMAT_VERSION, WorkerMessageType.READY, None, {"pluginId": plugin_id})
+
+
+def parse_ready(frame: IPCFrame, plugin_id: str) -> None:
+    """Accept a strict ready frame for ``plugin_id`` or reject the worker."""
+    if frame.version != FRAME_FORMAT_VERSION:
+        raise IPCProtocolError(
+            "frame-version-incompatible",
+            f"expected {FRAME_FORMAT_VERSION}; received {frame.version}",
+        )
+    if frame.type is not WorkerMessageType.READY or frame.request_id is not None:
+        raise IPCProtocolError("invalid-ready", "expected an uncorrelated ready frame")
+    if set(frame.payload) != {"pluginId"}:
+        raise IPCProtocolError("invalid-ready", "ready fields do not match the contract")
+    if frame.payload["pluginId"] != plugin_id:
+        raise IPCProtocolError(
+            "plugin-identity-mismatch",
+            f"expected {plugin_id}; received {frame.payload['pluginId']!r}",
+        )
+
+
+async def await_worker_ready(
+    reader: asyncio.StreamReader,
+    plugin_id: str,
+    *,
+    max_frame_bytes: int = DEFAULT_MAX_FRAME_BYTES,
+) -> None:
+    """Wait for the worker to report that its plugin finished starting."""
+    parse_ready(await read_frame(reader, max_frame_bytes=max_frame_bytes), plugin_id)
 
 
 def negotiate_handshake(
