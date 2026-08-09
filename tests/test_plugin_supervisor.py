@@ -9,11 +9,16 @@ from omnitensor.plugins import (
     MAX_SUPERVISED_WORKERS,
     MAX_WORKER_ARGUMENT_CHARS,
     MAX_WORKER_ARGUMENTS,
+    MAX_WORKER_DIAGNOSTICS,
     AsyncioSubprocessLauncher,
     HandshakeOffer,
     PluginWorkerSupervisor,
+    WorkerDiagnostic,
+    WorkerDiagnosticCode,
+    WorkerRecoveryPolicy,
     WorkerSpec,
     WorkerState,
+    WorkerStatus,
     decode_frame,
     encode_frame,
     handshake_frame,
@@ -122,6 +127,30 @@ class FakeLauncher:
         if spec.plugin_id in self.failures:
             raise self.failures[spec.plugin_id]
         return self.processes[spec.plugin_id]
+
+
+class SequencedLauncher:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    async def launch(self, spec):
+        self.calls.append(spec.plugin_id)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class FailureObserver:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    async def cancel_orphaned_jobs(self, plugin_id, detail):
+        self.calls.append((plugin_id, detail))
+        if self.error is not None:
+            raise self.error
 
 
 def worker_spec(plugin_id):
@@ -246,7 +275,10 @@ def test_monitor_records_unexpected_worker_exit(returncode):
     async def scenario():
         events = []
         process = FakeProcess("watched", worker_offer("watched"), events)
-        supervisor = PluginWorkerSupervisor(FakeLauncher({"watched": process}))
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"watched": process}),
+            recovery_policy=WorkerRecoveryPolicy(max_restarts=0),
+        )
         await supervisor.start([worker_spec("watched")])
 
         process.exit(returncode)
@@ -336,7 +368,260 @@ def test_already_exited_worker_needs_no_shutdown_signal():
     run_scenario(scenario())
 
 
-@pytest.mark.parametrize("timeout", [0, -1, True, "1"])
+def test_crashed_worker_cancels_orphans_and_recovers_with_diagnostics():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("recovering", worker_offer("recovering"), events, pid=31)
+        recovered = FakeProcess("recovering", worker_offer("recovering"), events, pid=32)
+        launcher = SequencedLauncher([crashed, recovered])
+        observer = FailureObserver()
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=2,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                backoff_multiplier=1,
+            ),
+            failure_observer=observer,
+        )
+        await supervisor.start([worker_spec("recovering")])
+
+        crashed.exit(17)
+        await asyncio.sleep(0.01)
+
+        status = supervisor.statuses()[0]
+        assert status.state is WorkerState.READY
+        assert status.pid == 32
+        assert status.restart_attempts == 1
+        assert status.detail == "worker recovered after 1 restart attempts"
+        assert observer.calls == [("recovering", "worker exited with status 17")]
+        assert [item.code for item in supervisor.diagnostics("recovering")] == [
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.RECOVERED,
+        ]
+        assert launcher.calls == ["recovering", "recovering"]
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_restart_failures_are_redacted_and_budget_exhaustion_is_terminal():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("exhausted", worker_offer("exhausted"), events, pid=41)
+        launcher = SequencedLauncher(
+            [crashed, OSError("secret one"), RuntimeError("secret two")]
+        )
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=2,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                backoff_multiplier=1,
+            ),
+        )
+        await supervisor.start([worker_spec("exhausted")])
+
+        crashed.exit(9)
+        await asyncio.sleep(0.02)
+
+        status = supervisor.statuses()[0]
+        assert status.state is WorkerState.EXHAUSTED
+        assert status.restart_attempts == 2
+        assert status.detail == (
+            "worker restart budget exhausted after 2 attempts: "
+            "worker launch failed: RuntimeError"
+        )
+        assert "secret" not in status.detail
+        diagnostics = supervisor.diagnostics("exhausted")
+        assert [item.code for item in diagnostics] == [
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.RESTART_FAILED,
+            WorkerDiagnosticCode.RESTART_FAILED,
+            WorkerDiagnosticCode.EXHAUSTED,
+        ]
+        assert [item.restart_attempt for item in diagnostics] == [0, 1, 2, 2]
+        await asyncio.sleep(0.01)
+        assert launcher.calls == ["exhausted"] * 3
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_recovery_reaps_rejected_handshake_then_uses_next_attempt():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("retrying", worker_offer("retrying"), events, pid=71)
+        rejected = FakeProcess("retrying", worker_offer("substitute"), events, pid=72)
+        recovered = FakeProcess("retrying", worker_offer("retrying"), events, pid=73)
+        supervisor = PluginWorkerSupervisor(
+            SequencedLauncher([crashed, rejected, recovered]),
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=2,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                backoff_multiplier=1,
+            ),
+        )
+        await supervisor.start([worker_spec("retrying")])
+        crashed.exit(6)
+        await asyncio.sleep(0.02)
+
+        status = supervisor.statuses()[0]
+        assert status.pid == 73
+        assert status.restart_attempts == 2
+        failed = supervisor.diagnostics("retrying")[1]
+        assert failed == WorkerDiagnostic(
+            "retrying",
+            WorkerDiagnosticCode.RESTART_FAILED,
+            "worker handshake rejected: plugin-identity-mismatch",
+            72,
+            None,
+            1,
+        )
+        assert rejected.returncode == 0
+        assert rejected.writer.closed
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_recovery_diagnostics_drop_oldest_entries_at_hard_bound():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("bounded", worker_offer("bounded"), events)
+        failures = [OSError(str(index)) for index in range(16)]
+        supervisor = PluginWorkerSupervisor(
+            SequencedLauncher([crashed, *failures]),
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=16,
+                initial_backoff_seconds=0.0001,
+                max_backoff_seconds=0.0001,
+                backoff_multiplier=1,
+            ),
+        )
+        await supervisor.start([worker_spec("bounded")])
+        crashed.exit(8)
+        await asyncio.sleep(0.05)
+
+        diagnostics = supervisor.diagnostics("bounded")
+        assert len(diagnostics) == MAX_WORKER_DIAGNOSTICS
+        assert diagnostics[0].restart_attempt == 2
+        assert diagnostics[-1].code is WorkerDiagnosticCode.EXHAUSTED
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_observer_failure_is_contained_and_stop_cancels_pending_recovery():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("stopping", worker_offer("stopping"), events, pid=51)
+        replacement = FakeProcess("stopping", worker_offer("stopping"), events, pid=52)
+        launcher = SequencedLauncher([crashed, replacement])
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=1,
+                initial_backoff_seconds=0.1,
+                max_backoff_seconds=0.1,
+            ),
+            failure_observer=FailureObserver(ValueError("private")),
+        )
+        await supervisor.start([worker_spec("stopping")])
+        crashed.exit(2)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        restarting = supervisor.statuses()[0]
+        assert restarting == WorkerStatus(
+            "stopping",
+            WorkerState.RESTARTING,
+            51,
+            2,
+            "worker restart attempt 1",
+            1,
+        )
+
+        stopped = await supervisor.stop()
+
+        assert stopped[0].state is WorkerState.STOPPED
+        assert stopped[0].detail == "worker recovery stopped"
+        assert launcher.calls == ["stopping"]
+        assert [item.code for item in supervisor.diagnostics("stopping")] == [
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.ORPHAN_CANCEL_FAILED,
+        ]
+        assert supervisor.diagnostics("missing") == ()
+
+    run_scenario(scenario())
+
+
+def test_stop_reaps_replacement_cancelled_during_handshake():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("reaping", worker_offer("reaping"), events, pid=61)
+        silent = FakeProcess("reaping", None, events, pid=62)
+        supervisor = PluginWorkerSupervisor(
+            SequencedLauncher([crashed, silent]),
+            handshake_timeout=1,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=1,
+                initial_backoff_seconds=0.0001,
+                max_backoff_seconds=0.0001,
+            ),
+        )
+        await supervisor.start([worker_spec("reaping")])
+        crashed.exit(4)
+        await asyncio.sleep(0.01)
+
+        stopped = await supervisor.stop()
+
+        assert stopped[0].state is WorkerState.STOPPED
+        assert silent.writer.closed
+        assert silent.returncode == 0
+
+    run_scenario(scenario())
+
+
+@pytest.mark.parametrize(
+    "changes, match",
+    [
+        ({"max_restarts": True}, "max_restarts"),
+        ({"max_restarts": -1}, "max_restarts"),
+        ({"max_restarts": 17}, "max_restarts"),
+        ({"initial_backoff_seconds": 0}, "initial_backoff_seconds"),
+        (
+            {"initial_backoff_seconds": 2, "max_backoff_seconds": 1},
+            "must not exceed",
+        ),
+        ({"backoff_multiplier": True}, "backoff_multiplier"),
+        ({"backoff_multiplier": 0.5}, "backoff_multiplier"),
+        ({"backoff_multiplier": float("inf")}, "backoff_multiplier"),
+    ],
+)
+def test_recovery_policy_is_bounded(changes, match):
+    with pytest.raises(ValueError, match=match):
+        WorkerRecoveryPolicy(**changes)
+
+
+def test_recovery_backoff_is_exponential_and_capped():
+    policy = WorkerRecoveryPolicy(
+        max_restarts=3,
+        initial_backoff_seconds=0.5,
+        max_backoff_seconds=1.5,
+        backoff_multiplier=2,
+    )
+
+    assert [policy.delay(attempt) for attempt in (1, 2, 3)] == [0.5, 1.0, 1.5]
+    for attempt in (True, 0, 17, 1.5):
+        with pytest.raises(ValueError, match="attempt"):
+            policy.delay(attempt)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "1", float("inf"), float("nan")])
 def test_timeouts_must_be_positive_numbers(timeout):
     with pytest.raises(ValueError, match="handshake_timeout must be positive"):
         PluginWorkerSupervisor(handshake_timeout=timeout)
