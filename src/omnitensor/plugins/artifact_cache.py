@@ -60,6 +60,7 @@ class ArtifactCacheCollection:
     before: ArtifactCacheAccounting
     after: ArtifactCacheAccounting
     removed: tuple[ArtifactReference, ...]
+    reclaimed: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,10 +97,17 @@ class ArtifactCache:
             return _accounting(entries, protected, leftovers)
 
     def enforce(self) -> ArtifactCacheCollection:
-        """Remove unreferenced versions in stable identity/version order."""
+        """Reclaim installer leftovers, then remove unreferenced versions.
+
+        Installation holds the same store lock for its whole duration, so any
+        leftover still present while enforcement holds the lock belongs to an
+        install that is no longer running.  No age heuristic is needed to tell
+        an abandoned stage directory from an in-flight one.
+        """
         with artifact_store_lock(self._root):
             entries, protected, leftovers = self._scan()
             before = _accounting(entries, protected, leftovers)
+            reclaimed = tuple(self._reclaim(leftover) for leftover in leftovers)
             protected_entries = [entry for entry in entries if _entry_key(entry) in protected]
             protected_usage = _accounting(protected_entries, protected)
             if (
@@ -126,7 +134,7 @@ class ArtifactCache:
             after = _accounting(kept, protected)
             if after.total_items > self._max_items or after.total_bytes > self._max_bytes:
                 raise ArtifactCacheError("quota-unsatisfiable", "cache quotas cannot be satisfied")
-            return ArtifactCacheCollection(before, after, tuple(removed))
+            return ArtifactCacheCollection(before, after, tuple(removed), reclaimed)
 
     def _scan(self) -> tuple[list[_CacheEntry], set[tuple[str, str]], list[_Leftover]]:
         entries: list[_CacheEntry] = []
@@ -212,6 +220,33 @@ class ArtifactCache:
                 "cache-state-invalid", "artifact cache primary file is invalid"
             )
         return _CacheEntry(reference, version_root, _version_size(version_root))
+
+    def _reclaim(self, leftover: _Leftover) -> str:
+        """Delete one abandoned installer temporary, following no symlink."""
+        path = leftover.path
+        label = f"{path.parent.name}/{path.name}"
+        try:
+            if path.is_symlink() or not path.is_dir():
+                path.unlink()
+            else:
+                for directory, _names, files in os.walk(path, topdown=False, followlinks=False):
+                    current = Path(directory)
+                    for name in files:
+                        (current / name).unlink()
+                    for name in _names:
+                        child = current / name
+                        if child.is_symlink():
+                            child.unlink()
+                        else:
+                            child.rmdir()
+                path.rmdir()
+            _fsync_directory(path.parent)
+        except OSError as error:
+            raise ArtifactCacheError(
+                "cache-reclaim-failed",
+                f"cannot reclaim {label}: {error}",
+            ) from error
+        return label
 
     def _remove_entry(self, entry: _CacheEntry) -> None:
         path = entry.path

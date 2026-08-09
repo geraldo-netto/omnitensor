@@ -489,3 +489,68 @@ def test_a_leftover_symlink_is_never_followed_when_accounting(tmp_path):
     accounting = ArtifactCache(store, max_bytes=100_000, max_items=10).accounting()
     assert accounting.reclaimable_items == 1
     assert accounting.reclaimable_bytes == 0
+
+
+def test_enforcement_reclaims_abandoned_stage_directories(tmp_path):
+    store = tmp_path / "store"
+    install_three_versions(tmp_path, store)
+    stage = _leftover_stage(store)
+    cache = ArtifactCache(store, max_bytes=10_000, max_items=3)
+
+    collection = cache.enforce()
+
+    assert collection.reclaimed == ("sample-model/.install-abcd1234",)
+    assert collection.before.reclaimable_bytes == len(b"partially copied")
+    assert collection.after.reclaimable_bytes == 0
+    assert not stage.exists()
+    assert cache.accounting().reclaimable_items == 0
+
+
+def test_enforcement_reclaims_a_nested_stage_directory(tmp_path):
+    store = tmp_path / "store"
+    install_version(tmp_path, store, b"model", version="1.0.0")
+    stage = store / "sample-model" / ".install-nested"
+    (stage / "inner").mkdir(parents=True)
+    (stage / "inner/blob.bin").write_bytes(b"junk")
+    (stage / "top.bin").write_bytes(b"junk")
+
+    ArtifactCache(store, max_bytes=10_000, max_items=3).enforce()
+
+    assert not stage.exists()
+
+
+def test_enforcement_reclaims_activation_temporaries(tmp_path):
+    store = tmp_path / "store"
+    install_version(tmp_path, store, b"model", version="1.0.0")
+    temporary = store / "sample-model" / ".activation-xyz"
+    temporary.write_bytes(b"{}")
+
+    collection = ArtifactCache(store, max_bytes=10_000, max_items=3).enforce()
+
+    assert collection.reclaimed == ("sample-model/.activation-xyz",)
+    assert not temporary.exists()
+
+
+def test_reclamation_unlinks_a_leftover_symlink_without_touching_its_target(tmp_path):
+    store = tmp_path / "store"
+    install_version(tmp_path, store, b"model", version="1.0.0")
+    target = tmp_path / "outside.bin"
+    target.write_bytes(b"precious")
+    link = store / "sample-model" / ".install-link"
+    link.symlink_to(target)
+
+    ArtifactCache(store, max_bytes=10_000, max_items=3).enforce()
+
+    assert not link.exists()
+    assert target.read_bytes() == b"precious"
+
+
+def test_reclamation_keeps_installed_versions_and_activation_state(tmp_path):
+    store = tmp_path / "store"
+    _v1, _v2, v3 = install_three_versions(tmp_path, store)
+    _leftover_stage(store)
+
+    ArtifactCache(store, max_bytes=10_000, max_items=3).enforce()
+
+    assert ArtifactInstaller(store).activation("sample-model").active == v3
+    assert ArtifactCache(store, max_bytes=10_000, max_items=3).accounting().total_items == 3
