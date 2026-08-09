@@ -24,7 +24,7 @@ from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService, build_control_service
-from .discovery import DiscoveryPaths, detect_devices
+from .discovery import DiscoveryPaths, detect_devices, device_utilization
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -120,6 +120,12 @@ class OmniTensorService:
         self._scheduler = Scheduler(self._executors, self._weight_of)
         self._stopping = asyncio.Event()
 
+    def _device_load(self, device, stats) -> float | None:
+        # Prefer the kernel's own utilization counter (covers every consumer
+        # of the device); fall back to the scheduler's inference busy EMA.
+        utilization = device_utilization(self._discovery_paths, device)
+        return utilization if utilization is not None else stats["loads"].get(device.backend)
+
     def _weight_of(self, workload_id: str) -> int:
         policy = self.control.state.profiles.get(workload_id)
         return policy.weight if policy is not None else 1
@@ -128,7 +134,7 @@ class OmniTensorService:
         self._scheduler.tick()
         stats = self._scheduler.stats()
         devices = [
-            dataclasses.replace(device, load=stats["loads"].get(device.backend))
+            dataclasses.replace(device, load=self._device_load(device, stats))
             for device in self._devices
         ]
         snapshot = build_snapshot(

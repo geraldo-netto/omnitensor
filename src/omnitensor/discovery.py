@@ -165,3 +165,21 @@ def detect_devices(paths: DiscoveryPaths | None = None) -> list[Device]:
     resolved = paths or DiscoveryPaths()
     found = (detect_tpu(resolved), detect_npu(resolved), detect_gpu(resolved))
     return [device for device in found if device is not None]
+
+
+def device_utilization(paths: DiscoveryPaths, device: Device) -> float | None:
+    """Real device utilization from sysfs, when the kernel exposes it.
+
+    amdgpu (and some other DRM drivers) publish ``gpu_busy_percent`` per
+    device; that covers all work on the accelerator, not only OmniTensor's
+    own inference, which is the honest number for a load display.  Returns
+    ``None`` when the driver does not expose it.
+    """
+    if device.kind != "dri":
+        return None
+    node = device.id.removeprefix("gpu-")
+    raw = _read_trimmed(paths.sys / f"class/drm/{node}/device/gpu_busy_percent")
+    try:
+        return max(0.0, min(100.0, float(raw)))
+    except ValueError:
+        return None

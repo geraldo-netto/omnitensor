@@ -78,3 +78,20 @@ def test_build_executors_marks_absent_backends(fake_nodes):
     executors = build_executors([])
     for executor in executors.values():
         assert executor.availability().available is False
+
+
+def test_publish_prefers_kernel_gpu_utilization(fake_nodes, tmp_path):
+    from conftest import add_gpu
+
+    add_gpu(fake_nodes, node=128, vendor="0x1002")
+    (fake_nodes.sys / "class/drm/renderD128/device/gpu_busy_percent").write_text("42\n")
+
+    async def scenario():
+        service = build_service(fake_nodes, tmp_path)
+        service._scheduler.start()
+        snapshot = service.publish_once()
+        await service._scheduler.stop()
+        return snapshot
+
+    snapshot = asyncio.run(scenario())
+    assert snapshot["devices"][0]["load"] == 42.0

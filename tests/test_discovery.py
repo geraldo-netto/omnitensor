@@ -72,3 +72,24 @@ def test_snapshot_entry_shape(fake_nodes):
         "load": None,
         "reason": "",
     }
+
+
+def test_gpu_utilization_reads_sysfs_busy_percent(fake_nodes):
+    add_gpu(fake_nodes, node=128, vendor="0x1002")
+    from omnitensor.discovery import device_utilization
+    device = detect_gpu(fake_nodes)
+    busy = fake_nodes.sys / "class/drm/renderD128/device/gpu_busy_percent"
+    busy.write_text("37\n")
+    assert device_utilization(fake_nodes, device) == 37.0
+    busy.write_text("999\n")
+    assert device_utilization(fake_nodes, device) == 100.0
+    busy.write_text("garbage\n")
+    assert device_utilization(fake_nodes, device) is None
+    busy.unlink()
+    assert device_utilization(fake_nodes, device) is None
+
+
+def test_utilization_only_applies_to_render_nodes(fake_nodes):
+    add_npu(fake_nodes)
+    from omnitensor.discovery import device_utilization
+    assert device_utilization(fake_nodes, detect_npu(fake_nodes)) is None
