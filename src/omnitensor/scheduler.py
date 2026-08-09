@@ -185,6 +185,19 @@ class Scheduler:
             "loads": {backend: queue.load for backend, queue in self._queues.items()},
         }
 
+    def profile_stats(self) -> dict[str, dict[str, int]]:
+        """Per-profile queued and running job counts across all backends;
+        profiles with no queued or running work are absent."""
+        stats: dict[str, dict[str, int]] = {}
+        for queue in self._queues.values():
+            for profile_id, jobs in queue.profiles.items():
+                entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
+                entry["queued"] += len(jobs)
+        for profile_id in self._running:
+            entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
+            entry["running"] += 1
+        return stats
+
     def tick(self) -> None:
         """Fold busy time since the last snapshot tick into each device's load EMA."""
         now = time.monotonic()

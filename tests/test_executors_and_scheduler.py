@@ -388,6 +388,82 @@ def test_update_executors_cancels_queued_jobs_of_removed_backends():
     asyncio.run(scenario())
 
 
+def test_profile_stats_report_per_profile_queued_and_running():
+    import threading
+
+    gate = threading.Event()
+    started = threading.Event()
+
+    class BlockingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            started.set()
+            gate.wait(timeout=5)
+            return super().run(model_path, inputs)
+
+    async def scenario():
+        scheduler = Scheduler(
+            {"tpu": BlockingExecutor(), "npu": SlowExecutor()},
+            weight_of=lambda _profile: 1,
+        )
+        scheduler.start()
+        in_flight = scheduler.submit("tpu", "profile-a", "job-1", [])
+        await asyncio.to_thread(started.wait, 5)
+        queued = scheduler.submit("tpu", "profile-a", "job-2", [])
+        await scheduler.submit("npu", "profile-b", "job-3", [])
+        assert scheduler.profile_stats() == {
+            "profile-a": {"queued": 1, "running": 1},
+        }
+        gate.set()
+        await asyncio.gather(in_flight, queued)
+        assert scheduler.profile_stats() == {}
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_profile_stats_sum_queued_jobs_across_backends():
+    async def scenario():
+        scheduler = Scheduler(
+            {"tpu": SlowExecutor(), "npu": SlowExecutor()},
+            weight_of=lambda _profile: 1,
+        )
+        scheduler.submit("tpu", "profile-a", "job-1", [])
+        scheduler.submit("npu", "profile-a", "job-2", [])
+        scheduler.submit("npu", "profile-b", "job-3", [])
+        assert scheduler.profile_stats() == {
+            "profile-a": {"queued": 2, "running": 0},
+            "profile-b": {"queued": 1, "running": 0},
+        }
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_profile_stats_report_running_with_no_backlog():
+    import threading
+
+    gate = threading.Event()
+    started = threading.Event()
+
+    class BlockingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            started.set()
+            gate.wait(timeout=5)
+            return super().run(model_path, inputs)
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": BlockingExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        future = scheduler.submit("tpu", "profile-a", "job-1", [])
+        await asyncio.to_thread(started.wait, 5)
+        assert scheduler.profile_stats() == {"profile-a": {"queued": 0, "running": 1}}
+        gate.set()
+        await future
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
 def test_stride_late_joiner_alternates_instead_of_bursting():
     from omnitensor.scheduler import _BackendQueue, _Job
 

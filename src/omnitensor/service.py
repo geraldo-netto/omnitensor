@@ -161,27 +161,34 @@ def profile_statuses(
     policy: PolicyState,
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
-    stats = scheduler.stats()
+    per_profile = scheduler.profile_stats()
     return {
-        workload_id: _profile_status(workload, executors, stats, policy)
+        workload_id: _profile_status(
+            workload,
+            executors,
+            per_profile.get(workload_id, {"queued": 0, "running": 0}),
+            policy,
+        )
         for workload_id, workload in workloads.items()
     }
 
 
-def _profile_status(workload: Workload, executors: dict, stats: dict, policy: PolicyState) -> dict:
+def _profile_status(workload: Workload, executors: dict, counts: dict, policy: PolicyState) -> dict:
+    queued = counts["queued"]
     profile_policy = policy.profiles.get(workload.id)
     if policy.paused:
-        return {"status": "paused", "queued": 0, "detail": "Runtime paused by policy"}
+        return {"status": "paused", "queued": queued, "detail": "Runtime paused by policy"}
     if profile_policy is not None and not profile_policy.enabled:
-        return {"status": "paused", "queued": 0, "detail": "Profile disabled by policy"}
+        return {"status": "paused", "queued": queued, "detail": "Profile disabled by policy"}
     backend, reason = pick_backend(workload, executors)
     if backend is None:
-        return {"status": "unavailable", "queued": 0, "detail": reason[:240]}
+        return {"status": "unavailable", "queued": queued, "detail": reason[:240]}
     if workload.model is None:
-        return {"status": "idle", "queued": 0, "detail": f"Ready on {backend}; no model bundled"}
+        detail = f"Ready on {backend}; no model bundled"
+        return {"status": "idle", "queued": queued, "detail": detail}
     return {
-        "status": "watching" if stats["runningProfiles"] == 0 else "running",
-        "queued": 0,
+        "status": "running" if counts["running"] > 0 else "watching",
+        "queued": queued,
         "detail": f"Serving on {backend}",
     }
 

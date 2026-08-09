@@ -849,8 +849,8 @@ def test_profile_statuses_documents_are_exact():
     from omnitensor.state import PolicyState
 
     class StatsScheduler:
-        def stats(self):
-            return {"queueDepth": 0, "runningProfiles": 0, "loads": {}}
+        def profile_stats(self):
+            return {}
 
     policy = PolicyState()
     manifest = sample_manifest(acceleratorPreference=["tpu"])

@@ -410,11 +410,14 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
             return InferenceResult(outputs=[], duration_ms=0.0)
 
     class StatsOnlyScheduler:
-        def __init__(self, running_profiles):
-            self._running_profiles = running_profiles
+        def __init__(self, running, queued=0):
+            self._running = running
+            self._queued = queued
 
-        def stats(self):
-            return {"queueDepth": 0, "runningProfiles": self._running_profiles, "loads": {}}
+        def profile_stats(self):
+            if self._running == 0 and self._queued == 0:
+                return {}
+            return {"sample-workload": {"queued": self._queued, "running": self._running}}
 
     manifest = sample_manifest(model={
         "id": "sample-model",
@@ -434,10 +437,17 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
         "queued": 0,
         "detail": "Serving on tpu",
     }
-    running = profile_statuses(workloads, executors, StatsOnlyScheduler(2), policy)
+    running = profile_statuses(workloads, executors, StatsOnlyScheduler(2, queued=3), policy)
     assert running["sample-workload"] == {
         "status": "running",
-        "queued": 0,
+        "queued": 3,
+        "detail": "Serving on tpu",
+    }
+    # Queued-but-not-running is watching, with the real queue depth surfaced.
+    backlog = profile_statuses(workloads, executors, StatsOnlyScheduler(0, queued=5), policy)
+    assert backlog["sample-workload"] == {
+        "status": "watching",
+        "queued": 5,
         "detail": "Serving on tpu",
     }
 
@@ -554,6 +564,56 @@ def test_admits_reflects_profile_enablement_and_unknown_profiles(tmp_path):
     # A disabled profile is held even though the runtime is not paused.
     assert service._admits("sample-workload") is False
     assert service._admits("unknown-profile") is True
+
+
+def test_profile_statuses_do_not_leak_running_state_across_profiles():
+    from omnitensor.executors.base import Availability, InferenceResult
+    from omnitensor.registry import Workload
+    from omnitensor.service import profile_statuses
+    from omnitensor.state import PolicyState
+
+    class ReadyExecutor:
+        backend = "tpu"
+        model_formats = frozenset({"tflite-edgetpu"})
+
+        def availability(self):
+            return Availability(True)
+
+        def run(self, model_path, inputs):
+            return InferenceResult(outputs=[], duration_ms=0.0)
+
+    class OneBusyScheduler:
+        def profile_stats(self):
+            return {"busy-profile": {"queued": 2, "running": 1}}
+
+    model = {
+        "id": "sample-model",
+        "version": "1.0.0",
+        "format": "tflite-edgetpu",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "1",
+        "minimumRuntimeVersion": "1",
+    }
+    workloads = {}
+    for workload_id in ("busy-profile", "idle-profile"):
+        manifest = sample_manifest(workload_id, model=model)
+        workloads[workload_id] = Workload(id=workload_id, manifest=manifest)
+
+    statuses = profile_statuses(
+        workloads, {"tpu": ReadyExecutor()}, OneBusyScheduler(), PolicyState(),
+    )
+    # Regression (OMNI-0019): the global running count used to mark every
+    # profile "running"; state is now strictly per profile.
+    assert statuses["busy-profile"] == {
+        "status": "running",
+        "queued": 2,
+        "detail": "Serving on tpu",
+    }
+    assert statuses["idle-profile"] == {
+        "status": "watching",
+        "queued": 0,
+        "detail": "Serving on tpu",
+    }
 
 
 def test_env_path_prefers_environment_and_expands_home(monkeypatch):
