@@ -364,3 +364,44 @@ def test_missing_canonical_schema_never_uses_unrelated_directory(monkeypatch, tm
     monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
     with pytest.raises(FileNotFoundError, match="canonical schema is not installed"):
         registry.load_schema("contract.schema.json")
+
+
+def test_catalog_skips_one_bad_user_manifest_and_keeps_the_rest(tmp_path, caplog):
+    """One invalid user manifest used to crash-loop the whole unit."""
+    bundled = tmp_path / "bundled"
+    user = tmp_path / "user"
+    write_workload(bundled, sample_manifest("bundled-workload"))
+    write_workload(user, sample_manifest("good-workload"))
+    broken = user / "broken-workload"
+    broken.mkdir()
+    (broken / "manifest.json").write_text("{nope", encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        catalog = load_workload_catalog(user, bundled_root=bundled)
+
+    assert sorted(catalog) == ["bundled-workload", "good-workload"]
+    assert "broken-workload" in caplog.text
+
+
+def test_catalog_skips_an_oversized_user_manifest(tmp_path):
+    bundled = tmp_path / "bundled"
+    user = tmp_path / "user"
+    write_workload(bundled, sample_manifest("bundled-workload"))
+    write_workload(user, sample_manifest("huge-workload"))
+    (user / "huge-workload/manifest.json").write_bytes(
+        b" " * (registry.MAX_MANIFEST_BYTES + 1)
+    )
+
+    assert sorted(load_workload_catalog(user, bundled_root=bundled)) == ["bundled-workload"]
+
+
+def test_catalog_still_rejects_a_bad_bundled_manifest(tmp_path):
+    """A bundled manifest is shipped with the service; a bad one is a defect."""
+    bundled = tmp_path / "bundled"
+    user = tmp_path / "user"
+    user.mkdir()
+    write_workload(bundled, sample_manifest("bundled-workload"))
+    (bundled / "bundled-workload/manifest.json").write_text("{nope", encoding="utf-8")
+
+    with pytest.raises(ManifestError):
+        load_workload_catalog(user, bundled_root=bundled)

@@ -9,6 +9,7 @@ when omitted the global ``tpu > npu > gpu`` default applies.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,8 @@ _SOURCE_SCHEMAS = _PACKAGE_DIR.parents[1] / "schemas" if _PACKAGE_DIR.parent.nam
 _SOURCE_WORKLOADS = (
     _PACKAGE_DIR.parents[1] / "workloads" if _PACKAGE_DIR.parent.name == "src" else None
 )
+LOGGER = logging.getLogger(__name__)
+
 MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
 
@@ -109,8 +112,14 @@ def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
     return manifest
 
 
-def load_workloads(root: Path) -> dict[str, Workload]:
-    """Load every ``<id>/manifest.json`` under ``root``, strictly validated."""
+def load_workloads(root: Path, *, strict: bool = True) -> dict[str, Workload]:
+    """Load every ``<id>/manifest.json`` under ``root``, strictly validated.
+
+    With ``strict=False`` an unloadable manifest is logged and skipped instead
+    of rejecting the whole catalog.  That is the right behaviour for manifests
+    the service does not own: one malformed user manifest should cost the user
+    that workload, not every workload plus the service.
+    """
     if not root.is_dir():
         return {}
     workloads: dict[str, Workload] = {}
@@ -118,7 +127,13 @@ def load_workloads(root: Path) -> dict[str, Workload]:
         manifest_path = directory / "manifest.json"
         if not manifest_path.is_file():
             continue
-        manifest = _load_manifest(manifest_path, directory.name)
+        try:
+            manifest = _load_manifest(manifest_path, directory.name)
+        except ManifestError:
+            if strict:
+                raise
+            LOGGER.warning("Skipping unloadable workload manifest %s", manifest_path)
+            continue
         workloads[manifest["id"]] = Workload(id=manifest["id"], manifest=manifest)
         if len(workloads) > MAX_WORKLOADS:
             raise ManifestError(f"{root}: more than {MAX_WORKLOADS} workloads")
@@ -152,6 +167,14 @@ def load_workload_catalog(
     *,
     bundled_root: Path | None = None,
 ) -> dict[str, Workload]:
-    """Load built-in profiles plus user manifests; built-ins win ID collisions."""
+    """Load built-in profiles plus user manifests; built-ins win ID collisions.
+
+    Bundled manifests are shipped with the service, so one that fails to load
+    is a packaging defect and stays fatal.  User manifests are not, and a
+    single bad one must not stop the service from starting.
+    """
     resolved_bundled = bundled_root or bundled_workloads_path()
-    return merge_workloads(load_workloads(resolved_bundled), load_workloads(user_root))
+    return merge_workloads(
+        load_workloads(resolved_bundled),
+        load_workloads(user_root, strict=False),
+    )
