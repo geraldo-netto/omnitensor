@@ -334,7 +334,7 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
 def test_publisher_crash_takes_down_rediscover_and_the_whole_run(tmp_path):
     class ExplodingPublisher(FakePublisher):
         def publish(self, snapshot: dict) -> None:
-            raise OSError("disk full")
+            raise RuntimeError("publisher defect")
 
     transport = FakeTransport()
 
@@ -347,7 +347,7 @@ def test_publisher_crash_takes_down_rediscover_and_the_whole_run(tmp_path):
             publish_interval_s=0.01,
             discovery_interval_s=0.01,
         )
-        with pytest.raises(OSError, match="disk full"):
+        with pytest.raises(RuntimeError, match="publisher defect"):
             await asyncio.wait_for(service.run(), timeout=2)
         # Regression (OMNI-0012): the sibling _rediscover task used to be
         # left pending; now nothing survives the crash.
@@ -994,3 +994,67 @@ def test_intervals_default_to_module_constants(tmp_path, interval_attr):
         "_discovery_interval_s": service_module.DISCOVERY_INTERVAL_S,
     }[interval_attr]
     assert getattr(service, interval_attr) == expected
+
+
+def test_publisher_survives_an_io_failure_and_retries_next_tick(tmp_path, caplog):
+    """A full disk used to tear down job dispatch and D-Bus along with publishing."""
+
+    class IntermittentPublisher(FakePublisher):
+        def publish(self, snapshot: dict) -> None:
+            if len(self.published) < 2:
+                self.published.append(snapshot)
+                raise OSError("disk full")
+            super().publish(snapshot)
+
+    publisher = IntermittentPublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            publish_interval_s=0.001,
+        )
+        task = asyncio.create_task(service._publisher())
+        for _ in range(500):
+            if len(publisher.published) > 2:
+                break
+            await asyncio.sleep(0.001)
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(scenario())
+
+    assert len(publisher.published) > 2, "publishing never resumed after the failure"
+    assert "Could not publish the runtime snapshot" in caplog.text
+
+
+def test_publisher_survives_an_io_failure_while_retracting(tmp_path, caplog):
+    class UnretractablePublisher(FakePublisher):
+        def retract(self) -> None:
+            self.retracted += 1
+            raise OSError("permission denied")
+
+    publisher = UnretractablePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([]),
+            publisher=publisher,
+            publish_interval_s=0.001,
+        )
+        task = asyncio.create_task(service._publisher())
+        for _ in range(500):
+            if publisher.retracted > 1:
+                break
+            await asyncio.sleep(0.001)
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(scenario())
+
+    assert publisher.retracted > 1, "retraction was never retried"
+    assert "Could not publish the runtime snapshot" in caplog.text

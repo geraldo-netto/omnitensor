@@ -355,19 +355,26 @@ class OmniTensorService:
         # it — readers observe absence, exactly as when the service is down —
         # and log the outage once.  Publishing resumes when devices return.
         while not self._stopping.is_set():
-            if self._devices:
-                if self._snapshot_retracted:
-                    LOGGER.info("Accelerator devices returned; publishing snapshots again")
-                    self._snapshot_retracted = False
-                snapshot = self._build_runtime_snapshot()
-                await asyncio.to_thread(self._publisher_port.publish, snapshot)
-            elif not self._snapshot_retracted:
-                await asyncio.to_thread(self._publisher_port.retract)
-                self._snapshot_retracted = True
-                LOGGER.warning(
-                    "No accelerator devices present; retracted the runtime snapshot"
-                    " so readers observe absence instead of stale data",
-                )
+            # A publish failure is an outage of one output, not of the service.
+            # Letting an OSError escape here propagates through the gather that
+            # supervises the loops and takes down job dispatch and D-Bus with
+            # it, so a full disk would stop far more than snapshot publishing.
+            try:
+                if self._devices:
+                    if self._snapshot_retracted:
+                        LOGGER.info("Accelerator devices returned; publishing snapshots again")
+                        self._snapshot_retracted = False
+                    snapshot = self._build_runtime_snapshot()
+                    await asyncio.to_thread(self._publisher_port.publish, snapshot)
+                elif not self._snapshot_retracted:
+                    await asyncio.to_thread(self._publisher_port.retract)
+                    self._snapshot_retracted = True
+                    LOGGER.warning(
+                        "No accelerator devices present; retracted the runtime snapshot"
+                        " so readers observe absence instead of stale data",
+                    )
+            except OSError:
+                LOGGER.exception("Could not publish the runtime snapshot; retrying next tick")
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._publish_interval_s)
             except TimeoutError:
