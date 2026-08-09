@@ -435,3 +435,41 @@ def test_generated_job_id_failure_and_collision_are_redacted():
         await collision.stop()
 
     run_scenario(scenario())
+
+
+def test_a_large_valid_request_keeps_its_request_id_in_the_error_reply():
+    """The id lookup used the module default, not the configured bound, so a
+    request the service accepts by size still echoed requestId "invalid"."""
+
+    async def scenario():
+        service = JobSubmissionService(
+            None,
+            allows_all(),
+            max_request_bytes=DEFAULT_MAX_JOB_REQUEST_BYTES * 4,
+            clock_ms=lambda: 0,
+        )
+        padding = "x" * DEFAULT_MAX_JOB_REQUEST_BYTES
+        request = submit_document(payload={"tensor": padding})
+        return decode(await service.submit_job_text(json.dumps(request)))
+
+    reply = run_scenario(scenario())
+
+    assert reply["requestId"] == "request-1"
+    assert reply["status"] == "rejected"
+
+
+def test_request_id_recovery_measures_encoded_bytes_not_characters():
+    """A multi-byte body is larger on the wire than len() suggests."""
+
+    async def scenario():
+        service = JobSubmissionService(None, allows_all(), clock_ms=lambda: 0)
+        oversized = submit_document(payload={"tensor": "é" * DEFAULT_MAX_JOB_REQUEST_BYTES})
+        text = json.dumps(oversized, ensure_ascii=False)
+        assert len(text) < DEFAULT_MAX_JOB_REQUEST_BYTES * 2
+        assert len(text.encode()) > DEFAULT_MAX_JOB_REQUEST_BYTES
+        return decode(await service.submit_job_text(text))
+
+    reply = run_scenario(scenario())
+
+    assert reply["requestId"] == "invalid"
+    assert reply["status"] == "rejected"

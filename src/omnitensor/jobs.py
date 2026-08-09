@@ -196,7 +196,7 @@ class JobSubmissionService:
                 error.message,
             )
         except JobDispatchError as error:
-            request_id = _request_id_from_text(text)
+            request_id = _request_id_from_text(text, self._max_request_bytes)
             return self._reply(
                 request_id,
                 None,
@@ -206,7 +206,7 @@ class JobSubmissionService:
             )
         except Exception:
             return self._reply(
-                _request_id_from_text(text),
+                _request_id_from_text(text, self._max_request_bytes),
                 None,
                 "rejected",
                 "internal-error",
@@ -270,7 +270,7 @@ class JobSubmissionService:
             raise
         except Exception:
             return self._reply(
-                _request_id_from_text(text),
+                _request_id_from_text(text, self._max_request_bytes),
                 None,
                 "rejected",
                 "internal-error",
@@ -362,8 +362,17 @@ def _request_id(document: object) -> str:
     return "invalid"
 
 
-def _request_id_from_text(text: object) -> str:
-    if not isinstance(text, str) or len(text) > DEFAULT_MAX_JOB_REQUEST_BYTES:
+def _request_id_from_text(text: object, max_request_bytes: int) -> str:
+    """Recover the request id from a request that failed elsewhere.
+
+    The bound must be the caller's configured one, measured in encoded bytes:
+    the module default measured in characters both rejects a valid request that
+    a larger configured bound admits — echoing requestId "invalid" back for it —
+    and admits a multi-byte request larger than the bound actually allows.
+    """
+    if not isinstance(text, str):
+        return "invalid"
+    if len(text.encode("utf-8", "surrogatepass")) > max_request_bytes:
         return "invalid"
     try:
         return _request_id(json.loads(text, parse_constant=_reject_json_constant))
