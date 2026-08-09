@@ -33,7 +33,18 @@
           "required": ["minimum", "maximum"],
           "properties": {
             "minimum": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "maximum": {"type": "integer", "minimum": 1, "maximum": 65535}
+            "maximum": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "capabilities": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
           }
         },
         "schemas": {

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
+from .manifest_compatibility import resolve_plugin_compatibility
 from .supervisor import PluginWorkerSupervisor, WorkerSpec, WorkerStatus
 
 MAX_WORKER_IMPORT_PATHS = 16
@@ -52,7 +53,7 @@ class InstalledPluginRuntime:
             bundled_root=self._bundled_root,
             entry_points_provider=self._entry_points_provider,
         )
-        catalog = resolve_plugin_identities(candidates)
+        catalog = resolve_plugin_compatibility(resolve_plugin_identities(candidates))
         workers = await self._supervisor.start(
             external_worker_specs(
                 catalog.plugins,
@@ -104,7 +105,9 @@ def external_worker_specs(
                 tuple(argv),
                 minimum_protocol=protocol["minimum"],
                 maximum_protocol=protocol["maximum"],
-                capabilities=WORKER_CAPABILITIES,
+                capabilities=(
+                    frozenset(protocol.get("capabilities", ())) & WORKER_CAPABILITIES
+                ),
             )
         )
     return tuple(specs)

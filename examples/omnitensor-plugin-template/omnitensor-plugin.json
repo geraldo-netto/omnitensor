@@ -5,7 +5,11 @@
   "capabilities": ["bounded-scoring"],
   "plugin": {
     "entryPoint": "template-workload",
-    "protocol": {"minimum": 1, "maximum": 1},
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": ["cancel", "health"]
+    },
     "schemas": {
       "configuration": {
         "type": "object",

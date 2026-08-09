@@ -89,7 +89,11 @@ class FakeEntryPoint:
 
 def _resolved(source=PluginSource.EXTERNAL, tmp_path=Path("/tmp")):
     manifest = sample_plugin_manifest("external-example")
-    manifest["plugin"]["protocol"] = {"minimum": 2, "maximum": 4}
+    manifest["plugin"]["protocol"] = {
+        "minimum": 2,
+        "maximum": 4,
+        "capabilities": ["cancel", "health", "progress"],
+    }
     return ResolvedPlugin(
         "external-example",
         "1.0.0",

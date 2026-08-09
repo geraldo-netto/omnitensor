@@ -93,7 +93,11 @@ def sample_plugin_manifest(workload_id: str = "sample-plugin") -> dict:
     manifest["manifestVersion"] = 2
     manifest["plugin"] = {
         "entryPoint": workload_id,
-        "protocol": {"minimum": 1, "maximum": 1},
+        "protocol": {
+            "minimum": 1,
+            "maximum": 1,
+            "capabilities": ["cancel", "health"],
+        },
         "schemas": {
             "configuration": {"type": "object", "additionalProperties": False},
             "input": {"type": "object", "additionalProperties": False},
