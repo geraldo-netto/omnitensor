@@ -7,8 +7,8 @@ from conftest import sample_manifest
 
 import omnitensor.executors.npu as npu_module
 import omnitensor.executors.tpu as tpu_module
-from omnitensor.executors.base import supports_model
-from omnitensor.executors.gpu import GpuExecutor
+from omnitensor.executors.base import Availability, supports_model
+from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import Workload
@@ -199,6 +199,65 @@ def test_pick_backend_follows_preference_and_reports_reasons():
     backend, reason = pick_backend(missing_backend, executors)
     assert backend is None
     assert "npu: no executor" in reason
+
+
+def test_pick_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
+    class Lane:
+        backend = "gpu"
+
+        def __init__(self, formats, available, reason=""):
+            self.model_formats = frozenset(formats)
+            self._availability = Availability(available, reason)
+
+        def availability(self):
+            return self._availability
+
+    gpu = CompositeGpuExecutor([
+        Lane({"ncnn"}, True),
+        Lane({"onnx"}, False, "No CUDA or ROCm provider"),
+    ])
+    npu = Lane({"onnx"}, True)
+    manifest = sample_manifest(
+        accelerator="gpu",
+        acceleratorPreference=["gpu", "npu"],
+        model={
+            "id": "sample-model",
+            "version": "1.0.0",
+            "format": "onnx",
+            "fullyQuantized": False,
+            "minimumCompilerVersion": "1",
+            "minimumRuntimeVersion": "1",
+        },
+    )
+    backend, reason = pick_backend(Workload(id=manifest["id"], manifest=manifest), {
+        "gpu": gpu, "npu": npu,
+    })
+    assert backend == "npu"
+    assert reason == ""
+
+    backend, reason = pick_backend(
+        Workload(id=manifest["id"], manifest=manifest), {"npu": npu},
+    )
+    assert backend == "npu"
+    assert reason == ""
+
+    incompatible_gpu = Lane({"ncnn"}, True)
+    backend, reason = pick_backend(Workload(id=manifest["id"], manifest=manifest), {
+        "gpu": incompatible_gpu, "npu": npu,
+    })
+    assert backend == "npu"
+    assert reason == ""
+    backend, reason = pick_backend(
+        Workload(id=manifest["id"], manifest=manifest), {"gpu": incompatible_gpu},
+    )
+    assert backend is None
+    assert reason == "gpu: model format not supported; npu: no executor"
+
+    class NoPreference:
+        preference = ()
+        model = None
+
+    assert pick_backend(NoPreference(), {}) == (None, "No backend in preference list")
 
 
 class SlowExecutor:

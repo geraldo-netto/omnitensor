@@ -10,7 +10,7 @@ wiring injects the real libraries.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,14 @@ class Executor(Protocol):
         """Execute one inference; raises RuntimeError when unavailable."""
 
 
+@runtime_checkable
+class ModelAwareAvailability(Protocol):
+    """Optional executor capability for format-specific runtime health."""
+
+    def availability_for(self, model: dict | None) -> Availability:
+        """Availability of the lane that can execute ``model``."""
+
+
 def require_available(executor: Executor) -> None:
     availability = executor.availability()
     if not availability.available:
@@ -45,3 +53,10 @@ def require_available(executor: Executor) -> None:
 def supports_model(executor: Executor, model: dict | None) -> bool:
     """A workload without a model spec is compatible with any backend."""
     return model is None or model.get("format") in executor.model_formats
+
+
+def availability_for_model(executor: Executor, model: dict | None) -> Availability:
+    """Use format-aware health when the executor exposes it."""
+    if isinstance(executor, ModelAwareAvailability):
+        return executor.availability_for(model)
+    return executor.availability()

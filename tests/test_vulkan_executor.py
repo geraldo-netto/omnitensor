@@ -163,6 +163,21 @@ def test_composite_dispatches_by_extension_and_prefers_vulkan():
     assert composite.run("model.onnx", []).outputs == ["onnx"]
 
 
+def test_composite_availability_is_scoped_to_requested_format():
+    composite = CompositeGpuExecutor([
+        StubExecutor({"ncnn"}, True),
+        StubExecutor({"onnx"}, False, "no GPU provider"),
+    ])
+    assert composite.availability().available is True
+    assert composite.availability_for({"format": "ncnn"}) == Availability(True)
+    assert composite.availability_for({"format": "onnx"}) == Availability(
+        False, "no GPU provider",
+    )
+    assert composite.availability_for({"format": "openvino"}) == Availability(
+        False, "No GPU runtime supports the model format",
+    )
+
+
 def test_composite_reports_joined_reasons_and_missing_runtime():
     composite = CompositeGpuExecutor([
         StubExecutor({"ncnn"}, False, "no vulkan"),

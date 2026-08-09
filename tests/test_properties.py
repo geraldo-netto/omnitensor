@@ -24,6 +24,8 @@ from omnitensor.discovery import (
     detect_devices,
     device_utilization,
 )
+from omnitensor.executors.base import Availability, availability_for_model
+from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import validate_document
@@ -121,6 +123,17 @@ class CacheCore:
 
 class CacheOpenVinoRuntime:
     Core = CacheCore
+
+
+class FormatLane:
+    backend = "gpu"
+
+    def __init__(self, model_format: str, available: bool):
+        self.model_formats = frozenset({model_format})
+        self._availability = Availability(available, f"{model_format} unavailable")
+
+    def availability(self):
+        return self._availability
 
 
 def assert_valid_acknowledgement(text: str) -> None:
@@ -341,6 +354,23 @@ def test_executor_reconciliation_reuses_exactly_unchanged_device_states(states):
             assert executors["gpu"] is previous_executors["gpu"]
         previous_devices = devices
         previous_executors = executors
+
+
+@given(
+    ncnn_available=st.booleans(),
+    onnx_available=st.booleans(),
+    requested=st.sampled_from(["ncnn", "onnx", "openvino"]),
+)
+def test_composite_gpu_availability_matches_requested_runtime_lane(
+    ncnn_available, onnx_available, requested,
+):
+    composite = CompositeGpuExecutor([
+        FormatLane("ncnn", ncnn_available),
+        FormatLane("onnx", onnx_available),
+    ])
+    availability = availability_for_model(composite, {"format": requested})
+    expected = {"ncnn": ncnn_available, "onnx": onnx_available, "openvino": False}
+    assert availability.available is expected[requested]
 
 
 device_entries = st.builds(

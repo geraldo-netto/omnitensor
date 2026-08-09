@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from .base import Availability, InferenceResult, require_available
+from .base import Availability, InferenceResult, require_available, supports_model
 
 GPU_PROVIDERS = ("CUDAExecutionProvider", "ROCMExecutionProvider")
 
@@ -81,13 +81,23 @@ class CompositeGpuExecutor:
         )
 
     def availability(self) -> Availability:
+        return self._availability_of(self._executors)
+
+    @staticmethod
+    def _availability_of(executors: list) -> Availability:
         reasons = []
-        for executor in self._executors:
+        for executor in executors:
             availability = executor.availability()
             if availability.available:
                 return Availability(True)
             reasons.append(availability.reason)
         return Availability(False, "; ".join(reasons) or "No GPU runtime configured")
+
+    def availability_for(self, model: dict | None) -> Availability:
+        compatible = [executor for executor in self._executors if supports_model(executor, model)]
+        if not compatible:
+            return Availability(False, "No GPU runtime supports the model format")
+        return self._availability_of(compatible)
 
     def _executor_for(self, model_path: str):
         wanted = "ncnn" if model_path.endswith(".param") else "onnx"

@@ -15,7 +15,7 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass
 
-from .executors.base import Executor, InferenceResult, supports_model
+from .executors.base import Executor, InferenceResult, availability_for_model, supports_model
 from .registry import Workload
 
 LOAD_SMOOTHING = 0.5
@@ -33,7 +33,7 @@ def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[st
         if not supports_model(executor, workload.model):
             reasons.append(f"{backend}: model format not supported")
             continue
-        availability = executor.availability()
+        availability = availability_for_model(executor, workload.model)
         if not availability.available:
             reasons.append(f"{backend}: {availability.reason}")
             continue
