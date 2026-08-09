@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import tempfile
 from pathlib import Path
 
@@ -9,11 +10,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.plugins import (
+    ArtifactActivation,
+    ArtifactInstallationError,
+    ArtifactInstaller,
     ArtifactReference,
     ArtifactResolution,
     ArtifactResolver,
     artifact_filename,
     artifact_reference_error,
+    artifact_reference_from_document,
 )
 
 
@@ -249,10 +254,319 @@ def test_digest_reads_bounded_chunks_and_accumulates_the_total(monkeypatch):
     digest=st.text(max_size=80),
 )
 def test_arbitrary_reference_metadata_never_escapes_or_raises(
-    artifact_id, version, digest,
+    artifact_id,
+    version,
+    digest,
 ):
     artifact = ArtifactReference(artifact_id, version, "onnx", digest)
     with tempfile.TemporaryDirectory() as root:
         resolution = ArtifactResolver([Path(root)]).resolve(artifact)
     assert resolution.path is None
     assert resolution.ready is False
+
+
+def test_installer_activates_verified_versions_and_rolls_back(tmp_path):
+    store = tmp_path / "store"
+    source_v1 = tmp_path / "v1.onnx"
+    source_v2 = tmp_path / "v2.onnx"
+    source_v1.write_bytes(b"version-one")
+    source_v2.write_bytes(b"version-two")
+    v1 = reference(b"version-one", version="1.0.0")
+    v2 = reference(b"version-two", version="2.0.0")
+    installer = ArtifactInstaller(store)
+
+    first = installer.install(v1, source_v1)
+    second = installer.install(v2, source_v2)
+
+    assert first == first.__class__(v1, first.path, None)
+    assert first.path.read_bytes() == b"version-one"
+    assert second == second.__class__(v2, second.path, v1)
+    assert installer.activation(v1.id) == ArtifactActivation(v2, v1)
+    assert installer.resolve_active(v1.id).path == second.path
+    rolled_back = installer.rollback(v1.id)
+    assert rolled_back == rolled_back.__class__(v1, first.path, v2)
+    assert installer.activation(v1.id) == ArtifactActivation(v1, v2)
+
+
+def test_installer_rejects_invalid_references_with_stable_error(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"model")
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        installer.install(reference(id="../escape"), source)
+
+    assert excinfo.value.code == "reference-invalid"
+    assert excinfo.value.detail == "invalid artifact id: '../escape'"
+    assert str(excinfo.value) == "reference-invalid: invalid artifact id: '../escape'"
+
+
+def test_installer_configuration_and_staging_are_exact(tmp_path, monkeypatch):
+    import omnitensor.plugins.artifact_installation as installation_module
+
+    with pytest.raises(ValueError) as excinfo:
+        ArtifactInstaller(tmp_path, max_artifact_bytes=0)
+    assert str(excinfo.value) == "max_artifact_bytes must be positive"
+
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"model")
+    store = tmp_path / "store"
+    calls = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def recording_mkdtemp(*, prefix, dir):
+        calls.append((prefix, dir))
+        return real_mkdtemp(prefix=prefix, dir=dir)
+
+    monkeypatch.setattr(installation_module.tempfile, "mkdtemp", recording_mkdtemp)
+    installer = ArtifactInstaller(store, max_artifact_bytes=5)
+    installer.install(reference(), source)
+
+    assert installer._root == store.resolve()
+    assert installer._max_artifact_bytes == 5
+    assert calls == [(".install-", store.resolve() / "sample-model")]
+
+
+def test_installer_persists_exact_artifact_and_activation_metadata(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"model")
+    artifact = reference()
+    store = tmp_path / "store"
+    installer = ArtifactInstaller(store)
+
+    installed = installer.install(artifact, source)
+
+    assert json.loads((installed.path.parent / "artifact.json").read_text()) == {
+        "version": 1,
+        "artifact": {
+            "id": "sample-model",
+            "version": "1.2.3",
+            "format": "onnx",
+            "sha256": artifact.sha256,
+        },
+    }
+    assert json.loads((store / artifact.id / "activation.json").read_text()) == {
+        "version": 1,
+        "artifactId": "sample-model",
+        "active": {
+            "id": "sample-model",
+            "version": "1.2.3",
+            "format": "onnx",
+            "sha256": artifact.sha256,
+        },
+        "rollback": None,
+    }
+
+
+def test_idempotent_install_keeps_activation_and_returns_active_reference(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"model")
+    artifact = reference()
+    installer = ArtifactInstaller(tmp_path / "store")
+    first = installer.install(artifact, source)
+
+    repeated = installer.install(artifact, source)
+
+    assert repeated == repeated.__class__(artifact, first.path, artifact)
+    assert installer.activation(artifact.id) == ArtifactActivation(artifact, None)
+
+
+def test_invalid_install_never_changes_active_version_or_leaves_staging(tmp_path):
+    store = tmp_path / "store"
+    valid_source = tmp_path / "valid.onnx"
+    invalid_source = tmp_path / "invalid.onnx"
+    valid_source.write_bytes(b"valid")
+    invalid_source.write_bytes(b"tampered")
+    v1 = reference(b"valid", version="1.0.0")
+    invalid_v2 = reference(b"expected", version="2.0.0")
+    installer = ArtifactInstaller(store)
+    installer.install(v1, valid_source)
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        installer.install(invalid_v2, invalid_source)
+
+    assert excinfo.value.code == "digest-mismatch"
+    assert installer.activation(v1.id) == ArtifactActivation(v1, None)
+    assert not (store / v1.id / invalid_v2.version).exists()
+    assert not list((store / v1.id).glob(".install-*"))
+
+
+def test_interrupted_activation_preserves_previous_pointer(tmp_path, monkeypatch):
+    import omnitensor.plugins.artifact_installation as installation_module
+
+    store = tmp_path / "store"
+    first_source = tmp_path / "first.onnx"
+    second_source = tmp_path / "second.onnx"
+    first_source.write_bytes(b"first")
+    second_source.write_bytes(b"second")
+    first = reference(b"first", version="1.0.0")
+    second = reference(b"second", version="2.0.0")
+    installer = ArtifactInstaller(store)
+    installer.install(first, first_source)
+    real_write = installation_module.write_json_atomic
+
+    def interrupted(path, payload, prefix):
+        if path.name == "activation.json":
+            raise OSError("interrupted")
+        return real_write(path, payload, prefix)
+
+    monkeypatch.setattr(installation_module, "write_json_atomic", interrupted)
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        installer.install(second, second_source)
+
+    assert excinfo.value.code == "activation-failed"
+    assert installer.activation(first.id) == ArtifactActivation(first, None)
+    assert installer.resolve_active(first.id).path.read_bytes() == b"first"
+    assert (store / second.id / second.version / "model.onnx").read_bytes() == b"second"
+
+
+def test_installer_rejects_symlink_sources_and_immutable_version_conflicts(tmp_path):
+    store = tmp_path / "store"
+    real_source = tmp_path / "real.onnx"
+    source_link = tmp_path / "link.onnx"
+    real_source.write_bytes(b"one")
+    source_link.symlink_to(real_source)
+    installer = ArtifactInstaller(store)
+    first = reference(b"one", version="1.0.0")
+
+    with pytest.raises(ArtifactInstallationError) as symlink_error:
+        installer.install(first, source_link)
+    assert symlink_error.value.code == "source-invalid"
+    assert "Too many levels of symbolic links" in symlink_error.value.detail
+
+    with pytest.raises(ArtifactInstallationError) as directory_error:
+        installer.install(first, tmp_path)
+    assert directory_error.value.code == "source-invalid"
+    assert (
+        directory_error.value.detail
+        == "cannot open artifact: artifact source is not a regular file"
+    )
+
+    installer.install(first, real_source)
+    (store / first.id / first.version / "model.onnx").write_bytes(b"changed")
+    with pytest.raises(ArtifactInstallationError) as conflict:
+        installer.install(first, real_source)
+    assert conflict.value.code == "version-conflict"
+    assert conflict.value.detail == (
+        "installed version is not the requested immutable artifact: 1.0.0"
+    )
+
+
+def test_installer_enforces_size_and_rollback_boundaries(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"12345")
+    artifact = reference(b"12345")
+    installer = ArtifactInstaller(tmp_path / "store", max_artifact_bytes=4)
+
+    with pytest.raises(ArtifactInstallationError) as too_large:
+        installer.install(artifact, source)
+    assert too_large.value.code == "artifact-too-large"
+    with pytest.raises(ArtifactInstallationError) as no_rollback:
+        installer.rollback(artifact.id)
+    assert no_rollback.value.code == "rollback-unavailable"
+    assert no_rollback.value.detail == "artifact has no rollback version: sample-model"
+    assert installer.resolve_active(artifact.id) == ArtifactResolution(
+        False,
+        None,
+        "artifact has no active version: sample-model",
+        0,
+    )
+
+
+def test_rollback_reverifies_the_preserved_version(tmp_path):
+    first_source = tmp_path / "first.onnx"
+    second_source = tmp_path / "second.onnx"
+    first_source.write_bytes(b"first")
+    second_source.write_bytes(b"second")
+    first = reference(b"first", version="1.0.0")
+    second = reference(b"second", version="2.0.0")
+    store = tmp_path / "store"
+    installer = ArtifactInstaller(store)
+    installer.install(first, first_source)
+    installer.install(second, second_source)
+    (store / first.id / first.version / "model.onnx").write_bytes(b"corrupt")
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        installer.rollback(first.id)
+
+    assert excinfo.value.code == "rollback-invalid"
+    assert excinfo.value.detail == "artifact sha256 mismatch"
+    assert installer.activation(first.id) == ArtifactActivation(second, first)
+
+
+def test_artifact_store_rejects_symlinked_identity_directories(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "sample-model").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        ArtifactInstaller(store).activation("sample-model")
+
+    assert excinfo.value.code == "store-path-invalid"
+    assert excinfo.value.detail == "artifact directory escapes store root: sample-model"
+
+
+@pytest.mark.parametrize(
+    ("document", "detail"),
+    [
+        ({}, "activation has invalid fields"),
+        (
+            {"version": 2, "artifactId": "sample-model", "active": None, "rollback": None},
+            "activation identity is invalid",
+        ),
+        (
+            {
+                "version": 1,
+                "artifactId": "sample-model",
+                "active": {
+                    "id": "other-model",
+                    "version": "1.0.0",
+                    "format": "onnx",
+                    "sha256": "0" * 64,
+                },
+                "rollback": None,
+            },
+            "active artifact id does not match",
+        ),
+        (
+            {
+                "version": 1,
+                "artifactId": "sample-model",
+                "active": None,
+                "rollback": {
+                    "id": "other-model",
+                    "version": "1.0.0",
+                    "format": "onnx",
+                    "sha256": "0" * 64,
+                },
+            },
+            "rollback artifact id does not match",
+        ),
+    ],
+)
+def test_activation_metadata_fails_closed(tmp_path, document, detail):
+    state = tmp_path / "store/sample-model/activation.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps(document))
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        ArtifactInstaller(tmp_path / "store").activation("sample-model")
+
+    assert excinfo.value.code == "activation-state-invalid"
+    assert excinfo.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {},
+        {"id": 3, "version": "1.0.0", "format": "onnx", "sha256": "0" * 64},
+        {"id": "model", "version": "1.0.0", "format": "onnx", "sha256": "bad"},
+    ],
+)
+def test_stored_artifact_references_fail_closed(document):
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        artifact_reference_from_document(document)
+    assert excinfo.value.code == "metadata-invalid"

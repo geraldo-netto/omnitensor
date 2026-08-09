@@ -51,13 +51,13 @@ def artifact_filename(model_format: str) -> str:
 
 def artifact_reference_error(reference: ArtifactReference) -> str:
     """Return an actionable validation error, or an empty string when valid."""
-    if not _IDENTIFIER.fullmatch(reference.id):
+    if not isinstance(reference.id, str) or not _IDENTIFIER.fullmatch(reference.id):
         return f"invalid artifact id: {reference.id!r}"
-    if not _VERSION.fullmatch(reference.version):
+    if not isinstance(reference.version, str) or not _VERSION.fullmatch(reference.version):
         return f"invalid artifact version: {reference.version!r}"
     if reference.format not in _FILENAMES:
         return f"unsupported artifact format: {reference.format}"
-    if not _SHA256.fullmatch(reference.sha256):
+    if not isinstance(reference.sha256, str) or not _SHA256.fullmatch(reference.sha256):
         return "invalid artifact sha256"
     return ""
 

@@ -1,5 +1,13 @@
 """Stable contracts for workload plugins."""
 
+from .artifact_installation import (
+    ArtifactActivation,
+    ArtifactInstallation,
+    ArtifactInstallationError,
+    ArtifactInstaller,
+    artifact_reference_document,
+    artifact_reference_from_document,
+)
 from .artifacts import (
     DEFAULT_MAX_ARTIFACT_BYTES,
     ArtifactReference,
@@ -146,6 +154,10 @@ __all__ = [
     "ArtifactResolution",
     "ArtifactResolver",
     "ActiveGrant",
+    "ArtifactActivation",
+    "ArtifactInstallation",
+    "ArtifactInstallationError",
+    "ArtifactInstaller",
     "CancellationToken",
     "CollectedOutput",
     "CollectionOutcome",
@@ -226,7 +238,9 @@ __all__ = [
     "WorkerState",
     "WorkerStatus",
     "artifact_filename",
+    "artifact_reference_document",
     "artifact_reference_error",
+    "artifact_reference_from_document",
     "decode_frame",
     "discover_plugin_metadata",
     "encode_frame",
