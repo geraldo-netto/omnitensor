@@ -13,6 +13,11 @@ import jsonschema
 
 from ..atomicio import write_json_atomic
 from .protocol import JsonObject
+from .secrets import (
+    SecretConfigurationError,
+    persisted_configuration_errors,
+    validate_secret_references,
+)
 
 SETTINGS_DOCUMENT_VERSION = 1
 DEFAULT_MAX_SETTINGS_BYTES = 256 * 1024
@@ -90,11 +95,15 @@ class PluginSettingsStore:
         document = self._read(path, spec.plugin_id)
         settings = self._parse(document, spec.plugin_id)
         if settings.plugin_version == spec.plugin_version:
-            _validate_configuration(validator, settings.configuration)
+            _validate_persisted_configuration(
+                validator, spec.schema, settings.configuration
+            )
             return _copy_settings(settings)
 
         migrated = self._migrate(settings, spec, migrations)
-        _validate_configuration(validator, migrated.configuration)
+        _validate_persisted_configuration(
+            validator, spec.schema, migrated.configuration
+        )
         self._write(path, migrated)
         return _copy_settings(migrated)
 
@@ -108,7 +117,7 @@ class PluginSettingsStore:
         """Validate and atomically replace settings when the revision matches."""
         _validate_revision(expected_revision, "expected_revision")
         validator, _migrations = self._prepare_spec(spec)
-        _validate_configuration(validator, configuration)
+        _validate_persisted_configuration(validator, spec.schema, configuration)
         current = self.load(spec)
         if current.revision != expected_revision:
             raise PluginSettingsError(
@@ -140,7 +149,7 @@ class PluginSettingsStore:
                 "configuration schema is invalid",
             ) from error
         validator = jsonschema.Draft202012Validator(dict(spec.schema))
-        _validate_configuration(validator, spec.defaults)
+        _validate_persisted_configuration(validator, spec.schema, spec.defaults)
         if len(spec.migrations) > MAX_MIGRATIONS:
             raise PluginSettingsError(
                 "invalid-migrations",
@@ -289,13 +298,23 @@ class PluginSettingsStore:
         return self._root / f"{plugin_id}.json"
 
 
-def _validate_configuration(
+def _validate_persisted_configuration(
     validator: jsonschema.Draft202012Validator,
+    schema: Mapping[str, object],
     configuration: JsonObject,
 ) -> None:
     if not isinstance(configuration, dict):
         raise PluginSettingsError("invalid-configuration", "configuration must be an object")
-    errors = sorted(validator.iter_errors(configuration), key=lambda error: error.json_path)
+    try:
+        paths = validate_secret_references(schema, configuration)
+    except SecretConfigurationError as error:
+        code = (
+            "invalid-schema"
+            if error.code == "invalid-secret-schema"
+            else error.code
+        )
+        raise PluginSettingsError(code, error.detail) from error
+    errors = persisted_configuration_errors(validator, configuration, paths)
     if errors:
         error = errors[0]
         raise PluginSettingsError(

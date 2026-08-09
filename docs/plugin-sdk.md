@@ -15,6 +15,19 @@ verified artifacts, and `CancellationController` in local composition tests.
 copy output values and validate terminal timestamps and details before they
 cross IPC.
 
+Configuration secrets never belong in plugin settings. Mark string fields
+with `x-omnitensor-secret: true` and persist only a host secret reference:
+
+```json
+{"$secretRef":{"provider":"secret-service","key":"plugins/example/token","version":"v1"}}
+```
+
+OmniTensor resolves references through an injected provider immediately
+before plugin execution. Plugins receive the resolved value through their
+normal `ConfigurationView`; persisted state, snapshots, results, and logs use
+the reference or a redacted value. Missing providers and invalid values fail
+closed without returning secret material.
+
 The SDK follows the manifest protocol compatibility policy. Additive exports
 are backward compatible; removals or signature changes require a negotiated
 protocol/SDK major version rather than importing service internals as a
