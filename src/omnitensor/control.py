@@ -41,14 +41,8 @@ def _sanitized_command_id(command: dict) -> str:
 
 
 class ControlService:
-    def __init__(
-        self,
-        store: PolicyStorage,
-        defaults: dict[str, ProfilePolicy],
-        on_applied=None,
-    ):
+    def __init__(self, store: PolicyStorage, on_applied=None):
         self._store = store
-        self._defaults = defaults
         self._on_applied = on_applied
         self._state: PolicyState = store.load()
 
@@ -133,4 +127,4 @@ class ControlService:
 
 
 def build_control_service(state_path: Path, defaults: dict[str, ProfilePolicy]) -> ControlService:
-    return ControlService(PolicyStore(state_path, defaults), defaults)
+    return ControlService(PolicyStore(state_path, defaults))

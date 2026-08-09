@@ -78,7 +78,7 @@ def valid_command(**overrides) -> dict:
 
 
 def test_control_exact_rejection_and_acknowledgement_messages():
-    control = ControlService(MemoryStorage(), {})
+    control = ControlService(MemoryStorage())
     assert apply(control, "{nope")["message"] == "Command is not valid JSON"
     assert apply(control, "[]")["message"] == "Command is not an object"
     bad = apply(control, {"version": 2})
@@ -96,14 +96,14 @@ def test_control_exact_rejection_and_acknowledgement_messages():
 
 
 def test_control_applied_at_is_current_epoch_milliseconds():
-    control = ControlService(MemoryStorage(), {})
+    control = ControlService(MemoryStorage())
     acknowledgement = apply(control, valid_command())
     assert abs(acknowledgement["appliedAt"] - time.time() * 1000) < 60_000
 
 
 def test_control_saves_exactly_the_published_state():
     storage = MemoryStorage()
-    control = ControlService(storage, {})
+    control = ControlService(storage)
     apply(control, valid_command(operation="set-profile-weight", profileId="wl", value=4))
     assert len(storage.saved) == 1
     assert storage.saved[0] is control.state

@@ -219,7 +219,7 @@ class OmniTensorService:
             for workload_id, workload in self._workloads.items()
         }
         storage = policy_storage or PolicyStore(policy_path, defaults)
-        self.control = ControlService(storage, defaults, on_applied=self._policy_changed)
+        self.control = ControlService(storage, on_applied=self._policy_changed)
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)

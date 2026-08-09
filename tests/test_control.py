@@ -120,7 +120,7 @@ class FailingStorage:
 
 
 def test_save_failure_rejects_and_keeps_served_state_consistent():
-    control = ControlService(FailingStorage(OSError("disk full")), {})
+    control = ControlService(FailingStorage(OSError("disk full")))
     acknowledgement = apply(control, command("set-profile-enabled", "visual-library", True))
     assert acknowledgement["status"] == "rejected"
     assert acknowledgement["message"] == PERSIST_FAILURE_MESSAGE
@@ -130,7 +130,7 @@ def test_save_failure_rejects_and_keeps_served_state_consistent():
 
 
 def test_unexpected_handler_failure_returns_internal_error_rejection():
-    control = ControlService(FailingStorage(RuntimeError("boom")), {})
+    control = ControlService(FailingStorage(RuntimeError("boom")))
     acknowledgement = apply(control, command("set-paused", None, True))
     assert acknowledgement["status"] == "rejected"
     assert acknowledgement["message"] == INTERNAL_ERROR_MESSAGE
@@ -150,7 +150,7 @@ class MemoryStore:
 
 def test_on_applied_listener_fires_only_for_applied_commands():
     calls = []
-    control = ControlService(MemoryStore(), {}, on_applied=lambda: calls.append(True))
+    control = ControlService(MemoryStore(), on_applied=lambda: calls.append(True))
     applied = apply(control, command("set-paused", None, True))
     assert applied["status"] == "applied"
     assert calls == [True]
@@ -168,7 +168,16 @@ def test_raising_on_applied_listener_never_breaks_the_acknowledgement():
     def explode():
         raise RuntimeError("listener bug")
 
-    control = ControlService(MemoryStore(), {}, on_applied=explode)
+    control = ControlService(MemoryStore(), on_applied=explode)
     acknowledgement = apply(control, command("set-paused", None, True))
     assert acknowledgement["status"] == "applied"
     assert control.state.paused is True
+
+
+def test_control_service_holds_no_dead_defaults_state():
+    """Regression (OMNI-0022): defaults belong to PolicyStore; ControlService
+    takes only the storage port and the on_applied listener."""
+    import inspect
+
+    parameters = list(inspect.signature(ControlService.__init__).parameters)
+    assert parameters == ["self", "store", "on_applied"]
