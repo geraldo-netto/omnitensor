@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..atomicio import read_json_bounded
 from .artifact_installation import (
+    ARTIFACT_STORE_LOCK_FILE,
     ArtifactActivation,
     ArtifactInstallationError,
     ArtifactInstaller,
@@ -34,7 +35,13 @@ class ArtifactCacheError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ArtifactCacheAccounting:
-    """Current storage consumption split by collection eligibility."""
+    """Current storage consumption split by collection eligibility.
+
+    ``total_*`` counts installed versions.  ``reclaimable_*`` counts installer
+    leftovers, which occupy real bytes but are not versions anyone can resolve.
+    Reporting them separately keeps them from hiding from the operator without
+    letting them masquerade as installed state.
+    """
 
     total_items: int
     total_bytes: int
@@ -42,6 +49,8 @@ class ArtifactCacheAccounting:
     protected_bytes: int
     unreferenced_items: int
     unreferenced_bytes: int
+    reclaimable_items: int = 0
+    reclaimable_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +65,14 @@ class ArtifactCacheCollection:
 @dataclass(frozen=True, slots=True)
 class _CacheEntry:
     reference: ArtifactReference
+    path: Path
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Leftover:
+    """A dot-prefixed installer temporary that survived a killed install."""
+
     path: Path
     size_bytes: int
 
@@ -75,14 +92,14 @@ class ArtifactCache:
     def accounting(self) -> ArtifactCacheAccounting:
         """Report exact primary and sidecar bytes for installed versions."""
         with artifact_store_lock(self._root):
-            entries, protected = self._scan()
-            return _accounting(entries, protected)
+            entries, protected, leftovers = self._scan()
+            return _accounting(entries, protected, leftovers)
 
     def enforce(self) -> ArtifactCacheCollection:
         """Remove unreferenced versions in stable identity/version order."""
         with artifact_store_lock(self._root):
-            entries, protected = self._scan()
-            before = _accounting(entries, protected)
+            entries, protected, leftovers = self._scan()
+            before = _accounting(entries, protected, leftovers)
             protected_entries = [entry for entry in entries if _entry_key(entry) in protected]
             protected_usage = _accounting(protected_entries, protected)
             if (
@@ -111,18 +128,21 @@ class ArtifactCache:
                 raise ArtifactCacheError("quota-unsatisfiable", "cache quotas cannot be satisfied")
             return ArtifactCacheCollection(before, after, tuple(removed))
 
-    def _scan(self) -> tuple[list[_CacheEntry], set[tuple[str, str]]]:
+    def _scan(self) -> tuple[list[_CacheEntry], set[tuple[str, str]], list[_Leftover]]:
         entries: list[_CacheEntry] = []
         protected: set[tuple[str, str]] = set()
+        leftovers: list[_Leftover] = []
         self._root.mkdir(parents=True, exist_ok=True)
         for artifact_root in sorted(self._root.iterdir(), key=lambda path: path.name):
-            if artifact_root.name == ".artifact-store.lock":
+            if artifact_root.name == ARTIFACT_STORE_LOCK_FILE:
                 continue
             self._validate_artifact_root(artifact_root)
             activation = self._activation(artifact_root.name)
             protected.update(_activation_keys(activation))
-            entries.extend(self._scan_artifact(artifact_root))
-        return entries, protected
+            found, stale = self._scan_artifact(artifact_root)
+            entries.extend(found)
+            leftovers.extend(stale)
+        return entries, protected, leftovers
 
     def _validate_artifact_root(self, path: Path) -> None:
         probe = ArtifactReference(path.name, "0.0.0", "onnx", "0" * 64)
@@ -142,23 +162,29 @@ class ArtifactCache:
         except ArtifactInstallationError as error:
             raise ArtifactCacheError("cache-state-invalid", error.detail) from error
 
-    def _scan_artifact(self, artifact_root: Path) -> list[_CacheEntry]:
+    def _scan_artifact(self, artifact_root: Path) -> tuple[list[_CacheEntry], list[_Leftover]]:
         entries: list[_CacheEntry] = []
+        leftovers: list[_Leftover] = []
         for path in sorted(artifact_root.iterdir(), key=lambda value: value.name):
             if path.name == "activation.json":
                 continue
-            if (
-                path.name.startswith(".")
-                or path.is_symlink()
-                or not path.is_dir()
-                or path.resolve() != path
-            ):
+            if path.name.startswith("."):
+                # An interrupted install leaves .install-* and .activation-*
+                # temporaries behind.  A resolvable version can never be
+                # dot-prefixed, so these are not cache state to validate;
+                # rejecting them would disable accounting, enforcement, and
+                # garbage collection for the entire store until an operator
+                # cleaned up by hand.  They are reported as reclaimable so
+                # their bytes stay visible rather than silently ignored.
+                leftovers.append(_Leftover(path, _leftover_size(path)))
+                continue
+            if path.is_symlink() or not path.is_dir() or path.resolve() != path:
                 raise ArtifactCacheError(
                     "cache-state-invalid",
                     f"invalid artifact version directory: {artifact_root.name}/{path.name}",
                 )
             entries.append(self._read_entry(artifact_root.name, path))
-        return entries
+        return entries, leftovers
 
     def _read_entry(self, artifact_id: str, version_root: Path) -> _CacheEntry:
         metadata_path = version_root / "artifact.json"
@@ -227,6 +253,7 @@ def _entry_key(entry: _CacheEntry) -> tuple[str, str]:
 def _accounting(
     entries: list[_CacheEntry],
     protected: set[tuple[str, str]],
+    leftovers: list[_Leftover] = (),
 ) -> ArtifactCacheAccounting:
     protected_entries = [entry for entry in entries if _entry_key(entry) in protected]
     protected_bytes = sum(entry.size_bytes for entry in protected_entries)
@@ -238,7 +265,29 @@ def _accounting(
         protected_bytes=protected_bytes,
         unreferenced_items=len(entries) - len(protected_entries),
         unreferenced_bytes=total_bytes - protected_bytes,
+        reclaimable_items=len(leftovers),
+        reclaimable_bytes=sum(leftover.size_bytes for leftover in leftovers),
     )
+
+
+def _leftover_size(path: Path) -> int:
+    """Bytes held by one installer temporary, following no symlink."""
+    try:
+        entry_stat = path.lstat()
+        if stat.S_ISREG(entry_stat.st_mode):
+            return entry_stat.st_size
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            return 0
+        total = 0
+        for directory, _names, files in os.walk(path, followlinks=False):
+            for name in files:
+                with contextlib.suppress(OSError):
+                    total += os.lstat(Path(directory) / name).st_size
+        return total
+    except OSError as error:
+        raise ArtifactCacheError(
+            "cache-state-invalid", f"cannot account artifact leftover: {error}"
+        ) from error
 
 
 def _version_size(version_root: Path) -> int:

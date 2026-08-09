@@ -281,15 +281,17 @@ def test_symlinked_activation_is_rejected_before_protection_is_computed(tmp_path
 
 
 def test_hidden_version_entries_cannot_bypass_accounting(tmp_path):
+    """Leftovers are not installed versions, but their bytes stay visible."""
     store = tmp_path / "store"
     artifact = install_version(tmp_path, store, b"model", version="1.0.0")
     (store / artifact.id / ".stale").mkdir()
+    (store / artifact.id / ".stale/partial.onnx").write_bytes(b"0123456789")
 
-    with pytest.raises(ArtifactCacheError) as excinfo:
-        ArtifactCache(store, max_bytes=100_000, max_items=10).accounting()
+    accounting = ArtifactCache(store, max_bytes=100_000, max_items=10).accounting()
 
-    assert excinfo.value.code == "cache-state-invalid"
-    assert excinfo.value.detail == ("invalid artifact version directory: sample-model/.stale")
+    assert accounting.total_items == 1
+    assert accounting.reclaimable_items == 1
+    assert accounting.reclaimable_bytes == 10
 
 
 def test_invalid_stored_reference_preserves_cache_error_code(tmp_path):
@@ -439,3 +441,51 @@ def test_protected_versions_survive_arbitrary_item_quotas(max_items):
             cache.enforce()
         assert (store / v2.id / v2.version).is_dir()
         assert (store / v3.id / v3.version).is_dir()
+
+
+def _leftover_stage(store: Path, artifact_id: str = "sample-model") -> Path:
+    """The exact shape ArtifactInstaller leaves behind when it is killed."""
+    stage = store / artifact_id / ".install-abcd1234"
+    stage.mkdir()
+    (stage / "model.onnx").write_bytes(b"partially copied")
+    return stage
+
+
+def test_installer_leftovers_do_not_count_as_installed_versions(tmp_path):
+    store = tmp_path / "store"
+    v1, _v2, _v3 = install_three_versions(tmp_path, store)
+    cache = ArtifactCache(store, max_bytes=10_000, max_items=10)
+    before = cache.accounting()
+    _leftover_stage(store)
+    after = cache.accounting()
+    assert (after.total_items, after.total_bytes) == (before.total_items, before.total_bytes)
+    assert after.reclaimable_items == 1
+    assert after.reclaimable_bytes == len(b"partially copied")
+    assert v1.version in {path.name for path in (store / v1.id).iterdir()}
+
+
+def test_enforcement_still_runs_with_installer_leftovers_present(tmp_path):
+    """A leftover used to make enforce() unusable for the whole store."""
+    store = tmp_path / "store"
+    v1, _v2, _v3 = install_three_versions(tmp_path, store)
+    _leftover_stage(store)
+    collection = ArtifactCache(store, max_bytes=10_000, max_items=2).enforce()
+    assert collection.removed == (v1,)
+
+
+def test_activation_temporaries_do_not_invalidate_the_store(tmp_path):
+    store = tmp_path / "store"
+    install_three_versions(tmp_path, store)
+    (store / "sample-model" / ".activation-xyz").write_bytes(b"{}")
+    assert ArtifactCache(store, max_bytes=10_000, max_items=10).accounting().total_items == 3
+
+
+def test_a_leftover_symlink_is_never_followed_when_accounting(tmp_path):
+    store = tmp_path / "store"
+    install_version(tmp_path, store, b"model", version="1.0.0")
+    huge = tmp_path / "huge.bin"
+    huge.write_bytes(b"x" * 4096)
+    (store / "sample-model" / ".install-link").symlink_to(huge)
+    accounting = ArtifactCache(store, max_bytes=100_000, max_items=10).accounting()
+    assert accounting.reclaimable_items == 1
+    assert accounting.reclaimable_bytes == 0
