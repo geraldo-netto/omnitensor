@@ -15,6 +15,6 @@ def test_use_case_guide_covers_every_bundled_profile():
 
 
 def test_readme_links_the_use_case_guide():
-    assert "[Cinnamon workload use cases](docs/use-cases.md)" in (
-        ROOT / "README.md"
-    ).read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "[Cinnamon workload use cases](docs/use-cases.md)" in readme
+    assert "[cinnamon-tpuwlm](../cinnamon-tpuwlm)" in readme
