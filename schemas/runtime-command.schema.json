@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/tpu-workload-manager/runtime-command.schema.json",
+  "title": "TPU Workload Manager runtime command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "issuedAt", "expectedRevision", "operation", "profileId", "value"],
+  "properties": {
+    "version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1, "maxLength": 120},
+    "issuedAt": {"type": "integer", "minimum": 1},
+    "expectedRevision": {"type": "integer", "minimum": 0},
+    "operation": {"enum": ["set-profile-enabled", "set-profile-weight", "set-paused"]},
+    "profileId": {"type": ["string", "null"], "minLength": 1, "maxLength": 80},
+    "value": {"anyOf": [{"type": "boolean"}, {"type": "integer"}]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "set-profile-enabled"}}},
+      "then": {"properties": {"profileId": {"type": "string"}, "value": {"type": "boolean"}}}
+    },
+    {
+      "if": {"properties": {"operation": {"const": "set-profile-weight"}}},
+      "then": {"properties": {"profileId": {"type": "string"}, "value": {"type": "integer", "minimum": 1, "maximum": 5}}}
+    },
+    {
+      "if": {"properties": {"operation": {"const": "set-paused"}}},
+      "then": {"properties": {"profileId": {"type": "null"}, "value": {"type": "boolean"}}}
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/tpu-workload-manager/runtime-snapshot.schema.json",
+  "title": "TPU Workload Manager runtime snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "generatedAt", "device", "metrics", "profiles", "alerts"],
+  "properties": {
+    "version": {"const": 1},
+    "generatedAt": {"type": "integer", "minimum": 1},
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "name", "kind"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "name": {"type": "string", "maxLength": 120},
+        "kind": {"enum": ["usb", "pcie", "unknown"]},
+        "reason": {"type": "string", "maxLength": 240}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["load", "queueDepth", "runningProfiles"],
+      "properties": {
+        "load": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "queueDepth": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "runningProfiles": {"type": "integer", "minimum": 0, "maximum": 128}
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {"enum": ["healthy", "running", "watching", "idle", "paused", "unavailable"]},
+          "queued": {"type": "integer", "minimum": 0, "maximum": 1000000},
+          "detail": {"type": "string", "maxLength": 240}
+        }
+      }
+    },
+    "alerts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "profileId", "title", "summary", "severity", "timestamp"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 120},
+          "profileId": {"type": "string", "minLength": 1, "maxLength": 80},
+          "title": {"type": "string", "minLength": 1, "maxLength": 160},
+          "summary": {"type": "string", "maxLength": 500},
+          "severity": {"enum": ["advisory", "warning", "critical"]},
+          "timestamp": {"type": "integer", "minimum": 0},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "riskScore": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "resolved": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

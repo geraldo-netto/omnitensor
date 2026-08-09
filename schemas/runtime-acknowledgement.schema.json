@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/tpu-workload-manager/runtime-acknowledgement.schema.json",
+  "title": "TPU Workload Manager runtime acknowledgement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "commandId", "status", "revision", "appliedAt", "message", "portfolio"],
+  "properties": {
+    "version": {"const": 1},
+    "commandId": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1, "maxLength": 120},
+    "status": {"enum": ["applied", "rejected"]},
+    "revision": {"type": "integer", "minimum": 0},
+    "appliedAt": {"type": "integer", "minimum": 1},
+    "message": {"type": "string", "maxLength": 240},
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paused", "profiles"],
+      "properties": {
+        "paused": {"type": "boolean"},
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["enabled", "weight"],
+            "properties": {
+              "enabled": {"type": "boolean"},
+              "weight": {"type": "integer", "minimum": 1, "maximum": 5}
+            }
+          }
+        }
+      }
+    }
+  }
+}
