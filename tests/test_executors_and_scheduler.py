@@ -5,6 +5,8 @@ import asyncio
 import pytest
 from conftest import sample_manifest
 
+import omnitensor.executors.npu as npu_module
+import omnitensor.executors.tpu as tpu_module
 from omnitensor.executors.base import supports_model
 from omnitensor.executors.gpu import GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
@@ -80,6 +82,48 @@ def test_tpu_executor_runs_real_delegate_path_with_injected_runtime():
     result = executor.run("model.tflite", [[1, 2, 3]])
     assert result.outputs == [[2, 4, 6]]
     assert result.duration_ms >= 0
+
+
+def test_tpu_executor_reuses_one_interpreter_per_model():
+    class CountingRuntime:
+        def __init__(self):
+            self.delegate_loads = 0
+            self.interpreters = []
+
+        def load_delegate(self, name):
+            assert name == "libedgetpu.so.1"
+            self.delegate_loads += 1
+            return object()
+
+        def Interpreter(self, model_path, experimental_delegates):  # noqa: N802
+            interpreter = FakeTfliteInterpreter(model_path, experimental_delegates)
+            self.interpreters.append(interpreter)
+            return interpreter
+
+    runtime = CountingRuntime()
+    executor = TpuExecutor(device_present=True, runtime=runtime)
+    assert executor.run("alpha.tflite", [[1]]).outputs == [[2]]
+    assert executor.run("alpha.tflite", [[3]]).outputs == [[6]]
+    assert executor.run("beta.tflite", [[4]]).outputs == [[8]]
+    assert runtime.delegate_loads == 2
+    assert [item.model_path for item in runtime.interpreters] == [
+        "alpha.tflite", "beta.tflite",
+    ]
+
+
+def test_tpu_executor_rejects_wrong_input_count():
+    executor = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime())
+    with pytest.raises(ValueError, match=r"zip\(\) argument 2 is longer"):
+        executor.run("model.tflite", [[1], [2]])
+
+
+def test_tpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+    ticks = iter([10.0, 10.25])
+    monkeypatch.setattr(tpu_module.time, "monotonic", lambda: next(ticks))
+    result = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime()).run(
+        "model.tflite", [[1]],
+    )
+    assert result.duration_ms == 250.0
 
 
 def test_tpu_executor_degrades_without_device_or_runtime():
@@ -605,6 +649,54 @@ def test_npu_executor_runs_via_openvino_when_plugin_present():
     assert executor.availability().available is True
     result = executor.run("model.xml", [[1, 2]])
     assert result.outputs == [[3, 6]]
+
+
+def test_npu_executor_reuses_one_compiled_model_per_path():
+    class FakeCompiled:
+        def __call__(self, inputs):
+            return {"output": inputs[0]}
+
+    class CountingCore:
+        available_devices = ["NPU"]
+
+        def __init__(self):
+            self.compiled_paths = []
+
+        def compile_model(self, model_path, device):
+            assert device == "NPU"
+            self.compiled_paths.append(model_path)
+            return FakeCompiled()
+
+    class FakeOpenVino:
+        Core = CountingCore
+
+    executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
+    assert executor.run("alpha.xml", [[1]]).outputs == [[1]]
+    assert executor.run("alpha.xml", [[2]]).outputs == [[2]]
+    assert executor.run("beta.xml", [[3]]).outputs == [[3]]
+    assert executor._core.compiled_paths == ["alpha.xml", "beta.xml"]
+
+
+def test_npu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+    class Compiled:
+        def __call__(self, inputs):
+            return {"output": inputs[0]}
+
+    class Core:
+        available_devices = ["NPU"]
+
+        def compile_model(self, model_path, device):
+            return Compiled()
+
+    class Runtime:
+        pass
+
+    Runtime.Core = Core
+
+    ticks = iter([10.0, 10.25])
+    monkeypatch.setattr(npu_module.time, "monotonic", lambda: next(ticks))
+    result = NpuExecutor(device_present=True, runtime=Runtime()).run("model.xml", [[1]])
+    assert result.duration_ms == 250.0
 
 
 def test_npu_executor_degrades_without_device_or_runtime():

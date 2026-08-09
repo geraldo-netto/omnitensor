@@ -36,6 +36,11 @@ class TpuExecutor:
         # publication of the error text safe across threads.
         self._delegate_error: str | None = None
         self._delegate_error_lock = threading.Lock()
+        # Interpreters are expensive model-specific runtime state.  The
+        # scheduler serializes TPU work; this lock also preserves that safety
+        # when callers use the executor directly from multiple threads.
+        self._interpreters: dict[str, object] = {}
+        self._interpreter_lock = threading.Lock()
 
     def availability(self) -> Availability:
         if not self._device_present:
@@ -48,8 +53,10 @@ class TpuExecutor:
             return Availability(False, delegate_error)
         return Availability(True)
 
-    def run(self, model_path: str, inputs: list) -> InferenceResult:
-        require_available(self)
+    def _interpreter_for(self, model_path: str):
+        interpreter = self._interpreters.get(model_path)
+        if interpreter is not None:
+            return interpreter
         try:
             delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
         except (ValueError, OSError) as error:
@@ -62,14 +69,21 @@ class TpuExecutor:
             experimental_delegates=[delegate],
         )
         interpreter.allocate_tensors()
-        input_details = interpreter.get_input_details()
-        for detail, value in zip(input_details, inputs, strict=True):
-            interpreter.set_tensor(detail["index"], value)
-        started = time.monotonic()
-        interpreter.invoke()
-        duration_ms = (time.monotonic() - started) * 1000
-        outputs = [
-            interpreter.get_tensor(detail["index"])
-            for detail in interpreter.get_output_details()
-        ]
+        self._interpreters[model_path] = interpreter
+        return interpreter
+
+    def run(self, model_path: str, inputs: list) -> InferenceResult:
+        require_available(self)
+        with self._interpreter_lock:
+            interpreter = self._interpreter_for(model_path)
+            input_details = interpreter.get_input_details()
+            for detail, value in zip(input_details, inputs, strict=True):
+                interpreter.set_tensor(detail["index"], value)
+            started = time.monotonic()
+            interpreter.invoke()
+            duration_ms = (time.monotonic() - started) * 1000
+            outputs = [
+                interpreter.get_tensor(detail["index"])
+                for detail in interpreter.get_output_details()
+            ]
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)

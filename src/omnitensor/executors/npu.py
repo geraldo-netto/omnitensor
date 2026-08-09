@@ -33,6 +33,8 @@ class NpuExecutor:
         self._runtime = runtime if runtime is not None else _import_openvino()
         self._core = None
         self._core_lock = threading.Lock()
+        self._compiled_models: dict[str, object] = {}
+        self._compiled_models_lock = threading.Lock()
 
     def _ensure_core(self):
         # availability() runs on the event loop thread while run() executes in
@@ -58,9 +60,16 @@ class NpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        core = self._ensure_core()
-        compiled = core.compile_model(model_path, OPENVINO_DEVICE)
+        compiled = self._compiled_model_for(model_path)
         started = time.monotonic()
         outputs = compiled(inputs)
         duration_ms = (time.monotonic() - started) * 1000
         return InferenceResult(outputs=list(outputs.values()), duration_ms=duration_ms)
+
+    def _compiled_model_for(self, model_path: str):
+        with self._compiled_models_lock:
+            compiled = self._compiled_models.get(model_path)
+            if compiled is None:
+                compiled = self._ensure_core().compile_model(model_path, OPENVINO_DEVICE)
+                self._compiled_models[model_path] = compiled
+            return compiled

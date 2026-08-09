@@ -24,6 +24,8 @@ from omnitensor.discovery import (
     detect_devices,
     device_utilization,
 )
+from omnitensor.executors.npu import NpuExecutor
+from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import validate_document
 from omnitensor.scheduler import Scheduler, _BackendQueue, _Job
 from omnitensor.snapshot import build_snapshot
@@ -69,6 +71,55 @@ class MemoryStorage:
 
     def save(self, state: PolicyState) -> None:
         pass
+
+
+class CacheInterpreter:
+    def __init__(self, model_path, experimental_delegates):
+        self.tensors = {}
+
+    def allocate_tensors(self):
+        pass
+
+    def get_input_details(self):
+        return [{"index": 0}]
+
+    def get_output_details(self):
+        return [{"index": 0}]
+
+    def set_tensor(self, index, value):
+        self.tensors[index] = value
+
+    def invoke(self):
+        pass
+
+    def get_tensor(self, index):
+        return self.tensors[index]
+
+
+class CacheTfliteRuntime:
+    Interpreter = CacheInterpreter
+
+    def __init__(self):
+        self.delegate_loads = 0
+
+    def load_delegate(self, name):
+        self.delegate_loads += 1
+        return object()
+
+
+class CacheCore:
+    available_devices = ["NPU"]
+
+    def __init__(self):
+        self.compile_calls = []
+
+    def compile_model(self, model_path, device):
+        self.compile_calls.append(model_path)
+        return lambda inputs: {"output": inputs[0]}
+
+
+class CacheOpenVinoRuntime:
+    Core = CacheCore
 
 
 def assert_valid_acknowledgement(text: str) -> None:
@@ -252,6 +303,20 @@ def test_retired_worker_tracking_stays_bounded_under_backend_churn(rounds):
         assert scheduler._retired == []
 
     asyncio.run(scenario())
+
+
+@settings(max_examples=30)
+@given(paths=st.lists(st.sampled_from(["alpha", "beta", "gamma"]), min_size=1, max_size=20))
+def test_executor_model_caches_create_once_per_distinct_path(paths):
+    tflite = CacheTfliteRuntime()
+    tpu = TpuExecutor(device_present=True, runtime=tflite)
+    npu = NpuExecutor(device_present=True, runtime=CacheOpenVinoRuntime())
+    for path in paths:
+        assert tpu.run(path, [[path]]).outputs == [[path]]
+        assert npu.run(path, [[path]]).outputs == [[path]]
+
+    assert tflite.delegate_loads == len(set(paths))
+    assert npu._core.compile_calls == list(dict.fromkeys(paths))
 
 
 device_entries = st.builds(
