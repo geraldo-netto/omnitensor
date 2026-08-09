@@ -487,7 +487,7 @@ def test_dbus_interface_is_a_pure_passthrough_shim():
         def __init__(self):
             self.seen: list[str] = []
 
-        def apply_command_text(self, text: str) -> str:
+        async def apply_command_text(self, text: str) -> str:
             self.seen.append(text)
             return '{"echo":true}'
 
@@ -503,10 +503,9 @@ def test_dbus_interface_is_a_pure_passthrough_shim():
     interface = OmniTensorInterface(control)
     # dbus-fast's @method() wrapper swallows return values on direct calls;
     # the bus dispatches to the wrapped function, so test that path.
-    reply = interface.ApplyCommand.__wrapped__(interface, '{"id":"x"}')
-    assert reply == '{"echo":true}'
-
     async def jobs():
+        reply = await interface.ApplyCommand.__wrapped__(interface, '{"id":"x"}')
+        assert reply == '{"echo":true}'
         submitted = await interface.SubmitJob.__wrapped__(interface, '{"id":"y"}')
         cancelled = await interface.CancelJob.__wrapped__(interface, '{"id":"z"}')
         return submitted, cancelled
@@ -553,7 +552,7 @@ def test_runtime_job_boundary_authorizes_catalog_and_fails_closed_without_dispat
                 }
             )
         )
-        policy = service.runtime_api.apply_command_text("not-json")
+        policy = await service.runtime_api.apply_command_text("not-json")
         return tuple(json.loads(reply) for reply in (known, unknown, missing, policy))
 
     known, unknown, missing, policy = asyncio.run(scenario())
@@ -601,7 +600,7 @@ def test_service_control_round_trip_through_injected_ports(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    acknowledgement = json.loads(service.control.apply_command_text(json.dumps({
+    acknowledgement = json.loads(asyncio.run(service.control.apply_command_text(json.dumps({
         "version": 1,
         "id": "cmd-1",
         "issuedAt": 1,
@@ -609,7 +608,7 @@ def test_service_control_round_trip_through_injected_ports(tmp_path):
         "operation": "set-profile-weight",
         "profileId": "sample-workload",
         "value": 5,
-    })))
+    }))))
     assert acknowledgement["status"] == "applied"
     assert service._weight_of("sample-workload") == 5
 
@@ -693,9 +692,9 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    disabled = json.loads(service.control.apply_command_text(
+    disabled = json.loads(asyncio.run(service.control.apply_command_text(
         policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
-    ))
+    )))
     assert disabled["status"] == "applied"
     snapshot = service.publish_once()
     assert snapshot["profiles"]["sample-workload"] == {
@@ -704,9 +703,9 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         "detail": "Profile disabled by policy",
     }
 
-    paused = json.loads(service.control.apply_command_text(
+    paused = json.loads(asyncio.run(service.control.apply_command_text(
         policy_command("set-paused", True, 1),
-    ))
+    )))
     assert paused["status"] == "applied"
     snapshot = service.publish_once()
     assert snapshot["profiles"]["sample-workload"] == {
@@ -746,7 +745,7 @@ def test_pause_holds_dispatch_and_resume_command_drains(tmp_path):
         service._scheduler.update_executors(service._executors)
         service._scheduler.start()
 
-        paused = json.loads(service.control.apply_command_text(
+        paused = json.loads(await service.control.apply_command_text(
             policy_command("set-paused", True, 0),
         ))
         assert paused["status"] == "applied"
@@ -757,7 +756,7 @@ def test_pause_holds_dispatch_and_resume_command_drains(tmp_path):
         assert executor.served == []
 
         # The resume command itself must wake the workers (on_applied -> kick).
-        resumed = json.loads(service.control.apply_command_text(
+        resumed = json.loads(await service.control.apply_command_text(
             policy_command("set-paused", False, 1),
         ))
         assert resumed["status"] == "applied"
@@ -778,9 +777,9 @@ def test_admits_reflects_profile_enablement_and_unknown_profiles(tmp_path):
     )
     assert service._admits("unknown-profile") is True
     assert service._admits("sample-workload") is True
-    disabled = json.loads(service.control.apply_command_text(
+    disabled = json.loads(asyncio.run(service.control.apply_command_text(
         policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
-    ))
+    )))
     assert disabled["status"] == "applied"
     # A disabled profile is held even though the runtime is not paused.
     assert service._admits("sample-workload") is False
@@ -853,7 +852,7 @@ def test_dbus_transport_stop_without_start_is_a_no_op():
 
 
 class NullControl:
-    def apply_command_text(self, text: str) -> str:
+    async def apply_command_text(self, text: str) -> str:
         return "{}"
 
 
@@ -971,7 +970,7 @@ def test_dbus_transport_keeps_the_bus_as_primary_owner():
         [(path, interface)] = bus.exported
         assert path == "/org/cinnamon/OmniTensor1"
         assert isinstance(interface, OmniTensorInterface)
-        assert interface.ApplyCommand.__wrapped__(interface, "{}") == "{}"
+        assert await interface.ApplyCommand.__wrapped__(interface, "{}") == "{}"
         await transport.stop()
         assert bus.disconnected == 1
         assert transport._bus is None

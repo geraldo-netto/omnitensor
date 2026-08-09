@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import time
 
 import pytest
 
@@ -37,7 +40,8 @@ def command(operation, profile_id, value, revision=0, command_id="tpuwm-1"):
 
 
 def apply(control, text):
-    acknowledgement = json.loads(control.apply_command_text(text))
+    """ApplyCommand persists off the event loop, so it is a coroutine."""
+    acknowledgement = json.loads(asyncio.run(control.apply_command_text(text)))
     assert validate_document("runtime-acknowledgement.schema.json", acknowledgement) == []
     return acknowledgement
 
@@ -181,3 +185,78 @@ def test_control_service_holds_no_dead_defaults_state():
 
     parameters = list(inspect.signature(ControlService.__init__).parameters)
     assert parameters == ["self", "store", "on_applied"]
+
+
+def test_policy_persistence_does_not_block_the_event_loop(tmp_path):
+    """A save is a write plus two fsyncs; on the loop it stalls every other task."""
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStore:
+        def __init__(self):
+            self.saved = []
+
+        def load(self):
+            return PolicyState(profiles={"visual-library": ProfilePolicy(True, 1)})
+
+        def save(self, state):
+            started.set()
+            assert release.wait(timeout=5)
+            self.saved.append(state)
+
+    async def scenario():
+        control = ControlService(BlockingStore())
+        applying = asyncio.create_task(
+            control.apply_command_text(
+                command("set-profile-enabled", "visual-library", False)
+            )
+        )
+        await asyncio.to_thread(started.wait, 5)
+        # The loop is still live while the store blocks in its own thread.
+        ticks = 0
+        for _ in range(3):
+            await asyncio.sleep(0)
+            ticks += 1
+        release.set()
+        return ticks, json.loads(await applying)
+
+    ticks, acknowledgement = asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+    assert ticks == 3, "the event loop was blocked by the policy save"
+    assert acknowledgement["status"] == "applied"
+
+
+def test_concurrent_commands_cannot_both_commit_the_same_revision(tmp_path):
+    """Persisting off the loop opens a window the revision check must close."""
+
+    class SlowStore:
+        def __init__(self):
+            self.saved = []
+
+        def load(self):
+            return PolicyState(profiles={"visual-library": ProfilePolicy(True, 1)})
+
+        def save(self, state):
+            time.sleep(0.05)
+            self.saved.append(state)
+
+    store = SlowStore()
+
+    async def scenario():
+        control = ControlService(store)
+        first, second = await asyncio.gather(
+            control.apply_command_text(
+                command("set-profile-enabled", "visual-library", False, 0, "cmd-a")
+            ),
+            control.apply_command_text(
+                command("set-profile-weight", "visual-library", 4, 0, "cmd-b")
+            ),
+        )
+        return json.loads(first), json.loads(second)
+
+    first, second = asyncio.run(asyncio.wait_for(scenario(), timeout=10))
+
+    statuses = sorted((first["status"], second["status"]))
+    assert statuses == ["applied", "rejected"]
+    assert len(store.saved) == 1
+    assert store.saved[0].revision == 1

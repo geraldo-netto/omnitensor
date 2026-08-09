@@ -75,8 +75,8 @@ class RuntimeAPI:
         self._control = control
         self._jobs = jobs
 
-    def apply_command_text(self, text: str) -> str:
-        return self._control.apply_command_text(text)
+    async def apply_command_text(self, text: str) -> str:
+        return await self._control.apply_command_text(text)
 
     async def submit_job_text(self, text: str) -> str:
         return await self._jobs.submit_job_text(text)
@@ -93,8 +93,8 @@ class OmniTensorInterface(ServiceInterface):
         self._runtime = runtime
 
     @method()
-    def ApplyCommand(self, command: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return self._runtime.apply_command_text(command)
+    async def ApplyCommand(self, command: s) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return await self._runtime.apply_command_text(command)
 
     @method()
     async def SubmitJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names

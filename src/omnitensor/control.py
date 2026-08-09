@@ -8,6 +8,7 @@ around this class so the policy logic is fully testable off the bus.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import json
@@ -45,14 +46,15 @@ class ControlService:
         self._store = store
         self._on_applied = on_applied
         self._state: PolicyState = store.load()
+        self._lock = asyncio.Lock()
 
     @property
     def state(self) -> PolicyState:
         return self._state
 
-    def apply_command_text(self, text: str) -> str:
+    async def apply_command_text(self, text: str) -> str:
         try:
-            acknowledgement = self._apply(text)
+            acknowledgement = await self._apply(text)
         except Exception:  # noqa: BLE001 - transport must always get a contract-valid reply
             acknowledgement = self._rejection("invalid", INTERNAL_ERROR_MESSAGE)
         violations = validate_document("runtime-acknowledgement.schema.json", acknowledgement)
@@ -60,7 +62,7 @@ class ControlService:
             raise RuntimeError(f"acknowledgement violates contract: {violations}")
         return json.dumps(acknowledgement, separators=(",", ":"))
 
-    def _apply(self, text: str) -> dict:
+    async def _apply(self, text: str) -> dict:
         try:
             command = json.loads(text)
         except ValueError:
@@ -71,20 +73,29 @@ class ControlService:
         violations = validate_document("runtime-command.schema.json", command)
         if violations:
             return self._rejection(command_id, "Command does not match the version 1 contract")
-        if command["expectedRevision"] != self._state.revision:
-            return self._rejection(command_id, REVISION_MISMATCH_MESSAGE)
-        # Commit protocol: mutate a copy, persist it, only then publish it in
-        # memory — a failed save leaves the served state untouched.
-        candidate = copy.deepcopy(self._state)
-        message = self._execute(candidate, command)
-        if message is not None:
-            return self._rejection(command_id, message)
-        candidate.revision += 1
-        try:
-            self._store.save(candidate)
-        except OSError:
-            return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
-        self._state = candidate
+        # The lock spans the revision check, the persist, and the publish.
+        # Persisting off the loop means another command can run between the
+        # check and the commit, and two commands that both saw revision N
+        # would both commit N+1 — the compare-and-swap the contract promises
+        # would silently stop holding.
+        async with self._lock:
+            if command["expectedRevision"] != self._state.revision:
+                return self._rejection(command_id, REVISION_MISMATCH_MESSAGE)
+            # Commit protocol: mutate a copy, persist it, only then publish it
+            # in memory — a failed save leaves the served state untouched.
+            candidate = copy.deepcopy(self._state)
+            message = self._execute(candidate, command)
+            if message is not None:
+                return self._rejection(command_id, message)
+            candidate.revision += 1
+            try:
+                # A policy save is a write plus a file and a directory fsync.
+                # On the event loop that stalls snapshot publishing and job
+                # dispatch for as long as the disk takes.
+                await asyncio.to_thread(self._store.save, candidate)
+            except OSError:
+                return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
+            self._state = candidate
         if self._on_applied is not None:
             # The listener is a runtime nudge (e.g. wake scheduler workers);
             # it must never break the acknowledgement contract for an already

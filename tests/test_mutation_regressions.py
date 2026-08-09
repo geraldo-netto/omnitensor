@@ -54,8 +54,10 @@ class MemoryStorage:
 
 
 def apply(control: ControlService, document) -> dict:
-    text = control.apply_command_text(
-        document if isinstance(document, str) else json.dumps(document),
+    text = asyncio.run(
+        control.apply_command_text(
+            document if isinstance(document, str) else json.dumps(document),
+        )
     )
     # The wire form is compact JSON.
     parsed = json.loads(text)

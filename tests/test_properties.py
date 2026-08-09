@@ -173,19 +173,19 @@ def assert_valid_acknowledgement(text: str) -> None:
 @given(text=st.text(max_size=300))
 def test_control_never_raises_on_arbitrary_text(text):
     control = ControlService(MemoryStorage())
-    assert_valid_acknowledgement(control.apply_command_text(text))
+    assert_valid_acknowledgement(asyncio.run(control.apply_command_text(text)))
 
 
 @given(raw=st.binary(max_size=300))
 def test_control_never_raises_on_arbitrary_bytes(raw):
     control = ControlService(MemoryStorage())
-    assert_valid_acknowledgement(control.apply_command_text(raw))
+    assert_valid_acknowledgement(asyncio.run(control.apply_command_text(raw)))
 
 
 @given(command=command_like)
 def test_control_never_raises_on_arbitrary_command_documents(command):
     control = ControlService(MemoryStorage())
-    assert_valid_acknowledgement(control.apply_command_text(json.dumps(command)))
+    assert_valid_acknowledgement(asyncio.run(control.apply_command_text(json.dumps(command))))
     state = control.state
     for policy in state.profiles.values():
         assert MIN_WEIGHT <= policy.weight <= MAX_WEIGHT
