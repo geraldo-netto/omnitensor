@@ -836,3 +836,66 @@ def test_cancelling_a_recovery_after_relaunch_reaps_the_new_worker():
         assert not supervisor.running
 
     run_scenario(scenario())
+
+
+def test_an_unkillable_worker_does_not_abort_the_rest_of_shutdown():
+    """stop() used to raise out mid-loop, leaving later workers running."""
+
+    async def scenario():
+        events = []
+        unkillable = FakeProcess(
+            "beta",
+            worker_offer("beta"),
+            events,
+            pid=71,
+            exit_on_close=False,
+            exit_on_terminate=False,
+        )
+        unkillable.kill = lambda: events.append("kill:beta")
+        healthy = FakeProcess("alpha", worker_offer("alpha"), events, pid=70)
+        launcher = FakeLauncher({"alpha": healthy, "beta": unkillable})
+        supervisor = PluginWorkerSupervisor(launcher, stop_timeout=0.01)
+        await supervisor.start([worker_spec("alpha"), worker_spec("beta")])
+
+        stopped = await supervisor.stop()
+
+        by_id = {status.plugin_id: status for status in stopped}
+        assert by_id["beta"].detail == "worker survived kill"
+        assert by_id["alpha"].detail == "worker stopped"
+        assert healthy.returncode == 0, "the next worker was never stopped"
+        assert [item.code for item in supervisor.diagnostics("beta")] == [
+            WorkerDiagnosticCode.STOP_FAILED
+        ]
+        assert not supervisor.running
+        assert supervisor._startup_order == []
+        assert await supervisor.stop() == stopped
+
+    run_scenario(scenario())
+
+
+def test_a_failed_handshake_reports_its_own_error_when_the_child_will_not_die():
+    """_force_stop must not replace the failure it was cleaning up after."""
+
+    async def scenario():
+        events = []
+        stubborn = FakeProcess(
+            "alpha",
+            None,
+            events,
+            pid=72,
+            exit_on_close=False,
+            exit_on_terminate=False,
+        )
+        stubborn.kill = lambda: events.append("kill:alpha")
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"alpha": stubborn}),
+            handshake_timeout=0.01,
+            stop_timeout=0.01,
+        )
+
+        started = await supervisor.start([worker_spec("alpha")])
+
+        assert started[0].state is WorkerState.FAILED
+        assert started[0].detail == "worker handshake timed out"
+
+    run_scenario(scenario())

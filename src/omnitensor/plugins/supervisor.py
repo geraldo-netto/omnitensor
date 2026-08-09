@@ -52,6 +52,7 @@ class WorkerDiagnosticCode(StrEnum):
     RESTART_FAILED = "restart-failed"
     RECOVERED = "worker-recovered"
     EXHAUSTED = "restart-budget-exhausted"
+    STOP_FAILED = "worker-stop-failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,13 +295,25 @@ class PluginWorkerSupervisor:
                         )
                     continue
                 await _cancel_monitor(slot.monitor)
-                await self._stop_process(slot)
+                reaped = await self._stop_process(slot)
+                detail = "worker stopped" if reaped else "worker survived kill"
+                if not reaped:
+                    self._record_diagnostic(
+                        WorkerDiagnostic(
+                            plugin_id,
+                            WorkerDiagnosticCode.STOP_FAILED,
+                            detail,
+                            slot.process.pid,
+                            None,
+                            0,
+                        )
+                    )
                 self._statuses[plugin_id] = WorkerStatus(
                     plugin_id,
                     WorkerState.STOPPED,
                     slot.process.pid,
                     slot.agreement.protocol_version,
-                    "worker stopped",
+                    detail,
                 )
             self._startup_order.clear()
             return self.statuses()
@@ -532,9 +545,10 @@ class PluginWorkerSupervisor:
         diagnostics.append(diagnostic)
         del diagnostics[:-MAX_WORKER_DIAGNOSTICS]
 
-    async def _stop_process(self, slot: _WorkerSlot) -> None:
+    async def _stop_process(self, slot: _WorkerSlot) -> bool:
+        """Ask the worker to exit, escalating if it will not; never raise."""
         if slot.process.returncode is not None:
-            return
+            return True
         with suppress(ConnectionError, IPCProtocolError, RuntimeError):
             await write_frame(
                 slot.process.writer,
@@ -546,7 +560,7 @@ class PluginWorkerSupervisor:
                 ),
             )
         await _close_writer(slot.process.writer)
-        await _terminate_after_timeout(slot.process, self._stop_timeout)
+        return await _terminate_after_timeout(slot.process, self._stop_timeout)
 
 
 def _validate_specs(specs: Sequence[WorkerSpec]) -> tuple[WorkerSpec, ...]:
@@ -605,21 +619,32 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
         await writer.wait_closed()
 
 
-async def _force_stop(process: WorkerProcess, timeout: float) -> None:
+async def _force_stop(process: WorkerProcess, timeout: float) -> bool:
     await _close_writer(process.writer)
-    await _terminate_after_timeout(process, timeout)
+    return await _terminate_after_timeout(process, timeout)
 
 
 
-async def _terminate_after_timeout(process: WorkerProcess, timeout: float) -> None:
+async def _terminate_after_timeout(process: WorkerProcess, timeout: float) -> bool:
+    """Escalate to SIGTERM then SIGKILL; report whether the child was reaped.
+
+    A child that survives SIGKILL — uninterruptible sleep in a driver, for
+    instance — must not abort the caller.  Raising here left stop() with the
+    remaining workers still running and ``_startup_order`` uncleared, and made
+    _force_stop replace the very failure it was cleaning up after.
+    """
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
-        return
+        return True
     except TimeoutError:
         process.terminate()
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
-        return
+        return True
     except TimeoutError:
         process.kill()
-    await asyncio.wait_for(process.wait(), timeout=timeout)
+    try:
+        await asyncio.wait_for(process.wait(), timeout=timeout)
+    except TimeoutError:
+        return False
+    return True
