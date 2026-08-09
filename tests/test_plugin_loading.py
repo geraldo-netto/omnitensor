@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -408,11 +409,16 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
         served.append((candidate, reader, writer, options))
 
     stdin = type("Input", (), {"buffer": io.BytesIO()})()
-    stdout = type("Output", (), {"buffer": io.BytesIO()})()
+    channel = io.BytesIO()
+    claims = []
     monkeypatch.setattr(worker_module, "load_external_plugin", load)
     monkeypatch.setattr(worker_module, "serve_worker", serve)
+    monkeypatch.setattr(
+        worker_module,
+        "claim_frame_channel",
+        lambda: claims.append(len(loaded)) or channel,
+    )
     monkeypatch.setattr(worker_module.sys, "stdin", stdin)
-    monkeypatch.setattr(worker_module.sys, "stdout", stdout)
     monkeypatch.setattr(worker_module.sys, "path", list(sys.path))
 
     worker_module.main(
@@ -438,9 +444,8 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
             "external-dist",
         )
     ]
-    assert served == [
-        (plugin, stdin.buffer, stdout.buffer, {"permissions": frozenset()})
-    ]
+    assert served == [(plugin, stdin.buffer, channel, {"permissions": frozenset()})]
+    assert claims == [0], "the frame channel must be claimed before the plugin is loaded"
     assert worker_module.sys.path[0] == str(site)
 
 
@@ -600,3 +605,85 @@ def test_worker_rejects_a_plugin_that_omits_its_identity():
             entry_points_provider=lambda **_selection: [FakeEntryPoint(factory=Anonymous)],
         )
     assert str(error.value) == "entry point does not implement the declared plugin"
+
+
+_CHATTY_PLUGIN = '''\
+import sys
+
+print("noise from import", flush=True)
+sys.stdout.write("more noise\\n")
+
+from omnitensor.plugins.protocol import PluginHealth, PluginHealthStatus
+
+
+class Plugin:
+    plugin_id = "chatty-plugin"
+
+    async def start(self, context):
+        print("noise from start", flush=True)
+
+    async def health(self):
+        return PluginHealth(PluginHealthStatus.READY, "ready", 0)
+
+    async def stop(self):
+        print("noise from stop", flush=True)
+
+    async def execute(self, request, cancellation, progress):
+        raise AssertionError("worker bootstrap must not execute jobs")
+'''
+
+_CHATTY_BOOTSTRAP = '''\
+from omnitensor.plugins import worker
+
+
+def _load(plugin_id, entry_point, target, distribution):
+    import chatty_plugin
+
+    return chatty_plugin.Plugin()
+
+
+worker.load_external_plugin = _load
+worker.main(
+    [
+        "--plugin-id",
+        "chatty-plugin",
+        "--entry-point",
+        "chatty-plugin",
+        "--target",
+        "chatty_plugin:Plugin",
+        "--distribution",
+        "chatty-dist",
+    ]
+)
+'''
+
+
+def test_plugin_stdout_never_reaches_the_frame_channel(tmp_path):
+    """A single stray print used to desynchronise the service's frame reader."""
+    (tmp_path / "chatty_plugin.py").write_text(_CHATTY_PLUGIN, encoding="utf-8")
+    (tmp_path / "bootstrap.py").write_text(_CHATTY_BOOTSTRAP, encoding="utf-8")
+    offer = HandshakeOffer("chatty-plugin", 1, 1, frozenset({"cancel"}))
+
+    worker = subprocess.Popen(
+        [sys.executable, str(tmp_path / "bootstrap.py")],
+        cwd=tmp_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)},
+    )
+    try:
+        worker.stdin.write(encode_frame(handshake_frame(offer)))
+        worker.stdin.flush()
+        agreement = _read_frame(worker.stdout)
+        worker.stdin.close()
+        stdout_tail = worker.stdout.read()
+        stderr = worker.stderr.read().decode()
+    finally:
+        worker.kill()
+        worker.wait(timeout=30)
+
+    assert agreement.payload["pluginId"] == "chatty-plugin"
+    assert stdout_tail == b"", "plugin output leaked into the frame channel"
+    assert "noise from import" in stderr
+    assert "noise from start" in stderr

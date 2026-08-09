@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from importlib import metadata
@@ -160,8 +161,26 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def claim_frame_channel() -> BinaryIO:
+    """Take sole ownership of the framing stream before any plugin code runs.
+
+    The IPC channel is the stdout this process inherited.  A single ``print``
+    from a plugin's import or its ``start`` would be interleaved into the
+    length-prefixed frames and desynchronise the service's reader for the rest
+    of the worker's life.  Duplicating the descriptor keeps an exclusive handle
+    on the real channel, and pointing file descriptor 1 at stderr keeps plugin
+    output visible in the journal — including output written from C — without
+    letting any of it reach the frames.
+    """
+    sys.stdout.flush()
+    channel = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    return channel
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     arguments = _parser().parse_args(argv)
+    channel = claim_frame_channel()
     for path in reversed(arguments.import_path):
         sys.path.insert(0, path)
     plugin = load_external_plugin(
@@ -173,7 +192,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     serve_worker(
         plugin,
         sys.stdin.buffer,
-        sys.stdout.buffer,
+        channel,
         permissions=frozenset(arguments.permission),
     )
 
