@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from ..atomicio import write_json_atomic
+from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..storelock import store_lock
 
 GRANTS_DOCUMENT_VERSION = 1
 DEFAULT_MAX_GRANTS_BYTES = 512 * 1024
@@ -118,18 +120,20 @@ class GrantLedger:
         _validate_plugin_id(plugin_id)
         _validate_permission(permission)
         _validate_provenance(provenance)
-        self._check_revision(expected_revision)
+        _validate_non_negative_integer(expected_revision, "expected_revision")
         if permission not in declared:
             raise GrantError(
                 "permission-undeclared",
                 f"{plugin_id} does not declare {permission}",
             )
-        if permission in self._grants.get(plugin_id, {}):
+        with self._locked():
+            self._check_revision(expected_revision)
+            if permission in self._grants.get(plugin_id, {}):
+                return self.snapshot(plugin_id, declared)
+            grants = {key: dict(value) for key, value in self._grants.items()}
+            grants.setdefault(plugin_id, {})[permission] = provenance
+            self._commit(grants, plugin_id, permission, GrantAction.GRANTED, provenance)
             return self.snapshot(plugin_id, declared)
-        grants = {key: dict(value) for key, value in self._grants.items()}
-        grants.setdefault(plugin_id, {})[permission] = provenance
-        self._commit(grants, plugin_id, permission, GrantAction.GRANTED, provenance)
-        return self.snapshot(plugin_id, declared)
 
     def revoke(
         self,
@@ -144,15 +148,17 @@ class GrantLedger:
         _validate_plugin_id(plugin_id)
         _validate_permission(permission)
         _validate_provenance(provenance)
-        self._check_revision(expected_revision)
-        if permission not in self._grants.get(plugin_id, {}):
+        _validate_non_negative_integer(expected_revision, "expected_revision")
+        with self._locked():
+            self._check_revision(expected_revision)
+            if permission not in self._grants.get(plugin_id, {}):
+                return self.snapshot(plugin_id, declared)
+            grants = {key: dict(value) for key, value in self._grants.items()}
+            del grants[plugin_id][permission]
+            if not grants[plugin_id]:
+                del grants[plugin_id]
+            self._commit(grants, plugin_id, permission, GrantAction.REVOKED, provenance)
             return self.snapshot(plugin_id, declared)
-        grants = {key: dict(value) for key, value in self._grants.items()}
-        del grants[plugin_id][permission]
-        if not grants[plugin_id]:
-            del grants[plugin_id]
-        self._commit(grants, plugin_id, permission, GrantAction.REVOKED, provenance)
-        return self.snapshot(plugin_id, declared)
 
     def is_granted(
         self,
@@ -184,6 +190,22 @@ class GrantLedger:
             grant.permission
             for grant in self.snapshot(plugin_id, declared_permissions).active
         )
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """Serialize a mutation and re-read the ledger the caller will replace.
+
+        The in-memory state is a snapshot taken at construction.  Committing
+        from it without re-reading lets this process overwrite a revocation
+        another process persisted in the meantime, resurrecting a permission
+        the user has already withdrawn.
+        """
+        with store_lock(self._path.parent, f".{self._path.name}.lock"):
+            self._revision = 0
+            self._grants = {}
+            self._audit = []
+            self._load()
+            yield
 
     def _check_revision(self, expected_revision: int) -> None:
         _validate_non_negative_integer(expected_revision, "expected_revision")
@@ -222,15 +244,12 @@ class GrantLedger:
         if not self._path.exists():
             return
         try:
-            size = self._path.stat().st_size
-            if size > self._max_bytes:
-                raise GrantError(
-                    "grants-too-large",
-                    f"grant state is {size} bytes; limit is {self._max_bytes}",
-                )
-            document = json.loads(self._path.read_text(encoding="utf-8"))
-        except GrantError:
-            raise
+            document = read_json_bounded(self._path, self._max_bytes)
+        except JsonTooLargeError as error:
+            raise GrantError(
+                "grants-too-large",
+                f"grant state exceeds the {self._max_bytes} byte limit",
+            ) from error
         except (OSError, UnicodeError, ValueError) as error:
             raise GrantError("grants-unreadable", "cannot read grant state") from error
         if not isinstance(document, dict) or set(document) != {

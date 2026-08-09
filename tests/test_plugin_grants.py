@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import tempfile
 from pathlib import Path
 
@@ -471,3 +472,66 @@ def test_undeclared_arbitrary_permissions_are_never_authorized(declared):
     with tempfile.TemporaryDirectory() as directory:
         ledger = GrantLedger(Path(directory) / "grants.json")
         assert ledger.is_granted("hardware-health", READ_SENSOR, declared) is False
+
+
+def test_a_stale_ledger_cannot_resurrect_a_permission_revoked_elsewhere(tmp_path):
+    """The classic lost-update: commit from a snapshot taken before the revoke."""
+    path = tmp_path / "grants.json"
+    stale = GrantLedger(path)
+    grant_once(stale)
+    assert stale.revision == 1
+
+    elsewhere = GrantLedger(path)
+    elsewhere.revoke(
+        "hardware-health", READ_SENSOR, DECLARED, provenance(), expected_revision=1
+    )
+
+    with pytest.raises(GrantError) as excinfo:
+        stale.grant(
+            "hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=1
+        )
+    assert excinfo.value.code == "revision-mismatch"
+    reread = GrantLedger(path)
+    assert reread.snapshot("hardware-health", DECLARED).active == ()
+
+
+def test_a_stale_ledger_observes_a_grant_committed_elsewhere(tmp_path):
+    path = tmp_path / "grants.json"
+    stale = GrantLedger(path)
+    GrantLedger(path).grant(
+        "hardware-health", READ_SENSOR, DECLARED, provenance(), expected_revision=0
+    )
+    with pytest.raises(GrantError) as excinfo:
+        stale.grant(
+            "hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=0
+        )
+    assert excinfo.value.code == "revision-mismatch"
+    assert stale.revision == 1
+
+
+def _race_grant(path: str, ready, results, permission: str) -> None:
+    ledger = GrantLedger(Path(path))
+    ready.wait(timeout=30)
+    try:
+        ledger.grant("hardware-health", permission, DECLARED, provenance(), expected_revision=0)
+    except GrantError as error:
+        results.put(error.code)
+    else:
+        results.put("ok")
+
+
+def test_concurrent_grants_cannot_both_commit_the_same_revision(tmp_path):
+    path = tmp_path / "grants.json"
+    context = multiprocessing.get_context("spawn")
+    ready = context.Barrier(2)
+    results = context.Queue()
+    workers = [
+        context.Process(target=_race_grant, args=(str(path), ready, results, permission))
+        for permission in (READ_SENSOR, RUN_ACTION)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=60)
+    assert sorted(results.get() for _ in workers) == ["ok", "revision-mismatch"]
+    assert GrantLedger(path).revision == 1
