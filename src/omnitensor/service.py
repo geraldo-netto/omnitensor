@@ -25,9 +25,10 @@ from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService, build_control_service
 from .discovery import DiscoveryPaths, detect_devices
-from .executors.gpu import GpuExecutor
+from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
+from .executors.vulkan import VulkanGpuExecutor
 from .registry import Workload, load_workloads
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, write_snapshot
@@ -54,10 +55,16 @@ class OmniTensorInterface(ServiceInterface):
 
 def build_executors(devices) -> dict:
     present = {device.backend for device in devices}
+    gpu_present = "gpu" in present
     return {
         "tpu": TpuExecutor("tpu" in present),
         "npu": NpuExecutor("npu" in present),
-        "gpu": GpuExecutor("gpu" in present),
+        # Vulkan (ncnn) first so any Mesa/RADV/ANV driver serves GPU work;
+        # ONNX Runtime with CUDA/ROCm providers is the optional second lane.
+        "gpu": CompositeGpuExecutor([
+            VulkanGpuExecutor(gpu_present),
+            GpuExecutor(gpu_present),
+        ]),
     }
 
 

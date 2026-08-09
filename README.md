@@ -16,11 +16,15 @@ of falling back.
 | --- | --- | --- |
 | `tpu` | Coral PCIe `/dev/apex_*`, Coral USB `18d1:9302` | `tflite-runtime` + `libedgetpu.so.1` delegate |
 | `npu` | `/dev/accel/accel*` (kernel accel subsystem), sysfs vendor id | OpenVINO (`NPU` device) |
-| `gpu` | `/dev/dri/renderD*`, sysfs vendor id | ONNX Runtime (CUDA / ROCm execution providers) |
+| `gpu` | `/dev/dri/renderD*`, sysfs vendor id | ncnn Vulkan compute (primary — any Mesa/RADV/ANV/NVIDIA Vulkan driver); ONNX Runtime CUDA/ROCm as optional second lane |
 
 A missing runtime library or execution provider marks the backend unavailable
 with an explicit reason; it never crashes the service or blocks snapshot
-publishing.
+publishing. The GPU backend is a composite: Vulkan via ncnn is tried first
+(model format `ncnn`, `.param` + `.bin` files) so no CUDA/ROCm stack is
+required, with ONNX Runtime (`onnx` models) as an optional second runtime.
+Software Vulkan devices (llvmpipe) are never selected — the no-CPU rule
+applies inside Vulkan device enumeration too.
 
 ## Contract
 

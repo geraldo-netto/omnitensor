@@ -61,3 +61,40 @@ class GpuExecutor:
         outputs = session.run(None, feed)
         duration_ms = (time.monotonic() - started) * 1000
         return InferenceResult(outputs=list(outputs), duration_ms=duration_ms)
+
+
+class CompositeGpuExecutor:
+    """One ``gpu`` backend, several runtimes.
+
+    Tries sub-executors in construction order (Vulkan/ncnn first, ONNX
+    Runtime second) so a machine with any Vulkan driver serves GPU work
+    without CUDA or ROCm.  ``run`` dispatches on the model file extension:
+    ``.param`` is an ncnn model, ``.onnx`` an ONNX model.
+    """
+
+    backend = "gpu"
+
+    def __init__(self, executors: list):
+        self._executors = [executor for executor in executors if executor is not None]
+        self.model_formats = frozenset().union(
+            *(executor.model_formats for executor in self._executors),
+        )
+
+    def availability(self) -> Availability:
+        reasons = []
+        for executor in self._executors:
+            availability = executor.availability()
+            if availability.available:
+                return Availability(True)
+            reasons.append(availability.reason)
+        return Availability(False, "; ".join(reasons) or "No GPU runtime configured")
+
+    def _executor_for(self, model_path: str):
+        wanted = "ncnn" if model_path.endswith(".param") else "onnx"
+        for executor in self._executors:
+            if wanted in executor.model_formats and executor.availability().available:
+                return executor
+        raise RuntimeError(f"No available GPU runtime for model: {model_path}")
+
+    def run(self, model_path: str, inputs: list) -> InferenceResult:
+        return self._executor_for(model_path).run(model_path, inputs)
