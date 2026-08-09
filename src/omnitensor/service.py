@@ -295,9 +295,22 @@ class OmniTensorService:
     async def run(self) -> None:
         await self._transport.start(self.control)
         self._scheduler.start()
+        loop = asyncio.get_running_loop()
+        tasks = [
+            loop.create_task(self._publisher()),
+            loop.create_task(self._rediscover()),
+        ]
         try:
-            await asyncio.gather(self._publisher(), self._rediscover())
+            # gather raises on the first loop failure; the finally block then
+            # cancels and awaits the sibling, so one crashing loop can never
+            # leave the other running as an orphan — the service crashes
+            # loudly as a whole.
+            await asyncio.gather(*tasks)
         finally:
+            self._stopping.set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks)
             await self._scheduler.stop()
             await self._transport.stop()
 

@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0012 | open | medium | s | — | service: an exception escaping `_publisher` (e.g. `write_snapshot` OSError) propagates out of `asyncio.gather`, leaving the sibling `_rediscover` task running while `finally` stops the scheduler and disconnects the bus (orphan pending task at shutdown). |
 | OMNI-0013 | open | low | s | OMNI-0007 | scheduler: `_running` is a set of workload ids — the same profile running on two backends concurrently is counted once and discarded when the first job finishes, undercounting `runningProfiles`. |
 | OMNI-0014 | open | low | s | — | executors: `NpuExecutor._ensure_core` lazy init races between `availability()` (event loop thread) and `run()` (worker thread via `asyncio.to_thread`), possibly constructing two `openvino.Core` objects; `TpuExecutor._delegate_error` is likewise written in the worker thread and read from the loop thread. |
 | OMNI-0015 | open | low | s | — | executors: `VulkanGpuExecutor.run` enumerates Vulkan devices twice (`require_available` → `_select_device`, then again) — TOCTOU: the chosen index can shift between enumeration and `net.set_vulkan_device` on device-set change; the second enumeration does re-filter software devices, so the no-CPU rule holds at selection time. |

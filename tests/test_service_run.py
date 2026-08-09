@@ -229,6 +229,61 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
     assert resumes == ["Accelerator devices returned; publishing snapshots again"]
 
 
+def test_publisher_crash_takes_down_rediscover_and_the_whole_run(tmp_path):
+    class ExplodingPublisher(FakePublisher):
+        def publish(self, snapshot: dict) -> None:
+            raise OSError("disk full")
+
+    transport = FakeTransport()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=ExplodingPublisher(),
+            transport=transport,
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        with pytest.raises(OSError, match="disk full"):
+            await asyncio.wait_for(service.run(), timeout=2)
+        # Regression (OMNI-0012): the sibling _rediscover task used to be
+        # left pending; now nothing survives the crash.
+        pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        assert pending == []
+
+    asyncio.run(scenario())
+    assert transport.stopped == 1
+
+
+def test_rediscover_crash_takes_down_the_publisher_too(tmp_path):
+    class FailingDiscovery(FakeDiscovery):
+        def detect(self):
+            devices = super().detect()
+            if self.detect_calls > 1:
+                raise RuntimeError("sysfs went away")
+            return devices
+
+    transport = FakeTransport()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FailingDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=transport,
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        with pytest.raises(RuntimeError, match="sysfs went away"):
+            await asyncio.wait_for(service.run(), timeout=2)
+        pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        assert pending == []
+
+    asyncio.run(scenario())
+    assert transport.stopped == 1
+
+
 def test_run_stops_cleanly_when_stopped_before_first_interval(tmp_path):
     transport = FakeTransport()
 
