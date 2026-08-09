@@ -38,9 +38,18 @@ def test_unit_install_and_hardening_are_intact():
     assert service["Restart"] == "on-failure"
     assert service["NoNewPrivileges"] == "true"
     assert service["ProtectSystem"] == "strict"
-    assert set(service.get("ReadWritePaths", raw=True).split()) == {
-        "%h/.local/state/omnitensor",
-        "%h/.local/state/tpu-workload-manager",
+    assert service["ProtectHome"] == "read-only"
+
+
+def test_unit_creates_its_state_directories_instead_of_assuming_them():
+    """ReadWritePaths= needs the directories to exist, and ProtectHome=read-only
+    stops the service from creating them, so a fresh install could never
+    persist policy or snapshots.  StateDirectory= creates them (OMNI-0129)."""
+    service = _load_unit()["Service"]
+    assert "ReadWritePaths" not in service
+    assert set(service.get("StateDirectory", raw=True).split()) == {
+        "omnitensor",
+        "tpu-workload-manager",
     }
 
 

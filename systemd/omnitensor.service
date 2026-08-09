@@ -18,7 +18,11 @@ NoNewPrivileges=true
 Delegate=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/state/omnitensor %h/.local/state/tpu-workload-manager
+# ReadWritePaths= cannot be used here: it requires the directories to already
+# exist, and under ProtectHome=read-only the service cannot create them, so a
+# fresh install could never persist policy or snapshots.  StateDirectory=
+# creates them under $XDG_STATE_HOME and makes them writable.
+StateDirectory=omnitensor tpu-workload-manager
 PrivateTmp=true
 
 [Install]
