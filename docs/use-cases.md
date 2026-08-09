@@ -96,3 +96,6 @@ Before adding inference:
 The canonical manifest and runtime schemas remain under `schemas/`. Coordinate
 any incompatible catalog or contract change with `cinnamon-tpuwlm` before
 release.
+
+Detailed bounded collector contracts for the `network-peripherals` profile are
+documented in [Network and peripheral collection](network-peripherals.md).
