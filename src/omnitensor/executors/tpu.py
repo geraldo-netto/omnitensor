@@ -8,6 +8,7 @@ quantized, edgetpu-compiled models are compatible.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from .base import Availability, InferenceResult, require_available
@@ -30,15 +31,21 @@ class TpuExecutor:
     def __init__(self, device_present: bool, runtime=None):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_tflite()
+        # Written by run() in a worker thread (asyncio.to_thread) and read by
+        # availability() on the event loop thread; the lock makes the
+        # publication of the error text safe across threads.
         self._delegate_error: str | None = None
+        self._delegate_error_lock = threading.Lock()
 
     def availability(self) -> Availability:
         if not self._device_present:
             return Availability(False, "No Coral Edge TPU device detected")
         if self._runtime is None:
             return Availability(False, "tflite-runtime is not installed")
-        if self._delegate_error is not None:
-            return Availability(False, self._delegate_error)
+        with self._delegate_error_lock:
+            delegate_error = self._delegate_error
+        if delegate_error is not None:
+            return Availability(False, delegate_error)
         return Availability(True)
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
@@ -46,8 +53,10 @@ class TpuExecutor:
         try:
             delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
         except (ValueError, OSError) as error:
-            self._delegate_error = f"Could not load {EDGETPU_DELEGATE}: {error}"
-            raise RuntimeError(self._delegate_error) from error
+            message = f"Could not load {EDGETPU_DELEGATE}: {error}"
+            with self._delegate_error_lock:
+                self._delegate_error = message
+            raise RuntimeError(message) from error
         interpreter = self._runtime.Interpreter(
             model_path=model_path,
             experimental_delegates=[delegate],

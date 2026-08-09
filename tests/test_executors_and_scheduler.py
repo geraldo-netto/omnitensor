@@ -614,6 +614,54 @@ def test_npu_executor_degrades_without_device_or_runtime():
     assert "not installed" in missing.availability().reason
 
 
+def test_npu_ensure_core_constructs_exactly_one_core_across_threads():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    constructed = []
+    release = threading.Event()
+
+    class SlowCore:
+        available_devices = ["NPU"]
+
+        def __init__(self):
+            constructed.append(self)
+            release.wait(timeout=2)
+
+    class FakeOpenVino:
+        Core = SlowCore
+
+    executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(executor._ensure_core) for _ in range(8)]
+        release.set()
+        cores = {id(future.result()) for future in futures}
+    # Regression (OMNI-0014): concurrent lazy init used to be able to build
+    # two openvino.Core objects; the lock serializes construction.
+    assert len(constructed) == 1
+    assert len(cores) == 1
+    assert executor._ensure_core() is constructed[0]
+
+
+def test_tpu_delegate_error_written_in_worker_thread_is_read_consistently():
+    from concurrent.futures import ThreadPoolExecutor
+
+    class FailingDelegateRuntime(FakeTfliteRuntime):
+        @staticmethod
+        def load_delegate(name):
+            raise ValueError("no edgetpu")
+
+    executor = TpuExecutor(device_present=True, runtime=FailingDelegateRuntime())
+    assert executor.availability().available is True
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(executor.run, "model.tflite", [[1]])
+        with pytest.raises(RuntimeError, match="Could not load libedgetpu.so.1"):
+            future.result()
+    availability = executor.availability()
+    assert availability.available is False
+    assert availability.reason == "Could not load libedgetpu.so.1: no edgetpu"
+
+
 def test_npu_executor_reports_discovery_failure():
     class ExplodingCore:
         def __init__(self):

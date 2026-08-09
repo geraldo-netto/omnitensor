@@ -8,6 +8,7 @@ OpenVINO reads both IR and ONNX.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from .base import Availability, InferenceResult, require_available
@@ -31,11 +32,16 @@ class NpuExecutor:
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_openvino()
         self._core = None
+        self._core_lock = threading.Lock()
 
     def _ensure_core(self):
-        if self._core is None:
-            self._core = self._runtime.Core()
-        return self._core
+        # availability() runs on the event loop thread while run() executes in
+        # a worker thread (asyncio.to_thread); the lock guarantees exactly one
+        # openvino.Core is ever constructed and safely published.
+        with self._core_lock:
+            if self._core is None:
+                self._core = self._runtime.Core()
+            return self._core
 
     def availability(self) -> Availability:
         if not self._device_present:
