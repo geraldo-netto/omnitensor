@@ -37,11 +37,12 @@ packages = ["src/omnitensor"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "omnitensor/schemas"
+"workloads" = "omnitensor/workloads"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
 pytest_add_cli_args_test_selection = ["tests/"]
-also_copy = ["schemas/", "systemd/"]
+also_copy = ["schemas/", "systemd/", "workloads/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

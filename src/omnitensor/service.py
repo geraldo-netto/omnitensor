@@ -41,7 +41,7 @@ from .ports import (
     PolicyStorage,
     SnapshotPublisher,
 )
-from .registry import Workload, load_workloads
+from .registry import Workload, load_workload_catalog
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
@@ -230,7 +230,7 @@ class OmniTensorService:
         self._transport = transport or DbusControlTransport()
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
-        self._workloads = load_workloads(workloads_path)
+        self._workloads = load_workload_catalog(workloads_path)
         defaults = {
             workload_id: workload.default_policy()
             for workload_id, workload in self._workloads.items()

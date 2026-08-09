@@ -19,9 +19,13 @@ from .state import ProfilePolicy
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _PACKAGED_SCHEMAS = _PACKAGE_DIR / "schemas"
+_PACKAGED_WORKLOADS = _PACKAGE_DIR / "workloads"
 # Editable/source checkout fallback.  Installed packages never inspect an
 # arbitrary site-packages grandparent for a directory named ``schemas``.
 _SOURCE_SCHEMAS = _PACKAGE_DIR.parents[1] / "schemas" if _PACKAGE_DIR.parent.name == "src" else None
+_SOURCE_WORKLOADS = (
+    _PACKAGE_DIR.parents[1] / "workloads" if _PACKAGE_DIR.parent.name == "src" else None
+)
 MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
 
@@ -114,3 +118,35 @@ def load_workloads(root: Path) -> dict[str, Workload]:
         if len(workloads) > MAX_WORKLOADS:
             raise ManifestError(f"{root}: more than {MAX_WORKLOADS} workloads")
     return workloads
+
+
+def bundled_workloads_path() -> Path:
+    """Resolve the immutable workload catalog in an installed package or source checkout."""
+    if _PACKAGED_WORKLOADS.is_dir():
+        return _PACKAGED_WORKLOADS
+    if _SOURCE_WORKLOADS is not None and _SOURCE_WORKLOADS.is_dir():
+        return _SOURCE_WORKLOADS
+    raise FileNotFoundError("bundled workload catalog is not installed")
+
+
+def merge_workloads(
+    bundled: dict[str, Workload],
+    user: dict[str, Workload],
+) -> dict[str, Workload]:
+    """Merge catalogs with immutable bundled identities taking precedence."""
+    merged = dict(bundled)
+    for workload_id, workload in user.items():
+        merged.setdefault(workload_id, workload)
+    if len(merged) > MAX_WORKLOADS:
+        raise ManifestError(f"combined catalog has more than {MAX_WORKLOADS} workloads")
+    return merged
+
+
+def load_workload_catalog(
+    user_root: Path,
+    *,
+    bundled_root: Path | None = None,
+) -> dict[str, Workload]:
+    """Load built-in profiles plus user manifests; built-ins win ID collisions."""
+    resolved_bundled = bundled_root or bundled_workloads_path()
+    return merge_workloads(load_workloads(resolved_bundled), load_workloads(user_root))

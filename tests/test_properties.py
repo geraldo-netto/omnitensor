@@ -28,7 +28,7 @@ from omnitensor.executors.base import Availability, availability_for_model
 from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
-from omnitensor.registry import validate_document
+from omnitensor.registry import merge_workloads, validate_document
 from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
 from omnitensor.snapshot import build_snapshot
@@ -62,6 +62,8 @@ command_like = st.dictionaries(
     | st.booleans(),
     max_size=8,
 )
+
+workload_ids = st.from_regex(r"[a-z][a-z0-9]{0,7}", fullmatch=True)
 
 
 class MemoryStorage:
@@ -134,6 +136,20 @@ class FormatLane:
 
     def availability(self):
         return self._availability
+
+
+@given(
+    bundled=st.dictionaries(workload_ids, st.integers(), max_size=30),
+    user=st.dictionaries(workload_ids, st.integers(), max_size=30),
+)
+def test_merged_workloads_preserve_all_ids_and_bundled_precedence(bundled, user):
+    merged = merge_workloads(bundled, user)
+    assert set(merged) == set(bundled) | set(user)
+    for workload_id, workload in bundled.items():
+        assert merged[workload_id] == workload
+    for workload_id, workload in user.items():
+        if workload_id not in bundled:
+            assert merged[workload_id] == workload
 
 
 def assert_valid_acknowledgement(text: str) -> None:

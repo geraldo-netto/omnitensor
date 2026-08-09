@@ -928,7 +928,8 @@ def test_build_service_from_env_honours_environment_paths(tmp_path, monkeypatch)
     service = build_service_from_env()
     assert service._publisher_port._path == tmp_path / "snap.json"
     assert service.control._store._path == tmp_path / "policy.json"
-    assert sorted(service._workloads) == ["sample-workload"]
+    assert "sample-workload" in service._workloads
+    assert "hardware-health" in service._workloads
 
 
 def test_build_service_from_env_defaults_expand_home(monkeypatch):

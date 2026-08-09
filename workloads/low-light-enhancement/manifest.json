@@ -1,0 +1,73 @@
+{
+  "manifestVersion": 1,
+  "id": "low-light-enhancement",
+  "version": "0.1.0",
+  "capabilities": ["image-enhancement", "tonal-curve-estimation"],
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "tpu",
+    "acceleratorPreference": ["tpu", "npu", "gpu"],
+    "minimumDevices": 1,
+    "model": {
+      "id": "low-light-tonal-curve",
+      "version": "0.1.0",
+      "format": "tflite-edgetpu",
+      "fullyQuantized": true,
+      "minimumCompilerVersion": "validated-release",
+      "minimumRuntimeVersion": "validated-release"
+    }
+  },
+  "ui": {
+    "title": "Low-light enhancement",
+    "group": "Local workflows",
+    "description": "Enhance dark images with bounded tonal-curve inference",
+    "icon": "image-x-generic-symbolic",
+    "order": 55
+  },
+  "defaults": {"enabled": false, "weight": 2},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Decode and validate bounded image inputs",
+      "Resize, normalize, and quantize the model tensor",
+      "Apply the predicted tonal curve to the full-resolution image",
+      "Denoise, color-manage, encode, display, and route results"
+    ]
+  },
+  "acceptance": [
+    {
+      "metric": "edge-tpu-compiled-operations",
+      "comparator": "equal",
+      "target": 100,
+      "unit": "percent",
+      "description": "Compiler report maps every model operation to the Edge TPU"
+    },
+    {
+      "metric": "quantized-ssim",
+      "comparator": "at-least",
+      "target": 0.95,
+      "unit": "ratio",
+      "description": "Quantized output matches the frozen float-model baseline on the holdout set"
+    },
+    {
+      "metric": "color-error-ciede2000",
+      "comparator": "at-most",
+      "target": 3,
+      "unit": "score",
+      "description": "Median color error stays below the visible-quality threshold on the holdout set"
+    },
+    {
+      "metric": "p95-device-latency",
+      "comparator": "at-most",
+      "target": 50,
+      "unit": "milliseconds",
+      "description": "Warm 256×256 model invocation on the reference Coral USB Accelerator"
+    },
+    {
+      "metric": "end-to-end-speedup",
+      "comparator": "at-least",
+      "target": 1.2,
+      "unit": "ratio",
+      "description": "Complete host pipeline beats the documented CPU tone-mapping baseline"
+    }
+  ]
+}
