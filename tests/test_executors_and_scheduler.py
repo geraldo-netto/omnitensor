@@ -12,7 +12,7 @@ from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import Workload
-from omnitensor.scheduler import Scheduler, _BackendQueue, _Job, pick_backend
+from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job, pick_backend
 
 
 class FakeTfliteInterpreter:
@@ -387,6 +387,52 @@ def test_submit_after_stop_error_message_is_exact():
         assert str(excinfo.value) == "scheduler is stopped"
 
     asyncio.run(scenario())
+
+
+def test_submit_rejects_a_full_backend_queue_without_allocating_more_work():
+    async def scenario():
+        scheduler = Scheduler(
+            {"tpu": SlowExecutor()},
+            weight_of=lambda _profile: 1,
+            max_backend_queue_depth=2,
+        )
+        accepted = [
+            scheduler.submit("tpu", "profile-a", f"job-{index}", [])
+            for index in range(2)
+        ]
+        with pytest.raises(QueueFullError) as excinfo:
+            scheduler.submit("tpu", "profile-a", "rejected", [])
+
+        assert str(excinfo.value) == "tpu queue is full (2 jobs)"
+        assert scheduler.stats()["queueDepth"] == 2
+        assert scheduler.profile_stats() == {
+            "profile-a": {"queued": 2, "running": 0},
+        }
+        await scheduler.stop()
+        assert all(future.cancelled() for future in accepted)
+
+    asyncio.run(scenario())
+
+
+def test_scheduler_rejects_non_positive_backend_queue_limits():
+    with pytest.raises(ValueError) as excinfo:
+        Scheduler(
+            {"tpu": SlowExecutor()},
+            weight_of=lambda _profile: 1,
+            max_backend_queue_depth=0,
+        )
+    assert str(excinfo.value) == "max_backend_queue_depth must be positive"
+
+    def weight_of(_profile):
+        return 1
+
+    scheduler = Scheduler(
+        {"tpu": SlowExecutor()},
+        weight_of=weight_of,
+        max_backend_queue_depth=1,
+    )
+    assert scheduler._weight_of is weight_of
+    assert scheduler._max_backend_queue_depth == 1
 
 
 def test_worker_survives_executor_failure_and_serves_next_job():

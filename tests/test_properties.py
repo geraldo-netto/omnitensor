@@ -29,7 +29,7 @@ from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import validate_document
-from omnitensor.scheduler import Scheduler, _BackendQueue, _Job
+from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
 from omnitensor.snapshot import build_snapshot
 from omnitensor.state import (
@@ -315,6 +315,35 @@ def test_retired_worker_tracking_stays_bounded_under_backend_churn(rounds):
             assert len(scheduler._retired) <= 1
         await scheduler.stop()
         assert scheduler._retired == []
+
+    asyncio.run(scenario())
+
+
+@given(
+    capacity=st.integers(min_value=1, max_value=12),
+    attempts=st.integers(min_value=0, max_value=30),
+)
+def test_scheduler_backend_queue_never_exceeds_its_capacity(capacity, attempts):
+    async def scenario():
+        scheduler = Scheduler(
+            {"tpu": object()},
+            weight_of=lambda _profile: 1,
+            max_backend_queue_depth=capacity,
+        )
+        accepted = []
+        rejected = 0
+        for index in range(attempts):
+            try:
+                accepted.append(
+                    scheduler.submit("tpu", f"profile-{index % 3}", str(index), []),
+                )
+            except QueueFullError:
+                rejected += 1
+
+        assert len(accepted) == min(capacity, attempts)
+        assert rejected == max(0, attempts - capacity)
+        assert scheduler.stats()["queueDepth"] == min(capacity, attempts)
+        await scheduler.stop()
 
     asyncio.run(scenario())
 

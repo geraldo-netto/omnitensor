@@ -15,10 +15,17 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass
 
+from .discovery import BACKENDS
 from .executors.base import Executor, InferenceResult, availability_for_model, supports_model
 from .registry import Workload
 
 LOAD_SMOOTHING = 0.5
+MAX_SNAPSHOT_QUEUE_DEPTH = 1_000_000
+MAX_BACKEND_QUEUE_DEPTH = MAX_SNAPSHOT_QUEUE_DEPTH // len(BACKENDS)
+
+
+class QueueFullError(RuntimeError):
+    """A backend rejected work because its bounded queue is full."""
 
 
 def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[str | None, str]:
@@ -106,10 +113,20 @@ class _BackendQueue:
 
 
 class Scheduler:
-    def __init__(self, executors: dict[str, Executor], weight_of, admits=None):
+    def __init__(
+        self,
+        executors: dict[str, Executor],
+        weight_of,
+        admits=None,
+        *,
+        max_backend_queue_depth: int = MAX_BACKEND_QUEUE_DEPTH,
+    ):
+        if max_backend_queue_depth < 1:
+            raise ValueError("max_backend_queue_depth must be positive")
         self._executors = dict(executors)
         self._weight_of = weight_of
         self._admits = admits
+        self._max_backend_queue_depth = max_backend_queue_depth
         self._queues: dict[str, _BackendQueue] = {backend: _BackendQueue() for backend in executors}
         # Per-profile count of in-flight jobs: the same profile can run on
         # several backends at once, so membership alone would undercount.
@@ -185,8 +202,13 @@ class Scheduler:
     ) -> asyncio.Future:
         if self._stopped:
             raise RuntimeError("scheduler is stopped")
+        queue = self._queues[backend]
+        if queue.depth() >= self._max_backend_queue_depth:
+            raise QueueFullError(
+                f"{backend} queue is full ({self._max_backend_queue_depth} jobs)",
+            )
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._queues[backend].push(_Job(workload_id, model_path, inputs, future))
+        queue.push(_Job(workload_id, model_path, inputs, future))
         self._wakeups[backend].set()
         return future
 
