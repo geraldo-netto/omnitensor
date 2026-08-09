@@ -6,6 +6,10 @@ Entry point ``omnitensor`` runs an asyncio loop that
 - owns ``org.cinnamon.OmniTensor1`` on the session bus and answers
   ``ApplyCommand`` through :class:`omnitensor.control.ControlService`.
 
+:class:`OmniTensorService` depends on the ports in :mod:`omnitensor.ports`;
+the filesystem, sysfs, and D-Bus adapters defined here are only the default
+wiring and can be replaced through constructor injection.
+
 Configuration comes from environment variables:
 ``OMNITENSOR_STATE_PATH`` (snapshot the applet reads),
 ``OMNITENSOR_POLICY_PATH`` (persisted policy + revision),
@@ -23,15 +27,23 @@ from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
-from .control import ControlService, build_control_service
-from .discovery import DiscoveryPaths, detect_devices, device_utilization
+from .control import ControlService
+from .discovery import Device, DiscoveryPaths, detect_devices, device_utilization
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .ports import (
+    CommandHandler,
+    ControlTransport,
+    DeviceDiscovery,
+    PolicyStorage,
+    SnapshotPublisher,
+)
 from .registry import Workload, load_workloads
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, write_snapshot
+from .state import PolicyStore
 
 BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"
@@ -44,13 +56,56 @@ DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
 
 
 class OmniTensorInterface(ServiceInterface):
-    def __init__(self, control: ControlService):
+    """Transport-only D-Bus shim; all logic stays in the injected handler."""
+
+    def __init__(self, control: CommandHandler):
         super().__init__(BUS_NAME)
         self._control = control
 
     @method()
     def ApplyCommand(self, command: s) -> s:  # noqa: F821, N802 - D-Bus contract names
         return self._control.apply_command_text(command)
+
+
+class SysfsDeviceDiscovery:
+    """:class:`~omnitensor.ports.DeviceDiscovery` over kernel device nodes."""
+
+    def __init__(self, paths: DiscoveryPaths | None = None):
+        self._paths = paths or DiscoveryPaths()
+
+    def detect(self) -> list[Device]:
+        return detect_devices(self._paths)
+
+    def utilization(self, device: Device) -> float | None:
+        return device_utilization(self._paths, device)
+
+
+class FileSnapshotPublisher:
+    """:class:`~omnitensor.ports.SnapshotPublisher` writing atomically to a path."""
+
+    def __init__(self, path: Path):
+        self._path = path
+
+    def publish(self, snapshot: dict) -> None:
+        write_snapshot(self._path, snapshot)
+
+
+class DbusControlTransport:
+    """:class:`~omnitensor.ports.ControlTransport` over the session bus."""
+
+    def __init__(self, bus_type: BusType = BusType.SESSION):
+        self._bus_type = bus_type
+        self._bus = None
+
+    async def start(self, handler: CommandHandler) -> None:
+        self._bus = await MessageBus(bus_type=self._bus_type).connect()
+        self._bus.export(OBJECT_PATH, OmniTensorInterface(handler))
+        await self._bus.request_name(BUS_NAME)
+
+    async def stop(self) -> None:
+        if self._bus is not None:
+            self._bus.disconnect()
+            self._bus = None
 
 
 def build_executors(devices) -> dict:
@@ -106,16 +161,27 @@ class OmniTensorService:
         policy_path: Path,
         workloads_path: Path,
         discovery_paths: DiscoveryPaths | None = None,
+        *,
+        discovery: DeviceDiscovery | None = None,
+        publisher: SnapshotPublisher | None = None,
+        policy_storage: PolicyStorage | None = None,
+        transport: ControlTransport | None = None,
+        publish_interval_s: float = PUBLISH_INTERVAL_S,
+        discovery_interval_s: float = DISCOVERY_INTERVAL_S,
     ):
-        self._snapshot_path = snapshot_path
-        self._discovery_paths = discovery_paths or DiscoveryPaths()
+        self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
+        self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
+        self._transport = transport or DbusControlTransport()
+        self._publish_interval_s = publish_interval_s
+        self._discovery_interval_s = discovery_interval_s
         self._workloads = load_workloads(workloads_path)
         defaults = {
             workload_id: workload.default_policy()
             for workload_id, workload in self._workloads.items()
         }
-        self.control = build_control_service(policy_path, defaults)
-        self._devices = detect_devices(self._discovery_paths)
+        storage = policy_storage or PolicyStore(policy_path, defaults)
+        self.control = ControlService(storage, defaults)
+        self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of)
         self._stopping = asyncio.Event()
@@ -123,7 +189,7 @@ class OmniTensorService:
     def _device_load(self, device, stats) -> float | None:
         # Prefer the kernel's own utilization counter (covers every consumer
         # of the device); fall back to the scheduler's inference busy EMA.
-        utilization = device_utilization(self._discovery_paths, device)
+        utilization = self._discovery.utilization(device)
         return utilization if utilization is not None else stats["loads"].get(device.backend)
 
     def _weight_of(self, workload_id: str) -> int:
@@ -142,7 +208,7 @@ class OmniTensorService:
             metrics=stats,
             profiles=profile_statuses(self._workloads, self._executors, self._scheduler),
         )
-        write_snapshot(self._snapshot_path, snapshot)
+        self._publisher_port.publish(snapshot)
         return snapshot
 
     async def _publisher(self) -> None:
@@ -150,28 +216,26 @@ class OmniTensorService:
             if self._devices:
                 self.publish_once()
             try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=PUBLISH_INTERVAL_S)
+                await asyncio.wait_for(self._stopping.wait(), timeout=self._publish_interval_s)
             except TimeoutError:
                 continue
 
     async def _rediscover(self) -> None:
         while not self._stopping.is_set():
             try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=DISCOVERY_INTERVAL_S)
+                await asyncio.wait_for(self._stopping.wait(), timeout=self._discovery_interval_s)
             except TimeoutError:
-                self._devices = detect_devices(self._discovery_paths)
+                self._devices = self._discovery.detect()
                 self._executors = build_executors(self._devices)
 
     async def run(self) -> None:
-        bus = await MessageBus(bus_type=BusType.SESSION).connect()
-        bus.export(OBJECT_PATH, OmniTensorInterface(self.control))
-        await bus.request_name(BUS_NAME)
+        await self._transport.start(self.control)
         self._scheduler.start()
         try:
             await asyncio.gather(self._publisher(), self._rediscover())
         finally:
             await self._scheduler.stop()
-            bus.disconnect()
+            await self._transport.stop()
 
 
 def _env_path(name: str, fallback: str) -> Path:

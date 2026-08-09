@@ -12,6 +12,7 @@ import json
 import time
 from pathlib import Path
 
+from .ports import PolicyStorage
 from .registry import validate_document
 from .state import MAX_WEIGHT, MIN_WEIGHT, PolicyState, PolicyStore, ProfilePolicy
 
@@ -24,7 +25,7 @@ def _now_ms() -> int:
 
 
 class ControlService:
-    def __init__(self, store: PolicyStore, defaults: dict[str, ProfilePolicy]):
+    def __init__(self, store: PolicyStorage, defaults: dict[str, ProfilePolicy]):
         self._store = store
         self._defaults = defaults
         self._state: PolicyState = store.load()
