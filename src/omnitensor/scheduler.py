@@ -11,6 +11,7 @@ of busy time between snapshot ticks.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from dataclasses import dataclass
 from .discovery import BACKENDS
 from .executors.base import Executor, InferenceResult, availability_for_model, supports_model
 from .registry import Workload
+
+LOGGER = logging.getLogger(__name__)
 
 LOAD_SMOOTHING = 0.5
 MAX_SNAPSHOT_QUEUE_DEPTH = 1_000_000
@@ -161,6 +164,7 @@ class Scheduler:
         self._wakeups: dict[str, asyncio.Event] = {
             backend: asyncio.Event() for backend in executors
         }
+        self._degraded: dict[str, str] = {}
         self._started = False
         self._stopped = False
         self._last_tick = time.monotonic()
@@ -278,12 +282,39 @@ class Scheduler:
     async def _worker(self, backend: str) -> None:
         queue = self._queues[backend]
         while not self._stopped:
-            job = queue.pop_weighted(self._weight_of, self._admits)
-            if job is None:
-                self._wakeups[backend].clear()
-                await self._wakeups[backend].wait()
-                continue
-            await self._execute(backend, queue, job)
+            try:
+                job = queue.pop_weighted(self._weight_of, self._admits)
+                if job is None:
+                    self._wakeups[backend].clear()
+                    await self._wakeups[backend].wait()
+                    continue
+                await self._execute(backend, queue, job)
+            except asyncio.CancelledError:
+                raise
+            except BaseException as error:  # noqa: BLE001 - the loop must outlive one job
+                # Letting this end the task killed the backend silently: every
+                # future already queued for it would never be resolved, and
+                # callers would wait forever on a scheduler that looked healthy.
+                self._degrade(backend, queue, error)
+
+    def _degrade(self, backend: str, queue: _BackendQueue, error: BaseException) -> None:
+        """Fail everything queued for a backend that just failed unexpectedly."""
+        LOGGER.exception(
+            "Backend %s failed outside job execution; failing its queued jobs", backend
+        )
+        self._degraded[backend] = type(error).__name__
+        for profile_id in list(queue.profiles):
+            for job in queue.profiles.pop(profile_id):
+                if not job.future.done():
+                    job.future.set_exception(
+                        RuntimeError(f"{backend} scheduling failed: {type(error).__name__}")
+                    )
+            queue.order.remove(profile_id)
+            queue.passes.pop(profile_id, None)
+
+    def degraded_backends(self) -> dict[str, str]:
+        """Backends that failed outside job execution, by failure type."""
+        return dict(self._degraded)
 
     async def _execute(self, backend: str, queue: _BackendQueue, job: _Job) -> None:
         executor = self._executors[backend]

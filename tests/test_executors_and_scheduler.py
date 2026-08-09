@@ -954,3 +954,42 @@ def test_clamping_leaves_an_ordinary_unserved_profile_alone():
     served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(4)]
 
     assert served == ["a", "b", "a", "b"]
+
+
+def test_a_backend_failing_outside_execution_fails_its_queued_jobs():
+    """The worker task used to die silently, leaving futures pending forever."""
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": SlowExecutor()}, _exploding_weight_of())
+        scheduler.start()
+        first = scheduler.submit("tpu", "sample-workload", "job-1", [])
+        second = scheduler.submit("tpu", "sample-workload", "job-2", [])
+
+        with pytest.raises(RuntimeError, match="tpu scheduling failed"):
+            await asyncio.wait_for(first, timeout=2)
+        with pytest.raises(RuntimeError, match="tpu scheduling failed"):
+            await asyncio.wait_for(second, timeout=2)
+
+        assert scheduler.degraded_backends() == {"tpu": "ZeroDivisionError"}
+        assert not scheduler._workers["tpu"].done(), "the worker task died"
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def _exploding_weight_of():
+    def weight_of(_profile_id):
+        raise ZeroDivisionError("private")
+
+    return weight_of
+
+
+def test_a_healthy_backend_reports_no_degradation():
+    async def scenario():
+        scheduler = Scheduler({"tpu": SlowExecutor()}, lambda _p: 1)
+        scheduler.start()
+        await asyncio.wait_for(scheduler.submit("tpu", "sample-workload", "job-1", []), 2)
+        assert scheduler.degraded_backends() == {}
+        await scheduler.stop()
+
+    asyncio.run(scenario())
