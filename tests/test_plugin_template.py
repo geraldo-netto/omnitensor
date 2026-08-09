@@ -61,7 +61,7 @@ def template_request(payload=None):
 
 def test_template_build_metadata_manifest_and_identity_agree():
     project = tomllib.loads((TEMPLATE_ROOT / "pyproject.toml").read_text())
-    manifest_path = TEMPLATE_ROOT / "omnitensor-plugin.json"
+    manifest_path = TEMPLATE_ROOT / "src/omnitensor_template/omnitensor-plugin.json"
     manifest = json.loads(manifest_path.read_text())
     entry_points = project["project"]["entry-points"]["omnitensor.workloads"]
 
@@ -73,9 +73,10 @@ def test_template_build_metadata_manifest_and_identity_agree():
     assert manifest["manifestVersion"] == 2
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == "template-workload"
     assert validate_document("workload-manifest.schema.json", manifest) == []
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"] == {
-        "omnitensor-plugin.json": "omnitensor-plugin.json"
-    }
+    # Regression (OMNI-0143): installing the manifest at the wheel root made
+    # any two plugins built from this template overwrite each other's manifest.
+    assert "force-include" not in project["tool"]["hatch"]["build"]["targets"]["wheel"]
+    assert manifest_path.parent.name == "omnitensor_template"
 
     catalog = resolve_plugin_identities(
         (
