@@ -90,10 +90,18 @@ class ManifestError(ValueError):
 
 def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
     """One strictly validated manifest document, or :class:`ManifestError`."""
-    if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
+    try:
+        size = manifest_path.stat().st_size
+    except OSError as error:
+        raise ManifestError(f"{manifest_path}: unreadable manifest: {error}") from error
+    if size > MAX_MANIFEST_BYTES:
         raise ManifestError(f"{manifest_path}: manifest exceeds {MAX_MANIFEST_BYTES} bytes")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload = manifest_path.read_bytes()
+    except OSError as error:
+        raise ManifestError(f"{manifest_path}: unreadable manifest: {error}") from error
+    try:
+        manifest = json.loads(payload)
     except ValueError as error:
         raise ManifestError(f"{manifest_path}: invalid JSON: {error}") from error
     violations = validate_document("workload-manifest.schema.json", manifest)

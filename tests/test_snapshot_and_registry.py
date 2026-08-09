@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import errno
 import json
+import os
+from pathlib import Path
 
 import pytest
 from conftest import add_pcie_tpu, sample_manifest, sample_plugin_manifest, write_workload
@@ -122,6 +125,30 @@ def test_registry_wraps_malformed_json_in_manifest_error(tmp_path):
     directory.mkdir()
     (directory / "manifest.json").write_text("{nope")
     with pytest.raises(ManifestError, match="invalid JSON"):
+        load_workloads(tmp_path)
+
+
+@pytest.mark.parametrize("failing", ["stat", "read_bytes"])
+def test_registry_wraps_filesystem_errors_in_manifest_error(tmp_path, monkeypatch, failing):
+    write_workload(tmp_path, sample_manifest())
+    manifest_path = tmp_path / "sample-workload/manifest.json"
+    original = getattr(Path, failing)
+
+    def explode(self, *args, **kwargs):
+        if self == manifest_path:
+            raise OSError(errno.EIO, "device is gone")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, failing, explode)
+    with pytest.raises(ManifestError, match="unreadable manifest"):
+        registry._load_manifest(manifest_path, "sample-workload")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
+def test_registry_wraps_unreadable_manifest_in_manifest_error(tmp_path):
+    write_workload(tmp_path, sample_manifest())
+    (tmp_path / "sample-workload/manifest.json").chmod(0o000)
+    with pytest.raises(ManifestError, match="unreadable manifest"):
         load_workloads(tmp_path)
 
 
