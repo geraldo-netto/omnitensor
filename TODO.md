@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0007 | open | high | m | OMNI-0013 | scheduler: `stop()` abandons queued jobs — their futures never resolve so awaiting callers hang; the in-flight job's `CancelledError` is converted to `RuntimeError('')` on its future and the cancellation is swallowed (verified: f2/f3 pending after stop, f1 gets `RuntimeError('')`). |
 | OMNI-0008 | open | medium | m | — | scheduler: stride newcomer burst — a profile first submitting after others advanced their pass starts at pass 0 and monopolizes the device until it catches up (verified: `BBBBBBBBBBAAAAAAAAAA` with equal weights); `passes`/`order`/`profiles` entries are also never pruned for departed profiles. |
 | OMNI-0009 | open | high | m | OMNI-0010 | service: `_rediscover` replaces `self._executors`/`self._devices` but the `Scheduler` keeps the dict it was constructed with — dispatch uses stale executors forever, and `profile_statuses` (new executors) disagrees with `scheduler.stats()` (old queues). |
 | OMNI-0010 | open | high | m | OMNI-0009 | policy has no runtime effect: `paused` and per-profile `enabled` are persisted and acknowledged but scheduler dispatch and `profile_statuses` never consult them; the snapshot never reports the `paused` status the schema defines. |

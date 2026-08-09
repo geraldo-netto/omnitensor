@@ -424,10 +424,12 @@ def test_scheduler_stop_terminates_all_workers():
         )
         scheduler.start()
         await asyncio.sleep(0)
+        workers = list(scheduler._workers)
         await scheduler.stop()
         assert scheduler._stopped is True
-        assert scheduler._workers
-        assert all(worker.done() for worker in scheduler._workers)
+        assert workers
+        assert all(worker.done() for worker in workers)
+        assert scheduler._workers == []
 
     asyncio.run(scenario())
 

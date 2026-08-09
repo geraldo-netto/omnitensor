@@ -101,16 +101,27 @@ class Scheduler:
             self._workers.append(asyncio.get_running_loop().create_task(self._worker(backend)))
 
     async def stop(self) -> None:
+        """Stop dispatch deterministically: cancel the workers, then cancel the
+        future of every job still queued so no awaiting caller can hang."""
         self._stopped = True
         for event in self._wakeups.values():
             event.set()
         for worker in self._workers:
             worker.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
+        self._workers.clear()
+        for queue in self._queues.values():
+            for jobs in queue.profiles.values():
+                while jobs:
+                    job = jobs.popleft()
+                    if not job.future.done():
+                        job.future.cancel()
 
     def submit(
         self, backend: str, workload_id: str, model_path: str, inputs: list,
     ) -> asyncio.Future:
+        if self._stopped:
+            raise RuntimeError("scheduler is stopped")
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._queues[backend].push(_Job(workload_id, model_path, inputs, future))
         self._wakeups[backend].set()
@@ -153,11 +164,19 @@ class Scheduler:
             result: InferenceResult = await asyncio.to_thread(
                 executor.run, job.model_path, job.inputs,
             )
+        except asyncio.CancelledError:
+            # Worker cancellation (stop) is not an executor failure: cancel the
+            # caller's future and let the cancellation propagate.
+            if not job.future.done():
+                job.future.cancel()
+            raise
         except BaseException as error:  # noqa: BLE001 - failures propagate to the caller
             if not job.future.done():
                 job.future.set_exception(
-                    error if isinstance(error, Exception) else RuntimeError(str(error)),
+                    error if isinstance(error, Exception) else RuntimeError(repr(error)),
                 )
+            if not isinstance(error, Exception):
+                raise
         else:
             if not job.future.done():
                 job.future.set_result(result)

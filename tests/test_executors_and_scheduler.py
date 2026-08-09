@@ -230,6 +230,115 @@ def test_scheduler_propagates_executor_failures():
     asyncio.run(scenario())
 
 
+def test_stop_cancels_in_flight_and_queued_futures_deterministically():
+    import threading
+
+    gate = threading.Event()
+    started = threading.Event()
+
+    class BlockingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            started.set()
+            gate.wait(timeout=5)
+            return super().run(model_path, inputs)
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": BlockingExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        f1 = scheduler.submit("tpu", "profile-a", "job-1", [])
+        f2 = scheduler.submit("tpu", "profile-a", "job-2", [])
+        f3 = scheduler.submit("tpu", "profile-b", "job-3", [])
+        await asyncio.to_thread(started.wait, 5)
+        await scheduler.stop()
+        gate.set()
+        # The in-flight job is cancelled, not failed with RuntimeError('').
+        assert f1.cancelled()
+        # Queued jobs no longer hang forever: their futures are cancelled too.
+        assert f2.cancelled()
+        assert f3.cancelled()
+        for future in (f1, f2, f3):
+            with pytest.raises(asyncio.CancelledError):
+                await future
+        assert scheduler.stats()["queueDepth"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_submit_after_stop_raises_instead_of_queueing_forever():
+    async def scenario():
+        scheduler = Scheduler({"tpu": SlowExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        await scheduler.stop()
+        with pytest.raises(RuntimeError, match="stopped"):
+            scheduler.submit("tpu", "profile-a", "job", [])
+
+    asyncio.run(scenario())
+
+
+def test_submit_after_stop_error_message_is_exact():
+    async def scenario():
+        scheduler = Scheduler({"tpu": SlowExecutor()}, weight_of=lambda _profile: 1)
+        await scheduler.stop()
+        with pytest.raises(RuntimeError) as excinfo:
+            scheduler.submit("tpu", "profile-a", "job", [])
+        assert str(excinfo.value) == "scheduler is stopped"
+
+    asyncio.run(scenario())
+
+
+def test_worker_survives_executor_failure_and_serves_next_job():
+    class FlakyExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            if model_path == "bad":
+                raise RuntimeError("device wedged")
+            return super().run(model_path, inputs)
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": FlakyExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        with pytest.raises(RuntimeError, match="device wedged"):
+            await scheduler.submit("tpu", "profile-a", "bad", [])
+        # A plain executor failure must not kill the worker.
+        result = await asyncio.wait_for(
+            scheduler.submit("tpu", "profile-a", "good", []), timeout=2,
+        )
+        assert result.outputs == [[]]
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_non_exception_base_exception_fails_future_with_exact_repr():
+    class Abort(BaseException):
+        def __repr__(self):
+            return "Abort(sentinel)"
+
+    class AbortingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            raise Abort()
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": AbortingExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        future = scheduler.submit("tpu", "profile-a", "job", [])
+        with pytest.raises(RuntimeError) as excinfo:
+            await future
+        assert str(excinfo.value) == "Abort(sentinel)"
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_stop_cancels_queued_futures_even_when_never_started():
+    async def scenario():
+        scheduler = Scheduler({"tpu": SlowExecutor()}, weight_of=lambda _profile: 1)
+        future = scheduler.submit("tpu", "profile-a", "job", [])
+        await scheduler.stop()
+        assert future.cancelled()
+
+    asyncio.run(scenario())
+
+
 def test_npu_executor_runs_via_openvino_when_plugin_present():
     class FakeCompiled:
         def __call__(self, inputs):
