@@ -210,6 +210,13 @@ from .protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
+from .revocation import (
+    DEFAULT_REVOCATION_POLL_SECONDS,
+    MAX_REVOCATION_POLL_SECONDS,
+    ConsentGuard,
+    LiveGrantView,
+    RevocationError,
+)
 from .sandbox import (
     BWRAP_PATH,
     MAX_SANDBOX_PATHS,
@@ -392,6 +399,11 @@ __all__ = [
     "GrantOrigin",
     "GrantProvenance",
     "GrantSnapshot",
+    "ConsentGuard",
+    "LiveGrantView",
+    "RevocationError",
+    "DEFAULT_REVOCATION_POLL_SECONDS",
+    "MAX_REVOCATION_POLL_SECONDS",
     "IPCFrame",
     "IPCProtocolError",
     "InstalledPluginRuntime",

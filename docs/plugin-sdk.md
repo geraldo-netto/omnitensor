@@ -32,3 +32,23 @@ The SDK follows the manifest protocol compatibility policy. Additive exports
 are backward compatible; removals or signature changes require a negotiated
 protocol/SDK major version rather than importing service internals as a
 workaround.
+
+## Consent that keeps applying
+
+`PermissionView` is a snapshot of the grants a plugin held when it started, so
+it cannot show a grant the user withdraws afterwards. Anything already running
+would keep collecting, inferring, and delivering on consent that no longer
+exists, and the withdrawal would only take effect at the next restart.
+
+`LiveGrantView` re-reads the grant ledger for every check, so a revocation
+committed by any process — the applet, a CLI, another service instance — is
+visible immediately, and both undeclared and ungranted permissions are refused.
+`ConsentGuard.run()` combines that with prompt cancellation: it refuses to
+start work whose grants are already missing, watches those grants while the
+work runs, and cancels the operation with a `consent-revoked` error the moment
+one disappears. Cancelling the caller cancels the guarded work too, so no
+operation outlives the request that asked for it.
+
+The guard checks before dispatch as well as during execution, because consent
+withdrawn between queueing and dispatch must stop that work, not merely the
+next one.

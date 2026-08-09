@@ -96,6 +96,16 @@ class GrantLedger:
     def revision(self) -> int:
         return self._revision
 
+    def reload(self) -> int:
+        """Re-read the ledger from disk and return the current revision.
+
+        In-memory state is a snapshot taken at construction, so a grant another
+        process revoked is invisible until it is re-read.  Enforcement paths
+        that must observe a withdrawal promptly call this first.
+        """
+        with self._locked():
+            return self._revision
+
     def snapshot(self, plugin_id: str, declared_permissions: set[str]) -> GrantSnapshot:
         declared = _validated_declarations(declared_permissions)
         _validate_plugin_id(plugin_id)
