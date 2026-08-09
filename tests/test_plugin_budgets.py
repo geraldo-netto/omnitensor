@@ -19,6 +19,7 @@ from omnitensor.plugins import (
     MAX_CONCURRENCY_LIMIT,
     MAX_DESCRIPTORS_LIMIT,
     MAX_MEMORY_BYTES_LIMIT,
+    MAX_OUTPUT_BYTES_LIMIT,
     MAX_PROCESSES_LIMIT,
     ProcfsWorkerUsageProbe,
     WorkerBudgetCode,
@@ -70,7 +71,8 @@ def test_default_limits_are_explicit_and_bounded():
         ({"max_memory_bytes": MAX_MEMORY_BYTES_LIMIT + 1}, "max_memory_bytes"),
         ({"max_descriptors": 0}, "max_descriptors"),
         ({"max_descriptors": MAX_DESCRIPTORS_LIMIT + 1}, "max_descriptors"),
-        ({"max_output_bytes": DEFAULT_MAX_OUTPUT_BYTES + 1}, "max_output_bytes"),
+        ({"max_output_bytes": 0}, "max_output_bytes"),
+        ({"max_output_bytes": MAX_OUTPUT_BYTES_LIMIT + 1}, "max_output_bytes"),
         ({"max_concurrency": MAX_CONCURRENCY_LIMIT + 1}, "max_concurrency"),
         ({"resource_poll_seconds": 0}, "resource_poll_seconds"),
         (
@@ -355,3 +357,15 @@ def test_procfs_probe_validates_pid_and_missing_memory_field(tmp_path):
     (tmp_path / "10/status").write_text("Name:\tfixture\n", encoding="ascii")
     with pytest.raises(OSError, match="VmRSS is unavailable"):
         ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()
+
+
+def test_output_limit_may_exceed_its_default():
+    """The default was used as the ceiling, so no larger value was accepted."""
+    limits = WorkerBudgetLimits(max_output_bytes=DEFAULT_MAX_OUTPUT_BYTES * 4)
+    assert limits.max_output_bytes == DEFAULT_MAX_OUTPUT_BYTES * 4
+
+
+def test_output_limit_has_its_own_ceiling():
+    WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT)
+    with pytest.raises(ValueError, match="max_output_bytes"):
+        WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT + 1)

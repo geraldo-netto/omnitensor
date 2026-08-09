@@ -22,6 +22,7 @@ MAX_CALL_TIMEOUT_SECONDS = 3600.0
 MAX_PROCESSES_LIMIT = 128
 MAX_MEMORY_BYTES_LIMIT = 64 * 1024 * 1024 * 1024
 MAX_DESCRIPTORS_LIMIT = 65_536
+MAX_OUTPUT_BYTES_LIMIT = 64 * 1024 * 1024
 MAX_CONCURRENCY_LIMIT = 32
 MAX_PROCFS_PROCESSES = 4096
 
@@ -69,7 +70,7 @@ class WorkerBudgetLimits:
             self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT
         )
         _bounded_integer(
-            self.max_output_bytes, "max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES
+            self.max_output_bytes, "max_output_bytes", MAX_OUTPUT_BYTES_LIMIT
         )
         _bounded_integer(
             self.max_concurrency, "max_concurrency", MAX_CONCURRENCY_LIMIT
