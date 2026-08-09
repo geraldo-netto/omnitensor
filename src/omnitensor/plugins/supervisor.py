@@ -450,26 +450,35 @@ class PluginWorkerSupervisor:
                     )
                 )
                 continue
-            async with self._lock:
-                if (
-                    not self._running
-                    or self._recoveries.get(plugin_id) is not asyncio.current_task()
-                ):
-                    await _force_stop(process, self._stop_timeout)
-                    return
-                self._install_ready_slot(spec, process, agreement, attempt)
-                self._record_diagnostic(
-                    WorkerDiagnostic(
-                        plugin_id,
-                        WorkerDiagnosticCode.RECOVERED,
-                        f"worker recovered after {attempt} restart attempts",
-                        process.pid,
-                        None,
-                        attempt,
+            # From here the worker is alive but not yet owned by a slot.  stop()
+            # cancels recovery precisely in this window, and it awaits the lock
+            # this block needs, so the cancellation lands on the acquire below.
+            # Nothing else would ever terminate or reap the child.
+            installed = False
+            try:
+                async with self._lock:
+                    if (
+                        not self._running
+                        or self._recoveries.get(plugin_id) is not asyncio.current_task()
+                    ):
+                        return
+                    self._install_ready_slot(spec, process, agreement, attempt)
+                    self._record_diagnostic(
+                        WorkerDiagnostic(
+                            plugin_id,
+                            WorkerDiagnosticCode.RECOVERED,
+                            f"worker recovered after {attempt} restart attempts",
+                            process.pid,
+                            None,
+                            attempt,
+                        )
                     )
-                )
-                self._recoveries.pop(plugin_id, None)
-                return
+                    self._recoveries.pop(plugin_id, None)
+                    installed = True
+                    return
+            finally:
+                if not installed:
+                    await _force_stop(process, self._stop_timeout)
         async with self._lock:
             if self._recoveries.get(plugin_id) is not asyncio.current_task():
                 return
@@ -599,6 +608,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
 async def _force_stop(process: WorkerProcess, timeout: float) -> None:
     await _close_writer(process.writer)
     await _terminate_after_timeout(process, timeout)
+
 
 
 async def _terminate_after_timeout(process: WorkerProcess, timeout: float) -> None:

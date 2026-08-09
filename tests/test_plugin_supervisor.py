@@ -763,3 +763,76 @@ def test_asyncio_launcher_rejects_missing_process_pipes(monkeypatch):
             await AsyncioSubprocessLauncher().launch(worker_spec("real"))
 
     run_scenario(scenario())
+
+
+class GatedLock:
+    """The supervisor lock with one acquire parked on demand.
+
+    Reproduces the window in which a recovery has relaunched a worker but has
+    not yet taken the lock that would install it into a slot: the worker is
+    alive and nothing else owns it.
+    """
+
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._gate = asyncio.Event()
+        self.reached = asyncio.Event()
+        self.armed = False
+
+    async def __aenter__(self):
+        if self.armed:
+            self.armed = False
+            self.reached.set()
+            await self._gate.wait()
+        await self._lock.acquire()
+        return None
+
+    async def __aexit__(self, *exc_info):
+        self._lock.release()
+        return False
+
+
+def test_cancelling_a_recovery_after_relaunch_reaps_the_new_worker():
+    async def scenario():
+        events = []
+        crashed = FakeProcess("alpha", worker_offer("alpha"), events, pid=61)
+        replacement = FakeProcess(
+            "alpha",
+            worker_offer("alpha"),
+            events,
+            pid=62,
+            exit_on_close=False,
+        )
+        launcher = SequencedLauncher([crashed, replacement])
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            stop_timeout=0.01,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=1,
+                initial_backoff_seconds=0.01,
+                max_backoff_seconds=0.01,
+            ),
+        )
+        await supervisor.start([worker_spec("alpha")])
+
+        gate = GatedLock()
+        supervisor._lock = gate
+        crashed.exit(2)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert supervisor.statuses()[0].state is WorkerState.RESTARTING
+
+        # The next acquire is the post-relaunch one; park the recovery there.
+        gate.armed = True
+        await asyncio.wait_for(gate.reached.wait(), timeout=1)
+        assert launcher.calls == ["alpha", "alpha"]
+        assert replacement.returncode is None
+
+        stopped = await supervisor.stop()
+
+        assert replacement.returncode is not None, "relaunched worker was never reaped"
+        assert replacement.writer.closed
+        assert stopped[0].state is WorkerState.STOPPED
+        assert not supervisor.running
+
+    run_scenario(scenario())
