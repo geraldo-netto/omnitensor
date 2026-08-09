@@ -88,6 +88,24 @@ def sample_manifest(workload_id: str = "sample-workload", **requirement_override
     }
 
 
+def sample_plugin_manifest(workload_id: str = "sample-plugin") -> dict:
+    manifest = sample_manifest(workload_id)
+    manifest["manifestVersion"] = 2
+    manifest["plugin"] = {
+        "entryPoint": workload_id,
+        "protocol": {"minimum": 1, "maximum": 1},
+        "schemas": {
+            "configuration": {"type": "object", "additionalProperties": False},
+            "input": {"type": "object", "additionalProperties": False},
+            "output": {"type": "object", "additionalProperties": False},
+        },
+        "triggers": ["manual"],
+        "artifacts": [],
+        "permissions": [],
+    }
+    return manifest
+
+
 def write_workload(root: Path, manifest: dict) -> None:
     directory = root / manifest["id"]
     directory.mkdir(parents=True)

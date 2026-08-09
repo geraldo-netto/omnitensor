@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0053 | open | high | s | OMNI-0034 | plugin manifest v2: extend the schema with entry point, configuration/input/output schemas, triggers, artifacts, permissions, and protocol-version requirements, with strict bounds and validation. |
 | OMNI-0054 | open | high | s | OMNI-0034, OMNI-0053 | plugin compatibility: adapt existing v1 catalog manifests, negotiate protocol capabilities, reject incompatible versions with stable reasons, and test migration without breaking current policy state. |
 | OMNI-0035 | open | high | s | OMNI-0034, OMNI-0053 | plugin discovery: enumerate a documented Python entry-point namespace plus bundled plugins in deterministic order without importing plugin code during metadata inspection. |
 | OMNI-0055 | open | high | s | OMNI-0035 | plugin identity: validate manifest, distribution, and entry-point identity; reject duplicate IDs and incompatible/broken plugins independently so one package cannot hide the remaining catalog. |

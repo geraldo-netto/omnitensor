@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import add_pcie_tpu, sample_manifest, write_workload
+from conftest import add_pcie_tpu, sample_manifest, sample_plugin_manifest, write_workload
 
 import omnitensor.registry as registry
 from omnitensor.discovery import detect_devices
@@ -69,6 +69,62 @@ def test_registry_loads_valid_manifests_and_preference(tmp_path):
     assert workloads["sample-workload"].preference == ("tpu", "npu", "gpu")
     assert workloads["gpu-workload"].preference == ("gpu",)
     assert workloads["gpu-workload"].accelerator == "gpu"
+
+
+def test_registry_loads_a_strict_plugin_manifest_v2(tmp_path):
+    manifest = sample_plugin_manifest()
+    manifest["plugin"]["artifacts"] = [{
+        "id": "sample-model",
+        "version": "1.2.3",
+        "format": "tflite-edgetpu",
+        "sha256": "a" * 64,
+    }]
+    manifest["plugin"]["permissions"] = ["read:/sys/class/hwmon/*"]
+    manifest["plugin"]["triggers"] = ["manual", "periodic"]
+    write_workload(tmp_path, manifest)
+
+    workload = load_workloads(tmp_path)["sample-plugin"]
+
+    assert workload.manifest["manifestVersion"] == 2
+    assert workload.manifest["plugin"] == manifest["plugin"]
+
+
+@pytest.mark.parametrize(
+    "mutate, expected",
+    [
+        (lambda manifest: manifest.pop("plugin"), "plugin"),
+        (lambda manifest: manifest["plugin"].update({"unknown": True}), "unknown"),
+        (lambda manifest: manifest["plugin"].update({"entryPoint": "Bad.Entry"}), "entryPoint"),
+        (lambda manifest: manifest["plugin"].update({"triggers": []}), "triggers"),
+        (
+            lambda manifest: manifest["plugin"].update({"triggers": ["manual", "manual"]}),
+            "triggers",
+        ),
+        (lambda manifest: manifest["plugin"].update({"permissions": ["ambient-root"]}),
+         "permissions"),
+        (lambda manifest: manifest["plugin"]["protocol"].update({"minimum": 0}),
+         "minimum"),
+        (lambda manifest: manifest["plugin"]["artifacts"].append({
+            "id": "model", "version": "1.0.0", "format": "onnx", "sha256": "bad",
+        }), "sha256"),
+    ],
+)
+def test_plugin_manifest_v2_rejects_unbounded_or_malformed_contracts(
+    tmp_path, mutate, expected,
+):
+    manifest = sample_plugin_manifest()
+    mutate(manifest)
+    write_workload(tmp_path, manifest)
+    with pytest.raises(ManifestError, match=expected):
+        load_workloads(tmp_path)
+
+
+def test_manifest_v1_cannot_smuggle_plugin_execution_metadata(tmp_path):
+    manifest = sample_plugin_manifest()
+    manifest["manifestVersion"] = 1
+    write_workload(tmp_path, manifest)
+    with pytest.raises(ManifestError, match="plugin"):
+        load_workloads(tmp_path)
 
 
 def test_registry_default_preference_when_omitted(tmp_path):

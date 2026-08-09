@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import tempfile
 from pathlib import Path
 
+from conftest import sample_plugin_manifest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -64,6 +66,7 @@ command_like = st.dictionaries(
 )
 
 workload_ids = st.from_regex(r"[a-z][a-z0-9]{0,7}", fullmatch=True)
+permission_pattern = re.compile(r"^[a-z][a-z0-9-]*:[a-zA-Z0-9*._/-]+$")
 
 
 class MemoryStorage:
@@ -76,6 +79,15 @@ class MemoryStorage:
 
     def save(self, state: PolicyState) -> None:
         pass
+
+
+@given(permission=st.text(max_size=180))
+def test_plugin_permission_schema_matches_the_documented_wire_grammar(permission):
+    manifest = sample_plugin_manifest()
+    manifest["plugin"]["permissions"] = [permission]
+    violations = validate_document("workload-manifest.schema.json", manifest)
+    expected_valid = 3 <= len(permission) <= 160 and permission_pattern.fullmatch(permission)
+    assert (violations == []) is bool(expected_valid)
 
 
 class CacheInterpreter:
