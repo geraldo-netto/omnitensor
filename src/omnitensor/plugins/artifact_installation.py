@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import functools
 import hashlib
 import json
@@ -14,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from omnitensor.atomicio import write_json_atomic
+from omnitensor.storelock import store_lock
 
 from .artifact_trust import (
     ArtifactProvenance,
@@ -387,19 +387,9 @@ def _fsync_directory(directory: Path) -> None:
             os.close(descriptor)
 
 
-@contextlib.contextmanager
+ARTIFACT_STORE_LOCK_FILE = ".artifact-store.lock"
+
+
 def artifact_store_lock(root: Path):
     """Serialize activation, rollback, and cache collection across processes."""
-    store = Path(root).resolve()
-    store.mkdir(parents=True, exist_ok=True)
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(store / ".artifact-store.lock", flags, 0o600)
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise OSError("artifact store lock is not a regular file")
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
-    finally:
-        with contextlib.suppress(OSError):
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+    return store_lock(root, ARTIFACT_STORE_LOCK_FILE)
