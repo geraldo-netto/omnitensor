@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import math
 from collections.abc import Awaitable
+from pathlib import Path
 from typing import TypeVar
 
 import pytest
@@ -408,3 +410,25 @@ def test_cancelling_a_call_does_not_leak_its_concurrency_slot():
 
 async def _completed_value(value):
     return value
+
+
+def test_procfs_probe_treats_a_pid_that_exits_mid_probe_as_no_usage(tmp_path):
+    _write_process(tmp_path, 10, children="11", rss_kb=2, descriptors=1)
+
+    usage = ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()
+
+    assert usage == WorkerResourceUsage(2, 2 * 1024, 1)
+
+
+def test_procfs_probe_still_reports_unexpected_errors(tmp_path, monkeypatch):
+    _write_process(tmp_path, 10, children="", rss_kb=2, descriptors=1)
+    original = Path.read_text
+
+    def refuse(self, *args, **kwargs):
+        if self.name == "children":
+            raise OSError(errno.EACCES, "permission denied")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refuse)
+    with pytest.raises(OSError):
+        ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()

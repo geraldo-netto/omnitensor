@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import math
 from collections import deque
@@ -259,14 +260,27 @@ class ProcfsWorkerUsageProbe:
             observed.append(pid)
             if len(observed) > MAX_PROCFS_PROCESSES:
                 raise OSError(f"process tree exceeds {MAX_PROCFS_PROCESSES} entries")
-            children = self._root / str(pid) / "task" / str(pid) / "children"
-            text = children.read_text(encoding="ascii").strip()
-            if text:
-                pending.extend(int(child) for child in text.split())
+            pending.extend(self._children(pid))
         return tuple(observed)
 
+    def _children(self, pid: int) -> list[int]:
+        """Children recorded for ``pid``; a pid that already exited has none."""
+        path = self._root / str(pid) / "task" / str(pid) / "children"
+        try:
+            text = path.read_text(encoding="ascii").strip()
+        except OSError as error:
+            if _vanished(error):
+                return []
+            raise
+        return [int(child) for child in text.split()]
+
     def _resident_bytes(self, pid: int) -> int:
-        status = (self._root / str(pid) / "status").read_text(encoding="ascii")
+        try:
+            status = (self._root / str(pid) / "status").read_text(encoding="ascii")
+        except OSError as error:
+            if _vanished(error):
+                return 0
+            raise
         for line in status.splitlines():
             if line.startswith("VmRSS:"):
                 fields = line.split()
@@ -275,7 +289,22 @@ class ProcfsWorkerUsageProbe:
         raise OSError("VmRSS is unavailable")
 
     def _descriptor_count(self, pid: int) -> int:
-        return sum(1 for _entry in (self._root / str(pid) / "fd").iterdir())
+        try:
+            return sum(1 for _entry in (self._root / str(pid) / "fd").iterdir())
+        except OSError as error:
+            if _vanished(error):
+                return 0
+            raise
+
+
+def _vanished(error: OSError) -> bool:
+    """A pid that exited mid-probe contributes no usage; it is not a failure.
+
+    Enumerating a tree and then reading each entry can never be atomic, so a
+    process exiting between the two steps is routine.  Treating it as an error
+    turned an ordinary race into a spurious usage-unavailable rejection.
+    """
+    return error.errno in (errno.ENOENT, errno.ESRCH)
 
 
 def _check_output(value: object, limit: int) -> None:
