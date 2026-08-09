@@ -1057,3 +1057,47 @@ def test_publisher_survives_an_io_failure_while_retracting(tmp_path, caplog):
 
     assert publisher.retracted > 1, "retraction was never retried"
     assert "Could not publish the runtime snapshot" in caplog.text
+
+
+def test_describe_plugins_answers_a_contract_valid_inventory(tmp_path):
+    """The applet needs to say why a profile is idle without running its code."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    document = json.loads(service.runtime_api.describe_plugins_text())
+
+    assert validate_document("plugin-inventory.schema.json", document) == []
+    assert document["version"] == 1
+    assert isinstance(document["plugins"], list)
+
+
+def test_the_dbus_shim_passes_describe_plugins_through():
+    class FakeControl:
+        async def apply_command_text(self, text: str) -> str:
+            return "{}"
+
+        async def submit_job_text(self, text: str) -> str:
+            return "{}"
+
+        async def cancel_job_text(self, text: str) -> str:
+            return "{}"
+
+        def describe_plugins_text(self) -> str:
+            return '{"inventory":true}'
+
+    interface = OmniTensorInterface(FakeControl())
+    assert interface.DescribePlugins.__wrapped__(interface) == '{"inventory":true}'
+
+
+def test_an_unwired_inspector_reports_an_empty_inventory_rather_than_failing():
+    from omnitensor.service import RuntimeAPI
+
+    runtime = RuntimeAPI(control=None, jobs=None)
+    document = json.loads(runtime.describe_plugins_text())
+
+    assert document == {"version": 1, "generatedAt": 1, "plugins": []}
+    assert validate_document("plugin-inventory.schema.json", document) == []

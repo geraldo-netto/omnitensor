@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import logging
 import os
 import secrets
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from dbus_fast import BusType, RequestNameReply
@@ -35,11 +38,13 @@ from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
 from .jobs import (
     JobDispatcher,
     JobSubmissionService,
     PredicateJobAuthorizer,
 )
+from .plugins.artifacts import ArtifactResolution
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
@@ -68,12 +73,26 @@ DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
 
 
+def _no_inventory() -> str:
+    """Fail closed: an unwired inspector reports an empty inventory, not an error."""
+    return json.dumps(
+        {"version": PLUGIN_INVENTORY_VERSION, "generatedAt": 1, "plugins": []},
+        separators=(",", ":"),
+    )
+
+
 class RuntimeAPI:
     """Transport-neutral facade retaining policy control while adding jobs."""
 
-    def __init__(self, control: ControlService, jobs: JobSubmissionService) -> None:
+    def __init__(
+        self,
+        control: ControlService,
+        jobs: JobSubmissionService,
+        inspector: Callable[[], str] | None = None,
+    ) -> None:
         self._control = control
         self._jobs = jobs
+        self._inspector = inspector or _no_inventory
 
     async def apply_command_text(self, text: str) -> str:
         return await self._control.apply_command_text(text)
@@ -83,6 +102,9 @@ class RuntimeAPI:
 
     async def cancel_job_text(self, text: str) -> str:
         return await self._jobs.cancel_job_text(text)
+
+    def describe_plugins_text(self) -> str:
+        return self._inspector()
 
 
 class OmniTensorInterface(ServiceInterface):
@@ -103,6 +125,10 @@ class OmniTensorInterface(ServiceInterface):
     @method()
     async def CancelJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
         return await self._runtime.cancel_job_text(request)
+
+    @method()
+    def DescribePlugins(self) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return self._runtime.describe_plugins_text()
 
 
 class SysfsDeviceDiscovery:
@@ -286,7 +312,7 @@ class OmniTensorService:
             job_dispatcher,
             PredicateJobAuthorizer(self._job_authorized),
         )
-        self.runtime_api = RuntimeAPI(self.control, self.jobs)
+        self.runtime_api = RuntimeAPI(self.control, self.jobs, self._describe_plugins)
         self.result_summaries = result_summaries or ResultSummaryRegistry(
             alert_id_factory=lambda: f"alert-{secrets.token_hex(16)}"
         )
@@ -324,6 +350,27 @@ class OmniTensorService:
     def _policy_changed(self) -> None:
         """Applied policy commands wake the workers so held jobs re-evaluate."""
         self._scheduler.kick()
+
+    def _describe_plugins(self) -> str:
+        """Answer DescribePlugins from installed metadata only.
+
+        Building this from the discovery snapshot means it never imports a
+        plugin module: asking what a plugin requires must not run its code.
+        """
+        snapshot = self._plugin_runtime.snapshot
+        states = {status.plugin_id: str(status.state) for status in snapshot.workers}
+        document = build_plugin_inventory(
+            snapshot.catalog.plugins,
+            resolve_artifact=self._resolve_artifact,
+            worker_states=states.get,
+            generated_at_ms=int(time.time() * 1000),
+        )
+        return json.dumps(document, separators=(",", ":"))
+
+    def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
+        return ArtifactResolution(
+            False, None, "no artifact store is configured for this service", 0
+        )
 
     def _build_runtime_snapshot(self) -> dict:
         self._scheduler.tick()

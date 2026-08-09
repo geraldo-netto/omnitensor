@@ -16,3 +16,26 @@ The service publishes the extension and registers every installed version-two
 plugin manifest. Consumers must inspect `pluginTelemetry.version` before using
 its entries and ignore the optional extension when they only implement the
 original snapshot view.
+
+## Plugin inventory (`DescribePlugins`)
+
+The snapshot answers "what is the runtime doing"; it deliberately does not
+answer "why is this profile doing nothing". That question needs what a plugin
+*declares* against what it *has*, which is what `DescribePlugins` returns,
+validated against `plugin-inventory.schema.json`.
+
+Each entry carries the plugin's identity and source, its negotiated protocol
+range and capabilities, its triggers, the readiness of every declared artifact
+with the reason when one is not ready, and every declared permission with
+whether it is currently granted. Declared-but-ungranted is reported explicitly
+because that is the case a user can act on.
+
+Two omissions are deliberate. Configuration **values** never appear — only the
+declared schema — because a value can be a resolved secret; fields marked
+`x-omnitensor-secret` are listed by name in `secretConfigurationKeys` so a
+consumer renders a control rather than a value. And the document is built
+entirely from installed metadata and artifact-store state: asking what a plugin
+requires must never mean importing and running its code.
+
+The method is read-only and takes no arguments, so it cannot be used to change
+policy or to probe for a plugin that is not installed.
