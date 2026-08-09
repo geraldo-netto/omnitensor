@@ -937,9 +937,10 @@ def test_build_service_from_env_defaults_expand_home(monkeypatch):
     for name in ("OMNITENSOR_STATE_PATH", "OMNITENSOR_POLICY_PATH", "OMNITENSOR_WORKLOADS"):
         monkeypatch.delenv(name, raising=False)
     service = build_service_from_env()
-    state_dir = Path.home() / ".local/state/omnitensor"
-    assert service._publisher_port._path == state_dir / "runtime-snapshot.json"
-    assert service.control._store._path == state_dir / "policy.json"
+    assert service._publisher_port._path == (
+        Path.home() / ".local/state/tpu-workload-manager/state.json"
+    )
+    assert service.control._store._path == Path.home() / ".local/state/omnitensor/policy.json"
 
 
 def test_env_path_defaults_expand_the_home_directory(monkeypatch):

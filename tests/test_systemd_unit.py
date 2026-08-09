@@ -38,3 +38,7 @@ def test_unit_install_and_hardening_are_intact():
     assert service["Restart"] == "on-failure"
     assert service["NoNewPrivileges"] == "true"
     assert service["ProtectSystem"] == "strict"
+    assert set(service.get("ReadWritePaths", raw=True).split()) == {
+        "%h/.local/state/omnitensor",
+        "%h/.local/state/tpu-workload-manager",
+    }

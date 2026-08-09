@@ -32,7 +32,8 @@ The JSON Schemas under [schemas/](schemas/) are canonical; the applet ships
 mirror copies. OmniTensor:
 
 - writes the runtime snapshot atomically (temp file + rename) to the
-  applet-configured `runtime-state-path`, validated against
+  applet's default `~/.local/state/tpu-workload-manager/state.json` path
+  (overridable with `OMNITENSOR_STATE_PATH`), validated against
   `runtime-snapshot.schema.json` before every write;
 - owns the D-Bus name `org.cinnamon.OmniTensor1` and answers `ApplyCommand`
   with optimistic-concurrency revision checks, persisting policy state

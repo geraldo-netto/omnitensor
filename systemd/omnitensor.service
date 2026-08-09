@@ -14,7 +14,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/state/omnitensor
+ReadWritePaths=%h/.local/state/omnitensor %h/.local/state/tpu-workload-manager
 PrivateTmp=true
 
 [Install]
