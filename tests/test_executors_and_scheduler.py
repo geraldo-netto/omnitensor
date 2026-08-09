@@ -674,3 +674,27 @@ def test_npu_executor_reports_discovery_failure():
     availability = executor.availability()
     assert availability.available is False
     assert "discovery failed" in availability.reason
+
+
+def test_update_executors_reaps_finished_retired_workers():
+    """Regression (OMNI-0027): retired worker tasks must be pruned once they
+    finish cancelling, not accumulate until stop() under backend churn."""
+    async def scenario():
+        tpu = SlowExecutor()
+        npu = SlowExecutor()
+        scheduler = Scheduler({"tpu": tpu, "npu": npu}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        for _round in range(5):
+            scheduler.update_executors({"tpu": tpu})
+            # Let the event loop process the cancellation so the retired
+            # worker completes before the next churn round.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            scheduler.update_executors({"tpu": tpu, "npu": npu})
+        assert len(scheduler._retired) <= 1
+        await scheduler.submit("npu", "profile-a", "job-npu", [])
+        assert npu.served == ["job-npu"]
+        await scheduler.stop()
+        assert scheduler._retired == []
+
+    asyncio.run(scenario())

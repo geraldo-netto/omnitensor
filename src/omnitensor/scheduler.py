@@ -133,6 +133,10 @@ class Scheduler:
         cancelled because no device can ever serve them again."""
         removed = [backend for backend in self._executors if backend not in executors]
         self._executors = dict(executors)
+        # Reap retired workers that have finished cancelling so the list
+        # cannot grow without bound under repeated backend churn; tasks
+        # still unwinding stay tracked until stop() awaits them.
+        self._retired = [task for task in self._retired if not task.done()]
         for backend in removed:
             worker = self._workers.pop(backend, None)
             if worker is not None:

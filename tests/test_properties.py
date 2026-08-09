@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -24,7 +25,7 @@ from omnitensor.discovery import (
     device_utilization,
 )
 from omnitensor.registry import validate_document
-from omnitensor.scheduler import _BackendQueue, _Job
+from omnitensor.scheduler import Scheduler, _BackendQueue, _Job
 from omnitensor.snapshot import build_snapshot
 from omnitensor.state import (
     MAX_WEIGHT,
@@ -233,6 +234,24 @@ def test_stride_scheduling_serves_only_admitted_profiles_and_holds_the_rest(plan
     assert queue.depth() == sum(
         jobs for profile_id, (_w, jobs) in plan.items() if profile_id not in admitted
     )
+
+
+@given(rounds=st.integers(min_value=1, max_value=30))
+def test_retired_worker_tracking_stays_bounded_under_backend_churn(rounds):
+    async def scenario():
+        executors = {"tpu": object(), "npu": object()}
+        scheduler = Scheduler(executors, weight_of=lambda _profile: 1)
+        scheduler.start()
+        for _round in range(rounds):
+            scheduler.update_executors({"tpu": executors["tpu"]})
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            scheduler.update_executors(executors)
+            assert len(scheduler._retired) <= 1
+        await scheduler.stop()
+        assert scheduler._retired == []
+
+    asyncio.run(scenario())
 
 
 device_entries = st.builds(
