@@ -394,14 +394,22 @@ def test_scheduler_backend_queue_never_exceeds_its_capacity(capacity, attempts):
 @given(paths=st.lists(st.sampled_from(["alpha", "beta", "gamma"]), min_size=1, max_size=20))
 def test_executor_model_caches_create_once_per_distinct_path(paths):
     tflite = CacheTfliteRuntime()
-    tpu = TpuExecutor(device_present=True, runtime=tflite)
-    npu = NpuExecutor(device_present=True, runtime=CacheOpenVinoRuntime())
-    for path in paths:
-        assert tpu.run(path, [[path]]).outputs == [[path]]
-        assert npu.run(path, [[path]]).outputs == [[path]]
+    # The caches revalidate each model against its file, so the paths must
+    # name real, unchanging files.
+    tpu = TpuExecutor(device_present=True, runtime=tflite, max_cached_models=8)
+    npu = NpuExecutor(device_present=True, runtime=CacheOpenVinoRuntime(), max_cached_models=8)
+    with tempfile.TemporaryDirectory() as directory:
+        resolved = []
+        for name in paths:
+            path = Path(directory) / name
+            path.write_bytes(name.encode())
+            resolved.append(str(path))
+        for path in resolved:
+            assert tpu.run(path, [[path]]).outputs == [[path]]
+            assert npu.run(path, [[path]]).outputs == [[path]]
 
-    assert tflite.delegate_loads == len(set(paths))
-    assert npu._core.compile_calls == list(dict.fromkeys(paths))
+        assert tflite.delegate_loads == len(set(resolved))
+        assert npu._core.compile_calls == list(dict.fromkeys(resolved))
 
 
 @settings(max_examples=30)

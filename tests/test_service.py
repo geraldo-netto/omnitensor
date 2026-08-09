@@ -85,14 +85,13 @@ def test_build_executors_marks_absent_backends(fake_nodes):
 def test_build_executors_reuses_only_unchanged_device_adapters():
     tpu = Device(id="tpu-a", backend="tpu", name="TPU A", kind="pcie")
     first = build_executors([tpu])
-    cached = object()
-    first["tpu"]._interpreters["model.tflite"] = cached
+    interpreters = first["tpu"]._interpreters
 
     same = build_executors(
         [tpu], previous_devices=[tpu], previous_executors=first,
     )
     assert same["tpu"] is first["tpu"]
-    assert same["tpu"]._interpreters["model.tflite"] is cached
+    assert same["tpu"]._interpreters is interpreters
     assert same["npu"] is first["npu"]
     assert same["gpu"] is first["gpu"]
 

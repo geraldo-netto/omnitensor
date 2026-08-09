@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 from conftest import sample_manifest
 
 import omnitensor.executors.npu as npu_module
 import omnitensor.executors.tpu as tpu_module
-from omnitensor.executors.base import Availability, supports_model
+from omnitensor.executors.base import Availability, ModelCache, supports_model
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
@@ -84,7 +85,7 @@ def test_tpu_executor_runs_real_delegate_path_with_injected_runtime():
     assert result.duration_ms >= 0
 
 
-def test_tpu_executor_reuses_one_interpreter_per_model():
+def test_tpu_executor_reuses_one_interpreter_per_model(tmp_path):
     class CountingRuntime:
         def __init__(self):
             self.delegate_loads = 0
@@ -102,13 +103,13 @@ def test_tpu_executor_reuses_one_interpreter_per_model():
 
     runtime = CountingRuntime()
     executor = TpuExecutor(device_present=True, runtime=runtime)
-    assert executor.run("alpha.tflite", [[1]]).outputs == [[2]]
-    assert executor.run("alpha.tflite", [[3]]).outputs == [[6]]
-    assert executor.run("beta.tflite", [[4]]).outputs == [[8]]
+    alpha = _model_file(tmp_path, "alpha.tflite")
+    beta = _model_file(tmp_path, "beta.tflite")
+    assert executor.run(alpha, [[1]]).outputs == [[2]]
+    assert executor.run(alpha, [[3]]).outputs == [[6]]
+    assert executor.run(beta, [[4]]).outputs == [[8]]
     assert runtime.delegate_loads == 2
-    assert [item.model_path for item in runtime.interpreters] == [
-        "alpha.tflite", "beta.tflite",
-    ]
+    assert [item.model_path for item in runtime.interpreters] == [alpha, beta]
 
 
 def test_tpu_executor_rejects_wrong_input_count():
@@ -756,7 +757,7 @@ def test_npu_executor_runs_via_openvino_when_plugin_present():
     assert result.outputs == [[3, 6]]
 
 
-def test_npu_executor_reuses_one_compiled_model_per_path():
+def test_npu_executor_reuses_one_compiled_model_per_path(tmp_path):
     class FakeCompiled:
         def __call__(self, inputs):
             return {"output": inputs[0]}
@@ -776,10 +777,12 @@ def test_npu_executor_reuses_one_compiled_model_per_path():
         Core = CountingCore
 
     executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
-    assert executor.run("alpha.xml", [[1]]).outputs == [[1]]
-    assert executor.run("alpha.xml", [[2]]).outputs == [[2]]
-    assert executor.run("beta.xml", [[3]]).outputs == [[3]]
-    assert executor._core.compiled_paths == ["alpha.xml", "beta.xml"]
+    alpha = _model_file(tmp_path, "alpha.xml")
+    beta = _model_file(tmp_path, "beta.xml")
+    assert executor.run(alpha, [[1]]).outputs == [[1]]
+    assert executor.run(alpha, [[2]]).outputs == [[2]]
+    assert executor.run(beta, [[3]]).outputs == [[3]]
+    assert executor._core.compiled_paths == [alpha, beta]
 
 
 def test_npu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
@@ -1068,3 +1071,66 @@ def test_a_successful_delegate_load_clears_an_earlier_failure():
 
     assert executor._delegate_error is None
     assert executor.availability().available is True
+
+
+def _model_file(directory, name, content=b"model"):
+    path = directory / name
+    path.write_bytes(content)
+    return str(path)
+
+
+def test_a_replaced_model_file_is_not_served_from_cache(tmp_path):
+    """Keyed on the path alone, the cache kept serving a retired model."""
+
+    class CountingRuntime:
+        def __init__(self):
+            self.builds = 0
+
+        def load_delegate(self, name):
+            return object()
+
+        def Interpreter(self, model_path, experimental_delegates):  # noqa: N802
+            self.builds += 1
+            return FakeTfliteInterpreter(model_path, experimental_delegates)
+
+    runtime = CountingRuntime()
+    executor = TpuExecutor(device_present=True, runtime=runtime)
+    model = _model_file(tmp_path, "model.tflite")
+
+    executor.run(model, [[1]])
+    executor.run(model, [[1]])
+    assert runtime.builds == 1
+
+    os.utime(model, ns=(0, 0))
+    executor.run(model, [[1]])
+    assert runtime.builds == 2, "the replaced model was served from cache"
+
+
+def test_the_model_cache_is_bounded_and_evicts_least_recently_used(tmp_path):
+    cache = ModelCache(max_entries=2)
+    paths = [_model_file(tmp_path, f"m{index}.tflite") for index in range(3)]
+
+    for path in paths[:2]:
+        cache.get_or_build(path, lambda: object())
+    cache.get_or_build(paths[0], lambda: pytest.fail("cached entry was rebuilt"))
+    cache.get_or_build(paths[2], lambda: object())
+
+    assert len(cache) == 2
+    assert cache.paths() == (paths[0], paths[2])
+
+
+def test_a_model_that_cannot_be_stated_is_never_cached(tmp_path):
+    cache = ModelCache()
+    builds = []
+
+    for _ in range(3):
+        cache.get_or_build(str(tmp_path / "absent.tflite"), lambda: builds.append(1))
+
+    assert len(builds) == 3
+    assert len(cache) == 0
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "2"])
+def test_the_model_cache_bound_is_a_positive_integer(bad):
+    with pytest.raises(ValueError, match="max_entries"):
+        ModelCache(bad)

@@ -64,7 +64,6 @@
 | OMNI-0123 | open | high | s | OMNI-0122 | system acceptance resilience: exercise device/source loss and recovery, worker crash, backpressure, cancellation, service/Cinnamon restart, and in-flight cleanup across representative plugins. |
 | OMNI-0124 | open | high | s | OMNI-0122 | system acceptance lifecycle: verify plugin/artifact/service upgrade, configuration migration, rollback, revocation, cache cleanup, and offline startup without losing valid prior state. |
 | OMNI-0125 | open | high | s | OMNI-0087, OMNI-0090, OMNI-0093, OMNI-0096, OMNI-0101, OMNI-0106, OMNI-0111, OMNI-0115, OMNI-0121 | system acceptance hardware: run the reproducible TPU/NPU/GPU matrix, archive evidence, and prevent any profile from claiming operational readiness until its own model, pipeline, safety, and acceptance gates pass. |
-| OMNI-0148 | open | low | s | OMNI-0036 | executor model caches (`executors/npu.py:74`, `executors/tpu.py`): `_compiled_models` and `_interpreters` are never evicted and never notice a replaced model file, giving unbounded memory growth and stale-model serving; bound the caches and invalidate on file change. |
 | OMNI-0155 | open | low | s | OMNI-0049 | peripheral collector (`plugins/peripheral_collection.py:192`): `_previous` keeps only the truncated `selected` set, so devices past `max_devices` are reported removed while still attached and re-added when they fit again; track churn against the full eligible set and truncate only the emitted list. |
 
 ## Rejected / Won't fix

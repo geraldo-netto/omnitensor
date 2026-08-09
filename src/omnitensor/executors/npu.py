@@ -11,7 +11,13 @@ from __future__ import annotations
 import threading
 import time
 
-from .base import Availability, InferenceResult, require_available
+from .base import (
+    DEFAULT_MAX_CACHED_MODELS,
+    Availability,
+    InferenceResult,
+    ModelCache,
+    require_available,
+)
 
 OPENVINO_DEVICE = "NPU"
 
@@ -28,12 +34,18 @@ class NpuExecutor:
     backend = "npu"
     model_formats = frozenset({"openvino", "onnx"})
 
-    def __init__(self, device_present: bool, runtime=None):
+    def __init__(
+        self,
+        device_present: bool,
+        runtime=None,
+        *,
+        max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+    ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_openvino()
         self._core = None
         self._core_lock = threading.Lock()
-        self._compiled_models: dict[str, object] = {}
+        self._compiled_models = ModelCache(max_cached_models)
         self._compiled_models_lock = threading.Lock()
 
     def _ensure_core(self):
@@ -68,8 +80,7 @@ class NpuExecutor:
 
     def _compiled_model_for(self, model_path: str):
         with self._compiled_models_lock:
-            compiled = self._compiled_models.get(model_path)
-            if compiled is None:
-                compiled = self._ensure_core().compile_model(model_path, OPENVINO_DEVICE)
-                self._compiled_models[model_path] = compiled
-            return compiled
+            return self._compiled_models.get_or_build(
+                model_path,
+                lambda: self._ensure_core().compile_model(model_path, OPENVINO_DEVICE),
+            )

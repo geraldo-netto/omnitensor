@@ -11,7 +11,13 @@ from __future__ import annotations
 import threading
 import time
 
-from .base import Availability, InferenceResult, require_available
+from .base import (
+    DEFAULT_MAX_CACHED_MODELS,
+    Availability,
+    InferenceResult,
+    ModelCache,
+    require_available,
+)
 
 EDGETPU_DELEGATE = "libedgetpu.so.1"
 # How long a delegate-load failure is trusted before the next run retries it.
@@ -40,6 +46,7 @@ class TpuExecutor:
         *,
         delegate_retry_seconds: float = DELEGATE_RETRY_SECONDS,
         clock=time.monotonic,
+        max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
     ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_tflite()
@@ -54,7 +61,7 @@ class TpuExecutor:
         # Interpreters are expensive model-specific runtime state.  The
         # scheduler serializes TPU work; this lock also preserves that safety
         # when callers use the executor directly from multiple threads.
-        self._interpreters: dict[str, object] = {}
+        self._interpreters = ModelCache(max_cached_models)
         self._interpreter_lock = threading.Lock()
 
     def availability(self) -> Availability:
@@ -69,9 +76,11 @@ class TpuExecutor:
         return Availability(True)
 
     def _interpreter_for(self, model_path: str):
-        interpreter = self._interpreters.get(model_path)
-        if interpreter is not None:
-            return interpreter
+        return self._interpreters.get_or_build(
+            model_path, lambda: self._build_interpreter(model_path)
+        )
+
+    def _build_interpreter(self, model_path: str):
         try:
             delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
         except (ValueError, OSError) as error:
@@ -86,7 +95,6 @@ class TpuExecutor:
             experimental_delegates=[delegate],
         )
         interpreter.allocate_tensors()
-        self._interpreters[model_path] = interpreter
         return interpreter
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
