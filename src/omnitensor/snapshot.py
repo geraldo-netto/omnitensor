@@ -8,13 +8,10 @@ observes a partial document.
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
-import tempfile
 import time
 from pathlib import Path
 
+from .atomicio import write_json_atomic
 from .discovery import Device
 from .registry import validate_document
 
@@ -64,15 +61,4 @@ def build_snapshot(
 
 def write_snapshot(path: Path, snapshot: dict) -> None:
     """Atomically publish ``snapshot`` to ``path``."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".snapshot-")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(snapshot, stream, separators=(",", ":"))
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(temp_name)
-        raise
+    write_json_atomic(path, snapshot, prefix=".snapshot-")

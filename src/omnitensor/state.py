@@ -9,12 +9,11 @@ write can never corrupt the state the next start loads.
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .atomicio import write_json_atomic
 
 MIN_WEIGHT = 1
 MAX_WEIGHT = 5
@@ -95,15 +94,4 @@ class PolicyStore:
             },
             "revision": state.revision,
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        handle, temp_name = tempfile.mkstemp(dir=self._path.parent, prefix=".policy-")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                json.dump(payload, stream, separators=(",", ":"))
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temp_name, self._path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(temp_name)
-            raise
+        write_json_atomic(self._path, payload, prefix=".policy-")
