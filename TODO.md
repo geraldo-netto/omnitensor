@@ -25,7 +25,6 @@
 | OMNI-0071 | open | high | s | OMNI-0039 | D-Bus results: expose bounded progress and terminal-result retrieval with ownership checks, expiry, deterministic not-found semantics, and no unbounded in-memory history. |
 | OMNI-0072 | open | medium | s | OMNI-0039, OMNI-0055 | D-Bus inspection: expose plugin capabilities, artifact readiness, configuration schemas, and permission requirements without leaking secrets or importing plugin workers. |
 | OMNI-0073 | open | high | s | OMNI-0039, OMNI-0071 | D-Bus hardening: bind jobs to caller identity, enforce method/payload/rate quotas, prevent spoofing, and return stable versioned error codes for every rejected boundary. |
-| OMNI-0074 | open | high | s | OMNI-0040 | consent and grants: persist explicit data-source/action permissions, expose grant/revoke operations, record auditable grant provenance, and deny undeclared permissions. |
 | OMNI-0075 | open | high | s | OMNI-0040 | plugin secrets: store only secret references in plugin state, resolve them through an injected provider, redact logs/snapshots/results, and fail without echoing secret material. |
 | OMNI-0076 | open | high | s | OMNI-0040, OMNI-0068, OMNI-0074 | revocation behavior: fail closed when required settings/grants are absent and cancel active collection, inference, and delivery promptly when consent is revoked. |
 | OMNI-0041 | open | medium | s | OMNI-0038 | plugin telemetry: maintain bounded health, current stage, artifact readiness, last success/error, queue, deadline, retry, cancellation, and drop counters per plugin. |
