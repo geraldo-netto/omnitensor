@@ -135,3 +135,40 @@ def test_unexpected_handler_failure_returns_internal_error_rejection():
     assert acknowledgement["status"] == "rejected"
     assert acknowledgement["message"] == INTERNAL_ERROR_MESSAGE
     assert control.state.paused is False
+
+
+class MemoryStore:
+    def __init__(self):
+        self.saved = []
+
+    def load(self):
+        return PolicyState(profiles={"visual-library": ProfilePolicy(enabled=True, weight=3)})
+
+    def save(self, state):
+        self.saved.append(state)
+
+
+def test_on_applied_listener_fires_only_for_applied_commands():
+    calls = []
+    control = ControlService(MemoryStore(), {}, on_applied=lambda: calls.append(True))
+    applied = apply(control, command("set-paused", None, True))
+    assert applied["status"] == "applied"
+    assert calls == [True]
+
+    rejected = apply(control, command("set-paused", None, True, revision=99))
+    assert rejected["status"] == "rejected"
+    assert calls == [True]
+
+    invalid = apply(control, "not json")
+    assert invalid["status"] == "rejected"
+    assert calls == [True]
+
+
+def test_raising_on_applied_listener_never_breaks_the_acknowledgement():
+    def explode():
+        raise RuntimeError("listener bug")
+
+    control = ControlService(MemoryStore(), {}, on_applied=explode)
+    acknowledgement = apply(control, command("set-paused", None, True))
+    assert acknowledgement["status"] == "applied"
+    assert control.state.paused is True

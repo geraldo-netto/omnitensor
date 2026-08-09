@@ -51,7 +51,9 @@ def test_profile_statuses_report_backend_or_reason(fake_nodes, tmp_path):
             sample_manifest("gpu-only", accelerator="gpu", acceleratorPreference=["gpu"]),
         ])
         service._scheduler.start()
-        statuses = profile_statuses(service._workloads, executors, service._scheduler)
+        statuses = profile_statuses(
+            service._workloads, executors, service._scheduler, service.control.state,
+        )
         await service._scheduler.stop()
         return statuses
 

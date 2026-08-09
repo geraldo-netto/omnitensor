@@ -266,6 +266,7 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
     from omnitensor.executors.base import Availability, InferenceResult
     from omnitensor.registry import Workload
     from omnitensor.service import profile_statuses
+    from omnitensor.state import PolicyState
 
     class ReadyExecutor:
         backend = "tpu"
@@ -295,11 +296,133 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
     workloads = {manifest["id"]: Workload(id=manifest["id"], manifest=manifest)}
     executors = {"tpu": ReadyExecutor()}
 
-    watching = profile_statuses(workloads, executors, StatsOnlyScheduler(0))
-    assert watching["sample-workload"]["status"] == "watching"
-    running = profile_statuses(workloads, executors, StatsOnlyScheduler(2))
-    assert running["sample-workload"]["status"] == "running"
-    assert running["sample-workload"]["detail"] == "Serving on tpu"
+    policy = PolicyState()
+    watching = profile_statuses(workloads, executors, StatsOnlyScheduler(0), policy)
+    assert watching["sample-workload"] == {
+        "status": "watching",
+        "queued": 0,
+        "detail": "Serving on tpu",
+    }
+    running = profile_statuses(workloads, executors, StatsOnlyScheduler(2), policy)
+    assert running["sample-workload"] == {
+        "status": "running",
+        "queued": 0,
+        "detail": "Serving on tpu",
+    }
+
+
+def policy_command(operation, value, revision, profile_id=None):
+    return json.dumps({
+        "version": 1,
+        "id": f"cmd-{operation}-{revision}",
+        "issuedAt": 1,
+        "expectedRevision": revision,
+        "operation": operation,
+        "profileId": profile_id,
+        "value": value,
+    })
+
+
+def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
+    service = build_service(
+        tmp_path,
+        [sample_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    disabled = json.loads(service.control.apply_command_text(
+        policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
+    ))
+    assert disabled["status"] == "applied"
+    snapshot = service.publish_once()
+    assert snapshot["profiles"]["sample-workload"] == {
+        "status": "paused",
+        "queued": 0,
+        "detail": "Profile disabled by policy",
+    }
+
+    paused = json.loads(service.control.apply_command_text(
+        policy_command("set-paused", True, 1),
+    ))
+    assert paused["status"] == "applied"
+    snapshot = service.publish_once()
+    assert snapshot["profiles"]["sample-workload"] == {
+        "status": "paused",
+        "queued": 0,
+        "detail": "Runtime paused by policy",
+    }
+
+
+def test_pause_holds_dispatch_and_resume_command_drains(tmp_path):
+    from omnitensor.executors.base import Availability, InferenceResult
+
+    class ReadyExecutor:
+        backend = "tpu"
+        model_formats = frozenset({"tflite-edgetpu"})
+
+        def __init__(self):
+            self.served = []
+
+        def availability(self):
+            return Availability(True)
+
+        def run(self, model_path, inputs):
+            self.served.append(model_path)
+            return InferenceResult(outputs=[inputs], duration_ms=1.0)
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+        )
+        executor = ReadyExecutor()
+        service._executors = {"tpu": executor}
+        service._scheduler.update_executors(service._executors)
+        service._scheduler.start()
+
+        paused = json.loads(service.control.apply_command_text(
+            policy_command("set-paused", True, 0),
+        ))
+        assert paused["status"] == "applied"
+        assert service._admits("sample-workload") is False
+        future = service._scheduler.submit("tpu", "sample-workload", "held-job", [])
+        await asyncio.sleep(0.02)
+        assert not future.done()
+        assert executor.served == []
+
+        # The resume command itself must wake the workers (on_applied -> kick).
+        resumed = json.loads(service.control.apply_command_text(
+            policy_command("set-paused", False, 1),
+        ))
+        assert resumed["status"] == "applied"
+        await asyncio.wait_for(future, timeout=2)
+        assert executor.served == ["held-job"]
+        await service._scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_admits_reflects_profile_enablement_and_unknown_profiles(tmp_path):
+    service = build_service(
+        tmp_path,
+        [sample_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    assert service._admits("unknown-profile") is True
+    assert service._admits("sample-workload") is True
+    disabled = json.loads(service.control.apply_command_text(
+        policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
+    ))
+    assert disabled["status"] == "applied"
+    # A disabled profile is held even though the runtime is not paused.
+    assert service._admits("sample-workload") is False
+    assert service._admits("unknown-profile") is True
 
 
 def test_env_path_prefers_environment_and_expands_home(monkeypatch):

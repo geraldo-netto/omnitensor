@@ -846,15 +846,17 @@ def test_build_executors_wiring_is_exact():
 
 def test_profile_statuses_documents_are_exact():
     from omnitensor.service import profile_statuses
+    from omnitensor.state import PolicyState
 
     class StatsScheduler:
         def stats(self):
             return {"queueDepth": 0, "runningProfiles": 0, "loads": {}}
 
+    policy = PolicyState()
     manifest = sample_manifest(acceleratorPreference=["tpu"])
     workloads = {manifest["id"]: Workload(id=manifest["id"], manifest=manifest)}
     executors = {"tpu": TpuExecutor(device_present=False)}
-    statuses = profile_statuses(workloads, executors, StatsScheduler())
+    statuses = profile_statuses(workloads, executors, StatsScheduler(), policy)
     assert statuses == {
         "sample-workload": {
             "status": "unavailable",
@@ -874,7 +876,7 @@ def test_profile_statuses_documents_are_exact():
             raise AssertionError("not executed")
 
     truncated = profile_statuses(
-        workloads, {"tpu": LongReasonExecutor()}, StatsScheduler(),
+        workloads, {"tpu": LongReasonExecutor()}, StatsScheduler(), policy,
     )
     assert len(truncated["sample-workload"]["detail"]) == 240
 
@@ -882,7 +884,7 @@ def test_profile_statuses_documents_are_exact():
         def availability(self):
             return Availability(True)
 
-    idle = profile_statuses(workloads, {"tpu": ReadyExecutor()}, StatsScheduler())
+    idle = profile_statuses(workloads, {"tpu": ReadyExecutor()}, StatsScheduler(), policy)
     assert idle == {
         "sample-workload": {
             "status": "idle",

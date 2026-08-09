@@ -67,11 +67,16 @@ class _BackendQueue:
     def depth(self) -> int:
         return sum(len(queue) for queue in self.profiles.values())
 
-    def pop_weighted(self, weight_of) -> _Job | None:
+    def pop_weighted(self, weight_of, admits=None) -> _Job | None:
         """Stride scheduling: the pending profile with the smallest pass value
         runs next, and its pass advances by 1/weight — so a weight-5 profile
-        is served roughly five times per weight-1 serve under contention."""
-        pending = [profile_id for profile_id in self.order if self.profiles[profile_id]]
+        is served roughly five times per weight-1 serve under contention.
+        Profiles the ``admits`` policy predicate rejects stay queued."""
+        pending = [
+            profile_id
+            for profile_id in self.order
+            if self.profiles[profile_id] and (admits is None or admits(profile_id))
+        ]
         if not pending:
             return None
         chosen = min(
@@ -84,9 +89,10 @@ class _BackendQueue:
 
 
 class Scheduler:
-    def __init__(self, executors: dict[str, Executor], weight_of):
+    def __init__(self, executors: dict[str, Executor], weight_of, admits=None):
         self._executors = dict(executors)
         self._weight_of = weight_of
+        self._admits = admits
         self._queues: dict[str, _BackendQueue] = {backend: _BackendQueue() for backend in executors}
         self._running: set[str] = set()
         self._workers: dict[str, asyncio.Task] = {}
@@ -180,10 +186,16 @@ class Scheduler:
                 LOAD_SMOOTHING * ratio + (1 - LOAD_SMOOTHING) * queue.load
             )
 
+    def kick(self) -> None:
+        """Wake every worker so held jobs are re-evaluated against the current
+        admission policy (call after a pause/enable policy change)."""
+        for event in self._wakeups.values():
+            event.set()
+
     async def _worker(self, backend: str) -> None:
         queue = self._queues[backend]
         while not self._stopped:
-            job = queue.pop_weighted(self._weight_of)
+            job = queue.pop_weighted(self._weight_of, self._admits)
             if job is None:
                 self._wakeups[backend].clear()
                 await self._wakeups[backend].wait()

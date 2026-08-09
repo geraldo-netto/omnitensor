@@ -388,6 +388,33 @@ def test_update_executors_cancels_queued_jobs_of_removed_backends():
     asyncio.run(scenario())
 
 
+def test_scheduler_holds_non_admitted_jobs_and_resumes_on_kick():
+    async def scenario():
+        executor = SlowExecutor()
+        held = {"profile-a"}
+        scheduler = Scheduler(
+            {"tpu": executor},
+            weight_of=lambda _profile: 1,
+            admits=lambda profile_id: profile_id not in held,
+        )
+        scheduler.start()
+        held_future = scheduler.submit("tpu", "profile-a", "held-job", [])
+        await scheduler.submit("tpu", "profile-b", "free-job", [])
+        await asyncio.sleep(0.01)
+        # The held profile's job stays queued, only the admitted one ran.
+        assert executor.served == ["free-job"]
+        assert scheduler.stats()["queueDepth"] == 1
+        assert not held_future.done()
+        held.clear()
+        scheduler.kick()
+        await asyncio.wait_for(held_future, timeout=2)
+        assert executor.served == ["free-job", "held-job"]
+        assert scheduler.stats()["queueDepth"] == 0
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
 def test_update_executors_retires_the_worker_of_a_removed_backend():
     async def scenario():
         tpu = SlowExecutor()

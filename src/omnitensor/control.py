@@ -8,6 +8,7 @@ around this class so the policy logic is fully testable off the bus.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import re
@@ -40,9 +41,15 @@ def _sanitized_command_id(command: dict) -> str:
 
 
 class ControlService:
-    def __init__(self, store: PolicyStorage, defaults: dict[str, ProfilePolicy]):
+    def __init__(
+        self,
+        store: PolicyStorage,
+        defaults: dict[str, ProfilePolicy],
+        on_applied=None,
+    ):
         self._store = store
         self._defaults = defaults
+        self._on_applied = on_applied
         self._state: PolicyState = store.load()
 
     @property
@@ -84,6 +91,12 @@ class ControlService:
         except OSError:
             return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
         self._state = candidate
+        if self._on_applied is not None:
+            # The listener is a runtime nudge (e.g. wake scheduler workers);
+            # it must never break the acknowledgement contract for an already
+            # committed command.
+            with contextlib.suppress(Exception):
+                self._on_applied()
         return self._acknowledgement(command_id, "applied", "Policy applied")
 
     def _execute(self, state: PolicyState, command: dict) -> str | None:

@@ -43,7 +43,7 @@ from .ports import (
 from .registry import Workload, load_workloads
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, write_snapshot
-from .state import PolicyStore
+from .state import PolicyState, PolicyStore
 
 BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"
@@ -127,31 +127,32 @@ def profile_statuses(
     workloads: dict[str, Workload],
     executors: dict,
     scheduler: Scheduler,
+    policy: PolicyState,
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
-    statuses: dict[str, dict] = {}
     stats = scheduler.stats()
-    for workload_id, workload in workloads.items():
-        backend, reason = pick_backend(workload, executors)
-        if backend is None:
-            statuses[workload_id] = {
-                "status": "unavailable",
-                "queued": 0,
-                "detail": reason[:240],
-            }
-        elif workload.model is None:
-            statuses[workload_id] = {
-                "status": "idle",
-                "queued": 0,
-                "detail": f"Ready on {backend}; no model bundled",
-            }
-        else:
-            statuses[workload_id] = {
-                "status": "watching" if stats["runningProfiles"] == 0 else "running",
-                "queued": 0,
-                "detail": f"Serving on {backend}",
-            }
-    return statuses
+    return {
+        workload_id: _profile_status(workload, executors, stats, policy)
+        for workload_id, workload in workloads.items()
+    }
+
+
+def _profile_status(workload: Workload, executors: dict, stats: dict, policy: PolicyState) -> dict:
+    profile_policy = policy.profiles.get(workload.id)
+    if policy.paused:
+        return {"status": "paused", "queued": 0, "detail": "Runtime paused by policy"}
+    if profile_policy is not None and not profile_policy.enabled:
+        return {"status": "paused", "queued": 0, "detail": "Profile disabled by policy"}
+    backend, reason = pick_backend(workload, executors)
+    if backend is None:
+        return {"status": "unavailable", "queued": 0, "detail": reason[:240]}
+    if workload.model is None:
+        return {"status": "idle", "queued": 0, "detail": f"Ready on {backend}; no model bundled"}
+    return {
+        "status": "watching" if stats["runningProfiles"] == 0 else "running",
+        "queued": 0,
+        "detail": f"Serving on {backend}",
+    }
 
 
 class OmniTensorService:
@@ -180,10 +181,10 @@ class OmniTensorService:
             for workload_id, workload in self._workloads.items()
         }
         storage = policy_storage or PolicyStore(policy_path, defaults)
-        self.control = ControlService(storage, defaults)
+        self.control = ControlService(storage, defaults, on_applied=self._policy_changed)
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
-        self._scheduler = Scheduler(self._executors, self._weight_of)
+        self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
         self._stopping = asyncio.Event()
 
     def _device_load(self, device, stats) -> float | None:
@@ -196,6 +197,19 @@ class OmniTensorService:
         policy = self.control.state.profiles.get(workload_id)
         return policy.weight if policy is not None else 1
 
+    def _admits(self, workload_id: str) -> bool:
+        """Dispatch admission: nothing runs while the runtime is paused, and a
+        disabled profile's jobs stay queued until it is enabled again."""
+        state = self.control.state
+        if state.paused:
+            return False
+        policy = state.profiles.get(workload_id)
+        return policy is None or policy.enabled
+
+    def _policy_changed(self) -> None:
+        """Applied policy commands wake the workers so held jobs re-evaluate."""
+        self._scheduler.kick()
+
     def publish_once(self) -> dict:
         self._scheduler.tick()
         stats = self._scheduler.stats()
@@ -206,7 +220,9 @@ class OmniTensorService:
         snapshot = build_snapshot(
             devices=devices,
             metrics=stats,
-            profiles=profile_statuses(self._workloads, self._executors, self._scheduler),
+            profiles=profile_statuses(
+                self._workloads, self._executors, self._scheduler, self.control.state,
+            ),
         )
         self._publisher_port.publish(snapshot)
         return snapshot

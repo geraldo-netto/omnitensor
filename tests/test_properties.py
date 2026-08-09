@@ -162,6 +162,42 @@ def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
     assert served == {profile_id: jobs for profile_id, (_w, jobs) in plan.items()}
 
 
+@given(plan=profile_plan, data=st.data())
+def test_stride_scheduling_serves_only_admitted_profiles_and_holds_the_rest(plan, data):
+    admitted = data.draw(
+        st.sets(st.sampled_from(sorted(plan)), min_size=0, max_size=len(plan)),
+    )
+    queue = _BackendQueue()
+    submissions = [
+        profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)
+    ]
+    for index, profile_id in enumerate(data.draw(st.permutations(submissions))):
+        queue.push(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
+
+    weights = {profile_id: weight for profile_id, (weight, _jobs) in plan.items()}
+    served = dict.fromkeys(plan, 0)
+    while True:
+        job = queue.pop_weighted(
+            lambda profile_id: weights[profile_id],
+            admits=lambda profile_id: profile_id in admitted,
+        )
+        if job is None:
+            break
+        assert job.workload_id in admitted
+        served[job.workload_id] += 1
+
+    for profile_id, (_weight, jobs) in plan.items():
+        if profile_id in admitted:
+            assert served[profile_id] == jobs
+        else:
+            # Held jobs stay queued, never dropped.
+            assert served[profile_id] == 0
+            assert len(queue.profiles[profile_id]) == jobs
+    assert queue.depth() == sum(
+        jobs for profile_id, (_w, jobs) in plan.items() if profile_id not in admitted
+    )
+
+
 device_entries = st.builds(
     Device,
     id=st.text(max_size=90),
