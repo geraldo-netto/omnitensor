@@ -32,6 +32,7 @@ from omnitensor.plugins import worker as worker_module
 from omnitensor.plugins.protocol import (
     PluginHealth,
     PluginHealthStatus,
+    WorkloadPlugin,
 )
 from omnitensor.plugins.worker import (
     ExternalPluginLoadError,
@@ -577,3 +578,25 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
         assert len(started.workers) == 1
         assert started.workers[0].state is WorkerState.READY
         assert stopped.workers[0].state is WorkerState.STOPPED
+
+
+def test_worker_rejects_a_plugin_that_omits_its_identity():
+    class Anonymous:
+        async def start(self, context): ...
+
+        async def health(self): ...
+
+        async def stop(self): ...
+
+        async def execute(self, request, cancellation, progress): ...
+
+    assert isinstance(Anonymous(), WorkloadPlugin)
+    with pytest.raises(ExternalPluginLoadError) as error:
+        load_external_plugin(
+            "external-example",
+            "external-example",
+            "external_package:Plugin",
+            "external-dist",
+            entry_points_provider=lambda **_selection: [FakeEntryPoint(factory=Anonymous)],
+        )
+    assert str(error.value) == "entry point does not implement the declared plugin"

@@ -64,7 +64,10 @@ def load_external_plugin(
         raise ExternalPluginLoadError(
             f"entry-point load failed: {type(error).__name__}"
         ) from error
-    if not isinstance(plugin, WorkloadPlugin) or plugin.plugin_id != plugin_id:
+    # WorkloadPlugin does not declare plugin_id, so isinstance() admits an
+    # object without it; reading the attribute directly would surface a raw
+    # AttributeError instead of the load error callers handle.
+    if not isinstance(plugin, WorkloadPlugin) or getattr(plugin, "plugin_id", None) != plugin_id:
         raise ExternalPluginLoadError("entry point does not implement the declared plugin")
     return plugin
 
