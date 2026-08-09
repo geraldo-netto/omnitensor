@@ -98,6 +98,20 @@ from .settings import (
     PluginSettingsError,
     PluginSettingsStore,
 )
+from .supervisor import (
+    DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
+    DEFAULT_STOP_TIMEOUT_SECONDS,
+    MAX_SUPERVISED_WORKERS,
+    MAX_WORKER_ARGUMENT_CHARS,
+    MAX_WORKER_ARGUMENTS,
+    AsyncioSubprocessLauncher,
+    PluginWorkerSupervisor,
+    WorkerLauncher,
+    WorkerProcess,
+    WorkerSpec,
+    WorkerState,
+    WorkerStatus,
+)
 from .triggers import (
     DEFAULT_COLLECTION_TIMEOUT_SECONDS,
     DEFAULT_MAX_PENDING_TRIGGERS,
@@ -116,7 +130,9 @@ from .triggers import (
 )
 
 __all__ = [
+    "AsyncioSubprocessLauncher",
     "DEFAULT_MAX_ARTIFACT_BYTES",
+    "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
     "DEFAULT_MAX_FRAME_BYTES",
     "DEFAULT_COLLECTION_TIMEOUT_SECONDS",
     "DEFAULT_AUDIT_EVENTS",
@@ -124,6 +140,7 @@ __all__ = [
     "DEFAULT_MAX_PENDING_TRIGGERS",
     "DEFAULT_MAX_SETTINGS_BYTES",
     "DEFAULT_MAX_TRIGGER_BYTES",
+    "DEFAULT_STOP_TIMEOUT_SECONDS",
     "FRAME_FORMAT_VERSION",
     "ArtifactReference",
     "ArtifactResolution",
@@ -157,6 +174,9 @@ __all__ = [
     "MAX_DISTRIBUTION_VERSION_LENGTH",
     "MAX_ENTRY_POINT_TARGET_LENGTH",
     "MAX_PLUGIN_CANDIDATES",
+    "MAX_SUPERVISED_WORKERS",
+    "MAX_WORKER_ARGUMENT_CHARS",
+    "MAX_WORKER_ARGUMENTS",
     "JsonObject",
     "JsonValue",
     "PluginContext",
@@ -177,6 +197,7 @@ __all__ = [
     "PluginSettingsError",
     "PluginSettingsStore",
     "PluginSource",
+    "PluginWorkerSupervisor",
     "PipelineSnapshot",
     "PipelineStage",
     "PipelineStateMachine",
@@ -199,6 +220,11 @@ __all__ = [
     "TriggerValidationError",
     "WorkloadPlugin",
     "WorkerMessageType",
+    "WorkerLauncher",
+    "WorkerProcess",
+    "WorkerSpec",
+    "WorkerState",
+    "WorkerStatus",
     "artifact_filename",
     "artifact_reference_error",
     "decode_frame",

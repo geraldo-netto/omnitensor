@@ -1,0 +1,447 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+
+import pytest
+
+from omnitensor.plugins import (
+    MAX_SUPERVISED_WORKERS,
+    MAX_WORKER_ARGUMENT_CHARS,
+    MAX_WORKER_ARGUMENTS,
+    AsyncioSubprocessLauncher,
+    HandshakeOffer,
+    PluginWorkerSupervisor,
+    WorkerSpec,
+    WorkerState,
+    decode_frame,
+    encode_frame,
+    handshake_frame,
+)
+
+
+def run_scenario(coroutine):
+    async def bounded():
+        return await asyncio.wait_for(coroutine, timeout=0.25)
+
+    return asyncio.run(bounded())
+
+
+class FakeWriter:
+    def __init__(self, process, response_offer, events, *, drain_error=None, close_error=None):
+        self.process = process
+        self.response_offer = response_offer
+        self.events = events
+        self.drain_error = drain_error
+        self.close_error = close_error
+        self.writes = []
+        self.closed = False
+        self._responded = False
+
+    def write(self, data):
+        self.writes.append(data)
+        if self.response_offer is not None and not self._responded:
+            self._responded = True
+            self.process.reader.feed_data(encode_frame(handshake_frame(self.response_offer)))
+
+    async def drain(self):
+        if self.drain_error is not None:
+            raise self.drain_error
+
+    def close(self):
+        self.closed = True
+        self.events.append(f"close:{self.process.plugin_id}")
+        if self.process.exit_on_close:
+            self.process.exit(0)
+
+    async def wait_closed(self):
+        if self.close_error is not None:
+            raise self.close_error
+
+
+class FakeProcess:
+    def __init__(
+        self,
+        plugin_id,
+        response_offer,
+        events,
+        *,
+        pid=100,
+        exit_on_close=True,
+        exit_on_terminate=True,
+        drain_error=None,
+        close_error=None,
+    ):
+        self.plugin_id = plugin_id
+        self.pid = pid
+        self.reader = asyncio.StreamReader()
+        self.returncode = None
+        self.exit_on_close = exit_on_close
+        self.exit_on_terminate = exit_on_terminate
+        self.events = events
+        self.writer = FakeWriter(
+            self,
+            response_offer,
+            events,
+            drain_error=drain_error,
+            close_error=close_error,
+        )
+        self._exited = asyncio.Event()
+        self.terminate_calls = 0
+        self.kill_calls = 0
+
+    async def wait(self):
+        await self._exited.wait()
+        return self.returncode
+
+    def exit(self, returncode):
+        if self.returncode is None:
+            self.returncode = returncode
+            self._exited.set()
+
+    def terminate(self):
+        self.events.append(f"terminate:{self.plugin_id}")
+        self.terminate_calls += 1
+        if self.exit_on_terminate:
+            self.exit(-15)
+
+    def kill(self):
+        self.events.append(f"kill:{self.plugin_id}")
+        self.kill_calls += 1
+        self.exit(-9)
+
+
+class FakeLauncher:
+    def __init__(self, processes=None, failures=None):
+        self.processes = processes or {}
+        self.failures = failures or {}
+        self.calls = []
+
+    async def launch(self, spec):
+        self.calls.append(spec.plugin_id)
+        if spec.plugin_id in self.failures:
+            raise self.failures[spec.plugin_id]
+        return self.processes[spec.plugin_id]
+
+
+def worker_spec(plugin_id):
+    return WorkerSpec(
+        plugin_id,
+        ("python", "worker.py", plugin_id),
+        minimum_protocol=1,
+        maximum_protocol=2,
+        capabilities=frozenset({"cancel", "health"}),
+    )
+
+
+def worker_offer(plugin_id, *, minimum=1, maximum=2):
+    return HandshakeOffer(
+        plugin_id,
+        minimum,
+        maximum,
+        frozenset({"cancel", "progress"}),
+    )
+
+
+def test_starts_in_identity_order_and_stops_in_reverse_without_leaks():
+    async def scenario():
+        events = []
+        processes = {
+            plugin_id: FakeProcess(
+                plugin_id,
+                worker_offer(plugin_id),
+                events,
+                pid=index,
+            )
+            for index, plugin_id in enumerate(("alpha", "beta", "zeta"), start=10)
+        }
+        launcher = FakeLauncher(processes)
+        supervisor = PluginWorkerSupervisor(launcher)
+
+        started = await supervisor.start(
+            [worker_spec("zeta"), worker_spec("alpha"), worker_spec("beta")]
+        )
+
+        assert supervisor.running
+        assert launcher.calls == ["alpha", "beta", "zeta"]
+        assert [status.plugin_id for status in started] == ["alpha", "beta", "zeta"]
+        assert all(status.state is WorkerState.READY for status in started)
+        assert all(status.protocol_version == 2 for status in started)
+        assert [status.pid for status in started] == [10, 11, 12]
+
+        stopped = await supervisor.stop()
+
+        assert not supervisor.running
+        assert events == ["close:zeta", "close:beta", "close:alpha"]
+        assert all(status.state is WorkerState.STOPPED for status in stopped)
+        assert all(process.returncode == 0 for process in processes.values())
+        for process in processes.values():
+            assert process.terminate_calls == process.kill_calls == 0
+            assert decode_frame(process.writer.writes[-1]).payload == {"reason": "shutdown"}
+        assert await supervisor.stop() == stopped
+
+    run_scenario(scenario())
+
+
+def test_launch_and_handshake_failures_are_isolated_and_children_are_reaped():
+    async def scenario():
+        events = []
+        wrong = FakeProcess("wrong", worker_offer("substitute"), events, pid=21)
+        good = FakeProcess("good", worker_offer("good"), events, pid=22)
+        launcher = FakeLauncher(
+            {"wrong": wrong, "good": good},
+            failures={"broken": OSError("private")},
+        )
+        supervisor = PluginWorkerSupervisor(launcher, stop_timeout=0.01)
+
+        statuses = await supervisor.start(
+            [worker_spec("wrong"), worker_spec("good"), worker_spec("broken")]
+        )
+
+        by_id = {status.plugin_id: status for status in statuses}
+        assert by_id["broken"].detail == "worker launch failed: OSError"
+        assert by_id["broken"].pid is None
+        assert by_id["wrong"].detail == (
+            "worker handshake rejected: plugin-identity-mismatch"
+        )
+        assert by_id["wrong"].pid == 21
+        assert by_id["wrong"].protocol_version is None
+        assert wrong.returncode == 0
+        assert by_id["good"].state is WorkerState.READY
+        await supervisor.stop()
+        assert good.returncode == 0
+
+    run_scenario(scenario())
+
+
+def test_handshake_timeout_and_transport_failure_are_stable():
+    async def scenario():
+        events = []
+        silent = FakeProcess("silent", None, events)
+        broken = FakeProcess(
+            "transport",
+            worker_offer("transport"),
+            events,
+            drain_error=ValueError("private"),
+        )
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"silent": silent, "transport": broken}),
+            handshake_timeout=0.001,
+            stop_timeout=0.001,
+        )
+
+        statuses = await supervisor.start([worker_spec("transport"), worker_spec("silent")])
+
+        by_id = {status.plugin_id: status for status in statuses}
+        assert by_id["silent"].detail == "worker handshake timed out"
+        assert by_id["transport"].detail == "worker handshake failed: ValueError"
+        assert silent.returncode == broken.returncode == 0
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_monitor_records_unexpected_worker_exit(returncode):
+    async def scenario():
+        events = []
+        process = FakeProcess("watched", worker_offer("watched"), events)
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"watched": process}))
+        await supervisor.start([worker_spec("watched")])
+
+        process.exit(returncode)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        status = supervisor.statuses()[0]
+        expected_state = WorkerState.EXITED if returncode == 0 else WorkerState.FAILED
+        expected_detail = (
+            "worker exited"
+            if returncode == 0
+            else f"worker exited with status {returncode}"
+        )
+        assert status.state is expected_state
+        assert status.detail == expected_detail
+        stopped = await supervisor.stop()
+        assert stopped == (status,)
+
+    run_scenario(scenario())
+
+
+def test_stubborn_worker_is_terminated_then_killed():
+    async def scenario():
+        events = []
+        process = FakeProcess(
+            "stubborn",
+            worker_offer("stubborn"),
+            events,
+            exit_on_close=False,
+            exit_on_terminate=False,
+            close_error=ConnectionError("closed"),
+        )
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"stubborn": process}),
+            stop_timeout=0.001,
+        )
+        await supervisor.start([worker_spec("stubborn")])
+
+        stopped = await supervisor.stop()
+
+        assert stopped[0].state is WorkerState.STOPPED
+        assert process.returncode == -9
+        assert process.terminate_calls == process.kill_calls == 1
+        assert events == ["close:stubborn", "terminate:stubborn", "kill:stubborn"]
+
+    run_scenario(scenario())
+
+
+def test_worker_that_ignores_eof_exits_after_terminate():
+    async def scenario():
+        events = []
+        process = FakeProcess(
+            "terminated",
+            worker_offer("terminated"),
+            events,
+            exit_on_close=False,
+        )
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"terminated": process}),
+            stop_timeout=0.001,
+        )
+        await supervisor.start([worker_spec("terminated")])
+
+        await supervisor.stop()
+
+        assert process.returncode == -15
+        assert process.terminate_calls == 1
+        assert process.kill_calls == 0
+
+    run_scenario(scenario())
+
+
+def test_already_exited_worker_needs_no_shutdown_signal():
+    async def scenario():
+        events = []
+        process = FakeProcess("exited", worker_offer("exited"), events)
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"exited": process}))
+        await supervisor.start([worker_spec("exited")])
+        process.exit(0)
+
+        stopped = await supervisor.stop()
+
+        assert stopped[0].state is WorkerState.STOPPED
+        assert len(process.writer.writes) == 1
+        assert events == []
+
+    run_scenario(scenario())
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "1"])
+def test_timeouts_must_be_positive_numbers(timeout):
+    with pytest.raises(ValueError, match="handshake_timeout must be positive"):
+        PluginWorkerSupervisor(handshake_timeout=timeout)
+    with pytest.raises(ValueError, match="stop_timeout must be positive"):
+        PluginWorkerSupervisor(stop_timeout=timeout)
+
+
+def test_worker_specs_are_bounded_unique_and_protocol_validated():
+    async def rejected(specs, match):
+        supervisor = PluginWorkerSupervisor(FakeLauncher())
+        with pytest.raises(ValueError, match=match):
+            await supervisor.start(specs)
+        assert not supervisor.running
+
+    async def scenario():
+        await rejected(
+            [worker_spec(f"plugin-{index}") for index in range(MAX_SUPERVISED_WORKERS + 1)],
+            "at most 128 workers",
+        )
+        await rejected([worker_spec("same"), worker_spec("same")], "must be unique")
+        await rejected([WorkerSpec("empty", ())], "argv must contain")
+        await rejected(
+            [WorkerSpec("many", tuple("x" for _ in range(MAX_WORKER_ARGUMENTS + 1)))],
+            "argv must contain",
+        )
+        for argument in (None, "", "bad\0arg", "x" * (MAX_WORKER_ARGUMENT_CHARS + 1)):
+            await rejected([WorkerSpec("invalid", (argument,))], "invalid argument")
+        await rejected([WorkerSpec("Bad_ID", ("worker",))], "invalid plugin id")
+
+    run_scenario(scenario())
+
+
+def test_start_is_single_use_until_stopped_and_empty_catalog_is_valid():
+    async def scenario():
+        supervisor = PluginWorkerSupervisor(FakeLauncher())
+        assert await supervisor.start([]) == ()
+        assert supervisor.running
+        with pytest.raises(RuntimeError, match="already running"):
+            await supervisor.start([])
+        assert await supervisor.stop() == ()
+        assert await supervisor.start([]) == ()
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+@dataclass
+class StubSubprocess:
+    stdout: object = None
+    stdin: object = None
+    pid: int = 77
+    returncode: int | None = None
+    terminate_calls: int = 0
+    kill_calls: int = 0
+
+    async def wait(self):
+        return 0
+
+    def terminate(self):
+        self.terminate_calls += 1
+
+    def kill(self):
+        self.kill_calls += 1
+
+
+def test_asyncio_launcher_uses_isolated_bounded_process_options(monkeypatch):
+    async def scenario():
+        reader = asyncio.StreamReader()
+        events = []
+        process_owner = type("Owner", (), {"plugin_id": "real", "reader": reader})()
+        writer = FakeWriter(process_owner, None, events)
+        process = StubSubprocess(stdout=reader, stdin=writer)
+        calls = []
+
+        async def create(*argv, **options):
+            calls.append((argv, options))
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+        launched = await AsyncioSubprocessLauncher().launch(worker_spec("real"))
+
+        assert launched.pid == 77
+        assert launched.returncode is None
+        assert await launched.wait() == 0
+        launched.terminate()
+        launched.kill()
+        assert process.terminate_calls == process.kill_calls == 1
+        argv, options = calls[0]
+        assert argv == ("python", "worker.py", "real")
+        assert options["stdin"] is asyncio.subprocess.PIPE
+        assert options["stdout"] is asyncio.subprocess.PIPE
+        assert options["stderr"] is asyncio.subprocess.DEVNULL
+        assert options["close_fds"] is True
+        assert options["start_new_session"] is True
+
+    run_scenario(scenario())
+
+
+def test_asyncio_launcher_rejects_missing_process_pipes(monkeypatch):
+    async def scenario():
+        async def create(*_argv, **_options):
+            return StubSubprocess()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+        with pytest.raises(RuntimeError, match="worker pipes are unavailable"):
+            await AsyncioSubprocessLauncher().launch(worker_spec("real"))
+
+    run_scenario(scenario())
