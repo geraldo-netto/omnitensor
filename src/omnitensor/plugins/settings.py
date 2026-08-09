@@ -12,6 +12,7 @@ from pathlib import Path
 import jsonschema
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..storelock import store_lock
 from .protocol import JsonObject
 from .secrets import (
     SecretConfigurationError,
@@ -20,6 +21,7 @@ from .secrets import (
 )
 
 SETTINGS_DOCUMENT_VERSION = 1
+SETTINGS_LOCK_FILE = ".plugin-settings.lock"
 DEFAULT_MAX_SETTINGS_BYTES = 256 * 1024
 MAX_MIGRATIONS = 32
 _PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -83,6 +85,11 @@ class PluginSettingsStore:
 
     def load(self, spec: PluginConfigurationSpec) -> PluginSettings:
         """Load current settings, atomically committing any required migration."""
+        with store_lock(self._root, SETTINGS_LOCK_FILE):
+            return self._load_locked(spec)
+
+    def _load_locked(self, spec: PluginConfigurationSpec) -> PluginSettings:
+        """Read (and if needed migrate) settings; the store lock is already held."""
         validator, migrations = self._prepare_spec(spec)
         path = self._path(spec.plugin_id)
         if not path.exists():
@@ -114,23 +121,29 @@ class PluginSettingsStore:
         expected_revision: int,
         configuration: JsonObject,
     ) -> PluginSettings:
-        """Validate and atomically replace settings when the revision matches."""
+        """Validate and atomically replace settings when the revision matches.
+
+        The revision is re-read and compared inside the store lock: an unlocked
+        check-then-write lets two updaters both observe revision N and both
+        commit N+1, silently discarding one of the two updates.
+        """
         _validate_revision(expected_revision, "expected_revision")
         validator, _migrations = self._prepare_spec(spec)
         _validate_persisted_configuration(validator, spec.schema, configuration)
-        current = self.load(spec)
-        if current.revision != expected_revision:
-            raise PluginSettingsError(
-                "revision-mismatch",
-                f"expected {expected_revision}; current revision is {current.revision}",
+        with store_lock(self._root, SETTINGS_LOCK_FILE):
+            current = self._load_locked(spec)
+            if current.revision != expected_revision:
+                raise PluginSettingsError(
+                    "revision-mismatch",
+                    f"expected {expected_revision}; current revision is {current.revision}",
+                )
+            updated = PluginSettings(
+                spec.plugin_id,
+                spec.plugin_version,
+                current.revision + 1,
+                copy.deepcopy(dict(configuration)),
             )
-        updated = PluginSettings(
-            spec.plugin_id,
-            spec.plugin_version,
-            current.revision + 1,
-            copy.deepcopy(dict(configuration)),
-        )
-        self._write(self._path(spec.plugin_id), updated)
+            self._write(self._path(spec.plugin_id), updated)
         return _copy_settings(updated)
 
     def _prepare_spec(

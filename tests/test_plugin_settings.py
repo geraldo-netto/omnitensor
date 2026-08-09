@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -431,3 +433,81 @@ def test_valid_schema_domain_round_trips_every_revision(threshold):
             configuration={"mode": "safe", "threshold": threshold},
         )
         assert store.load(spec()) == expected
+
+
+def _hold_lock_then_bump(root: str, started, hold: float) -> None:
+    """Commit revision 1 while holding the settings lock for ``hold`` seconds."""
+    from omnitensor.atomicio import write_json_atomic
+    from omnitensor.plugins.settings import SETTINGS_LOCK_FILE
+    from omnitensor.storelock import store_lock
+
+    with store_lock(Path(root), SETTINGS_LOCK_FILE):
+        started.set()
+        time.sleep(hold)
+        write_json_atomic(
+            Path(root) / "echo-plugin.json",
+            {
+                "documentVersion": 1,
+                "pluginId": "echo-plugin",
+                "pluginVersion": "1.0.0",
+                "revision": 1,
+                "configuration": {"mode": "fast", "threshold": 9},
+            },
+            prefix=".echo-plugin-settings-",
+        )
+
+
+def test_update_rechecks_the_revision_under_the_store_lock(tmp_path):
+    """An unlocked check-then-write would read revision 0 and clobber revision 1."""
+    store = PluginSettingsStore(tmp_path)
+    store.update(spec(), expected_revision=0, configuration={"mode": "safe", "threshold": 1})
+    (tmp_path / "echo-plugin.json").unlink()
+
+    context = multiprocessing.get_context("spawn")
+    started = context.Event()
+    writer = context.Process(target=_hold_lock_then_bump, args=(str(tmp_path), started, 0.5))
+    writer.start()
+    try:
+        assert started.wait(timeout=30)
+        with pytest.raises(PluginSettingsError) as excinfo:
+            store.update(
+                spec(),
+                expected_revision=0,
+                configuration={"mode": "safe", "threshold": 3},
+            )
+    finally:
+        writer.join(timeout=30)
+    assert excinfo.value.code == "revision-mismatch"
+    assert store.load(spec()).configuration == {"mode": "fast", "threshold": 9}
+
+
+def test_concurrent_updaters_cannot_both_commit_the_same_revision(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    ready = context.Barrier(2)
+    results = context.Queue()
+    workers = [
+        context.Process(target=_race_update, args=(str(tmp_path), ready, results, threshold))
+        for threshold in (4, 7)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=60)
+    outcomes = sorted(results.get() for _ in workers)
+    assert outcomes == ["ok", "revision-mismatch"]
+    assert PluginSettingsStore(tmp_path).load(spec()).revision == 1
+
+
+def _race_update(root: str, ready, results, threshold: int) -> None:
+    store = PluginSettingsStore(Path(root))
+    ready.wait(timeout=30)
+    try:
+        store.update(
+            spec(),
+            expected_revision=0,
+            configuration={"mode": "safe", "threshold": threshold},
+        )
+    except PluginSettingsError as error:
+        results.put(error.code)
+    else:
+        results.put("ok")
