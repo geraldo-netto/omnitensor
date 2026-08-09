@@ -65,7 +65,13 @@
           "timestamp": {"type": "integer", "minimum": 0},
           "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
           "riskScore": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "resolved": {"type": "boolean"}
+          "resolved": {"type": "boolean"},
+          "resultRef": {
+            "type": "string",
+            "pattern": "^result-[A-Za-z0-9._-]+$",
+            "minLength": 8,
+            "maxLength": 120
+          }
         }
       }
     }

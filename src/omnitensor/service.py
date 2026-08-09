@@ -22,6 +22,7 @@ import asyncio
 import dataclasses
 import logging
 import os
+import secrets
 from pathlib import Path
 
 from dbus_fast import BusType, RequestNameReply
@@ -40,6 +41,7 @@ from .jobs import (
     PredicateJobAuthorizer,
 )
 from .plugins.loading import InstalledPluginRuntime
+from .plugins.summaries import ResultSummaryRegistry
 from .ports import (
     ControlTransport,
     DeviceDiscovery,
@@ -255,6 +257,7 @@ class OmniTensorService:
         policy_storage: PolicyStorage | None = None,
         plugin_runtime: PluginRuntime | None = None,
         job_dispatcher: JobDispatcher | None = None,
+        result_summaries: ResultSummaryRegistry | None = None,
         transport: ControlTransport | None = None,
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
@@ -282,6 +285,9 @@ class OmniTensorService:
             PredicateJobAuthorizer(self._job_authorized),
         )
         self.runtime_api = RuntimeAPI(self.control, self.jobs)
+        self.result_summaries = result_summaries or ResultSummaryRegistry(
+            alert_id_factory=lambda: f"alert-{secrets.token_hex(16)}"
+        )
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
@@ -326,6 +332,7 @@ class OmniTensorService:
             profiles=profile_statuses(
                 self._workloads, self._executors, self._scheduler, self.control.state,
             ),
+            alerts=self.result_summaries.documents(),
         )
 
     def publish_once(self) -> dict:

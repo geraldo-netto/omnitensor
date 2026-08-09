@@ -420,6 +420,38 @@ def test_kernel_utilization_wins_over_scheduler_load(tmp_path):
     assert snapshot["devices"][0]["load"] == 63.5
 
 
+def test_runtime_snapshot_publishes_only_result_summary_documents(tmp_path):
+    from omnitensor.plugins import ResultSummaryRegistry, SecretRedactor
+
+    summaries = ResultSummaryRegistry(alert_id_factory=lambda: "alert-runtime")
+    summaries.publish(
+        plugin_id="hardware-health",
+        title="Health warning",
+        summary="Bounded evidence",
+        timestamp_ms=10,
+        confidence=0.8,
+        risk_score=0.6,
+        result_reference="result-runtime-job",
+        redactor=SecretRedactor([]),
+    )
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            result_summaries=summaries,
+        )
+        service._scheduler.start()
+        snapshot = service.publish_once()
+        await service._scheduler.stop()
+        return snapshot
+
+    snapshot = asyncio.run(scenario())
+    assert snapshot["alerts"] == summaries.documents()
+
+
 def test_dbus_interface_is_a_pure_passthrough_shim():
     class FakeControl:
         def __init__(self):
