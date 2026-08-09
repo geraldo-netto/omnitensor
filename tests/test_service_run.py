@@ -115,6 +115,33 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
 
 
+def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
+    discovery = FakeDiscovery([tpu_device()])
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=discovery,
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.05)
+        discovery.devices.append(npu_device())
+        await asyncio.sleep(0.05)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+        return service
+
+    service = asyncio.run(scenario())
+    # Regression (OMNI-0009): dispatch must use the post-rediscovery executors,
+    # not the dict the scheduler was constructed with.
+    assert service._scheduler._executors == service._executors
+    assert service._executors["npu"]._device_present is True
+
+
 def test_publisher_loop_skips_when_no_devices_are_present(tmp_path):
     publisher = FakePublisher()
 

@@ -85,20 +85,48 @@ class _BackendQueue:
 
 class Scheduler:
     def __init__(self, executors: dict[str, Executor], weight_of):
-        self._executors = executors
+        self._executors = dict(executors)
         self._weight_of = weight_of
         self._queues: dict[str, _BackendQueue] = {backend: _BackendQueue() for backend in executors}
         self._running: set[str] = set()
-        self._workers: list[asyncio.Task] = []
+        self._workers: dict[str, asyncio.Task] = {}
+        self._retired: list[asyncio.Task] = []
         self._wakeups: dict[str, asyncio.Event] = {
             backend: asyncio.Event() for backend in executors
         }
+        self._started = False
         self._stopped = False
         self._last_tick = time.monotonic()
 
     def start(self) -> None:
+        self._started = True
         for backend in self._executors:
-            self._workers.append(asyncio.get_running_loop().create_task(self._worker(backend)))
+            self._spawn_worker(backend)
+
+    def _spawn_worker(self, backend: str) -> None:
+        self._workers[backend] = asyncio.get_running_loop().create_task(self._worker(backend))
+
+    def update_executors(self, executors: dict[str, Executor]) -> None:
+        """Swap in the executors from the latest discovery pass so dispatch
+        never uses stale adapters.  Existing backends keep their queue and
+        worker (the worker looks the executor up per job); new backends get a
+        queue and, when running, a worker; queued jobs of removed backends are
+        cancelled because no device can ever serve them again."""
+        removed = [backend for backend in self._executors if backend not in executors]
+        self._executors = dict(executors)
+        for backend in removed:
+            worker = self._workers.pop(backend, None)
+            if worker is not None:
+                worker.cancel()
+                self._retired.append(worker)
+            self._wakeups.pop(backend, None)
+            self._cancel_queued(self._queues.pop(backend))
+        for backend in executors:
+            if backend not in self._queues:
+                self._queues[backend] = _BackendQueue()
+                self._wakeups[backend] = asyncio.Event()
+                if self._started and not self._stopped:
+                    self._spawn_worker(backend)
 
     async def stop(self) -> None:
         """Stop dispatch deterministically: cancel the workers, then cancel the
@@ -106,16 +134,22 @@ class Scheduler:
         self._stopped = True
         for event in self._wakeups.values():
             event.set()
-        for worker in self._workers:
+        workers = [*self._workers.values(), *self._retired]
+        for worker in workers:
             worker.cancel()
-        await asyncio.gather(*self._workers, return_exceptions=True)
+        await asyncio.gather(*workers, return_exceptions=True)
         self._workers.clear()
+        self._retired.clear()
         for queue in self._queues.values():
-            for jobs in queue.profiles.values():
-                while jobs:
-                    job = jobs.popleft()
-                    if not job.future.done():
-                        job.future.cancel()
+            self._cancel_queued(queue)
+
+    @staticmethod
+    def _cancel_queued(queue: _BackendQueue) -> None:
+        for jobs in queue.profiles.values():
+            while jobs:
+                job = jobs.popleft()
+                if not job.future.done():
+                    job.future.cancel()
 
     def submit(
         self, backend: str, workload_id: str, model_path: str, inputs: list,

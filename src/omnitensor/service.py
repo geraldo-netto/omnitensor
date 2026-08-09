@@ -227,6 +227,7 @@ class OmniTensorService:
             except TimeoutError:
                 self._devices = self._discovery.detect()
                 self._executors = build_executors(self._devices)
+                self._scheduler.update_executors(self._executors)
 
     async def run(self) -> None:
         await self._transport.start(self.control)

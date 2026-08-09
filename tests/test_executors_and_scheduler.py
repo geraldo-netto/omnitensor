@@ -339,6 +339,73 @@ def test_stop_cancels_queued_futures_even_when_never_started():
     asyncio.run(scenario())
 
 
+def test_update_executors_dispatches_on_the_replacement_executor():
+    async def scenario():
+        old = SlowExecutor()
+        new = SlowExecutor()
+        scheduler = Scheduler({"tpu": old}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        await scheduler.submit("tpu", "profile-a", "job-old", [])
+        scheduler.update_executors({"tpu": new})
+        await scheduler.submit("tpu", "profile-a", "job-new", [])
+        assert old.served == ["job-old"]
+        assert new.served == ["job-new"]
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_update_executors_spawns_a_worker_for_a_new_backend():
+    async def scenario():
+        tpu = SlowExecutor()
+        npu = SlowExecutor()
+        scheduler = Scheduler({"tpu": tpu}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        scheduler.update_executors({"tpu": tpu, "npu": npu})
+        await scheduler.submit("npu", "profile-a", "job-npu", [])
+        assert npu.served == ["job-npu"]
+        assert scheduler.stats()["loads"].keys() == {"tpu", "npu"}
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_update_executors_cancels_queued_jobs_of_removed_backends():
+    async def scenario():
+        tpu = SlowExecutor()
+        npu = SlowExecutor()
+        scheduler = Scheduler({"tpu": tpu, "npu": npu}, weight_of=lambda _profile: 1)
+        future = scheduler.submit("npu", "profile-a", "job-npu", [])
+        scheduler.update_executors({"tpu": tpu})
+        assert future.cancelled()
+        assert "npu" not in scheduler.stats()["loads"]
+        scheduler.start()
+        await scheduler.submit("tpu", "profile-a", "job-tpu", [])
+        assert tpu.served == ["job-tpu"]
+        await scheduler.stop()
+        assert scheduler._retired == []
+
+    asyncio.run(scenario())
+
+
+def test_update_executors_retires_the_worker_of_a_removed_backend():
+    async def scenario():
+        tpu = SlowExecutor()
+        npu = SlowExecutor()
+        scheduler = Scheduler({"tpu": tpu, "npu": npu}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        npu_worker = scheduler._workers["npu"]
+        scheduler.update_executors({"tpu": tpu})
+        assert scheduler._workers.keys() == {"tpu"}
+        assert scheduler._wakeups.keys() == {"tpu"}
+        assert scheduler._retired == [npu_worker]
+        await scheduler.stop()
+        assert npu_worker.cancelled()
+        assert scheduler._retired == []
+
+    asyncio.run(scenario())
+
+
 def test_npu_executor_runs_via_openvino_when_plugin_present():
     class FakeCompiled:
         def __call__(self, inputs):

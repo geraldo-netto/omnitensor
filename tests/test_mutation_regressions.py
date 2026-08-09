@@ -424,12 +424,27 @@ def test_scheduler_stop_terminates_all_workers():
         )
         scheduler.start()
         await asyncio.sleep(0)
-        workers = list(scheduler._workers)
+        workers = list(scheduler._workers.values())
         await scheduler.stop()
         assert scheduler._stopped is True
         assert workers
         assert all(worker.done() for worker in workers)
-        assert scheduler._workers == []
+        assert scheduler._workers == {}
+
+    asyncio.run(scenario())
+
+
+def test_update_executors_before_start_never_spawns_workers():
+    async def scenario():
+        tpu = RecordingExecutor()
+        scheduler = Scheduler({"tpu": tpu}, weight_of=lambda _p: 1)
+        assert scheduler._started is False
+        assert scheduler._stopped is False
+        scheduler.update_executors({"tpu": tpu, "npu": RecordingExecutor()})
+        assert scheduler._workers == {}
+        scheduler.start()
+        assert scheduler._workers.keys() == {"tpu", "npu"}
+        await scheduler.stop()
 
     asyncio.run(scenario())
 
