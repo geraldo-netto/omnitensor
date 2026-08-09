@@ -11,6 +11,7 @@ expressed by omission.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -180,6 +181,9 @@ def device_utilization(paths: DiscoveryPaths, device: Device) -> float | None:
     node = device.id.removeprefix("gpu-")
     raw = _read_trimmed(paths.sys / f"class/drm/{node}/device/gpu_busy_percent")
     try:
-        return max(0.0, min(100.0, float(raw)))
+        value = float(raw)
     except ValueError:
         return None
+    if not math.isfinite(value):
+        return None
+    return max(0.0, min(100.0, value))

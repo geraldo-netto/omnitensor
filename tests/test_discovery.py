@@ -85,6 +85,9 @@ def test_gpu_utilization_reads_sysfs_busy_percent(fake_nodes):
     assert device_utilization(fake_nodes, device) == 100.0
     busy.write_text("garbage\n")
     assert device_utilization(fake_nodes, device) is None
+    for non_finite in ("nan", "inf", "-inf"):
+        busy.write_text(f"{non_finite}\n")
+        assert device_utilization(fake_nodes, device) is None
     busy.unlink()
     assert device_utilization(fake_nodes, device) is None
 

@@ -4,9 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0004 | open | low | xs | — | snapshot: `build_snapshot` raises `TypeError`, not `ValueError`, for non-numeric metrics (`int(None)`, `int(complex)`), breaking its documented "schema-valid or ValueError" contract. |
-| OMNI-0005 | open | low | xs | — | registry: `load_workloads` raises raw `json.JSONDecodeError` for malformed manifest JSON instead of `ManifestError`, unlike every other manifest failure path. |
-| OMNI-0006 | open | low | xs | — | discovery: `device_utilization` parses sysfs content `nan`/`inf` as load `100.0` (clamp of NaN returns the bound) instead of `None`. |
 | OMNI-0007 | open | high | m | OMNI-0013 | scheduler: `stop()` abandons queued jobs — their futures never resolve so awaiting callers hang; the in-flight job's `CancelledError` is converted to `RuntimeError('')` on its future and the cancellation is swallowed (verified: f2/f3 pending after stop, f1 gets `RuntimeError('')`). |
 | OMNI-0008 | open | medium | m | — | scheduler: stride newcomer burst — a profile first submitting after others advanced their pass starts at pass 0 and monopolizes the device until it catches up (verified: `BBBBBBBBBBAAAAAAAAAA` with equal weights); `passes`/`order`/`profiles` entries are also never pruned for departed profiles. |
 | OMNI-0009 | open | high | m | OMNI-0010 | service: `_rediscover` replaces `self._executors`/`self._devices` but the `Scheduler` keeps the dict it was constructed with — dispatch uses stale executors forever, and `profile_statuses` (new executors) disagrees with `scheduler.stats()` (old queues). |
