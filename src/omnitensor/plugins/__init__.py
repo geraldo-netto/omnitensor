@@ -92,6 +92,13 @@ from .ipc import (
     read_frame,
     write_frame,
 )
+from .loading import (
+    MAX_WORKER_IMPORT_PATHS,
+    InstalledPluginRuntime,
+    InstalledPluginSnapshot,
+    entry_points_from_distributions,
+    external_worker_specs,
+)
 from .pipeline import (
     CollectedOutput,
     DeliveredOutput,
@@ -216,6 +223,8 @@ __all__ = [
     "GrantSnapshot",
     "IPCFrame",
     "IPCProtocolError",
+    "InstalledPluginRuntime",
+    "InstalledPluginSnapshot",
     "InferenceOutput",
     "MAX_MIGRATIONS",
     "MAX_DECLARED_PERMISSIONS",
@@ -225,6 +234,7 @@ __all__ = [
     "MAX_ENTRY_POINT_TARGET_LENGTH",
     "MAX_PLUGIN_CANDIDATES",
     "MAX_SUPERVISED_WORKERS",
+    "MAX_WORKER_IMPORT_PATHS",
     "MAX_WORKER_ARGUMENT_CHARS",
     "MAX_WORKER_ARGUMENTS",
     "JsonObject",
@@ -286,6 +296,8 @@ __all__ = [
     "decode_frame",
     "discover_plugin_metadata",
     "encode_frame",
+    "entry_points_from_distributions",
+    "external_worker_specs",
     "handshake_frame",
     "negotiate_handshake",
     "resolve_plugin_identities",

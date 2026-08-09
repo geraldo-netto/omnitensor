@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0054 | open | high | s | OMNI-0034, OMNI-0053 | plugin compatibility: adapt existing v1 catalog manifests, negotiate protocol capabilities, reject incompatible versions with stable reasons, and test migration without breaking current policy state. |
-| OMNI-0056 | open | high | s | OMNI-0035, OMNI-0055 | external-plugin loading: integration-test installing a third-party wheel, restarting the service, discovering it, and loading its worker without any OmniTensor source or catalog edit. |
 | OMNI-0062 | open | high | s | OMNI-0061 | worker budgets: enforce per-call deadlines plus process, memory, descriptor, output-size, and concurrency limits with stable budget-exceeded failures. |
 | OMNI-0063 | open | high | s | OMNI-0061, OMNI-0074 | filesystem/device sandbox: derive read/write/device access from granted permissions and prevent undeclared paths, accelerator nodes, and host namespaces from reaching plugin workers. |
 | OMNI-0064 | open | high | s | OMNI-0061, OMNI-0074 | network/exec sandbox: deny networking, command execution, child processes, and ambient capabilities by default and selectively enable only declared, granted operations. |

@@ -62,3 +62,13 @@ class ControlTransport(Protocol):
 
     async def stop(self) -> None:
         """Disconnect the transport; safe to call when never started."""
+
+
+class PluginRuntime(Protocol):
+    """Own metadata discovery and isolated worker lifecycles."""
+
+    async def start(self) -> object:
+        """Discover and start every accepted installed plugin."""
+
+    async def stop(self) -> object:
+        """Stop all plugin workers; safe to call after partial startup."""

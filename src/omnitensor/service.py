@@ -34,14 +34,16 @@ from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .plugins.loading import InstalledPluginRuntime
 from .ports import (
     CommandHandler,
     ControlTransport,
     DeviceDiscovery,
+    PluginRuntime,
     PolicyStorage,
     SnapshotPublisher,
 )
-from .registry import Workload, load_workload_catalog
+from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
@@ -221,6 +223,7 @@ class OmniTensorService:
         discovery: DeviceDiscovery | None = None,
         publisher: SnapshotPublisher | None = None,
         policy_storage: PolicyStorage | None = None,
+        plugin_runtime: PluginRuntime | None = None,
         transport: ControlTransport | None = None,
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
@@ -228,6 +231,9 @@ class OmniTensorService:
         self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
         self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
         self._transport = transport or DbusControlTransport()
+        self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
+            bundled_workloads_path()
+        )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
         self._workloads = load_workload_catalog(workloads_path)
@@ -328,24 +334,28 @@ class OmniTensorService:
 
     async def run(self) -> None:
         await self._transport.start(self.control)
-        self._scheduler.start()
-        loop = asyncio.get_running_loop()
-        tasks = [
-            loop.create_task(self._publisher()),
-            loop.create_task(self._rediscover()),
-        ]
         try:
-            # gather raises on the first loop failure; the finally block then
-            # cancels and awaits the sibling, so one crashing loop can never
-            # leave the other running as an orphan — the service crashes
-            # loudly as a whole.
-            await asyncio.gather(*tasks)
+            await self._plugin_runtime.start()
+            self._scheduler.start()
+            loop = asyncio.get_running_loop()
+            tasks = [
+                loop.create_task(self._publisher()),
+                loop.create_task(self._rediscover()),
+            ]
+            try:
+                # gather raises on the first loop failure; the finally block then
+                # cancels and awaits the sibling, so one crashing loop can never
+                # leave the other running as an orphan — the service crashes
+                # loudly as a whole.
+                await asyncio.gather(*tasks)
+            finally:
+                self._stopping.set()
+                for task in tasks:
+                    task.cancel()
+                await asyncio.wait(tasks)
+                await self._scheduler.stop()
         finally:
-            self._stopping.set()
-            for task in tasks:
-                task.cancel()
-            await asyncio.wait(tasks)
-            await self._scheduler.stop()
+            await self._plugin_runtime.stop()
             await self._transport.stop()
 
 
