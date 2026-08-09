@@ -4,6 +4,10 @@ The document is written to a temp file in the target directory, fsynced,
 renamed over the target, and the parent directory is fsynced so the rename
 itself survives a power failure.  Readers therefore never observe a partial
 document, and a completed write is durable.
+
+:func:`read_json_bounded` is the reading counterpart: every store file has a
+declared size ceiling, and enforcing it on the same descriptor that supplies
+the bytes is what keeps a grown or replaced file from being read unbounded.
 """
 
 from __future__ import annotations
@@ -13,6 +17,28 @@ import json
 import os
 import tempfile
 from pathlib import Path
+
+
+class JsonTooLargeError(ValueError):
+    """A stored document exceeds the byte ceiling its reader declared."""
+
+
+def read_json_bounded(path: Path, max_bytes: int) -> object:
+    """Parse the JSON document at ``path`` without ever reading past ``max_bytes``.
+
+    A separate ``stat`` would only describe the file as it was before the read;
+    bounding the read itself is what makes the ceiling hold when the file grows
+    or is replaced concurrently.  Raises :class:`JsonTooLargeError` when the
+    document is oversized, ``OSError`` when it cannot be read, and
+    ``ValueError`` when its bytes are not valid UTF-8 JSON.
+    """
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+        raise ValueError("max_bytes must be a positive integer")
+    with path.open("rb") as stream:
+        payload = stream.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise JsonTooLargeError(f"{path}: document exceeds {max_bytes} bytes")
+    return json.loads(payload)
 
 
 def write_json_atomic(path: Path, payload: dict, prefix: str) -> None:

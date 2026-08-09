@@ -128,20 +128,27 @@ def test_registry_wraps_malformed_json_in_manifest_error(tmp_path):
         load_workloads(tmp_path)
 
 
-@pytest.mark.parametrize("failing", ["stat", "read_bytes"])
-def test_registry_wraps_filesystem_errors_in_manifest_error(tmp_path, monkeypatch, failing):
+def test_registry_wraps_filesystem_errors_in_manifest_error(tmp_path, monkeypatch):
     write_workload(tmp_path, sample_manifest())
     manifest_path = tmp_path / "sample-workload/manifest.json"
-    original = getattr(Path, failing)
+    original = Path.open
 
     def explode(self, *args, **kwargs):
         if self == manifest_path:
             raise OSError(errno.EIO, "device is gone")
         return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, failing, explode)
+    monkeypatch.setattr(Path, "open", explode)
     with pytest.raises(ManifestError, match="unreadable manifest"):
         registry._load_manifest(manifest_path, "sample-workload")
+
+
+def test_registry_rejects_an_oversized_manifest_without_reading_it_whole(tmp_path):
+    write_workload(tmp_path, sample_manifest())
+    manifest_path = tmp_path / "sample-workload/manifest.json"
+    manifest_path.write_bytes(b" " * (registry.MAX_MANIFEST_BYTES + 1))
+    with pytest.raises(ManifestError, match="exceeds"):
+        load_workloads(tmp_path)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import jsonschema
 
-from ..atomicio import write_json_atomic
+from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from .protocol import JsonObject
 from .secrets import (
     SecretConfigurationError,
@@ -176,15 +176,12 @@ class PluginSettingsStore:
 
     def _read(self, path: Path, plugin_id: str) -> dict:
         try:
-            size = path.stat().st_size
-            if size > self._max_settings_bytes:
-                raise PluginSettingsError(
-                    "settings-too-large",
-                    f"settings are {size} bytes; limit is {self._max_settings_bytes}",
-                )
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except PluginSettingsError:
-            raise
+            document = read_json_bounded(path, self._max_settings_bytes)
+        except JsonTooLargeError as error:
+            raise PluginSettingsError(
+                "settings-too-large",
+                f"settings exceed the {self._max_settings_bytes} byte limit",
+            ) from error
         except (OSError, UnicodeError, ValueError) as error:
             raise PluginSettingsError(
                 "settings-unreadable",

@@ -12,10 +12,14 @@ from pathlib import Path
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from ..atomicio import read_json_bounded
 from .artifacts import ArtifactReference
 
 _IDENTITY = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?")
 _PROVENANCE_FILE = "provenance.json"
+# A provenance record is a fixed handful of identifiers plus one signature;
+# anything larger is corruption or tampering, not a document worth parsing.
+MAX_PROVENANCE_BYTES = 64 * 1024
 _PROVENANCE_VERSION = 1
 _MAX_SOURCE_LENGTH = 2048
 _MAX_TIMESTAMP_MS = 253402300799999
@@ -161,7 +165,7 @@ class ArtifactTrustVerifier:
         """Re-read persisted provenance and enforce current offline policy."""
         path = Path(version_root) / _PROVENANCE_FILE
         try:
-            document = json.loads(path.read_text(encoding="utf-8"))
+            document = read_json_bounded(path, MAX_PROVENANCE_BYTES)
         except FileNotFoundError:
             return self.verify(reference, None)
         except (OSError, ValueError) as error:

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import jsonschema
 
+from .atomicio import JsonTooLargeError, read_json_bounded
 from .discovery import BACKENDS
 from .state import ProfilePolicy
 
@@ -91,17 +92,13 @@ class ManifestError(ValueError):
 def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
     """One strictly validated manifest document, or :class:`ManifestError`."""
     try:
-        size = manifest_path.stat().st_size
+        manifest = read_json_bounded(manifest_path, MAX_MANIFEST_BYTES)
+    except JsonTooLargeError as error:
+        raise ManifestError(
+            f"{manifest_path}: manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        ) from error
     except OSError as error:
         raise ManifestError(f"{manifest_path}: unreadable manifest: {error}") from error
-    if size > MAX_MANIFEST_BYTES:
-        raise ManifestError(f"{manifest_path}: manifest exceeds {MAX_MANIFEST_BYTES} bytes")
-    try:
-        payload = manifest_path.read_bytes()
-    except OSError as error:
-        raise ManifestError(f"{manifest_path}: unreadable manifest: {error}") from error
-    try:
-        manifest = json.loads(payload)
     except ValueError as error:
         raise ManifestError(f"{manifest_path}: invalid JSON: {error}") from error
     violations = validate_document("workload-manifest.schema.json", manifest)

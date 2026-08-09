@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..atomicio import read_json_bounded
 from .artifact_installation import (
     ArtifactActivation,
     ArtifactInstallationError,
@@ -19,6 +19,8 @@ from .artifact_installation import (
 from .artifacts import ArtifactReference, artifact_filename, artifact_reference_error
 
 _ARTIFACT_METADATA_VERSION = 1
+# Artifact metadata is one reference document; a larger file is corruption.
+MAX_ARTIFACT_METADATA_BYTES = 64 * 1024
 
 
 class ArtifactCacheError(RuntimeError):
@@ -161,7 +163,7 @@ class ArtifactCache:
     def _read_entry(self, artifact_id: str, version_root: Path) -> _CacheEntry:
         metadata_path = version_root / "artifact.json"
         try:
-            document = json.loads(metadata_path.read_text(encoding="utf-8"))
+            document = read_json_bounded(metadata_path, MAX_ARTIFACT_METADATA_BYTES)
         except (OSError, ValueError) as error:
             raise ArtifactCacheError(
                 "cache-state-invalid", f"cannot read {metadata_path}: {error}"
