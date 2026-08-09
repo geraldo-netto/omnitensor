@@ -1,5 +1,11 @@
 """Stable contracts for workload plugins."""
 
+from .artifact_cache import (
+    ArtifactCache,
+    ArtifactCacheAccounting,
+    ArtifactCacheCollection,
+    ArtifactCacheError,
+)
 from .artifact_compatibility import (
     AcceleratorRuntime,
     ArtifactCompatibility,
@@ -161,6 +167,10 @@ __all__ = [
     "ArtifactCompatibility",
     "ArtifactCompatibilityChecker",
     "ArtifactCompatibilityDecision",
+    "ArtifactCache",
+    "ArtifactCacheAccounting",
+    "ArtifactCacheCollection",
+    "ArtifactCacheError",
     "DEFAULT_MAX_ARTIFACT_BYTES",
     "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
     "DEFAULT_MAX_FRAME_BYTES",

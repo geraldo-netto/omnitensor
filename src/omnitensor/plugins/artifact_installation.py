@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -59,6 +61,15 @@ class ArtifactInstallation:
     previous: ArtifactReference | None
 
 
+def _store_locked(method):
+    @functools.wraps(method)
+    def locked(installer, *args, **kwargs):
+        with artifact_store_lock(installer._root):
+            return method(installer, *args, **kwargs)
+
+    return locked
+
+
 def artifact_reference_document(reference: ArtifactReference) -> dict[str, object]:
     """Stable JSON representation used by activation and cache metadata."""
     return {
@@ -101,6 +112,7 @@ class ArtifactInstaller:
         self._max_artifact_bytes = max_artifact_bytes
         self._trust_verifier = trust_verifier
 
+    @_store_locked
     def install(
         self,
         reference: ArtifactReference,
@@ -176,6 +188,7 @@ class ArtifactInstaller:
             max_artifact_bytes=self._max_artifact_bytes,
         ).resolve(active)
 
+    @_store_locked
     def rollback(self, artifact_id: str) -> ArtifactInstallation:
         """Atomically swap active and rollback versions after re-verification."""
         current = self.activation(artifact_id)
@@ -372,3 +385,21 @@ def _fsync_directory(directory: Path) -> None:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+
+
+@contextlib.contextmanager
+def artifact_store_lock(root: Path):
+    """Serialize activation, rollback, and cache collection across processes."""
+    store = Path(root).resolve()
+    store.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(store / ".artifact-store.lock", flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("artifact store lock is not a regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
