@@ -1,0 +1,66 @@
+"""Coral Edge TPU executor via tflite-runtime and libedgetpu.
+
+Uses ``tflite_runtime`` with ``load_delegate("libedgetpu.so.1")`` rather
+than pycoral: pycoral's packaging is effectively dead and pins old Python,
+while the delegate path is the supported minimal surface.  Only fully
+quantized, edgetpu-compiled models are compatible.
+"""
+
+from __future__ import annotations
+
+import time
+
+from .base import Availability, InferenceResult, require_available
+
+EDGETPU_DELEGATE = "libedgetpu.so.1"
+
+
+def _import_tflite():  # pragma: no cover - trivial import shim
+    try:
+        from tflite_runtime import interpreter as tflite  # noqa: PLC0415
+        return tflite
+    except ImportError:
+        return None
+
+
+class TpuExecutor:
+    backend = "tpu"
+    model_formats = frozenset({"tflite-edgetpu"})
+
+    def __init__(self, device_present: bool, runtime=None):
+        self._device_present = device_present
+        self._runtime = runtime if runtime is not None else _import_tflite()
+        self._delegate_error: str | None = None
+
+    def availability(self) -> Availability:
+        if not self._device_present:
+            return Availability(False, "No Coral Edge TPU device detected")
+        if self._runtime is None:
+            return Availability(False, "tflite-runtime is not installed")
+        if self._delegate_error is not None:
+            return Availability(False, self._delegate_error)
+        return Availability(True)
+
+    def run(self, model_path: str, inputs: list) -> InferenceResult:
+        require_available(self)
+        try:
+            delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
+        except (ValueError, OSError) as error:
+            self._delegate_error = f"Could not load {EDGETPU_DELEGATE}: {error}"
+            raise RuntimeError(self._delegate_error) from error
+        interpreter = self._runtime.Interpreter(
+            model_path=model_path,
+            experimental_delegates=[delegate],
+        )
+        interpreter.allocate_tensors()
+        input_details = interpreter.get_input_details()
+        for detail, value in zip(input_details, inputs, strict=True):
+            interpreter.set_tensor(detail["index"], value)
+        started = time.monotonic()
+        interpreter.invoke()
+        duration_ms = (time.monotonic() - started) * 1000
+        outputs = [
+            interpreter.get_tensor(detail["index"])
+            for detail in interpreter.get_output_details()
+        ]
+        return InferenceResult(outputs=outputs, duration_ms=duration_ms)

@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from conftest import sample_manifest
+
+from omnitensor.executors.base import supports_model
+from omnitensor.executors.gpu import GpuExecutor
+from omnitensor.executors.npu import NpuExecutor
+from omnitensor.executors.tpu import TpuExecutor
+from omnitensor.registry import Workload
+from omnitensor.scheduler import Scheduler, pick_backend
+
+
+class FakeTfliteInterpreter:
+    def __init__(self, model_path, experimental_delegates):
+        self.model_path = model_path
+        self.delegates = experimental_delegates
+        self.tensors = {}
+
+    def allocate_tensors(self):
+        pass
+
+    def get_input_details(self):
+        return [{"index": 0}]
+
+    def get_output_details(self):
+        return [{"index": 1}]
+
+    def set_tensor(self, index, value):
+        self.tensors[index] = value
+
+    def invoke(self):
+        self.tensors[1] = [value * 2 for value in self.tensors[0]]
+
+    def get_tensor(self, index):
+        return self.tensors[index]
+
+
+class FakeTfliteRuntime:
+    Interpreter = FakeTfliteInterpreter
+
+    @staticmethod
+    def load_delegate(name):
+        assert name == "libedgetpu.so.1"
+        return object()
+
+
+class FakeOrtSession:
+    def __init__(self, model_path, providers):
+        self.providers = providers
+
+    def get_inputs(self):
+        class _Input:
+            name = "input"
+        return [_Input()]
+
+    def run(self, _outputs, feed):
+        return [[value + 1 for value in feed["input"]]]
+
+
+class FakeOrtRuntime:
+    InferenceSession = FakeOrtSession
+
+    def __init__(self, providers):
+        self._providers = providers
+
+    def get_available_providers(self):
+        return self._providers
+
+
+def workload(**requirement_overrides) -> Workload:
+    manifest = sample_manifest(**requirement_overrides)
+    return Workload(id=manifest["id"], manifest=manifest)
+
+
+def test_tpu_executor_runs_real_delegate_path_with_injected_runtime():
+    executor = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime())
+    result = executor.run("model.tflite", [[1, 2, 3]])
+    assert result.outputs == [[2, 4, 6]]
+    assert result.duration_ms >= 0
+
+
+def test_tpu_executor_degrades_without_device_or_runtime():
+    assert "No Coral" in TpuExecutor(device_present=False).availability().reason
+    missing = TpuExecutor(device_present=True, runtime=None)
+    missing._runtime = None
+    assert "not installed" in missing.availability().reason
+    with pytest.raises(RuntimeError, match="unavailable"):
+        missing.run("model.tflite", [[1]])
+
+
+def test_gpu_executor_requires_gpu_provider_and_never_uses_cpu():
+    cpu_only = GpuExecutor(device_present=True, runtime=FakeOrtRuntime(["CPUExecutionProvider"]))
+    availability = cpu_only.availability()
+    assert availability.available is False
+    assert "CPU provider is not used" in availability.reason
+
+    cuda = GpuExecutor(device_present=True, runtime=FakeOrtRuntime(
+        ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    ))
+    assert cuda.availability().available is True
+    result = cuda.run("model.onnx", [[1, 2]])
+    assert result.outputs == [[2, 3]]
+
+
+def test_npu_executor_reports_missing_plugin():
+    class FakeCore:
+        available_devices = ["CPU", "GPU"]
+
+    class FakeOpenVino:
+        Core = FakeCore
+
+    executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
+    availability = executor.availability()
+    assert availability.available is False
+    assert "no NPU plugin" in availability.reason
+
+
+def test_model_format_compatibility():
+    tpu = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime())
+    assert supports_model(tpu, None) is True
+    assert supports_model(tpu, {"format": "tflite-edgetpu"}) is True
+    assert supports_model(tpu, {"format": "onnx"}) is False
+
+
+def test_pick_backend_follows_preference_and_reports_reasons():
+    executors = {
+        "tpu": TpuExecutor(device_present=False),
+        "gpu": GpuExecutor(device_present=True, runtime=FakeOrtRuntime(["CUDAExecutionProvider"])),
+    }
+    gpu_capable = workload(
+        accelerator="gpu",
+        acceleratorPreference=["tpu", "gpu"],
+        model={
+            "id": "sample-model",
+            "version": "1.0.0",
+            "format": "onnx",
+            "fullyQuantized": False,
+            "minimumCompilerVersion": "1",
+            "minimumRuntimeVersion": "1",
+        },
+    )
+    backend, reason = pick_backend(gpu_capable, executors)
+    assert backend == "gpu"
+    assert reason == ""
+
+    tpu_only = workload(acceleratorPreference=["tpu"])
+    backend, reason = pick_backend(tpu_only, executors)
+    assert backend is None
+    assert "No Coral" in reason
+
+    missing_backend = workload(acceleratorPreference=["npu"])
+    backend, reason = pick_backend(missing_backend, executors)
+    assert backend is None
+    assert "npu: no executor" in reason
+
+
+class SlowExecutor:
+    backend = "tpu"
+    model_formats = frozenset({"tflite-edgetpu"})
+
+    def __init__(self):
+        self.served = []
+
+    def availability(self):
+        from omnitensor.executors.base import Availability
+        return Availability(True)
+
+    def run(self, model_path, inputs):
+        from omnitensor.executors.base import InferenceResult
+        self.served.append(model_path)
+        return InferenceResult(outputs=[inputs], duration_ms=1.0)
+
+
+def test_scheduler_serializes_per_device_and_reports_stats():
+    async def scenario():
+        executor = SlowExecutor()
+        scheduler = Scheduler({"tpu": executor}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        futures = [
+            scheduler.submit("tpu", "profile-a", f"job-{index}", [index])
+            for index in range(5)
+        ]
+        results = await asyncio.gather(*futures)
+        assert len(results) == 5
+        assert sorted(executor.served) == sorted(f"job-{index}" for index in range(5))
+        scheduler.tick()
+        stats = scheduler.stats()
+        assert stats["queueDepth"] == 0
+        assert stats["runningProfiles"] == 0
+        assert stats["loads"]["tpu"] is not None
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_scheduler_weighted_shares_favour_heavier_profiles():
+    async def scenario():
+        executor = SlowExecutor()
+        weights = {"heavy": 5, "light": 1}
+        scheduler = Scheduler({"tpu": executor}, weight_of=lambda profile: weights[profile])
+        futures = []
+        for index in range(6):
+            futures.append(scheduler.submit("tpu", "light", f"light-{index}", []))
+            futures.append(scheduler.submit("tpu", "heavy", f"heavy-{index}", []))
+        scheduler.start()
+        await asyncio.gather(*futures)
+        first_six = executor.served[:6]
+        heavy_share = sum(1 for name in first_six if name.startswith("heavy"))
+        assert heavy_share >= 4
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_scheduler_propagates_executor_failures():
+    class FailingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            raise RuntimeError("device wedged")
+
+    async def scenario():
+        scheduler = Scheduler({"tpu": FailingExecutor()}, weight_of=lambda _profile: 1)
+        scheduler.start()
+        with pytest.raises(RuntimeError, match="device wedged"):
+            await scheduler.submit("tpu", "profile-a", "job", [])
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_npu_executor_runs_via_openvino_when_plugin_present():
+    class FakeCompiled:
+        def __call__(self, inputs):
+            return {"output": [value * 3 for value in inputs[0]]}
+
+    class FakeCore:
+        available_devices = ["CPU", "NPU"]
+
+        def compile_model(self, model_path, device):
+            assert device == "NPU"
+            return FakeCompiled()
+
+    class FakeOpenVino:
+        Core = FakeCore
+
+    executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
+    assert executor.availability().available is True
+    result = executor.run("model.xml", [[1, 2]])
+    assert result.outputs == [[3, 6]]
+
+
+def test_npu_executor_degrades_without_device_or_runtime():
+    assert "No /dev/accel" in NpuExecutor(device_present=False).availability().reason
+    missing = NpuExecutor(device_present=True, runtime=None)
+    missing._runtime = None
+    assert "not installed" in missing.availability().reason
+
+
+def test_npu_executor_reports_discovery_failure():
+    class ExplodingCore:
+        def __init__(self):
+            raise OSError("plugin registry corrupt")
+
+    class FakeOpenVino:
+        Core = ExplodingCore
+
+    executor = NpuExecutor(device_present=True, runtime=FakeOpenVino())
+    availability = executor.availability()
+    assert availability.available is False
+    assert "discovery failed" in availability.reason

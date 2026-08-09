@@ -4,27 +4,35 @@
   "title": "TPU Workload Manager runtime snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "generatedAt", "device", "metrics", "profiles", "alerts"],
+  "required": ["version", "generatedAt", "devices", "metrics", "profiles", "alerts"],
   "properties": {
     "version": {"const": 1},
     "generatedAt": {"type": "integer", "minimum": 1},
-    "device": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["available", "name", "kind"],
-      "properties": {
-        "available": {"type": "boolean"},
-        "name": {"type": "string", "maxLength": 120},
-        "kind": {"enum": ["usb", "pcie", "unknown"]},
-        "reason": {"type": "string", "maxLength": 240}
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "backend", "available", "name", "kind"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "backend": {"enum": ["tpu", "npu", "gpu"]},
+          "available": {"type": "boolean"},
+          "name": {"type": "string", "maxLength": 120},
+          "kind": {"enum": ["usb", "pcie", "accel", "dri", "unknown"]},
+          "vendor": {"type": "string", "maxLength": 80},
+          "load": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "reason": {"type": "string", "maxLength": 240}
+        }
       }
     },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["load", "queueDepth", "runningProfiles"],
+      "required": ["queueDepth", "runningProfiles"],
       "properties": {
-        "load": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
         "queueDepth": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "runningProfiles": {"type": "integer", "minimum": 0, "maximum": 128}
       }

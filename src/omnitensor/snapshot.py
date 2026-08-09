@@ -1,0 +1,71 @@
+"""Snapshot building and atomic publishing.
+
+Every snapshot is validated against the canonical
+``runtime-snapshot.schema.json`` before it is written, and the write is
+atomic (temp file + ``os.replace``) so the applet's hardened reader never
+observes a partial document.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import tempfile
+import time
+from pathlib import Path
+
+from .discovery import Device
+from .registry import validate_document
+
+SNAPSHOT_VERSION = 1
+MAX_DEVICE_ENTRIES = 16
+
+
+def _now_ms() -> int:
+    return max(1, int(time.time() * 1000))
+
+
+def build_snapshot(
+    devices: list[Device],
+    metrics: dict,
+    profiles: dict[str, dict],
+    alerts: list[dict] | None = None,
+    generated_at_ms: int | None = None,
+) -> dict:
+    """Build a contract-valid snapshot document.
+
+    ``metrics`` must carry integer ``queueDepth`` and ``runningProfiles``;
+    per-device load rides on the device entries themselves.
+    """
+    snapshot = {
+        "version": SNAPSHOT_VERSION,
+        "generatedAt": generated_at_ms if generated_at_ms is not None else _now_ms(),
+        "devices": [device.snapshot_entry() for device in devices[:MAX_DEVICE_ENTRIES]],
+        "metrics": {
+            "queueDepth": int(metrics.get("queueDepth", 0)),
+            "runningProfiles": int(metrics.get("runningProfiles", 0)),
+        },
+        "profiles": profiles,
+        "alerts": alerts or [],
+    }
+    violations = validate_document("runtime-snapshot.schema.json", snapshot)
+    if violations:
+        raise ValueError(f"snapshot violates contract: {'; '.join(violations)}")
+    return snapshot
+
+
+def write_snapshot(path: Path, snapshot: dict) -> None:
+    """Atomically publish ``snapshot`` to ``path``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".snapshot-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(snapshot, stream, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise

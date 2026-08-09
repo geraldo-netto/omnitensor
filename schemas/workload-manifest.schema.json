@@ -22,7 +22,14 @@
       "required": ["runtimeApi", "accelerator", "minimumDevices", "model"],
       "properties": {
         "runtimeApi": {"const": 1},
-        "accelerator": {"const": "edge-tpu"},
+        "accelerator": {"enum": ["tpu", "npu", "gpu"]},
+        "acceleratorPreference": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["tpu", "npu", "gpu"]}
+        },
         "minimumDevices": {"type": "integer", "minimum": 0, "maximum": 16},
         "model": {
           "type": ["object", "null"],
@@ -31,13 +38,34 @@
           "properties": {
             "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 120},
             "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$", "maxLength": 32},
-            "format": {"const": "tflite-edgetpu"},
-            "fullyQuantized": {"const": true},
+            "format": {"enum": ["tflite-edgetpu", "tflite", "onnx", "openvino"]},
+            "fullyQuantized": {"type": "boolean"},
             "minimumCompilerVersion": {"type": "string", "minLength": 1, "maxLength": 80},
             "minimumRuntimeVersion": {"type": "string", "minLength": 1, "maxLength": 80}
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"accelerator": {"const": "tpu"}}, "required": ["accelerator"]},
+          "then": {
+            "properties": {
+              "model": {
+                "anyOf": [
+                  {"type": "null"},
+                  {
+                    "type": "object",
+                    "properties": {
+                      "format": {"const": "tflite-edgetpu"},
+                      "fullyQuantized": {"const": true}
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
     },
     "ui": {
       "type": "object",
