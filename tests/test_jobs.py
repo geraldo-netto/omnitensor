@@ -473,3 +473,80 @@ def test_request_id_recovery_measures_encoded_bytes_not_characters():
 
     assert reply["requestId"] == "invalid"
     assert reply["status"] == "rejected"
+
+
+class SwallowingDispatcher:
+    """A plugin that catches cancellation and reaches a terminal state anyway."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+
+    def dispatch(self, job_id, workload_id, payload):
+        async def operation():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                if isinstance(self._outcome, Exception):
+                    raise self._outcome from None
+                return self._outcome
+
+        return operation()
+
+
+def test_cancel_reports_completion_when_the_job_finished_as_cancellation_landed():
+    """Reporting "cancelled" credited the caller's request with an outcome it
+    did not cause."""
+
+    async def scenario():
+        service = JobSubmissionService(
+            SwallowingDispatcher("finished"),
+            allows_all(),
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 1,
+        )
+        await service.submit_job_text(json.dumps(submit_document()))
+        await asyncio.sleep(0)  # let the job reach its await point
+        return decode(await service.cancel_job_text(json.dumps(cancel_document("job-1"))))
+
+    reply = run_scenario(scenario())
+
+    assert reply["status"] == "rejected"
+    assert reply["code"] == "job-already-completed"
+    assert validate_document("runtime-job-acknowledgement.schema.json", reply) == []
+
+
+def test_cancel_reports_failure_when_the_job_failed_as_cancellation_landed():
+    async def scenario():
+        service = JobSubmissionService(
+            SwallowingDispatcher(ValueError("private")),
+            allows_all(),
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 1,
+        )
+        await service.submit_job_text(json.dumps(submit_document()))
+        await asyncio.sleep(0)  # let the job reach its await point
+        return decode(await service.cancel_job_text(json.dumps(cancel_document("job-1"))))
+
+    reply = run_scenario(scenario())
+
+    assert reply["status"] == "rejected"
+    assert reply["code"] == "job-already-failed"
+    assert validate_document("runtime-job-acknowledgement.schema.json", reply) == []
+
+
+def test_cancel_still_reports_cancellation_when_the_job_really_stopped():
+    async def scenario():
+        service = JobSubmissionService(
+            BlockingDispatcher(),
+            allows_all(),
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 1,
+        )
+        await service.submit_job_text(json.dumps(submit_document()))
+        await asyncio.sleep(0)  # let the job reach its await point
+        return decode(await service.cancel_job_text(json.dumps(cancel_document("job-1"))))
+
+    reply = run_scenario(scenario())
+
+    assert reply["status"] == "cancelled"
+    assert reply["code"] == "job-cancelled"

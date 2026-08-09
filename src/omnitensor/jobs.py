@@ -251,13 +251,8 @@ class JobSubmissionService:
                     "cancel-timeout",
                     "Job did not stop within the cancellation deadline",
                 )
-            return self._reply(
-                request_id,
-                job_id,
-                "cancelled",
-                "job-cancelled",
-                "Job cancelled",
-            )
+            status, code, message = _settled_outcome(active.task)
+            return self._reply(request_id, job_id, status, code, message)
         except _RequestError as error:
             return self._reply(
                 error.request_id,
@@ -352,6 +347,28 @@ def _parse_request(text: str, schema: str, max_bytes: int) -> dict:
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _settled_outcome(task: asyncio.Task) -> tuple[str, str, str]:
+    """Describe how a settled job actually ended, not how it was asked to end.
+
+    A job can reach a terminal state before the cancellation reaches it.
+    Reporting "cancelled" then credits the caller's request with an outcome
+    something else decided.
+    """
+    if task.cancelled():
+        return "cancelled", "job-cancelled", "Job cancelled"
+    if task.exception() is not None:
+        return (
+            "rejected",
+            "job-already-failed",
+            "Job had already failed when cancellation arrived",
+        )
+    return (
+        "rejected",
+        "job-already-completed",
+        "Job had already completed when cancellation arrived",
+    )
 
 
 def _request_id(document: object) -> str:

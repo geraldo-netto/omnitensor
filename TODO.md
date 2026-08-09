@@ -70,7 +70,6 @@
 | OMNI-0148 | open | low | s | OMNI-0036 | executor model caches (`executors/npu.py:74`, `executors/tpu.py`): `_compiled_models` and `_interpreters` are never evicted and never notice a replaced model file, giving unbounded memory growth and stale-model serving; bound the caches and invalidate on file change. |
 | OMNI-0149 | open | low | s | OMNI-0067 | scheduler workers (`scheduler.py:253`): a `BaseException` from `_execute` kills a backend's worker task silently and leaves its queued futures pending forever; keep the loop alive, fail the affected futures, and report the backend as degraded. |
 | OMNI-0150 | open | low | xs | OMNI-0068 | scheduler fairness (`scheduler.py:81`): the anti-burst pass reset applies only on queue join, so a profile held out by `admits` keeps a stale low pass and monopolizes the device when re-enabled; clamp its pass to current virtual time on re-admission. |
-| OMNI-0151 | open | low | xs | OMNI-0071 | job cancellation (`jobs.py:243`): `cancel_job_text` reports "cancelled" for a job that actually finished or failed as cancellation landed; check `task.cancelled()` after the wait and report the real outcome. |
 | OMNI-0155 | open | low | s | OMNI-0049 | peripheral collector (`plugins/peripheral_collection.py:192`): `_previous` keeps only the truncated `selected` set, so devices past `max_devices` are reported removed while still attached and re-added when they fit again; track churn against the full eligible set and truncate only the emitted list. |
 
 ## Rejected / Won't fix
