@@ -19,6 +19,7 @@ from conftest import (
 )
 
 from omnitensor.discovery import Device
+from omnitensor.plugins.artifacts import ArtifactResolution
 from omnitensor.registry import validate_document
 from omnitensor.service import (
     FileSnapshotPublisher,
@@ -1157,3 +1158,87 @@ def test_the_artifact_root_defaults_to_the_user_share_directory(monkeypatch, tmp
 
     assert str(service._artifact_store._root).endswith("omnitensor/artifacts")
     assert DEFAULT_ARTIFACT_ROOT.endswith("omnitensor/artifacts")
+
+
+def test_inventory_readiness_uses_the_declared_digest_like_dispatch_does(tmp_path):
+    """Resolving by id alone would call an artifact ready that dispatch refuses."""
+    manifest = sample_plugin_manifest("digest-workload")
+    # The schema binds a tpu accelerator to tflite-edgetpu, so an ncnn model
+    # belongs to the GPU lane.
+    manifest["requirements"]["accelerator"] = "gpu"
+    manifest["requirements"]["acceleratorPreference"] = ["gpu"]
+    manifest["requirements"]["model"] = {
+        "id": "sample-model",
+        "version": "1.2.3",
+        "format": "ncnn",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "1.0.0",
+        "minimumRuntimeVersion": "1.0.0",
+    }
+    manifest["plugin"]["artifacts"] = [
+        {
+            "id": "sample-model",
+            "version": "1.2.3",
+            "format": "ncnn",
+            "sha256": "a" * 64,
+        }
+    ]
+    service = build_service(
+        tmp_path,
+        [manifest],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    class RecordingStore:
+        def __init__(self):
+            self.by_reference = []
+            self.by_id = []
+
+        def resolve(self, reference):
+            self.by_reference.append(reference)
+            return ArtifactResolution(False, None, "digest mismatch", 0)
+
+        def resolve_active(self, artifact_id):
+            self.by_id.append(artifact_id)
+            return ArtifactResolution(True, Path("/models/x"), "", 1)
+
+    store = RecordingStore()
+    service._artifact_store = store
+
+    resolution = service._resolve_artifact("sample-model")
+
+    assert [item.sha256 for item in store.by_reference] == ["a" * 64]
+    assert store.by_id == []
+    assert resolution.ready is False
+
+
+def test_inventory_readiness_falls_back_to_the_active_version_without_a_digest(tmp_path):
+    service = build_service(
+        tmp_path,
+        [sample_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    class RecordingStore:
+        def __init__(self):
+            self.by_id = []
+
+        def resolve(self, reference):  # pragma: no cover - no digest is declared
+            raise AssertionError("no digest is declared for this artifact")
+
+        def resolve_active(self, artifact_id):
+            self.by_id.append(artifact_id)
+            return ArtifactResolution(False, None, "no active version", 0)
+
+    store = RecordingStore()
+    service._artifact_store = store
+
+    service._resolve_artifact("unknown-model")
+
+    assert store.by_id == ["unknown-model"]

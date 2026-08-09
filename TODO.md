@@ -63,7 +63,6 @@
 | OMNI-0160 | open | high | s | OMNI-0067 | model digest coverage: `requirements.model` in a v1 manifest carries no `sha256`, so dispatch can only fall back to `resolve_active` and trust the digest recorded at install; add the declared digest to the v1 model requirement, or migrate the bundled catalog to manifest v2 so every dispatch verifies the exact artifact. |
 | OMNI-0161 | open | medium | s | OMNI-0067, OMNI-0069 | executor result mapping: `inference_result_payload` returns raw executor output tensors, which are backend-native objects (ncnn Mat, numpy array) and are not guaranteed JSON-encodable for a plugin result or a D-Bus reply; define the tensor wire encoding and convert at the boundary. |
 | OMNI-0162 | open | medium | s | OMNI-0067 | dispatch input validation: submitted tensors are passed to the executor unvalidated, so shape, dtype, and element bounds are only checked by the backend; validate inputs against the model's declared tensor contract before queueing. |
-| OMNI-0164 | open | low | xs | OMNI-0072 | inventory artifact readiness: `_resolve_artifact` resolves by artifact id alone, so `DescribePlugins` reports readiness without checking the declared digest that `dispatch` enforces; resolve the declared reference so the inventory and dispatch agree. |
 
 ## Rejected / Won't fix
 

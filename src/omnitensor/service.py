@@ -35,7 +35,7 @@ from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService
 from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
-from .dispatch import InferenceJobDispatcher
+from .dispatch import InferenceJobDispatcher, declared_artifact_reference
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -48,7 +48,7 @@ from .jobs import (
     UnavailableJobDispatcher,
 )
 from .plugins.artifact_installation import ArtifactInstaller
-from .plugins.artifacts import ArtifactResolution
+from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
@@ -388,11 +388,37 @@ class OmniTensorService:
         return json.dumps(document, separators=(",", ":"))
 
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
+        """Report readiness exactly as dispatch would decide it.
+
+        Resolving by id alone would call an artifact ready that dispatch then
+        refuses for a digest mismatch, so the inventory would tell a user the
+        opposite of what the runtime does.  When a manifest declares a digest,
+        that is what is checked.
+        """
         if self._artifact_store is None:
             return ArtifactResolution(
                 False, None, "no artifact store is configured for this service", 0
             )
+        reference = self._declared_reference(artifact_id)
+        if reference is not None:
+            return self._artifact_store.resolve(reference)
         return self._artifact_store.resolve_active(artifact_id)
+
+    def _declared_reference(self, artifact_id: str):
+        """The digest a bundled or installed manifest declares for this artifact."""
+        for workload in self._workloads.values():
+            model = workload.model
+            if model is not None and model["id"] == artifact_id:
+                reference = declared_artifact_reference(workload, model)
+                if reference is not None:
+                    return reference
+        for plugin in self._plugin_runtime.snapshot.catalog.plugins:
+            for entry in plugin.manifest["plugin"]["artifacts"]:
+                if entry["id"] == artifact_id:
+                    return ArtifactReference(
+                        entry["id"], entry["version"], entry["format"], entry["sha256"]
+                    )
+        return None
 
     def _build_runtime_snapshot(self) -> dict:
         self._scheduler.tick()
