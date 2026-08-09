@@ -146,7 +146,10 @@ class ConfigurationView:
                     "configuration-missing",
                     f"required configuration key is absent: {key}",
                 )
-            value = copy.deepcopy(default)
+            # The default is the caller's own answer for an absent key, so it
+            # is not theirs to fail: type-checking it made optional(key, str)
+            # raise on the implicit None it was asked to return.
+            return copy.deepcopy(default)
         if not _matches_type(value, expected_type):
             raise SDKContractError(
                 "configuration-type",

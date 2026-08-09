@@ -386,3 +386,30 @@ def test_sdk_exports_contracts_without_service_internals():
     for internal in ("service", "scheduler", "control", "registry", "executors", "state"):
         assert f"omnitensor.{internal}" not in source
         assert f"..{internal}" not in source
+
+
+def test_optional_returns_none_for_an_absent_key():
+    """The implicit None default was type-checked against the caller's type."""
+    view = sdk.ConfigurationView({})
+    assert view.optional("label", str) is None
+    assert view.optional("count", int) is None
+
+
+def test_optional_returns_a_typed_default_of_any_type():
+    view = sdk.ConfigurationView({})
+    assert view.optional("label", str, "fallback") == "fallback"
+    assert view.optional("retries", int, 0) == 0
+    assert view.optional("window", list, ()) == ()
+
+
+def test_optional_still_rejects_a_present_value_of_the_wrong_type():
+    view = sdk.ConfigurationView({"label": 7})
+    with pytest.raises(sdk.SDKContractError) as excinfo:
+        view.optional("label", str)
+    assert excinfo.value.code == "configuration-type"
+
+
+def test_required_is_unchanged_by_the_default_exemption():
+    with pytest.raises(sdk.SDKContractError) as excinfo:
+        sdk.ConfigurationView({}).required("label", str)
+    assert excinfo.value.code == "configuration-missing"
