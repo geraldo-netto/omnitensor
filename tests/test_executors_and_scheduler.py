@@ -10,7 +10,7 @@ from omnitensor.executors.gpu import GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import Workload
-from omnitensor.scheduler import Scheduler, pick_backend
+from omnitensor.scheduler import Scheduler, _BackendQueue, _Job, pick_backend
 
 
 class FakeTfliteInterpreter:
@@ -698,3 +698,18 @@ def test_update_executors_reaps_finished_retired_workers():
         assert scheduler._retired == []
 
     asyncio.run(scenario())
+
+
+def test_backend_queue_initial_state_and_exact_bounded_stride():
+    queue = _BackendQueue()
+    assert queue.busy_ms == 0.0
+    assert queue.load is None
+    queue.push(_Job("alpha", "first", [], future=None))
+    queue.push(_Job("alpha", "second", [], future=None))
+
+    def oversized_weight(profile_id):
+        assert profile_id == "alpha"
+        return 6
+
+    assert queue.pop_weighted(oversized_weight).model_path == "first"
+    assert queue.passes == {"alpha": 0.2}

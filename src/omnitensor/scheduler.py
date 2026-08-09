@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import Counter, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .executors.base import Executor, InferenceResult, supports_model
 from .registry import Workload
@@ -49,13 +49,19 @@ class _Job:
     future: asyncio.Future
 
 
-@dataclass
 class _BackendQueue:
-    profiles: dict[str, deque] = field(default_factory=dict)
-    order: list[str] = field(default_factory=list)
-    passes: dict[str, float] = field(default_factory=dict)
-    busy_ms: float = 0.0
-    load: float | None = None
+    """Mutable backend scheduling state.
+
+    Kept as a regular class because mutmut 3.7 skips methods on decorated
+    classes; explicit initialization keeps stride logic inside mutation scope.
+    """
+
+    def __init__(self) -> None:
+        self.profiles: dict[str, deque] = {}
+        self.order: list[str] = []
+        self.passes: dict[str, float] = {}
+        self.busy_ms = 0.0
+        self.load: float | None = None
 
     def push(self, job: _Job) -> None:
         if job.workload_id not in self.profiles:
