@@ -13,7 +13,8 @@ wiring and can be replaced through constructor injection.
 Configuration comes from environment variables:
 ``OMNITENSOR_STATE_PATH`` (snapshot the applet reads),
 ``OMNITENSOR_POLICY_PATH`` (persisted policy + revision),
-``OMNITENSOR_WORKLOADS`` (manifest directory).
+``OMNITENSOR_WORKLOADS`` (manifest directory),
+``OMNITENSOR_ARTIFACT_ROOT`` (verified model artifact store).
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ DISCOVERY_INTERVAL_S = 10.0
 DEFAULT_STATE_PATH = "~/.local/state/tpu-workload-manager/state.json"
 DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
+DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 
 
 def _no_inventory() -> str:
@@ -499,6 +501,7 @@ def build_service_from_env() -> OmniTensorService:
         snapshot_path=_env_path("OMNITENSOR_STATE_PATH", DEFAULT_STATE_PATH),
         policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
         workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
+        artifact_root=_env_path("OMNITENSOR_ARTIFACT_ROOT", DEFAULT_ARTIFACT_ROOT),
     )
 
 

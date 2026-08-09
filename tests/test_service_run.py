@@ -1127,3 +1127,33 @@ def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
         artifact_root=tmp_path / "artifacts",
     )
     assert isinstance(service.jobs._dispatcher, InferenceJobDispatcher)
+
+
+def test_the_artifact_root_is_configurable_from_the_environment(monkeypatch, tmp_path):
+    """Without this the packaged service was permanently fail-closed."""
+    from omnitensor.dispatch import InferenceJobDispatcher
+    from omnitensor.service import build_service_from_env
+
+    monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("OMNITENSOR_POLICY_PATH", str(tmp_path / "policy.json"))
+    monkeypatch.setenv("OMNITENSOR_WORKLOADS", str(tmp_path / "workloads"))
+    monkeypatch.setenv("OMNITENSOR_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+
+    service = build_service_from_env()
+
+    assert isinstance(service.jobs._dispatcher, InferenceJobDispatcher)
+    assert service._artifact_store is not None
+
+
+def test_the_artifact_root_defaults_to_the_user_share_directory(monkeypatch, tmp_path):
+    from omnitensor.service import DEFAULT_ARTIFACT_ROOT, build_service_from_env
+
+    monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("OMNITENSOR_POLICY_PATH", str(tmp_path / "policy.json"))
+    monkeypatch.setenv("OMNITENSOR_WORKLOADS", str(tmp_path / "workloads"))
+    monkeypatch.delenv("OMNITENSOR_ARTIFACT_ROOT", raising=False)
+
+    service = build_service_from_env()
+
+    assert str(service._artifact_store._root).endswith("omnitensor/artifacts")
+    assert DEFAULT_ARTIFACT_ROOT.endswith("omnitensor/artifacts")

@@ -25,6 +25,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now omnitensor.service
 ```
 
+Inference stays fail-closed until an artifact store is configured, because
+nothing else can prove a model file is the model a manifest declares. Point
+`OMNITENSOR_ARTIFACT_ROOT` at the verified store (default
+`~/.local/share/omnitensor/artifacts`); with no store the service still runs,
+publishes, and answers the bus, but refuses every inference job.
+
 The unit uses `StateDirectory=`, so systemd creates the state directories on
 first start; it needs no pre-existing paths. It also declares `Delegate=yes` so
 each plugin worker can be accounted in its own cgroup.
