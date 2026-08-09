@@ -1,6 +1,10 @@
 [Unit]
 Description=OmniTensor unified local inference service
-After=graphical-session.target
+# The service owns a name on the session bus; require the user D-Bus
+# socket so a non-graphical session (WantedBy=default.target) cannot
+# start it without a bus and spin in a restart loop.
+Requires=dbus.socket
+After=dbus.socket graphical-session.target
 
 [Service]
 Type=exec
