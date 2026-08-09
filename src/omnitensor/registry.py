@@ -30,6 +30,8 @@ _SOURCE_WORKLOADS = (
 )
 LOGGER = logging.getLogger(__name__)
 
+_VALIDATOR_CACHE: dict[str, tuple[tuple[str, int, int], jsonschema.Validator]] = {}
+
 MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
 
@@ -53,8 +55,45 @@ def load_schema(name: str) -> dict:
     return json.loads(_schema_path(name).read_bytes())
 
 
+def _schema_revision(name: str) -> tuple[str, int, int]:
+    """Identify the on-disk schema cheaply enough to check on every call.
+
+    The resolved path is part of the identity: the same contract name resolves
+    to the packaged copy or the source checkout depending on the installation.
+    """
+    path = _schema_path(name)
+    status = path.stat()
+    return str(path), status.st_mtime_ns, status.st_size
+
+
 def _validator(name: str) -> jsonschema.Validator:
-    return jsonschema.Draft202012Validator(load_schema(name))
+    """Return a compiled validator, recompiling only when the schema changes.
+
+    Re-reading and recompiling on every D-Bus call and every snapshot tick is
+    pure overhead, and it makes correctness depend on the file being readable
+    at that instant: an atomic schema replacement is not atomic to a reader
+    that stats and opens separately, and a raised error there would break the
+    never-raises contract of ``apply_command_text``.  Keeping the last good
+    validator makes a transiently unreadable schema a non-event.
+    """
+    cached = _VALIDATOR_CACHE.get(name)
+    try:
+        revision = _schema_revision(name)
+    except OSError:
+        if cached is None:
+            raise
+        return cached[1]
+    if cached is not None and cached[0] == revision:
+        return cached[1]
+    try:
+        validator = jsonschema.Draft202012Validator(load_schema(name))
+    except (OSError, ValueError, jsonschema.SchemaError):
+        if cached is None:
+            raise
+        LOGGER.warning("Keeping the last valid %s; the file on disk is unusable", name)
+        return cached[1]
+    _VALIDATOR_CACHE[name] = (revision, validator)
+    return validator
 
 
 def validate_document(name: str, document: object) -> list[str]:

@@ -405,3 +405,71 @@ def test_catalog_still_rejects_a_bad_bundled_manifest(tmp_path):
 
     with pytest.raises(ManifestError):
         load_workload_catalog(user, bundled_root=bundled)
+
+
+def test_validators_are_compiled_once_per_schema_revision(monkeypatch, tmp_path):
+    """Recompiling per D-Bus call and per two-second snapshot is pure overhead."""
+    packaged = tmp_path / "package-schemas"
+    packaged.mkdir()
+    name = "cached.schema.json"
+    path = packaged / name
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+    compiled = []
+    original = registry.jsonschema.Draft202012Validator
+
+    def counting(schema):
+        compiled.append(schema)
+        return original(schema)
+
+    monkeypatch.setattr(registry.jsonschema, "Draft202012Validator", counting)
+
+    path.write_text('{"type":"integer"}')
+    for _ in range(5):
+        assert validate_document(name, 7) == []
+    assert len(compiled) == 1
+
+    path.write_text('{"type":"string"}')
+    assert validate_document(name, 7)
+    assert len(compiled) == 2
+
+
+def test_a_transiently_missing_schema_keeps_the_last_good_validator(monkeypatch, tmp_path):
+    """apply_command_text must never raise, including mid schema replacement."""
+    packaged = tmp_path / "package-schemas"
+    packaged.mkdir()
+    name = "transient.schema.json"
+    path = packaged / name
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+
+    path.write_text('{"type":"integer"}')
+    assert validate_document(name, 7) == []
+
+    path.unlink()
+    assert validate_document(name, 7) == []
+    assert validate_document(name, "seven")
+
+
+def test_an_unparsable_replacement_keeps_the_last_good_validator(monkeypatch, tmp_path, caplog):
+    packaged = tmp_path / "package-schemas"
+    packaged.mkdir()
+    name = "corrupt.schema.json"
+    path = packaged / name
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+
+    path.write_text('{"type":"integer"}')
+    assert validate_document(name, 7) == []
+
+    path.write_text("{ this is not json")
+    with caplog.at_level("WARNING"):
+        assert validate_document(name, 7) == []
+    assert name in caplog.text
+
+
+def test_a_schema_that_was_never_readable_still_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", tmp_path / "missing")
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+    with pytest.raises(FileNotFoundError):
+        validate_document("never-present.schema.json", 7)
