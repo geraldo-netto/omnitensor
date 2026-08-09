@@ -42,7 +42,7 @@ packages = ["src/omnitensor"]
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
 pytest_add_cli_args_test_selection = ["tests/"]
-also_copy = ["schemas/", "systemd/", "workloads/"]
+also_copy = ["schemas/", "systemd/", "workloads/", "docs/", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
