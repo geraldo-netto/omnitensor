@@ -13,6 +13,11 @@ from pathlib import Path
 
 from omnitensor.atomicio import write_json_atomic
 
+from .artifact_trust import (
+    ArtifactProvenance,
+    ArtifactTrustVerifier,
+    artifact_provenance_document,
+)
 from .artifacts import (
     DEFAULT_MAX_ARTIFACT_BYTES,
     ArtifactReference,
@@ -88,13 +93,21 @@ class ArtifactInstaller:
         root: Path,
         *,
         max_artifact_bytes: int = DEFAULT_MAX_ARTIFACT_BYTES,
+        trust_verifier: ArtifactTrustVerifier | None = None,
     ):
         if max_artifact_bytes < 1:
             raise ValueError("max_artifact_bytes must be positive")
         self._root = Path(root).resolve()
         self._max_artifact_bytes = max_artifact_bytes
+        self._trust_verifier = trust_verifier
 
-    def install(self, reference: ArtifactReference, source: Path) -> ArtifactInstallation:
+    def install(
+        self,
+        reference: ArtifactReference,
+        source: Path,
+        *,
+        provenance: ArtifactProvenance | None = None,
+    ) -> ArtifactInstallation:
         """Stage and verify ``source`` before atomically activating its version."""
         invalid = artifact_reference_error(reference)
         if invalid:
@@ -105,6 +118,13 @@ class ArtifactInstaller:
         try:
             staged_path = stage / artifact_filename(reference.format)
             self._copy_verified(Path(source), staged_path, reference.sha256)
+            self._verify_trust(reference, provenance)
+            if self._trust_verifier is not None:
+                write_json_atomic(
+                    stage / "provenance.json",
+                    artifact_provenance_document(reference, provenance),
+                    prefix=".artifact-provenance-",
+                )
             write_json_atomic(
                 stage / _ARTIFACT_METADATA_FILE,
                 {"version": _DOCUMENT_VERSION, "artifact": artifact_reference_document(reference)},
@@ -112,6 +132,7 @@ class ArtifactInstaller:
             )
             _fsync_directory(stage)
             active_path = self._activate_version(stage, artifact_root, reference)
+            self._verify_stored_trust(reference, active_path.parent)
             previous = current.active if current.active != reference else current.rollback
             next_state = ArtifactActivation(reference, previous)
             try:
@@ -147,6 +168,9 @@ class ArtifactInstaller:
             return ArtifactResolution(
                 False, None, f"artifact has no active version: {artifact_id}", 0
             )
+        trust = self._stored_trust(active)
+        if trust:
+            return ArtifactResolution(False, None, trust, 0)
         return ArtifactResolver(
             [self._root],
             max_artifact_bytes=self._max_artifact_bytes,
@@ -160,6 +184,9 @@ class ArtifactInstaller:
                 "rollback-unavailable",
                 f"artifact has no rollback version: {artifact_id}",
             )
+        trust = self._stored_trust(current.rollback)
+        if trust:
+            raise ArtifactInstallationError("rollback-invalid", trust)
         resolution = ArtifactResolver(
             [self._root],
             max_artifact_bytes=self._max_artifact_bytes,
@@ -171,6 +198,31 @@ class ArtifactInstaller:
             ArtifactActivation(current.rollback, current.active),
         )
         return ArtifactInstallation(current.rollback, resolution.path, current.active)
+
+    def _verify_trust(
+        self,
+        reference: ArtifactReference,
+        provenance: ArtifactProvenance | None,
+    ) -> None:
+        if self._trust_verifier is None:
+            return
+        decision = self._trust_verifier.verify(reference, provenance)
+        if not decision.trusted:
+            raise ArtifactInstallationError("artifact-untrusted", decision.reason)
+
+    def _stored_trust(self, reference: ArtifactReference) -> str:
+        if self._trust_verifier is None:
+            return ""
+        version_root = self._root / reference.id / reference.version
+        decision = self._trust_verifier.verify_installed(reference, version_root)
+        return "" if decision.trusted else decision.reason
+
+    def _verify_stored_trust(self, reference: ArtifactReference, version_root: Path) -> None:
+        if self._trust_verifier is None:
+            return
+        decision = self._trust_verifier.verify_installed(reference, version_root)
+        if not decision.trusted:
+            raise ArtifactInstallationError("artifact-untrusted", decision.reason)
 
     def _artifact_root(self, artifact_id: str) -> Path:
         probe = ArtifactReference(artifact_id, "0.0.0", "onnx", "0" * 64)
