@@ -1,0 +1,235 @@
+"""Property-based (fuzz) coverage for the input boundaries and invariants:
+
+- control acknowledgements stay contract-valid for arbitrary input,
+- stride scheduling stays proportionally fair and always drains,
+- policy loading never raises and always yields bounded state,
+- snapshot building returns schema-valid or raises ValueError,
+- discovery never raises on arbitrary sysfs file contents.
+"""
+
+from __future__ import annotations
+
+import json
+import tempfile
+from pathlib import Path
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from omnitensor.control import ControlService
+from omnitensor.discovery import (
+    Device,
+    DiscoveryPaths,
+    detect_devices,
+    device_utilization,
+)
+from omnitensor.registry import validate_document
+from omnitensor.scheduler import _BackendQueue, _Job
+from omnitensor.snapshot import build_snapshot
+from omnitensor.state import (
+    MAX_WEIGHT,
+    MIN_WEIGHT,
+    PolicyState,
+    PolicyStore,
+    ProfilePolicy,
+)
+
+json_values = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers(min_value=-(10**9), max_value=10**9)
+    | st.floats(allow_nan=False, allow_infinity=False)
+    | st.text(max_size=40),
+    lambda children: st.lists(children, max_size=4)
+    | st.dictionaries(st.text(max_size=8), children, max_size=4),
+    max_leaves=25,
+)
+
+command_like = st.dictionaries(
+    st.sampled_from(
+        ["version", "id", "issuedAt", "expectedRevision", "operation", "profileId", "value", "x"],
+    ),
+    json_values
+    | st.sampled_from(["set-profile-enabled", "set-profile-weight", "set-paused"])
+    | st.sampled_from(["sample-workload", "missing-profile"])
+    | st.integers(min_value=-3, max_value=7)
+    | st.booleans(),
+    max_size=8,
+)
+
+
+class MemoryStorage:
+    """In-memory PolicyStorage for fast property runs."""
+
+    def load(self) -> PolicyState:
+        return PolicyState(
+            profiles={"sample-workload": ProfilePolicy(enabled=True, weight=2)},
+        )
+
+    def save(self, state: PolicyState) -> None:
+        pass
+
+
+def assert_valid_acknowledgement(text: str) -> None:
+    acknowledgement = json.loads(text)
+    assert validate_document("runtime-acknowledgement.schema.json", acknowledgement) == []
+
+
+@given(text=st.text(max_size=300))
+def test_control_never_raises_on_arbitrary_text(text):
+    control = ControlService(MemoryStorage(), {})
+    assert_valid_acknowledgement(control.apply_command_text(text))
+
+
+@given(raw=st.binary(max_size=300))
+def test_control_never_raises_on_arbitrary_bytes(raw):
+    control = ControlService(MemoryStorage(), {})
+    assert_valid_acknowledgement(control.apply_command_text(raw))
+
+
+@given(command=command_like)
+def test_control_never_raises_on_arbitrary_command_documents(command):
+    control = ControlService(MemoryStorage(), {})
+    assert_valid_acknowledgement(control.apply_command_text(json.dumps(command)))
+    state = control.state
+    for policy in state.profiles.values():
+        assert MIN_WEIGHT <= policy.weight <= MAX_WEIGHT
+    assert state.revision >= 0
+
+
+@given(document=json_values)
+def test_policy_load_never_raises_on_arbitrary_json_documents(document):
+    with tempfile.TemporaryDirectory() as root:
+        path = Path(root) / "policy.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        state = PolicyStore(
+            path, {"sample-workload": ProfilePolicy(enabled=True, weight=2)},
+        ).load()
+    assert isinstance(state.paused, bool)
+    assert isinstance(state.revision, int) and not isinstance(state.revision, bool)
+    assert state.revision >= 0
+    for policy in state.profiles.values():
+        assert MIN_WEIGHT <= policy.weight <= MAX_WEIGHT
+        assert isinstance(policy.enabled, bool)
+
+
+@given(raw=st.binary(max_size=200))
+def test_policy_load_never_raises_on_arbitrary_bytes(raw):
+    with tempfile.TemporaryDirectory() as root:
+        path = Path(root) / "policy.json"
+        path.write_bytes(raw)
+        state = PolicyStore(path, {"w": ProfilePolicy(enabled=False, weight=4)}).load()
+    assert MIN_WEIGHT <= state.profiles["w"].weight <= MAX_WEIGHT
+
+
+profile_plan = st.dictionaries(
+    st.sampled_from(["alpha", "beta", "gamma", "delta"]),
+    st.tuples(st.integers(min_value=1, max_value=5), st.integers(min_value=1, max_value=25)),
+    min_size=1,
+    max_size=4,
+)
+
+
+@given(plan=profile_plan, data=st.data())
+def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
+    submissions = [
+        profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)
+    ]
+    order = data.draw(st.permutations(submissions))
+    queue = _BackendQueue()
+    for index, profile_id in enumerate(order):
+        queue.push(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
+
+    weights = {profile_id: weight for profile_id, (weight, _jobs) in plan.items()}
+    served = dict.fromkeys(plan, 0)
+    popped = 0
+    while True:
+        all_pending = all(queue.profiles[profile_id] for profile_id in plan)
+        job = queue.pop_weighted(lambda profile_id: weights[profile_id])
+        if job is None:
+            break
+        popped += 1
+        served[job.workload_id] += 1
+        if all_pending:
+            # Stride invariant: while every profile is pending, normalized
+            # service (served / weight) never diverges by more than one stride.
+            normalized = [served[p] / weights[p] for p in plan]
+            assert max(normalized) - min(normalized) <= 1.0 + 1e-9
+
+    assert popped == len(submissions)
+    assert queue.depth() == 0
+    assert queue.pop_weighted(lambda profile_id: weights[profile_id]) is None
+    assert served == {profile_id: jobs for profile_id, (_w, jobs) in plan.items()}
+
+
+device_entries = st.builds(
+    Device,
+    id=st.text(max_size=90),
+    backend=st.sampled_from(["tpu", "npu", "gpu", "cpu", ""]),
+    name=st.text(max_size=130),
+    kind=st.sampled_from(["usb", "pcie", "accel", "dri", "unknown", "weird"]),
+    vendor=st.text(max_size=90),
+    load=st.none() | st.floats(min_value=-50, max_value=150, allow_nan=False),
+    available=st.booleans(),
+    reason=st.text(max_size=250),
+)
+
+
+@given(
+    devices=st.lists(device_entries, max_size=20),
+    metrics=st.dictionaries(
+        st.sampled_from(["queueDepth", "runningProfiles", "loads", "junk"]),
+        json_values,
+        max_size=4,
+    ),
+    profiles=st.dictionaries(st.text(max_size=12), json_values, max_size=4),
+    generated_at=st.none() | st.integers(min_value=-10, max_value=2**53),
+)
+def test_build_snapshot_is_schema_valid_or_value_error(devices, metrics, profiles, generated_at):
+    try:
+        snapshot = build_snapshot(
+            devices=devices,
+            metrics=metrics,
+            profiles=profiles,
+            generated_at_ms=generated_at,
+        )
+    except ValueError:
+        return
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+    json.dumps(snapshot)
+
+
+@settings(max_examples=40)
+@given(
+    id_vendor=st.binary(max_size=64),
+    id_product=st.binary(max_size=64),
+    npu_vendor=st.binary(max_size=64),
+    gpu_vendor=st.binary(max_size=64),
+    busy=st.binary(max_size=64),
+)
+def test_discovery_never_raises_on_arbitrary_file_contents(
+    id_vendor, id_product, npu_vendor, gpu_vendor, busy,
+):
+    with tempfile.TemporaryDirectory() as root:
+        paths = DiscoveryPaths(dev=Path(root) / "dev", sys=Path(root) / "sys")
+        usb = paths.sys / "bus/usb/devices/1-1"
+        usb.mkdir(parents=True)
+        (usb / "idVendor").write_bytes(id_vendor)
+        (usb / "idProduct").write_bytes(id_product)
+        (paths.dev / "accel").mkdir(parents=True)
+        (paths.dev / "accel/accel0").touch()
+        npu_dir = paths.sys / "class/accel/accel0/device"
+        npu_dir.mkdir(parents=True)
+        (npu_dir / "vendor").write_bytes(npu_vendor)
+        (paths.dev / "dri").mkdir(parents=True)
+        (paths.dev / "dri/renderD128").touch()
+        gpu_dir = paths.sys / "class/drm/renderD128/device"
+        gpu_dir.mkdir(parents=True)
+        (gpu_dir / "vendor").write_bytes(gpu_vendor)
+        (gpu_dir / "gpu_busy_percent").write_bytes(busy)
+
+        devices = detect_devices(paths)
+        assert {device.backend for device in devices} <= {"tpu", "npu", "gpu"}
+        for device in devices:
+            utilization = device_utilization(paths, device)
+            assert utilization is None or 0.0 <= utilization <= 100.0
