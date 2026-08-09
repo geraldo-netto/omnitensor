@@ -72,6 +72,22 @@ class ManifestError(ValueError):
     """A manifest failed validation or the registry bounds."""
 
 
+def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
+    """One strictly validated manifest document, or :class:`ManifestError`."""
+    if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
+        raise ManifestError(f"{manifest_path}: manifest exceeds {MAX_MANIFEST_BYTES} bytes")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise ManifestError(f"{manifest_path}: invalid JSON: {error}") from error
+    violations = validate_document("workload-manifest.schema.json", manifest)
+    if violations:
+        raise ManifestError(f"{manifest_path}: {'; '.join(violations)}")
+    if manifest["id"] != directory_name:
+        raise ManifestError(f"{manifest_path}: id must match directory name")
+    return manifest
+
+
 def load_workloads(root: Path) -> dict[str, Workload]:
     """Load every ``<id>/manifest.json`` under ``root``, strictly validated."""
     if not root.is_dir():
@@ -81,14 +97,7 @@ def load_workloads(root: Path) -> dict[str, Workload]:
         manifest_path = directory / "manifest.json"
         if not manifest_path.is_file():
             continue
-        if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
-            raise ManifestError(f"{manifest_path}: manifest exceeds {MAX_MANIFEST_BYTES} bytes")
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        violations = validate_document("workload-manifest.schema.json", manifest)
-        if violations:
-            raise ManifestError(f"{manifest_path}: {'; '.join(violations)}")
-        if manifest["id"] != directory.name:
-            raise ManifestError(f"{manifest_path}: id must match directory name")
+        manifest = _load_manifest(manifest_path, directory.name)
         workloads[manifest["id"]] = Workload(id=manifest["id"], manifest=manifest)
         if len(workloads) > MAX_WORKLOADS:
             raise ManifestError(f"{root}: more than {MAX_WORKLOADS} workloads")

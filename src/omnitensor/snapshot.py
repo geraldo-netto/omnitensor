@@ -26,6 +26,13 @@ def _now_ms() -> int:
     return max(1, int(time.time() * 1000))
 
 
+def _metric(metrics: dict, key: str) -> int:
+    try:
+        return int(metrics.get(key, 0))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"metrics {key} is not an integer: {metrics.get(key)!r}") from error
+
+
 def build_snapshot(
     devices: list[Device],
     metrics: dict,
@@ -43,8 +50,8 @@ def build_snapshot(
         "generatedAt": generated_at_ms if generated_at_ms is not None else _now_ms(),
         "devices": [device.snapshot_entry() for device in devices[:MAX_DEVICE_ENTRIES]],
         "metrics": {
-            "queueDepth": int(metrics.get("queueDepth", 0)),
-            "runningProfiles": int(metrics.get("runningProfiles", 0)),
+            "queueDepth": _metric(metrics, "queueDepth"),
+            "runningProfiles": _metric(metrics, "runningProfiles"),
         },
         "profiles": profiles,
         "alerts": alerts or [],

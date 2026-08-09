@@ -35,6 +35,22 @@ def test_snapshot_with_no_devices_is_rejected_by_contract(tmp_path):
         build_snapshot(devices=[], metrics={}, profiles={})
 
 
+@pytest.mark.parametrize("bad", [None, "garbage", 3 + 4j, float("nan"), [1]])
+def test_snapshot_raises_value_error_for_non_integer_metrics(fake_nodes, bad):
+    add_pcie_tpu(fake_nodes)
+    devices = detect_devices(fake_nodes)
+    with pytest.raises(ValueError):
+        build_snapshot(devices=devices, metrics={"queueDepth": bad}, profiles={})
+
+
+def test_registry_wraps_malformed_json_in_manifest_error(tmp_path):
+    directory = tmp_path / "broken-workload"
+    directory.mkdir()
+    (directory / "manifest.json").write_text("{nope")
+    with pytest.raises(ManifestError, match="invalid JSON"):
+        load_workloads(tmp_path)
+
+
 def test_registry_loads_valid_manifests_and_preference(tmp_path):
     write_workload(tmp_path, sample_manifest())
     write_workload(tmp_path, sample_manifest("gpu-workload", accelerator="gpu",
