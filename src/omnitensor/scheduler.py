@@ -109,7 +109,32 @@ class _BackendQueue:
             del self.profiles[chosen]
             self.order.remove(chosen)
             del self.passes[chosen]
+        self._clamp_held_out(admits)
         return job
+
+    def _clamp_held_out(self, admits) -> None:
+        """Keep a policy-held profile level with the device's virtual time.
+
+        A profile held out by ``admits`` keeps its queue and its pass while the
+        admitted ones advance theirs.  Left alone it banks credit for service
+        it was never eligible for and monopolizes the device catching up the
+        moment it is re-enabled — the same burst the newcomer clamp in
+        :meth:`push` exists to prevent.  Raising it to virtual time (never
+        past it) neither rewards nor penalizes being held.
+        """
+        if admits is None:
+            return
+        admitted = [
+            profile_id
+            for profile_id, queue in self.profiles.items()
+            if queue and admits(profile_id)
+        ]
+        if not admitted:
+            return
+        virtual_time = min(self.passes[profile_id] for profile_id in admitted)
+        for profile_id, queue in self.profiles.items():
+            if queue and not admits(profile_id):
+                self.passes[profile_id] = max(self.passes[profile_id], virtual_time)
 
 
 class Scheduler:

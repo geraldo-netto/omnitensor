@@ -910,3 +910,47 @@ def test_backend_queue_initial_state_and_exact_bounded_stride():
 
     assert queue.pop_weighted(oversized_weight).model_path == "first"
     assert queue.passes == {"alpha": 0.2}
+
+
+def test_a_profile_held_out_by_policy_does_not_burst_when_re_enabled():
+    """Held out, a profile used to bank credit for service it was never
+    eligible for, then monopolize the device catching up."""
+    queue = _BackendQueue()
+    for index in range(10):
+        queue.push(_Job("held", f"held-{index}", [], future=None))
+        queue.push(_Job("served", f"served-{index}", [], future=None))
+
+    for _ in range(8):
+        assert queue.pop_weighted(lambda _p: 1, lambda p: p == "served").workload_id == (
+            "served"
+        )
+
+    served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(4)]
+
+    assert served == ["held", "served", "held", "served"]
+
+
+def test_holding_out_a_profile_does_not_starve_it_either():
+    """Clamping raises a stale pass to virtual time and never past it, so a
+    re-admitted profile is served next rather than pushed to the back."""
+    queue = _BackendQueue()
+    queue.push(_Job("held", "held-0", [], future=None))
+    queue.push(_Job("served", "served-0", [], future=None))
+    queue.push(_Job("served", "served-1", [], future=None))
+
+    queue.pop_weighted(lambda _p: 1, lambda p: p == "served")
+
+    assert queue.passes["held"] == queue.passes["served"]
+    assert queue.pop_weighted(lambda _p: 1).workload_id == "held"
+
+
+def test_clamping_leaves_an_ordinary_unserved_profile_alone():
+    """Not yet served is not the same as held out; stride must still apply."""
+    queue = _BackendQueue()
+    for index in range(4):
+        queue.push(_Job("a", f"a-{index}", [], future=None))
+        queue.push(_Job("b", f"b-{index}", [], future=None))
+
+    served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(4)]
+
+    assert served == ["a", "b", "a", "b"]
