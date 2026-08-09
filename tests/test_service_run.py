@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,99 @@ def test_publisher_loop_retracts_once_when_no_devices_are_present(tmp_path, capl
         "No accelerator devices present; retracted the runtime snapshot"
         " so readers observe absence instead of stale data",
     ]
+
+
+def test_publisher_persistence_runs_off_the_event_loop(tmp_path):
+    class BlockingPublisher(FakePublisher):
+        def __init__(self):
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.publish_thread = None
+
+        def publish(self, snapshot):
+            self.publish_thread = threading.get_ident()
+            self.started.set()
+            assert self.release.wait(timeout=0.5)
+            super().publish(snapshot)
+
+    publisher = BlockingPublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=60.0,
+            discovery_interval_s=60.0,
+        )
+        loop_thread = threading.get_ident()
+        task = asyncio.create_task(service._publisher())
+        assert await asyncio.to_thread(publisher.started.wait, 0.5)
+        publisher.release.set()
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=1)
+        return loop_thread
+
+    loop_thread = asyncio.run(scenario())
+    assert publisher.publish_thread != loop_thread
+
+
+def test_snapshot_retraction_runs_off_the_event_loop(tmp_path):
+    class RecordingPublisher(FakePublisher):
+        def __init__(self):
+            super().__init__()
+            self.retract_thread = None
+
+        def retract(self):
+            self.retract_thread = threading.get_ident()
+            super().retract()
+
+    publisher = RecordingPublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([]),
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=60.0,
+            discovery_interval_s=60.0,
+        )
+        loop_thread = threading.get_ident()
+        task = asyncio.create_task(service._publisher())
+        for _ in range(100):
+            if publisher.retracted or task.done():
+                break
+            await asyncio.sleep(0)
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert publisher.retracted == 1
+        return loop_thread
+
+    loop_thread = asyncio.run(scenario())
+    assert publisher.retract_thread != loop_thread
+
+
+def test_publisher_returns_without_io_when_already_stopping(tmp_path):
+    publisher = FakePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=60.0,
+            discovery_interval_s=60.0,
+        )
+        service._stopping.set()
+        await asyncio.wait_for(service._publisher(), timeout=0.1)
+
+    asyncio.run(scenario())
+    assert publisher.published == []
+    assert publisher.retracted == 0
 
 
 def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplog):

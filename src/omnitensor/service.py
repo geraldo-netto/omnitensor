@@ -266,20 +266,24 @@ class OmniTensorService:
         """Applied policy commands wake the workers so held jobs re-evaluate."""
         self._scheduler.kick()
 
-    def publish_once(self) -> dict:
+    def _build_runtime_snapshot(self) -> dict:
         self._scheduler.tick()
         stats = self._scheduler.stats()
         devices = [
             dataclasses.replace(device, load=self._device_load(device, stats))
             for device in self._devices
         ]
-        snapshot = build_snapshot(
+        return build_snapshot(
             devices=devices,
             metrics=stats,
             profiles=profile_statuses(
                 self._workloads, self._executors, self._scheduler, self.control.state,
             ),
         )
+
+    def publish_once(self) -> dict:
+        """Synchronously build and publish one snapshot (test/adapter API)."""
+        snapshot = self._build_runtime_snapshot()
         self._publisher_port.publish(snapshot)
         return snapshot
 
@@ -294,9 +298,10 @@ class OmniTensorService:
                 if self._snapshot_retracted:
                     LOGGER.info("Accelerator devices returned; publishing snapshots again")
                     self._snapshot_retracted = False
-                self.publish_once()
+                snapshot = self._build_runtime_snapshot()
+                await asyncio.to_thread(self._publisher_port.publish, snapshot)
             elif not self._snapshot_retracted:
-                self._publisher_port.retract()
+                await asyncio.to_thread(self._publisher_port.retract)
                 self._snapshot_retracted = True
                 LOGGER.warning(
                     "No accelerator devices present; retracted the runtime snapshot"
