@@ -190,7 +190,11 @@ class PeripheralMetadataCollector:
             key=lambda device: device.stable_id,
         )
         selected = eligible[: self._max_devices]
-        current = {device.stable_id: device for device in selected}
+        # Churn is computed against every eligible device, not the truncated
+        # emission list.  Tracking only what fit reported a device past
+        # max_devices as removed while it was still attached, and as added
+        # again as soon as it fit — churn the user never experienced.
+        current = {device.stable_id: device for device in eligible}
         authorized_previous = {
             stable_id: device
             for stable_id, device in self._previous.items()

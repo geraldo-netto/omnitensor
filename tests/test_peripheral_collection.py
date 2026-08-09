@@ -153,10 +153,13 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
                     "observedAtMs": 9,
                 },
             ],
+            # Churn covers every eligible device, including the one past
+            # max_devices whose metadata is not emitted (OMNI-0155).
             "churn": {
                 "added": [
                     {"stableId": "device-a", "bus": "usb"},
                     {"stableId": "device-m", "bus": "usb"},
+                    {"stableId": "device-z", "bus": "bluetooth"},
                 ],
                 "removed": [],
                 "changed": [],
@@ -643,3 +646,80 @@ def test_peripheral_documentation_freezes_privacy_grants_churn_and_bounds():
     assert "serials, Bluetooth addresses and names" in guide
     assert "32 devices by" in guide
     assert "repeated replay snapshot produces empty churn" in guide
+
+
+def test_a_device_past_the_emission_limit_is_not_reported_as_removed():
+    """Tracking only what fit made a still-attached device churn in and out."""
+    source = ReplayPeripheralMetadataSource(
+        [
+            snapshot(device("device-a"), device("device-b")),
+            snapshot(device("device-a"), device("device-b")),
+        ]
+    )
+    collector = PeripheralMetadataCollector(
+        source,
+        permission_view("device-a", "device-b"),
+        ("device-a", "device-b"),
+        max_devices=1,
+    )
+
+    async def scenario():
+        first = await collector.collect(trigger())
+        second = await collector.collect(trigger())
+        return first.payload, second.payload
+
+    first, second = asyncio.run(scenario())
+
+    assert [entry["stableId"] for entry in first["devices"]] == ["device-a"]
+    assert first["truncatedDevices"] == 1
+    assert [entry["stableId"] for entry in first["churn"]["added"]] == [
+        "device-a",
+        "device-b",
+    ]
+    assert second["churn"] == {"added": [], "removed": [], "changed": []}
+
+
+def test_a_device_that_really_detaches_is_still_reported_as_removed():
+    source = ReplayPeripheralMetadataSource(
+        [
+            snapshot(device("device-a"), device("device-b")),
+            snapshot(device("device-a")),
+        ]
+    )
+    collector = PeripheralMetadataCollector(
+        source,
+        permission_view("device-a", "device-b"),
+        ("device-a", "device-b"),
+        max_devices=1,
+    )
+
+    async def scenario():
+        await collector.collect(trigger())
+        return (await collector.collect(trigger())).payload
+
+    second = asyncio.run(scenario())
+
+    assert [entry["stableId"] for entry in second["churn"]["removed"]] == ["device-b"]
+
+
+def test_a_truncated_device_still_reports_a_real_change():
+    source = ReplayPeripheralMetadataSource(
+        [
+            snapshot(device("device-a"), device("device-b")),
+            snapshot(device("device-a"), device("device-b", health=PeripheralHealth.DEGRADED)),
+        ]
+    )
+    collector = PeripheralMetadataCollector(
+        source,
+        permission_view("device-a", "device-b"),
+        ("device-a", "device-b"),
+        max_devices=1,
+    )
+
+    async def scenario():
+        await collector.collect(trigger())
+        return (await collector.collect(trigger())).payload
+
+    second = asyncio.run(scenario())
+
+    assert [entry["stableId"] for entry in second["churn"]["changed"]] == ["device-b"]
