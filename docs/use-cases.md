@@ -99,3 +99,26 @@ release.
 
 Detailed bounded collector contracts for the `network-peripherals` profile are
 documented in [Network and peripheral collection](network-peripherals.md).
+
+## Accelerator lanes available for qualification
+
+The `tpu > npu > gpu` preference is a routing order, not an availability
+claim. What a given host can actually qualify against decides which acceptance
+gates can run there.
+
+The GPU lane needs no vendor SDK: `VulkanGpuExecutor` runs `ncnn` models
+(`.param` plus sibling `.bin`) through Vulkan compute, so any Mesa RADV/ANV or
+NVIDIA driver serves it. Device selection prefers a discrete GPU over an
+integrated one and refuses software Vulkan devices such as `llvmpipe` outright
+— reporting the backend unavailable rather than silently running inference on
+the host CPU, which the no-CPU rule forbids.
+
+`tests/test_vulkan_hardware.py` is the check: it skips when no usable device is
+present and otherwise proves the real Vulkan compute path end to end. Run it to
+establish whether a host can serve the GPU lane before treating a GPU
+acceptance gate as runnable there.
+
+TPU and NPU lanes need their own hardware — a Coral Edge TPU with
+`libedgetpu`, or an NPU that OpenVINO reports — and profiles compiled for
+those targets cannot be qualified on a GPU without retargeting the model,
+which changes the artifact and its tensor contract.
