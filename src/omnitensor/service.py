@@ -23,7 +23,7 @@ import dataclasses
 import os
 from pathlib import Path
 
-from dbus_fast import BusType
+from dbus_fast import BusType, RequestNameReply
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
@@ -93,14 +93,39 @@ class FileSnapshotPublisher:
 class DbusControlTransport:
     """:class:`~omnitensor.ports.ControlTransport` over the session bus."""
 
-    def __init__(self, bus_type: BusType = BusType.SESSION):
+    def __init__(
+        self,
+        bus_type: BusType = BusType.SESSION,
+        *,
+        bus_factory=None,
+        bus_name: str = BUS_NAME,
+    ):
         self._bus_type = bus_type
+        self._bus_factory = bus_factory
+        self._bus_name = bus_name
         self._bus = None
 
     async def start(self, handler: CommandHandler) -> None:
-        self._bus = await MessageBus(bus_type=self._bus_type).connect()
-        self._bus.export(OBJECT_PATH, OmniTensorInterface(handler))
-        await self._bus.request_name(BUS_NAME)
+        if self._bus_factory is not None:
+            bus = await self._bus_factory()
+        else:
+            bus = await MessageBus(bus_type=self._bus_type).connect()
+        try:
+            bus.export(OBJECT_PATH, OmniTensorInterface(handler))
+            reply = await bus.request_name(self._bus_name)
+            if reply != RequestNameReply.PRIMARY_OWNER:
+                # Without primary ownership another instance is serving the
+                # bus name and publishing to the same snapshot path; running
+                # anyway would double-write. Fail startup loudly instead.
+                raise RuntimeError(
+                    f"{self._bus_name} is already owned"
+                    f" (request_name reply: {reply.name});"
+                    " another omnitensor instance is running",
+                )
+        except BaseException:
+            bus.disconnect()
+            raise
+        self._bus = bus
 
     async def stop(self) -> None:
         if self._bus is not None:

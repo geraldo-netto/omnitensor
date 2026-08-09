@@ -14,7 +14,6 @@
 | OMNI-0018 | open | low | xs | — | systemd: unit is `WantedBy=default.target` but only ordered `After=graphical-session.target`; in a non-graphical session the session bus may be absent, producing a restart loop. |
 | OMNI-0019 | open | medium | s | — | service: `profile_statuses` hardcodes `"queued": 0` and derives `running`/`watching` from the global `runningProfiles` count rather than per-profile queue depth/running state — the snapshot misleads the applet under load. |
 | OMNI-0022 | open | low | xs | — | control: `ControlService.__init__` stores `defaults` as `self._defaults` but never reads it (defaults are consumed by `PolicyStore` only) — dead parameter state; mutation testing flags it as an equivalent-mutant source (verified: no other `_defaults` reference in control.py). |
-| OMNI-0020 | open | medium | s | — | service: `bus.request_name` reply is not checked; a second instance keeps running without owning `org.cinnamon.OmniTensor1` while still publishing to the same snapshot path (two writers). |
 | OMNI-0021 | open | low | m | — | executors: no model caching — TPU loads the delegate and builds an interpreter per inference, NPU recompiles the model per inference; latency and device churn under steady load. |
 
 ## Rejected / Won't fix

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -440,6 +441,15 @@ def test_dbus_transport_stop_without_start_is_a_no_op():
     asyncio.run(DbusControlTransport().stop())
 
 
+class NullControl:
+    def apply_command_text(self, text: str) -> str:
+        return "{}"
+
+
+def unique_bus_name() -> str:
+    return f"org.cinnamon.OmniTensorTest{os.getpid()}"
+
+
 def test_dbus_transport_round_trip_on_a_real_session_bus():
     from dbus_fast.aio import MessageBus
 
@@ -451,15 +461,109 @@ def test_dbus_transport_round_trip_on_a_real_session_bus():
         except Exception as error:  # noqa: BLE001 - environment probe
             pytest.skip(f"no session bus available: {error}")
         probe.disconnect()
-        transport = DbusControlTransport()
-
-        class NullControl:
-            def apply_command_text(self, text: str) -> str:
-                return "{}"
-
+        # A unique per-process name: the production BUS_NAME may legitimately
+        # be owned by a running omnitensor instance on this machine.
+        transport = DbusControlTransport(bus_name=unique_bus_name())
         await transport.start(NullControl())
         await transport.stop()
         await transport.stop()
+
+    asyncio.run(scenario())
+
+
+def test_dbus_transport_refuses_to_run_as_a_second_instance():
+    from dbus_fast.aio import MessageBus
+
+    from omnitensor.service import DbusControlTransport
+
+    async def scenario():
+        try:
+            probe = await MessageBus().connect()
+        except Exception as error:  # noqa: BLE001 - environment probe
+            pytest.skip(f"no session bus available: {error}")
+        probe.disconnect()
+        name = unique_bus_name()
+        first = DbusControlTransport(bus_name=name)
+        await first.start(NullControl())
+        second = DbusControlTransport(bus_name=name)
+        with pytest.raises(RuntimeError, match="already owned"):
+            await second.start(NullControl())
+        # The refused instance never keeps a bus connection around.
+        assert second._bus is None
+        await second.stop()
+        await first.stop()
+
+    asyncio.run(scenario())
+
+
+class FakeBus:
+    def __init__(self, reply):
+        self._reply = reply
+        self.exported = []
+        self.disconnected = 0
+        self.requested = []
+
+    def export(self, path, interface):
+        self.exported.append((path, interface))
+
+    async def request_name(self, name):
+        self.requested.append(name)
+        return self._reply
+
+    def disconnect(self):
+        self.disconnected += 1
+
+
+@pytest.mark.parametrize("reply_name", ["IN_QUEUE", "EXISTS", "ALREADY_OWNER"])
+def test_dbus_transport_fails_loudly_without_primary_ownership(reply_name):
+    from dbus_fast import RequestNameReply
+
+    from omnitensor.service import DbusControlTransport
+
+    bus = FakeBus(RequestNameReply[reply_name])
+
+    async def factory():
+        return bus
+
+    async def scenario():
+        transport = DbusControlTransport(bus_factory=factory)
+        with pytest.raises(RuntimeError) as excinfo:
+            await transport.start(NullControl())
+        assert str(excinfo.value) == (
+            "org.cinnamon.OmniTensor1 is already owned"
+            f" (request_name reply: {reply_name});"
+            " another omnitensor instance is running"
+        )
+        assert bus.disconnected == 1
+        assert transport._bus is None
+        await transport.stop()
+        assert bus.disconnected == 1
+
+    asyncio.run(scenario())
+
+
+def test_dbus_transport_keeps_the_bus_as_primary_owner():
+    from dbus_fast import RequestNameReply
+
+    from omnitensor.service import DbusControlTransport, OmniTensorInterface
+
+    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
+
+    async def factory():
+        return bus
+
+    async def scenario():
+        transport = DbusControlTransport(bus_factory=factory)
+        await transport.start(NullControl())
+        assert transport._bus is bus
+        assert bus.requested == ["org.cinnamon.OmniTensor1"]
+        [(path, interface)] = bus.exported
+        assert path == "/org/cinnamon/OmniTensor1"
+        assert isinstance(interface, OmniTensorInterface)
+        assert interface.ApplyCommand.__wrapped__(interface, "{}") == "{}"
+        await transport.stop()
+        assert bus.disconnected == 1
+        assert transport._bus is None
 
     asyncio.run(scenario())
 
