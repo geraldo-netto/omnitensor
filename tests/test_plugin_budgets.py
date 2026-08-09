@@ -412,12 +412,48 @@ async def _completed_value(value):
     return value
 
 
+def _write_thread(proc_root, pid, tid, *, children=""):
+    """A non-main thread of ``pid``, which is where forks are often recorded."""
+    task = proc_root / str(pid) / "task" / str(tid)
+    task.mkdir(parents=True)
+    (task / "children").write_text(children, encoding="ascii")
+
+
+def test_procfs_probe_counts_children_forked_from_a_non_main_thread(tmp_path):
+    """Reading only task/<pid>/children let a thread's fork escape every limit."""
+    _write_process(tmp_path, 10, children="", rss_kb=2, descriptors=1)
+    _write_thread(tmp_path, 10, 17, children="11")
+    _write_process(tmp_path, 11, rss_kb=3, descriptors=2)
+
+    usage = ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()
+
+    assert usage == WorkerResourceUsage(2, 5 * 1024, 3)
+
+
 def test_procfs_probe_treats_a_pid_that_exits_mid_probe_as_no_usage(tmp_path):
     _write_process(tmp_path, 10, children="11", rss_kb=2, descriptors=1)
 
     usage = ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()
 
     assert usage == WorkerResourceUsage(2, 2 * 1024, 1)
+
+
+def test_procfs_probe_tolerates_a_thread_that_exits_between_listing_and_read(
+    tmp_path, monkeypatch
+):
+    _write_process(tmp_path, 10, children="", rss_kb=2, descriptors=1)
+    _write_thread(tmp_path, 10, 17, children="11")
+    original = Path.read_text
+
+    def vanish(self, *args, **kwargs):
+        if self.parent.name == "17":
+            raise OSError(errno.ESRCH, "no such process")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", vanish)
+    assert ProcfsWorkerUsageProbe(10, proc_root=tmp_path)() == WorkerResourceUsage(
+        1, 2 * 1024, 1
+    )
 
 
 def test_procfs_probe_still_reports_unexpected_errors(tmp_path, monkeypatch):

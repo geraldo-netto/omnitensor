@@ -264,15 +264,29 @@ class ProcfsWorkerUsageProbe:
         return tuple(observed)
 
     def _children(self, pid: int) -> list[int]:
-        """Children recorded for ``pid``; a pid that already exited has none."""
-        path = self._root / str(pid) / "task" / str(pid) / "children"
+        """Children of every thread of ``pid``, not only of its main thread.
+
+        The kernel records a child under the task that forked it, so reading
+        ``task/<pid>/children`` alone misses anything a plugin forked from a
+        worker thread — and what it misses is exactly what escapes the
+        process, memory, and descriptor limits.
+        """
+        children: list[int] = []
         try:
-            text = path.read_text(encoding="ascii").strip()
+            threads = sorted((self._root / str(pid) / "task").iterdir(), key=lambda p: p.name)
         except OSError as error:
             if _vanished(error):
-                return []
+                return children
             raise
-        return [int(child) for child in text.split()]
+        for thread in threads:
+            try:
+                text = (thread / "children").read_text(encoding="ascii").strip()
+            except OSError as error:
+                if _vanished(error):
+                    continue
+                raise
+            children.extend(int(child) for child in text.split())
+        return children
 
     def _resident_bytes(self, pid: int) -> int:
         try:
