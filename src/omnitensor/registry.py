@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from functools import cache
 from pathlib import Path
 
 import jsonschema
@@ -18,21 +17,34 @@ import jsonschema
 from .discovery import BACKENDS
 from .state import ProfilePolicy
 
-_REPO_SCHEMAS = Path(__file__).resolve().parents[2] / "schemas"
-_PACKAGED_SCHEMAS = Path(__file__).resolve().parent / "schemas"
-SCHEMA_DIR = _REPO_SCHEMAS if _REPO_SCHEMAS.is_dir() else _PACKAGED_SCHEMAS
+_PACKAGE_DIR = Path(__file__).resolve().parent
+_PACKAGED_SCHEMAS = _PACKAGE_DIR / "schemas"
+# Editable/source checkout fallback.  Installed packages never inspect an
+# arbitrary site-packages grandparent for a directory named ``schemas``.
+_SOURCE_SCHEMAS = _PACKAGE_DIR.parents[1] / "schemas" if _PACKAGE_DIR.parent.name == "src" else None
 MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
 
 DEFAULT_PREFERENCE = tuple(BACKENDS)
 
 
-@cache
+def _schema_path(name: str) -> Path:
+    packaged = _PACKAGED_SCHEMAS / name
+    if packaged.is_file():
+        return packaged
+    if _SOURCE_SCHEMAS is not None:
+        source = _SOURCE_SCHEMAS / name
+        if source.is_file():
+            return source
+    raise FileNotFoundError(f"canonical schema is not installed: {name}")
+
+
 def load_schema(name: str) -> dict:
-    return json.loads((SCHEMA_DIR / name).read_text(encoding="utf-8"))
+    # Contracts are deliberately read for each validation.  Operators can
+    # atomically update a schema without restarting the long-running service.
+    return json.loads(_schema_path(name).read_bytes())
 
 
-@cache
 def _validator(name: str) -> jsonschema.Validator:
     return jsonschema.Draft202012Validator(load_schema(name))
 

@@ -5,8 +5,9 @@ import json
 import pytest
 from conftest import add_pcie_tpu, sample_manifest, write_workload
 
+import omnitensor.registry as registry
 from omnitensor.discovery import detect_devices
-from omnitensor.registry import ManifestError, load_workloads
+from omnitensor.registry import ManifestError, load_workloads, validate_document
 from omnitensor.snapshot import build_snapshot, write_snapshot
 
 
@@ -88,3 +89,50 @@ def test_registry_rejects_id_directory_mismatch(tmp_path):
 
 def test_registry_missing_root_is_empty(tmp_path):
     assert load_workloads(tmp_path / "missing") == {}
+
+
+def test_packaged_schema_wins_over_source_fallback(monkeypatch, tmp_path):
+    packaged = tmp_path / "package-schemas"
+    source = tmp_path / "source-schemas"
+    packaged.mkdir()
+    source.mkdir()
+    name = "contract.schema.json"
+    (packaged / name).write_text('{"type":"integer"}')
+    (source / name).write_text('{"type":"string"}')
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", source)
+
+    assert validate_document(name, 7) == []
+    assert validate_document(name, "wrong")
+
+
+def test_source_schema_is_used_in_editable_checkout(monkeypatch, tmp_path):
+    source = tmp_path / "source-schemas"
+    source.mkdir()
+    name = "contract.schema.json"
+    (source / name).write_text('{"type":"integer"}')
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", tmp_path / "missing")
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", source)
+
+    assert validate_document(name, 7) == []
+
+
+def test_schema_updates_apply_without_restart(monkeypatch, tmp_path):
+    packaged = tmp_path / "package-schemas"
+    packaged.mkdir()
+    name = "contract.schema.json"
+    path = packaged / name
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+
+    path.write_text('{"type":"integer"}')
+    assert validate_document(name, 7) == []
+    path.write_text('{"type":"string"}')
+    assert validate_document(name, 7)
+
+
+def test_missing_canonical_schema_never_uses_unrelated_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", tmp_path / "missing")
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+    with pytest.raises(FileNotFoundError, match="canonical schema is not installed"):
+        registry.load_schema("contract.schema.json")

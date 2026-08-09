@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0017 | open | low | s | — | registry: `SCHEMA_DIR` is resolved at import time preferring `<pkg>/../../schemas` over the packaged copy — in an installed layout an unrelated `schemas` directory two levels up would shadow the canonical contracts; `@cache` on `load_schema`/`_validator` means any schema change requires a restart. |
 | OMNI-0023 | open | low | s | — | quality gates: mutmut 3.7 generates no mutants for methods of decorated classes — `_BackendQueue` (`@dataclass`) has zero `xǁ_BackendQueueǁ*` keys in `mutants/src/omnitensor/scheduler.py.meta`, so the stride push/pop logic is invisible to the mutation gate (covered by unit + hypothesis tests instead). |
 | OMNI-0021 | open | low | m | OMNI-0024 | executors: no model caching — TPU loads the delegate and builds an interpreter per inference, NPU recompiles the model per inference; latency and device churn under steady load. |
 | OMNI-0024 | open | low | s | OMNI-0021 | service: `_rediscover` rebuilds every executor each pass even when the device set is unchanged, discarding lazily-initialized runtime state (openvino `Core` is reconstructed on the next availability call every 10s) and defeating any per-executor model cache. |
