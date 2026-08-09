@@ -26,6 +26,13 @@ def _clamp_weight(value: object, fallback: int) -> int:
     return max(MIN_WEIGHT, min(MAX_WEIGHT, value))
 
 
+def _sanitized_revision(value: object) -> int:
+    # bool is an int subclass; JSON true/false must not become a revision.
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return 0
+
+
 @dataclass
 class ProfilePolicy:
     enabled: bool
@@ -73,11 +80,10 @@ class PolicyStore:
                 enabled=enabled if isinstance(enabled, bool) else default.enabled,
                 weight=_clamp_weight(entry.get("weight"), default.weight),
             )
-        revision = raw.get("revision")
         return PolicyState(
             paused=raw.get("paused") is True,
             profiles=profiles,
-            revision=revision if isinstance(revision, int) and revision >= 0 else 0,
+            revision=_sanitized_revision(raw.get("revision")),
         )
 
     def save(self, state: PolicyState) -> None:

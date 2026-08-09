@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0002 | open | medium | xs | — | state: `PolicyStore.load` accepts JSON `true`/`false` as `revision` (`bool` passes `isinstance(int)`); every later acknowledgement then violates the contract (`revision: True is not of type 'integer'`) and raises. |
 | OMNI-0004 | open | low | xs | — | snapshot: `build_snapshot` raises `TypeError`, not `ValueError`, for non-numeric metrics (`int(None)`, `int(complex)`), breaking its documented "schema-valid or ValueError" contract. |
 | OMNI-0005 | open | low | xs | — | registry: `load_workloads` raises raw `json.JSONDecodeError` for malformed manifest JSON instead of `ManifestError`, unlike every other manifest failure path. |
 | OMNI-0006 | open | low | xs | — | discovery: `device_utilization` parses sysfs content `nan`/`inf` as load `100.0` (clamp of NaN returns the bound) instead of `None`. |
