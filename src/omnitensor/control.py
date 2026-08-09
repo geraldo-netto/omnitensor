@@ -32,6 +32,23 @@ def _now_ms() -> int:
     return max(1, int(time.time() * 1000))
 
 
+def _integral_weight(value: object) -> int | None:
+    """Coerce a schema-valid weight to the ``int`` the policy stores.
+
+    Draft 2020-12 counts ``2.0`` as an integer, so a float reaches this code
+    having passed validation.  Assigned as a float it persists as ``2.0``,
+    which the loader's integer check then rejects — silently resetting the
+    profile to its default the next time the service starts.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
 def _sanitized_command_id(command: dict) -> str:
     """The command's ``id`` when it is echoable inside a contract-valid
     acknowledgement, ``"invalid"`` otherwise."""
@@ -116,8 +133,8 @@ class ControlService:
         if operation == "set-profile-enabled":
             policy.enabled = command["value"] is True
             return None
-        weight = command["value"]
-        if not MIN_WEIGHT <= weight <= MAX_WEIGHT:
+        weight = _integral_weight(command["value"])
+        if weight is None or not MIN_WEIGHT <= weight <= MAX_WEIGHT:
             return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
         policy.weight = weight
         return None

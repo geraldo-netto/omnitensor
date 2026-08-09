@@ -260,3 +260,30 @@ def test_concurrent_commands_cannot_both_commit_the_same_revision(tmp_path):
     assert statuses == ["applied", "rejected"]
     assert len(store.saved) == 1
     assert store.saved[0].revision == 1
+
+
+@pytest.mark.parametrize("value", [2.0, 5.0])
+def test_an_integral_float_weight_is_stored_as_an_integer(tmp_path, value):
+    """Draft 2020-12 accepts 2.0 as an integer; stored as a float the loader
+    would silently reset the profile to its default on the next start."""
+    path = tmp_path / "policy.json"
+    defaults = {"visual-library": ProfilePolicy(enabled=True, weight=1)}
+    control = ControlService(PolicyStore(path, defaults))
+
+    acknowledgement = apply(
+        control, command("set-profile-weight", "visual-library", value)
+    )
+
+    assert acknowledgement["status"] == "applied"
+    stored = json.loads(path.read_text())["profiles"]["visual-library"]["weight"]
+    assert stored == int(value)
+    assert isinstance(stored, int)
+    assert PolicyStore(path, defaults).load().profiles["visual-library"].weight == int(value)
+
+
+def test_a_boolean_is_never_accepted_as_a_weight(tmp_path):
+    control = ControlService(PolicyStore(tmp_path / "policy.json", {
+        "visual-library": ProfilePolicy(enabled=True, weight=1),
+    }))
+    acknowledgement = apply(control, command("set-profile-weight", "visual-library", True))
+    assert acknowledgement["status"] == "rejected"
