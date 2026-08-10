@@ -259,6 +259,50 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
     return Check("applet", True, f"{len(checksums)} applet files match their checksums")
 
 
+# Every accelerator lane and the runtime import that proves it can execute.
+# There is no CPU entry by design: a CPU-only runtime is not a backend here.
+BACKEND_RUNTIMES = (
+    ("gpu", "ncnn", "install the [gpu] extra"),
+    ("gpu", "onnxruntime", "install the [gpu-onnx-cuda] or [gpu-onnx-rocm] extra"),
+    ("npu", "openvino", "install the [npu] extra"),
+    ("tpu", "tflite_runtime", "install the [tpu] extra"),
+)
+
+
+def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) -> Check:
+    """At least one accelerator runtime must be importable.
+
+    Without this the whole report can pass while the service can execute
+    nothing: it starts, publishes a contract-valid snapshot, answers the bus,
+    and refuses every job because no runtime resolves.  That is the most
+    misleading state this install has, and it was reached by the documented
+    install command, which omitted the accelerator extra.
+
+    Importability is necessary, not sufficient — a present runtime may still
+    find no device — so this reports what resolved rather than promising it
+    will run.
+    """
+    import importlib.util  # noqa: PLC0415 - only needed for this probe
+
+    resolved = []
+    for backend, module, _remedy in runtimes:
+        try:
+            if importlib.util.find_spec(module) is not None:
+                resolved.append(f"{backend}:{module}")
+        except (ImportError, ValueError):
+            # A broken or half-removed distribution is not an installed one.
+            continue
+    if not resolved:
+        remedies = sorted({remedy for _backend, _module, remedy in runtimes})
+        return Check(
+            "backends",
+            False,
+            "no accelerator runtime is importable, so every profile is unavailable; "
+            + "; ".join(remedies),
+        )
+    return Check("backends", True, f"accelerator runtimes available: {', '.join(resolved)}")
+
+
 def verify_installation(checks: Sequence[Check]) -> InstallationReport:
     """Collect the individual probes into one ordered report."""
     return InstallationReport(tuple(checks))
@@ -367,6 +411,7 @@ def build_default_report(
         ),
         check_bus(bus or DbusApplyCommandProbe()),
         check_snapshot(snapshot_path, now_ms=now_ms),
+        check_backends(),
     ]
     if applet_root is not None and applet_checksums is not None:
         checks.append(check_applet(applet_root, load_applet_checksums(applet_checksums)))

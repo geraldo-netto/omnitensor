@@ -403,3 +403,41 @@ def test_a_snapshot_stamped_in_the_future_fails_rather_than_reading_as_fresh(
 
     assert check.ok is False
     assert "in the future" in check.detail
+
+
+def test_an_install_with_no_accelerator_runtime_fails_the_report():
+    """The whole report passing while nothing can execute is the worst state."""
+    from omnitensor.acceptance import check_backends
+
+    check = check_backends((("gpu", "a_runtime_that_is_not_installed", "install [gpu]"),))
+
+    assert check.ok is False
+    assert "no accelerator runtime is importable" in check.detail
+    assert "install [gpu]" in check.detail
+
+
+def test_an_available_runtime_is_named_rather_than_merely_counted():
+    from omnitensor.acceptance import check_backends
+
+    check = check_backends((("gpu", "json", "install [gpu]"),))
+
+    assert check.ok is True
+    assert "gpu:json" in check.detail
+
+
+def test_a_broken_distribution_is_not_counted_as_installed(monkeypatch):
+    from omnitensor import acceptance
+
+    def explode(name):
+        raise ValueError("broken distribution metadata")
+
+    monkeypatch.setattr("importlib.util.find_spec", explode)
+
+    assert acceptance.check_backends((("gpu", "ncnn", "install [gpu]"),)).ok is False
+
+
+def test_no_backend_entry_names_the_cpu():
+    """A CPU-only runtime is not a backend here, by design."""
+    from omnitensor.acceptance import BACKEND_RUNTIMES
+
+    assert "cpu" not in {backend for backend, _module, _remedy in BACKEND_RUNTIMES}
