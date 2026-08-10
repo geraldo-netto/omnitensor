@@ -10,6 +10,8 @@
     "runtimeApi": 1,
     "accelerator": "gpu",
     "acceleratorPreference": [
+      "tpu",
+      "npu",
       "gpu"
     ],
     "minimumDevices": 1,
