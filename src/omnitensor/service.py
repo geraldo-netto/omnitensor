@@ -35,7 +35,11 @@ from dbus_fast.service import ServiceInterface, method
 
 from .control import ControlService
 from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
-from .dispatch import InferenceJobDispatcher, declared_artifact_reference
+from .dispatch import (
+    InferenceJobDispatcher,
+    declared_artifact_reference,
+    inference_result_payload,
+)
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -49,7 +53,9 @@ from .jobs import (
 )
 from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
+from .plugins.cancellation import JobCancellationRegistry
 from .plugins.loading import InstalledPluginRuntime
+from .plugins.orchestration import RunnerSet, build_plugin_runners, with_recovery
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
@@ -293,6 +299,7 @@ class OmniTensorService:
         result_summaries: ResultSummaryRegistry | None = None,
         plugin_telemetry: PluginTelemetryRegistry | None = None,
         transport: ControlTransport | None = None,
+        cancellation_journal_path: Path | None = None,
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
     ):
@@ -315,8 +322,9 @@ class OmniTensorService:
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
         self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
+        self._job_dispatcher = job_dispatcher or self._default_dispatcher()
         self.jobs = JobSubmissionService(
-            job_dispatcher or self._default_dispatcher(),
+            self._job_dispatcher,
             PredicateJobAuthorizer(self._job_authorized),
         )
         self.runtime_api = RuntimeAPI(self.control, self.jobs, self._describe_plugins)
@@ -327,6 +335,10 @@ class OmniTensorService:
         for workload in self._workloads.values():
             if workload.manifest["manifestVersion"] >= 2:
                 self.plugin_telemetry.register(workload.id)
+        self._cancellations = JobCancellationRegistry(
+            cancellation_journal_path or (snapshot_path.parent / "cancellations.json")
+        )
+        self.runners = self._build_runners()
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
@@ -370,6 +382,39 @@ class OmniTensorService:
         return InferenceJobDispatcher(
             self._workloads, self._scheduler, self._executors, self._artifact_store
         )
+
+    def _build_runners(self) -> RunnerSet:
+        """One pipeline runner per profile that can actually execute.
+
+        Built here rather than lazily so a profile that cannot run says so at
+        startup, in one place, instead of at the first job a user submits.
+        """
+        return build_plugin_runners(
+            self._workloads,
+            dispatcher=self._job_dispatcher,
+            resolve_artifact=self._resolve_artifact,
+            encode_result=inference_result_payload,
+            cancellations=self._cancellations,
+            is_paused=lambda: self.control.state.paused,
+            is_enabled=self._admits,
+        )
+
+    def reconcile_interrupted_jobs(self) -> RunnerSet:
+        """Report the jobs a previous process left in flight, once, at startup.
+
+        Whatever owned their stage is gone, so they are not resumable; saying
+        so and clearing the journal is the only honest outcome.
+        """
+        self.runners = with_recovery(self.runners, self._cancellations)
+        for cancellation in self.runners.interrupted:
+            LOGGER.warning(
+                "job %s was interrupted by a previous shutdown: %s",
+                cancellation.job_id,
+                cancellation.detail,
+            )
+        for profile_id, reason in sorted(self.runners.skipped.items()):
+            LOGGER.info("no pipeline runner for %s: %s", profile_id, reason)
+        return self.runners
 
     def _describe_plugins(self) -> str:
         """Answer DescribePlugins from installed metadata only.
@@ -492,6 +537,7 @@ class OmniTensorService:
     async def run(self) -> None:
         await self._transport.start(self.runtime_api)
         try:
+            self.reconcile_interrupted_jobs()
             await self._plugin_runtime.start()
             self._scheduler.start()
             loop = asyncio.get_running_loop()

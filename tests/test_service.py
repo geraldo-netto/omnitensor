@@ -124,3 +124,58 @@ def test_publish_prefers_kernel_gpu_utilization(fake_nodes, tmp_path):
 
     snapshot = asyncio.run(scenario())
     assert snapshot["devices"][0]["load"] == 42.0
+
+
+def sample_manifest_with_model():
+    """A profile that can actually execute, so a runner is built for it."""
+    manifest = sample_manifest()
+    manifest["id"] = "runnable-workload"
+    manifest["requirements"]["model"] = {
+        "id": "runnable-model",
+        "version": "1.0.0",
+        "format": "tflite-edgetpu",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "validated-release",
+        "minimumRuntimeVersion": "validated-release",
+    }
+    return manifest
+
+
+def test_the_service_builds_a_runner_for_each_executable_profile(fake_nodes, tmp_path):
+    add_pcie_tpu(fake_nodes)
+    service = build_service(
+        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
+    )
+
+    assert "runnable-workload" in service.runners.runners
+    assert "declares no model" in service.runners.skipped["sample-workload"]
+
+
+def test_a_profile_without_a_model_says_so_at_startup_not_at_first_job(fake_nodes, tmp_path):
+    """One place, at startup, beats a stage failure at the first submission."""
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    assert service.runners.get("sample-workload") is None
+    assert service.runners.document()["skipped"]["sample-workload"]
+
+
+def test_interrupted_jobs_are_reconciled_when_the_service_starts(fake_nodes, tmp_path):
+    journal = tmp_path / "state/cancellations.json"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(
+        json.dumps({"version": 1, "jobs": {"job-1": "runnable-workload"}})
+    )
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
+
+    reconciled = service.reconcile_interrupted_jobs()
+
+    assert [item.job_id for item in reconciled.interrupted] == ["job-1"]
+    assert service.reconcile_interrupted_jobs().interrupted == ()
+
+
+def test_a_clean_start_reconciles_nothing(fake_nodes, tmp_path):
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
+    assert service.reconcile_interrupted_jobs().interrupted == ()

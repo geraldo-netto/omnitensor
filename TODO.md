@@ -49,7 +49,6 @@
 
 
 
-| OMNI-0169 | open | high | s | OMNI-0067, OMNI-0070 | runner service wiring: `PipelineRunner` is complete but the service constructs none, so no bundled profile runs a pipeline yet and `JobCancellationRegistry.recover()` is never called at startup; build one runner per active plugin and reconcile interrupted jobs on start. |
 
 | OMNI-0170 | open | high | s | OMNI-0071, OMNI-0073 | result owner identity: `JobResultStore` scopes retrieval by an owner token, but no transport supplies one — D-Bus method handlers do not receive the sender — so ownership cannot yet be enforced end to end; resolve the caller's unique bus name and pass it through submit, cancel, and retrieval. |
 
