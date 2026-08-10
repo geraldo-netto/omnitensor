@@ -1,0 +1,30 @@
+[Unit]
+Description=OmniTensor privileged eBPF telemetry helper
+Documentation=https://github.com/geraldo-netto/omnitensor
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/omnitensor/bpf/omnitensor-bpf-helper.py
+Restart=on-failure
+RestartSec=5
+
+# The only two capabilities a BPF loader needs. Everything else is dropped, so
+# a compromise of this helper does not become a compromise of the host.
+AmbientCapabilities=CAP_BPF CAP_PERFMON
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON
+NoNewPrivileges=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+MemoryMax=128M
+RuntimeDirectory=omnitensor
+ReadWritePaths=/sys/fs/bpf
+
+[Install]
+WantedBy=multi-user.target
