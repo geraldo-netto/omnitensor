@@ -11,15 +11,24 @@ from __future__ import annotations
 
 import os
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+# Machine-readable counterparts to the sentences below, so a consumer can
+# choose a remedy without matching on English prose. The sentence stays: it
+# says which device or package, which the code deliberately does not.
+DEVICE_ABSENT = "device-absent"
+RUNTIME_MISSING = "runtime-missing"
+RUNTIME_UNUSABLE = "runtime-unusable"
+FORMAT_UNSUPPORTED = "format-unsupported"
 
 
 @dataclass(frozen=True)
 class Availability:
     available: bool
     reason: str = ""
+    code: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,22 @@ class ModelAwareAvailability(Protocol):
 
     def availability_for(self, model: dict | None) -> Availability:
         """Availability of the lane that can execute ``model``."""
+
+
+# Ordered by what a user can actually do about it: install a package, repair
+# an installed one, supply a different artifact, obtain hardware. A profile
+# blocked on several backends is reported by the most actionable of them,
+# because that is the only one worth offering as a remedy.
+_ACTIONABILITY = (RUNTIME_MISSING, RUNTIME_UNUSABLE, FORMAT_UNSUPPORTED, DEVICE_ABSENT)
+
+
+def most_actionable(codes: Iterable[str]) -> str:
+    """The code a user has the best chance of resolving, or ``""``."""
+    present = {code for code in codes if code}
+    for code in _ACTIONABILITY:
+        if code in present:
+            return code
+    return min(present, default="")
 
 
 def require_available(executor: Executor) -> None:

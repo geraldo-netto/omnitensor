@@ -10,7 +10,17 @@ from __future__ import annotations
 
 import time
 
-from .base import Availability, InferenceResult, require_available, supports_model
+from .base import (
+    DEVICE_ABSENT,
+    FORMAT_UNSUPPORTED,
+    RUNTIME_MISSING,
+    RUNTIME_UNUSABLE,
+    Availability,
+    InferenceResult,
+    most_actionable,
+    require_available,
+    supports_model,
+)
 
 GPU_PROVIDERS = ("CUDAExecutionProvider", "ROCMExecutionProvider")
 
@@ -40,13 +50,14 @@ class GpuExecutor:
 
     def availability(self) -> Availability:
         if not self._device_present:
-            return Availability(False, "No GPU render node detected")
+            return Availability(False, "No GPU render node detected", DEVICE_ABSENT)
         if self._runtime is None:
-            return Availability(False, "onnxruntime is not installed")
+            return Availability(False, "onnxruntime is not installed", RUNTIME_MISSING)
         if not self._providers():
             return Availability(
                 False,
                 "onnxruntime has no CUDA or ROCm execution provider; the CPU provider is not used",
+                RUNTIME_UNUSABLE,
             )
         return Availability(True)
 
@@ -86,17 +97,28 @@ class CompositeGpuExecutor:
     @staticmethod
     def _availability_of(executors: list) -> Availability:
         reasons = []
+        codes = []
         for executor in executors:
             availability = executor.availability()
             if availability.available:
                 return Availability(True)
             reasons.append(availability.reason)
-        return Availability(False, "; ".join(reasons) or "No GPU runtime configured")
+            codes.append(availability.code)
+        return Availability(
+            False,
+            "; ".join(reasons) or "No GPU runtime configured",
+            # One backend, several runtimes: the lane a user can still fix wins
+            # over one they cannot, so "install ncnn" is not hidden behind
+            # "no ONNX Runtime provider".
+            most_actionable(codes),
+        )
 
     def availability_for(self, model: dict | None) -> Availability:
         compatible = [executor for executor in self._executors if supports_model(executor, model)]
         if not compatible:
-            return Availability(False, "No GPU runtime supports the model format")
+            return Availability(
+                False, "No GPU runtime supports the model format", FORMAT_UNSUPPORTED
+            )
         return self._availability_of(compatible)
 
     def _executor_for(self, model_path: str):

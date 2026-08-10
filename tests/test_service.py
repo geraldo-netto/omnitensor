@@ -8,9 +8,11 @@ from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
 
 from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
+from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins import ArtifactInstaller, ArtifactReference
-from omnitensor.registry import validate_document
+from omnitensor.registry import _schema_path, validate_document
+from omnitensor.scheduler import select_backend
 from omnitensor.service import OmniTensorService, build_executors, profile_statuses
 
 
@@ -236,6 +238,12 @@ class _AvailableExecutor:
         return Availability(True, "")
 
 
+class _OnnxOnlyExecutor(_AvailableExecutor):
+    """Present and healthy, but not for the format the workload declares."""
+
+    model_formats = ("onnx",)
+
+
 def _serving_profiles(service) -> set[str]:
     return {
         workload_id
@@ -293,3 +301,69 @@ def test_a_profile_serves_once_its_artifact_is_installed_and_the_job_is_admitted
 
     assert not isinstance(service._job_dispatcher, UnavailableJobDispatcher)
     assert _serving_profiles(service) == {"runnable-workload"}
+
+
+def _snapshot_reason_codes() -> set[str]:
+    schema = json.loads(_schema_path("runtime-snapshot.schema.json").read_text())
+    entry = schema["properties"]["profiles"]["additionalProperties"]
+    return set(entry["properties"]["reason"]["enum"])
+
+
+def test_every_profile_carries_a_reason_code_the_schema_allows(fake_nodes, tmp_path):
+    """The applet chooses a remedy from this code.
+
+    It used to choose by matching substrings of ``detail``, so rewording a
+    sentence here cost a user their remedy silently. A branch that forgets the
+    code has to fail here rather than in a popup.
+    """
+    add_pcie_tpu(fake_nodes)
+    service = build_service(
+        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
+    )
+    allowed = _snapshot_reason_codes()
+
+    profiles = service._build_runtime_snapshot()["profiles"]
+
+    assert profiles
+    for workload_id, entry in profiles.items():
+        assert entry["reason"] in allowed, workload_id
+
+
+def test_the_reason_names_the_state_each_branch_reached(fake_nodes, tmp_path):
+    add_pcie_tpu(fake_nodes)
+    service = build_service(
+        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
+    )
+    service._executors = {"tpu": _AvailableExecutor()}
+
+    def reason_for(workload_id: str) -> str:
+        return service._build_runtime_snapshot()["profiles"][workload_id]["reason"]
+
+    # No model declared, versus one declared with nothing installed.
+    assert reason_for("sample-workload") == "no-model"
+    assert reason_for("runnable-workload") == "artifact-unavailable"
+
+    service.control.state.profiles["sample-workload"].enabled = False
+    assert reason_for("sample-workload") == "profile-disabled"
+    service.control.state.paused = True
+    assert reason_for("sample-workload") == "paused-by-policy"
+
+
+def test_a_backend_reason_survives_as_a_code_not_a_sentence(fake_nodes, tmp_path):
+    """The three refusals a user must tell apart come from the executors."""
+    service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
+    workload = service._workloads["runnable-workload"]
+
+    absent = select_backend(workload, {"tpu": TpuExecutor(device_present=False)})
+    unimportable = TpuExecutor(device_present=True, runtime=None)
+    # Set explicitly rather than relying on the import failing: this must read
+    # the same on a host that does have tflite-runtime.
+    unimportable._runtime = None
+    missing = select_backend(workload, {"tpu": unimportable})
+    # Healthy and present, but not for the format this workload declares.
+    unsupported = select_backend(workload, {"tpu": _OnnxOnlyExecutor()})
+
+    assert (absent.backend, absent.code) == (None, "device-absent")
+    assert (missing.backend, missing.code) == (None, "runtime-missing")
+    assert (unsupported.backend, unsupported.code) == (None, "format-unsupported")
+    assert select_backend(workload, {}).code == "no-executor"

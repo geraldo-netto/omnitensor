@@ -657,12 +657,14 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
         "status": "watching",
         "queued": 0,
         "detail": "Serving on tpu",
+        "reason": "serving",
     }
     running = profile_statuses(workloads, executors, StatsOnlyScheduler(2, queued=3), policy)
     assert running["sample-workload"] == {
         "status": "running",
         "queued": 3,
         "detail": "Serving on tpu",
+        "reason": "serving",
     }
     # Queued-but-not-running is watching, with the real queue depth surfaced.
     backlog = profile_statuses(workloads, executors, StatsOnlyScheduler(0, queued=5), policy)
@@ -670,6 +672,7 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
         "status": "watching",
         "queued": 5,
         "detail": "Serving on tpu",
+        "reason": "serving",
     }
 
 
@@ -702,6 +705,7 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         "status": "paused",
         "queued": 0,
         "detail": "Profile disabled by policy",
+        "reason": "profile-disabled",
     }
 
     paused = json.loads(asyncio.run(service.control.apply_command_text(
@@ -713,6 +717,7 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         "status": "paused",
         "queued": 0,
         "detail": "Runtime paused by policy",
+        "reason": "paused-by-policy",
     }
 
 
@@ -829,11 +834,13 @@ def test_profile_statuses_do_not_leak_running_state_across_profiles():
         "status": "running",
         "queued": 2,
         "detail": "Serving on tpu",
+        "reason": "serving",
     }
     assert statuses["idle-profile"] == {
         "status": "watching",
         "queued": 0,
         "detail": "Serving on tpu",
+        "reason": "serving",
     }
 
 

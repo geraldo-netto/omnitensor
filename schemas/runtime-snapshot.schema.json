@@ -4,10 +4,22 @@
   "title": "TPU Workload Manager runtime snapshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "generatedAt", "devices", "metrics", "profiles", "alerts"],
+  "required": [
+    "version",
+    "generatedAt",
+    "devices",
+    "metrics",
+    "profiles",
+    "alerts"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "generatedAt": {"type": "integer", "minimum": 1},
+    "version": {
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "integer",
+      "minimum": 1
+    },
     "devices": {
       "type": "array",
       "minItems": 1,
@@ -15,26 +27,79 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "backend", "available", "name", "kind"],
+        "required": [
+          "id",
+          "backend",
+          "available",
+          "name",
+          "kind"
+        ],
         "properties": {
-          "id": {"type": "string", "minLength": 1, "maxLength": 80},
-          "backend": {"enum": ["tpu", "npu", "gpu"]},
-          "available": {"type": "boolean"},
-          "name": {"type": "string", "maxLength": 120},
-          "kind": {"enum": ["usb", "pcie", "accel", "dri", "unknown"]},
-          "vendor": {"type": "string", "maxLength": 80},
-          "load": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-          "reason": {"type": "string", "maxLength": 240}
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "backend": {
+            "enum": [
+              "tpu",
+              "npu",
+              "gpu"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "kind": {
+            "enum": [
+              "usb",
+              "pcie",
+              "accel",
+              "dri",
+              "unknown"
+            ]
+          },
+          "vendor": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "load": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 240
+          }
         }
       }
     },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queueDepth", "runningProfiles"],
+      "required": [
+        "queueDepth",
+        "runningProfiles"
+      ],
       "properties": {
-        "queueDepth": {"type": "integer", "minimum": 0, "maximum": 1000000},
-        "runningProfiles": {"type": "integer", "minimum": 0, "maximum": 128}
+        "queueDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "runningProfiles": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        }
       }
     },
     "profiles": {
@@ -44,9 +109,41 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "status": {"enum": ["healthy", "running", "watching", "idle", "paused", "unavailable"]},
-          "queued": {"type": "integer", "minimum": 0, "maximum": 1000000},
-          "detail": {"type": "string", "maxLength": 240}
+          "status": {
+            "enum": [
+              "healthy",
+              "running",
+              "watching",
+              "idle",
+              "paused",
+              "unavailable"
+            ]
+          },
+          "queued": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "reason": {
+            "description": "Machine-readable counterpart to detail: what kind of problem this is, so a consumer chooses a remedy without matching English prose.",
+            "enum": [
+              "serving",
+              "paused-by-policy",
+              "profile-disabled",
+              "no-model",
+              "artifact-unavailable",
+              "device-absent",
+              "runtime-missing",
+              "runtime-unusable",
+              "format-unsupported",
+              "no-executor",
+              "no-preference"
+            ]
+          }
         }
       }
     },
@@ -56,17 +153,64 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "profileId", "title", "summary", "severity", "timestamp"],
+        "required": [
+          "id",
+          "profileId",
+          "title",
+          "summary",
+          "severity",
+          "timestamp"
+        ],
         "properties": {
-          "id": {"type": "string", "minLength": 1, "maxLength": 120},
-          "profileId": {"type": "string", "minLength": 1, "maxLength": 80},
-          "title": {"type": "string", "minLength": 1, "maxLength": 160},
-          "summary": {"type": "string", "maxLength": 500},
-          "severity": {"enum": ["advisory", "warning", "critical"]},
-          "timestamp": {"type": "integer", "minimum": 0},
-          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "riskScore": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-          "resolved": {"type": "boolean"},
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "severity": {
+            "enum": [
+              "advisory",
+              "warning",
+              "critical"
+            ]
+          },
+          "timestamp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "riskScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "resolved": {
+            "type": "boolean"
+          },
           "resultRef": {
             "type": "string",
             "pattern": "^result-[A-Za-z0-9._-]+$",
@@ -79,9 +223,14 @@
     "pluginTelemetry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "plugins"],
+      "required": [
+        "version",
+        "plugins"
+      ],
       "properties": {
-        "version": {"const": 1},
+        "version": {
+          "const": 1
+        },
         "plugins": {
           "type": "array",
           "maxItems": 128,
@@ -113,39 +262,93 @@
                 "maxLength": 80
               },
               "health": {
-                "enum": ["initializing", "healthy", "degraded", "unavailable", "stopped"]
+                "enum": [
+                  "initializing",
+                  "healthy",
+                  "degraded",
+                  "unavailable",
+                  "stopped"
+                ]
               },
               "stage": {
-                "type": ["string", "null"],
-                "enum": [null, "collect", "preprocess", "resolve", "infer", "postprocess", "deliver", "terminal"]
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  null,
+                  "collect",
+                  "preprocess",
+                  "resolve",
+                  "infer",
+                  "postprocess",
+                  "deliver",
+                  "terminal"
+                ]
               },
               "artifactReadiness": {
-                "enum": ["unknown", "resolving", "ready", "missing", "rejected", "incompatible"]
+                "enum": [
+                  "unknown",
+                  "resolving",
+                  "ready",
+                  "missing",
+                  "rejected",
+                  "incompatible"
+                ]
               },
-              "queuedJobs": {"type": "integer", "minimum": 0, "maximum": 1000000},
-              "activeJobs": {"type": "integer", "minimum": 0, "maximum": 1024},
+              "queuedJobs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "activeJobs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1024
+              },
               "lastSuccessAt": {
-                "type": ["integer", "null"],
+                "type": [
+                  "integer",
+                  "null"
+                ],
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
               "lastErrorCode": {
-                "type": ["string", "null"],
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                 "minLength": 1,
                 "maxLength": 80
               },
               "lastErrorAt": {
-                "type": ["integer", "null"],
+                "type": [
+                  "integer",
+                  "null"
+                ],
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
-              "deadlineExceeded": {"$ref": "#/$defs/telemetryCounter"},
-              "retries": {"$ref": "#/$defs/telemetryCounter"},
-              "cancellations": {"$ref": "#/$defs/telemetryCounter"},
-              "drops": {"$ref": "#/$defs/telemetryCounter"},
-              "successes": {"$ref": "#/$defs/telemetryCounter"},
-              "failures": {"$ref": "#/$defs/telemetryCounter"}
+              "deadlineExceeded": {
+                "$ref": "#/$defs/telemetryCounter"
+              },
+              "retries": {
+                "$ref": "#/$defs/telemetryCounter"
+              },
+              "cancellations": {
+                "$ref": "#/$defs/telemetryCounter"
+              },
+              "drops": {
+                "$ref": "#/$defs/telemetryCounter"
+              },
+              "successes": {
+                "$ref": "#/$defs/telemetryCounter"
+              },
+              "failures": {
+                "$ref": "#/$defs/telemetryCounter"
+              }
             }
           }
         }

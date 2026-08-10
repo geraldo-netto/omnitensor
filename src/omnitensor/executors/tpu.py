@@ -13,6 +13,9 @@ import time
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
+    DEVICE_ABSENT,
+    RUNTIME_MISSING,
+    RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
     ModelCache,
@@ -66,13 +69,13 @@ class TpuExecutor:
 
     def availability(self) -> Availability:
         if not self._device_present:
-            return Availability(False, "No Coral Edge TPU device detected")
+            return Availability(False, "No Coral Edge TPU device detected", DEVICE_ABSENT)
         if self._runtime is None:
-            return Availability(False, "tflite-runtime is not installed")
+            return Availability(False, "tflite-runtime is not installed", RUNTIME_MISSING)
         with self._delegate_error_lock:
             failure = self._delegate_error
         if failure is not None and self._clock() - failure[1] < self._delegate_retry_seconds:
-            return Availability(False, failure[0])
+            return Availability(False, failure[0], RUNTIME_UNUSABLE)
         return Availability(True)
 
     def _interpreter_for(self, model_path: str):

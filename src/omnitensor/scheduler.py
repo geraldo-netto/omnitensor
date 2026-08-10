@@ -17,7 +17,14 @@ from collections import Counter, deque
 from dataclasses import dataclass
 
 from .discovery import BACKENDS
-from .executors.base import Executor, InferenceResult, availability_for_model, supports_model
+from .executors.base import (
+    FORMAT_UNSUPPORTED,
+    Executor,
+    InferenceResult,
+    availability_for_model,
+    most_actionable,
+    supports_model,
+)
 from .registry import Workload
 
 LOGGER = logging.getLogger(__name__)
@@ -31,24 +38,57 @@ class QueueFullError(RuntimeError):
     """A backend rejected work because its bounded queue is full."""
 
 
-def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[str | None, str]:
+NO_EXECUTOR = "no-executor"
+NO_PREFERENCE = "no-preference"
+
+
+@dataclass(frozen=True, slots=True)
+class BackendChoice:
+    """Which backend will serve a workload, and why not when none will.
+
+    ``reason`` names the device or package and is written for a person;
+    ``code`` says what kind of problem it is and is written for a program.
+    Both are carried because neither can be derived from the other: a caller
+    choosing a remedy must not parse prose, and a person reading a code learns
+    nothing about which of three accelerators is missing.
+    """
+
+    backend: str | None
+    reason: str
+    code: str
+
+
+def select_backend(workload: Workload, executors: dict[str, Executor]) -> BackendChoice:
     """First backend in the workload's preference that is available and
-    format-compatible; otherwise ``(None, reason)``."""
+    format-compatible; otherwise the collected reasons and the most actionable
+    of their codes."""
     reasons: list[str] = []
+    codes: list[str] = []
     for backend in workload.preference:
         executor = executors.get(backend)
         if executor is None:
             reasons.append(f"{backend}: no executor")
+            codes.append(NO_EXECUTOR)
             continue
         if not supports_model(executor, workload.model):
             reasons.append(f"{backend}: model format not supported")
+            codes.append(FORMAT_UNSUPPORTED)
             continue
         availability = availability_for_model(executor, workload.model)
         if not availability.available:
             reasons.append(f"{backend}: {availability.reason}")
+            codes.append(availability.code)
             continue
-        return backend, ""
-    return None, "; ".join(reasons) or "No backend in preference list"
+        return BackendChoice(backend, "", "")
+    if not reasons:
+        return BackendChoice(None, "No backend in preference list", NO_PREFERENCE)
+    return BackendChoice(None, "; ".join(reasons), most_actionable(codes) or NO_EXECUTOR)
+
+
+def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[str | None, str]:
+    """The choice above without its code, for callers that only render prose."""
+    choice = select_backend(workload, executors)
+    return choice.backend, choice.reason
 
 
 @dataclass

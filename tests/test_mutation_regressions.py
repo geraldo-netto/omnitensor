@@ -535,11 +535,13 @@ def test_tpu_delegate_failure_is_cached_as_unavailability():
 
 def test_tpu_availability_reasons_are_exact():
     assert TpuExecutor(device_present=False).availability() == Availability(
-        False, "No Coral Edge TPU device detected",
+        False, "No Coral Edge TPU device detected", "device-absent",
     )
     missing = TpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
-    assert missing.availability() == Availability(False, "tflite-runtime is not installed")
+    assert missing.availability() == Availability(
+        False, "tflite-runtime is not installed", "runtime-missing",
+    )
 
 
 class RecordingOrt:
@@ -582,15 +584,18 @@ def test_gpu_run_uses_only_gpu_providers_in_order():
 
 def test_gpu_availability_reasons_are_exact():
     assert GpuExecutor(device_present=False).availability() == Availability(
-        False, "No GPU render node detected",
+        False, "No GPU render node detected", "device-absent",
     )
     missing = GpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
-    assert missing.availability() == Availability(False, "onnxruntime is not installed")
+    assert missing.availability() == Availability(
+        False, "onnxruntime is not installed", "runtime-missing",
+    )
     cpu_only = GpuExecutor(device_present=True, runtime=RecordingOrt(["CPUExecutionProvider"]))
     assert cpu_only.availability() == Availability(
         False,
         "onnxruntime has no CUDA or ROCm execution provider; the CPU provider is not used",
+        "runtime-unusable",
     )
 
 
@@ -644,16 +649,18 @@ def test_npu_run_compiles_for_the_npu_device_exactly():
 
 def test_npu_availability_reasons_are_exact():
     assert NpuExecutor(device_present=False).availability() == Availability(
-        False, "No /dev/accel NPU device detected",
+        False, "No /dev/accel NPU device detected", "device-absent",
     )
     missing = NpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
-    assert missing.availability() == Availability(False, "openvino is not installed")
+    assert missing.availability() == Availability(
+        False, "openvino is not installed", "runtime-missing",
+    )
 
 
 def test_vulkan_availability_reasons_are_exact():
     assert VulkanGpuExecutor(device_present=False).availability() == Availability(
-        False, "No GPU render node detected",
+        False, "No GPU render node detected", "device-absent",
     )
 
 
@@ -798,9 +805,12 @@ def test_vulkan_device_preference_is_exact():
     assert software_only.availability() == Availability(
         False,
         "Only a software (CPU) Vulkan device is present; CPU execution is not used",
+        "runtime-unusable",
     )
     none_at_all = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([]))
-    assert none_at_all.availability() == Availability(False, "No Vulkan device is available")
+    assert none_at_all.availability() == Availability(
+        False, "No Vulkan device is available", "runtime-unusable",
+    )
 
 
 def test_vulkan_mat_conversions_are_exact():
@@ -864,6 +874,7 @@ def test_profile_statuses_documents_are_exact():
             "status": "unavailable",
             "queued": 0,
             "detail": "tpu: No Coral Edge TPU device detected",
+            "reason": "device-absent",
         },
     }
 
@@ -892,6 +903,7 @@ def test_profile_statuses_documents_are_exact():
             "status": "idle",
             "queued": 0,
             "detail": "Ready on tpu; no model bundled",
+            "reason": "no-model",
         },
     }
 

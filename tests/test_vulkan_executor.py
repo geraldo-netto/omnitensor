@@ -115,10 +115,12 @@ def test_vulkan_software_only_reports_no_cpu_rule():
 
 def test_vulkan_degrades_without_device_runtime_or_gpus():
     absent = VulkanGpuExecutor(device_present=False).availability()
-    assert absent == Availability(False, "No GPU render node detected")
+    assert absent == Availability(False, "No GPU render node detected", "device-absent")
     missing = VulkanGpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
-    assert missing.availability() == Availability(False, "ncnn is not installed")
+    assert missing.availability() == Availability(
+        False, "ncnn is not installed", "runtime-missing",
+    )
     with pytest.raises(RuntimeError) as raised:
         missing.run("model.param", [])
     assert str(raised.value) == "gpu executor unavailable: ncnn is not installed"
@@ -174,7 +176,7 @@ def test_composite_availability_is_scoped_to_requested_format():
         False, "no GPU provider",
     )
     assert composite.availability_for({"format": "openvino"}) == Availability(
-        False, "No GPU runtime supports the model format",
+        False, "No GPU runtime supports the model format", "format-unsupported",
     )
 
 

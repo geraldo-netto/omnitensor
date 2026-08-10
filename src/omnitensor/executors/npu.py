@@ -13,6 +13,9 @@ import time
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
+    DEVICE_ABSENT,
+    RUNTIME_MISSING,
+    RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
     ModelCache,
@@ -59,15 +62,19 @@ class NpuExecutor:
 
     def availability(self) -> Availability:
         if not self._device_present:
-            return Availability(False, "No /dev/accel NPU device detected")
+            return Availability(False, "No /dev/accel NPU device detected", DEVICE_ABSENT)
         if self._runtime is None:
-            return Availability(False, "openvino is not installed")
+            return Availability(False, "openvino is not installed", RUNTIME_MISSING)
         try:
             devices = self._ensure_core().available_devices
         except Exception as error:  # noqa: BLE001 - plugin discovery can fail arbitrarily
-            return Availability(False, f"OpenVINO device discovery failed: {error}")
+            return Availability(
+                False, f"OpenVINO device discovery failed: {error}", RUNTIME_UNUSABLE
+            )
         if OPENVINO_DEVICE not in devices:
-            return Availability(False, "OpenVINO reports no NPU plugin on this platform")
+            return Availability(
+                False, "OpenVINO reports no NPU plugin on this platform", RUNTIME_UNUSABLE
+            )
         return Availability(True)
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:

@@ -76,7 +76,7 @@ from .ports import (
     SnapshotPublisher,
 )
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
-from .scheduler import Scheduler, pick_backend
+from .scheduler import Scheduler, select_backend
 from .snapshot import build_snapshot, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
 from .tensorref import OptedInInputRoots
@@ -331,6 +331,18 @@ def profile_statuses(
     }
 
 
+# Why a profile is in the state it is, as a code rather than a sentence.  The
+# applet chooses which remedy to offer from this; it used to choose by matching
+# substrings of ``detail``, so rewording a message here silently cost a user
+# their remedy.  Every branch below sets one, and the snapshot schema closes the
+# enum, so adding a state without a code fails a gate rather than a popup.
+PAUSED_BY_POLICY = "paused-by-policy"
+PROFILE_DISABLED = "profile-disabled"
+NO_MODEL = "no-model"
+ARTIFACT_UNAVAILABLE = "artifact-unavailable"
+SERVING = "serving"
+
+
 def _profile_status(
     workload: Workload,
     executors: dict,
@@ -341,15 +353,34 @@ def _profile_status(
     queued = counts["queued"]
     profile_policy = policy.profiles.get(workload.id)
     if policy.paused:
-        return {"status": "paused", "queued": queued, "detail": "Runtime paused by policy"}
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Runtime paused by policy",
+            "reason": PAUSED_BY_POLICY,
+        }
     if profile_policy is not None and not profile_policy.enabled:
-        return {"status": "paused", "queued": queued, "detail": "Profile disabled by policy"}
-    backend, reason = pick_backend(workload, executors)
-    if backend is None:
-        return {"status": "unavailable", "queued": queued, "detail": reason[:240]}
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Profile disabled by policy",
+            "reason": PROFILE_DISABLED,
+        }
+    choice = select_backend(workload, executors)
+    if choice.backend is None:
+        return {
+            "status": "unavailable",
+            "queued": queued,
+            "detail": choice.reason[:240],
+            "reason": choice.code,
+        }
     if workload.model is None:
-        detail = f"Ready on {backend}; no model bundled"
-        return {"status": "idle", "queued": queued, "detail": detail}
+        return {
+            "status": "idle",
+            "queued": queued,
+            "detail": f"Ready on {choice.backend}; no model bundled",
+            "reason": NO_MODEL,
+        }
     if artifact_ready is not None:
         ready, reason = artifact_ready(workload)
         if not ready:
@@ -360,12 +391,14 @@ def _profile_status(
             return {
                 "status": "unavailable",
                 "queued": queued,
-                "detail": f"{backend}: {reason}"[:240],
+                "detail": f"{choice.backend}: {reason}"[:240],
+                "reason": ARTIFACT_UNAVAILABLE,
             }
     return {
         "status": "running" if counts["running"] > 0 else "watching",
         "queued": queued,
-        "detail": f"Serving on {backend}",
+        "detail": f"Serving on {choice.backend}",
+        "reason": SERVING,
     }
 
 
