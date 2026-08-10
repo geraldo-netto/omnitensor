@@ -476,7 +476,12 @@ class OmniTensorService:
             # Without a delivery sink the final stage is a no-op, so a job that
             # reached DELIVER left nothing a caller could collect.
             deliver=self._deliver_job_output,
+            progress=self._note_job_progress,
         )
+
+    def _note_job_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
+        # Late-bound: runners are built before the job service they report to.
+        self.jobs.note_progress(job_id, stage, fraction, detail)
 
     def _deliver_job_output(self, job_id: str, output: dict) -> None:
         self.jobs.note_progress(job_id, "deliver", 1.0, "Result delivered")

@@ -19,6 +19,7 @@ something a user can act on, and a stage failure is not.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Mapping
 from contextvars import ContextVar
@@ -135,6 +136,12 @@ class ArtifactResolver(Protocol):
     def __call__(self, artifact_id: str): ...
 
 
+class ProgressSink(Protocol):
+    """Record where a running job has got to, against its owner."""
+
+    def __call__(self, job_id: str, stage: str, fraction: float, detail: str) -> None: ...
+
+
 class Dispatcher(Protocol):
     """Queue one job onto an accelerator and return the pending future."""
 
@@ -148,6 +155,7 @@ def inference_stages(
     resolve_artifact: ArtifactResolver,
     encode_result: Callable[[object], dict],
     deliver: Callable[[str, dict], None] | None = None,
+    progress: ProgressSink | None = None,
 ) -> dict[PipelineStage, Callable]:
     """Compose the six stages of an inference profile from existing parts."""
     try:
@@ -162,7 +170,7 @@ def inference_stages(
         raise OrchestrationError(
             "profile-has-no-model", f"{workload.id} declares no model and cannot run inference"
         )
-    return {
+    stages = {
         PipelineStage.COLLECT: _collect_stage(),
         PipelineStage.PREPROCESS: _preprocess_stage(workload),
         PipelineStage.RESOLVE: _resolve_stage(model, resolve_artifact),
@@ -170,6 +178,29 @@ def inference_stages(
         PipelineStage.POSTPROCESS: _postprocess_stage(workload),
         PipelineStage.DELIVER: _deliver_stage(deliver),
     }
+    if progress is None:
+        return stages
+    return {
+        stage: _reporting(stage, index, call, progress)
+        for index, (stage, call) in enumerate(stages.items())
+    }
+
+
+def _reporting(stage: PipelineStage, index: int, call: Callable, progress: ProgressSink):
+    """Announce a stage as it starts, so a slow stage is not silence.
+
+    Reported before the stage runs rather than after: the interesting case is
+    the stage that has not finished, and an update that only lands on
+    completion says nothing about the one a job is stuck in.
+    """
+    fraction = index / len(STAGE_ORDER)
+
+    async def reported(carried: object):
+        with contextlib.suppress(OrchestrationError):
+            progress(_current_job()[0], str(stage), fraction, f"Running {stage}")
+        return await call(carried)
+
+    return reported
 
 
 def _collect_stage() -> Callable:
@@ -255,6 +286,7 @@ def build_plugin_runners(
     is_enabled: Callable[[str], bool],
     allows_permission: Callable[[str], bool] = lambda _permission: True,
     deliver: Callable[[str, dict], None] | None = None,
+    progress: ProgressSink | None = None,
     flow_options: Mapping[str, object] | None = None,
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> RunnerSet:
@@ -275,6 +307,7 @@ def build_plugin_runners(
                 resolve_artifact=resolve_artifact,
                 encode_result=encode_result,
                 deliver=deliver,
+                progress=progress,
             )
         except OrchestrationError as error:
             # A profile that cannot run is recorded, not given a runner that

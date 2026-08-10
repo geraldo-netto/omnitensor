@@ -552,3 +552,44 @@ def test_the_router_reports_what_it_wraps(tmp_path):
 
     assert routed.fallback is fallback
     assert routed.runners is built
+
+
+def test_each_stage_announces_itself_as_it_starts(tmp_path):
+    """An update that lands only on completion says nothing about a stuck stage."""
+    reported = []
+    def note(job_id, stage, fraction, detail):
+        reported.append((stage, fraction))
+
+    built, _registry = runners(tmp_path, progress=note)
+
+    run(built)
+
+    assert [stage for stage, _fraction in reported] == [
+        "collect",
+        "preprocess",
+        "resolve",
+        "infer",
+        "postprocess",
+        "deliver",
+    ]
+    assert [fraction for _stage, fraction in reported] == [0.0] + [
+        index / 6 for index in range(1, 6)
+    ]
+
+
+def test_a_job_that_stops_early_reports_only_the_stages_it_reached(tmp_path):
+    reported = []
+    built, _registry = runners(
+        tmp_path,
+        resolve=lambda _artifact_id: Resolution(False, detail="not ready"),
+        progress=lambda job_id, stage, fraction, detail: reported.append(stage),
+    )
+
+    run(built)
+
+    assert reported == ["collect", "preprocess", "resolve"]
+
+
+def test_progress_reporting_is_optional(tmp_path):
+    built, _registry = runners(tmp_path)
+    assert run(built).status is PluginResultStatus.SUCCEEDED
