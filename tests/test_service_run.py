@@ -1520,6 +1520,11 @@ def gpu_model_manifest(workload_id="referenced-workload"):
         "fullyQuantized": True,
         "minimumCompilerVersion": "1.0.0",
         "minimumRuntimeVersion": "1.0.0",
+        # Pinned, and ncnn keeps its weights in the companion: an unpinned
+        # profile is refused at admission before its payload is looked at, so
+        # a fixture without these would test the wrong refusal.
+        "sha256": "c" * 64,
+        "companions": {"model.bin": "d" * 64},
     }
     return manifest
 

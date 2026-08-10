@@ -93,6 +93,7 @@ class InferenceJobDispatcher:
         submission would refuse jobs that would have run.
         """
         workload = self._runnable(workload_id)
+        self._pinned(workload)
         specs = declared_inputs(workload.model)
         references = self._references(payload)
         if references is None:
@@ -111,6 +112,18 @@ class InferenceJobDispatcher:
             # its file is opened rather than after it has been read.
             budget.spend(reference.element_count)
             self._verify(reference)
+
+    def _pinned(self, workload: Workload) -> None:
+        """Refuse an unpinned manifest in the submitting call.
+
+        Which files a manifest vouches for is a fact of the manifest, stable
+        from load to shutdown and knowable without touching the artifact store
+        — so it belongs here rather than arriving as a stored failure the
+        caller has to poll for, which is the shape of refusal this method
+        exists to remove.
+        """
+        for model in workload.models:
+            _refuse_unpinned(workload.id, model, declared_artifact_reference(workload, model))
 
     def _agrees(self, specs, shapes) -> None:
         """Refuse an input the model cannot accept, in the submitting call.
@@ -222,27 +235,7 @@ class InferenceJobDispatcher:
         """Resolve the model this manifest declares, and only that one."""
         workload_id = workload.id
         reference = declared_artifact_reference(workload, model)
-        if reference is None:
-            # The store's own digest proves the file has not changed since it
-            # was installed; it cannot prove the publisher meant *this* file.
-            # Anything installed under the same id and version would satisfy an
-            # unpinned manifest, which is the one guarantee the digest exists to
-            # give — so an unpinned model does not run at all.
-            raise JobDispatchError(
-                "model-unpinned",
-                f"{workload_id}: the manifest declares a model without a sha256, so the "
-                "runtime cannot tell which file the publisher meant",
-            )
-        unpinned = reference.unpinned_companions()
-        if unpinned:
-            # For ncnn and OpenVINO IR the weights live in the companion, so a
-            # manifest that names only the primary file has vouched for the
-            # graph and not for the numbers it runs.
-            raise JobDispatchError(
-                "companion-unpinned",
-                f"{workload_id}: the manifest declares no digest for "
-                f"{', '.join(unpinned)}, which is where this format keeps its weights",
-            )
+        _refuse_unpinned(workload_id, model, reference)
         try:
             resolution = self._artifacts.resolve(reference)
         except Exception as error:  # noqa: BLE001 - store failures are arbitrary
@@ -255,6 +248,30 @@ class InferenceJobDispatcher:
                 "artifact-unavailable", f"{workload_id}: {resolution.reason}"
             )
         return str(resolution.path)
+
+
+def _refuse_unpinned(workload_id: str, model: dict, reference: ArtifactReference | None) -> None:
+    """Refuse a model whose manifest does not say which files it means."""
+    if reference is None:
+        # The store's own digest proves the file has not changed since it was
+        # installed; it cannot prove the publisher meant *this* file. Anything
+        # installed under the same id and version would satisfy an unpinned
+        # manifest, which is the one guarantee the digest exists to give.
+        raise JobDispatchError(
+            "model-unpinned",
+            f"{workload_id}: the manifest declares a model without a sha256, so the "
+            "runtime cannot tell which file the publisher meant",
+        )
+    unpinned = reference.unpinned_companions()
+    if unpinned:
+        # For ncnn and OpenVINO IR the weights live in the companion, so a
+        # manifest that names only the primary file has vouched for the graph
+        # and not for the numbers it runs.
+        raise JobDispatchError(
+            "companion-unpinned",
+            f"{workload_id}: the manifest declares no digest for "
+            f"{', '.join(unpinned)}, which is where this format keeps its weights",
+        )
 
 
 def _inline_inputs(payload: dict, max_input_tensors: int) -> list:

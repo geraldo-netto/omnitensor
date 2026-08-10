@@ -858,3 +858,35 @@ def test_a_profile_whose_models_no_backend_can_run_is_refused_by_format():
 
     assert excinfo.value.code == "no-backend-available"
     assert "format not supported" in str(excinfo.value)
+
+
+def test_an_unpinned_manifest_is_refused_in_the_submitting_call():
+    """Which files a manifest vouches for is a fact of the manifest.
+
+    It is stable from load to shutdown and knowable without touching the
+    artifact store, so refusing it at dispatch made a caller poll for an
+    answer that was available the moment they asked — the shape of failure
+    `admit()` exists to remove.
+    """
+    with pytest.raises(JobDispatchError) as unpinned:
+        dispatcher([workload(model=UNPINNED)]).admit("sample-workload", {"inputs": [[1]]})
+    assert unpinned.value.code == "model-unpinned"
+
+    with pytest.raises(JobDispatchError) as unvouched:
+        dispatcher([workload(model=UNVOUCHED)]).admit("sample-workload", {"inputs": [[1]]})
+    assert unvouched.value.code == "companion-unpinned"
+
+    # A pinned profile is admitted as it always was.
+    dispatcher([workload(model=MODEL)]).admit("sample-workload", {"inputs": [[1]]})
+
+
+def test_every_declared_lane_must_be_pinned_not_just_the_first():
+    """A profile is only as verifiable as its least-verifiable lane."""
+    unpinned_lane = {name: value for name, value in NPU_MODEL.items() if name != "sha256"}
+    target = multi_workload()
+    target.manifest["requirements"]["models"] = [dict(MODEL), unpinned_lane]
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatcher([target]).admit("sample-workload", {"inputs": [[1]]})
+
+    assert excinfo.value.code == "model-unpinned"
