@@ -29,6 +29,7 @@ from .artifacts import (
     artifact_filename,
     artifact_reference_error,
     companion_filenames,
+    permitted_companion_filenames,
 )
 
 _ACTIVATION_FILE = "activation.json"
@@ -142,13 +143,13 @@ class ArtifactInstaller:
                 "companion-missing",
                 f"{reference.format} requires {', '.join(missing)} beside its primary file",
             )
-        unexpected = sorted(set(supplied) - set(required))
+        unexpected = sorted(set(supplied) - permitted_companion_filenames(reference.format))
         if unexpected:
             # An unlisted file would be installed and digested but never read,
             # which reads as protection that is not actually load-bearing.
             raise ArtifactInstallationError(
                 "companion-unexpected",
-                f"{reference.format} declares no companion named {unexpected[0]}",
+                f"{reference.format} accepts no companion named {unexpected[0]}",
             )
         artifact_root = self._artifact_root(reference.id)
         current = self.activation(reference.id)

@@ -47,6 +47,11 @@
             }
           }
         ]
+      },
+      "outputContract": {
+        "kind": "classification",
+        "topK": 5,
+        "labels": "labels.txt"
       }
     }
   },

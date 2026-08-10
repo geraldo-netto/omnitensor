@@ -363,6 +363,34 @@
                   }
                 }
               }
+            },
+            "outputContract": {
+              "description": "What the model's output means. Absent means the raw tensors are returned unchanged, which is what every profile did before this field. A reduction belongs here rather than in whoever renders the result: the reduction is a property of the model, and a consumer that guessed it would relabel every result the day the artifact changed.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "description": "classification reduces to the highest-scoring entries; embedding and raw are returned unreduced and differ only in what a consumer may assume about them.",
+                  "enum": [
+                    "classification",
+                    "embedding",
+                    "raw"
+                  ]
+                },
+                "topK": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "labels": {
+                  "description": "Filename of a labels companion installed beside the model and digest-verified with it. Optional: without it a classification reports indices, which is honest where a guessed label list is not.",
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                }
+              }
             }
           }
         }

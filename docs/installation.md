@@ -217,6 +217,36 @@ installed `.param` by `tests/test_tensorcontract.py`; the preprocessing half
 rests on that identity and would have to be restated if the artifact were
 ever replaced.
 
+#### Declaring what the output means
+
+`requirements.model.outputContract` says how to read the result. Without it
+the raw tensors are returned unchanged, which is what every profile did
+before:
+
+```json
+"outputContract": { "kind": "classification", "topK": 5, "labels": "labels.txt" }
+```
+
+`kind` decides whether the output reduces at all — `classification` reduces to
+the highest-scoring entries, `embedding` and `raw` are returned whole. The
+reduction is added as `reading` **beside** the tensors, never in place of
+them, so nothing that wanted the raw scores loses them.
+
+`labels` names a file installed beside the weights:
+
+```sh
+omnitensor-prepare-artifact /path/to/squeezenet.param \
+    --id visual-library-classifier --version 1.1.0 --format ncnn \
+    --labels /path/to/labels.txt \
+    --install-root ~/.local/share/omnitensor/artifacts
+```
+
+It is staged and digested by the same machinery as `model.bin`, so a label
+list swapped after installation makes the artifact unresolvable rather than
+silently renaming every result. Without a labels file a classification reports
+indices — an honest number beats a guessed name, which is wrong in a form that
+reads as right.
+
 ### Large inputs
 
 A model input does not fit in a job submission. One 3x227x227 float image is

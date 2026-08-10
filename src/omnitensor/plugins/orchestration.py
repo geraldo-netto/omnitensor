@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
 from .artifacts import ArtifactReference
 from .cancellation import Cancellation, JobCancellationRegistry
@@ -179,7 +180,9 @@ def inference_stages(
         PipelineStage.PREPROCESS: _preprocess_stage(workload),
         PipelineStage.RESOLVE: _resolve_stage(model, resolve_artifact),
         PipelineStage.INFER: _infer_stage(workload, dispatcher, encode_result),
-        PipelineStage.POSTPROCESS: _postprocess_stage(workload),
+        PipelineStage.POSTPROCESS: _postprocess_stage(
+            workload, _label_reader(model, resolve_artifact)
+        ),
         PipelineStage.DELIVER: _deliver_stage(deliver),
     }
     if progress is None:
@@ -256,11 +259,54 @@ def _infer_stage(
     return infer
 
 
-def _postprocess_stage(workload: Workload) -> Callable:
+def _postprocess_stage(workload: Workload, read_labels: Callable[[], tuple]) -> Callable:
+    spec = declared_output(workload.model)
+
     async def postprocess(inferred: InferenceOutput) -> PostprocessedOutput:
-        return PostprocessedOutput({"profileId": workload.id, **dict(inferred.tensors)})
+        output = {"profileId": workload.id, **dict(inferred.tensors)}
+        reading = reduce_output(spec, output.get("outputs") or (), read_labels())
+        if reading is not None:
+            # Added beside the tensors, never in place of them: a consumer that
+            # wants the raw scores must not lose them to a reduction, and a
+            # reduction that replaced them would be unrecoverable.
+            output["reading"] = reading
+        return PostprocessedOutput(output)
 
     return postprocess
+
+
+def _label_reader(model: Mapping[str, object], resolve_artifact: ArtifactResolver) -> Callable:
+    """Read the labels companion once, from the directory the resolver verified.
+
+    Read lazily rather than when the runner is built: an artifact installed
+    after startup would otherwise never be seen, and reading it at build time
+    would make a profile with no artifact fail to get a runner at all.
+    """
+    spec = declared_output(model)
+    cached: list[tuple] = []
+
+    def read() -> tuple:
+        if cached:
+            return cached[0]
+        if spec is None or not spec.labels:
+            cached.append(())
+            return cached[0]
+        resolution = resolve_artifact(model["id"])
+        path = getattr(resolution, "path", None)
+        if not getattr(resolution, "ready", False) or path is None:
+            # Not cached: the artifact may be installed a moment from now, and
+            # remembering an empty list would report indices forever.
+            return ()
+        try:
+            text = (Path(path).parent / spec.labels).read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            # A labels file that cannot be read is a result reported by index,
+            # which is exactly what a profile declaring none reports.
+            return ()
+        cached.append(parse_labels(text))
+        return cached[0]
+
+    return read
 
 
 def _deliver_stage(deliver: Callable[[str, dict], None] | None) -> Callable:

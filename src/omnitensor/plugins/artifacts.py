@@ -38,9 +38,21 @@ COMPANION_SOURCE_SUFFIXES: dict[str, dict[str, str]] = {
 }
 
 
+# Files a publisher may install beside any model, for every format, and which
+# no format requires.  A labels list is the case: it belongs with the weights
+# it names — a list that drifted from them renames every result — but nothing
+# about ncnn or OpenVINO says a model must be a classifier.
+OPTIONAL_COMPANION_FILENAMES: frozenset[str] = frozenset({"labels.txt"})
+
+
 def companion_filenames(model_format: str) -> tuple[str, ...]:
     """The files that must accompany the primary file for this format."""
     return COMPANION_FILENAMES.get(model_format, ())
+
+
+def permitted_companion_filenames(model_format: str) -> frozenset[str]:
+    """Every companion this format accepts, required or not."""
+    return frozenset(companion_filenames(model_format)) | OPTIONAL_COMPANION_FILENAMES
 
 
 @dataclass(frozen=True, slots=True)

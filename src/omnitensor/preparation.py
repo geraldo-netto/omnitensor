@@ -101,12 +101,34 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+LABELS_FILENAME = "labels.txt"
+
+
+def _labels_companion(labels: Path | str | None) -> dict[str, Path]:
+    """A labels file named by the caller, staged like any other companion.
+
+    Named rather than discovered, unlike a weights file: an exporter always
+    writes the ``.bin`` beside the ``.param``, and nobody ships a labels file
+    at a predictable path. Staging it as a companion means the same digest
+    machinery re-verifies it on every resolve, so a label list swapped after
+    installation makes the artifact unresolvable instead of quietly renaming
+    every result.
+    """
+    if labels is None:
+        return {}
+    path = Path(labels)
+    if not path.is_file():
+        raise PreparationError("labels-invalid", f"not a regular file: {path}")
+    return {LABELS_FILENAME: path}
+
+
 def prepare_artifact(
     source: Path | str,
     *,
     artifact_id: str,
     version: str,
     model_format: str,
+    labels: Path | str | None = None,
 ) -> PreparedArtifact:
     """Describe a model file as the artifact contract requires."""
     path = Path(source)
@@ -132,7 +154,7 @@ def prepare_artifact(
         ArtifactReference(artifact_id, version, model_format, digest),
         path,
         size,
-        _discover_companions(path, model_format),
+        {**_discover_companions(path, model_format), **_labels_companion(labels)},
     )
 
 
@@ -177,6 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--format", required=True, dest="model_format", choices=SUPPORTED_FORMATS)
     parser.add_argument("--install-root", default=None)
+    parser.add_argument(
+        "--labels",
+        default=None,
+        help="a labels file to install beside the model, one label per line",
+    )
     arguments = parser.parse_args(argv)
 
     try:
@@ -185,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
             artifact_id=arguments.artifact_id,
             version=arguments.version,
             model_format=arguments.model_format,
+            labels=arguments.labels,
         )
         document = prepared.document()
         if arguments.install_root:
