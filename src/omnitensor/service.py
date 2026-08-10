@@ -56,7 +56,7 @@ from .jobs import (
     UnavailableJobDispatcher,
 )
 from .plugins.artifact_installation import ArtifactInstaller
-from .plugins.artifacts import ArtifactReference, ArtifactResolution
+from .plugins.artifacts import ArtifactReference, ArtifactResolution, artifact_filename
 from .plugins.cancellation import JobCancellationRegistry
 from .plugins.grants import GrantLedger
 from .plugins.loading import InstalledPluginRuntime
@@ -535,6 +535,8 @@ class OmniTensorService:
         # constructed, so `active_permissions` came from a deny-all stub: every
         # declared permission read as ungranted and nothing could change that.
         self._grants = grants if grants is not None else GrantLedger(grants_path)
+        self._artifact_root_path = artifact_root
+        self._resolutions: dict[str, tuple] = {}
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
@@ -845,11 +847,48 @@ class OmniTensorService:
                 False, None, "no artifact store is configured for this service", 0
             )
         reference = self._declared_reference(artifact_id)
-        if reference is not None:
-            return self._artifact_store.resolve(reference)
-        return ArtifactResolution(
-            False, None, "no manifest declares a sha256 for this artifact", 0
-        )
+        if reference is None:
+            return ArtifactResolution(
+                False, None, "no manifest declares a sha256 for this artifact", 0
+            )
+        return self._cached_resolution(artifact_id, reference)
+
+    def _cached_resolution(self, artifact_id: str, reference) -> ArtifactResolution:
+        """Resolve, but not by re-reading every model file twice a second.
+
+        Resolution re-digests the artifact and its companions, and the
+        publisher asks for every declared profile on every tick — so a
+        catalogue of large models is hashed end to end at the publish
+        interval, for an answer that changes only when a file does.
+
+        Keyed on what a change would move: the reference itself plus the
+        primary file's size and mtime.  A file replaced in place is a
+        different mtime, and one replaced with identical bytes resolves the
+        same either way, so the cache cannot report ready for something the
+        store would now refuse.
+        """
+        stamp = self._artifact_stamp(artifact_id, reference)
+        cached = self._resolutions.get(artifact_id)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        resolution = self._artifact_store.resolve(reference)
+        self._resolutions[artifact_id] = (stamp, resolution)
+        return resolution
+
+    def _artifact_stamp(self, artifact_id: str, reference) -> tuple:
+        """What must be unchanged for a previous resolution to still hold."""
+        try:
+            status = (
+                Path(self._artifact_root_path)
+                / artifact_id
+                / reference.version
+                / artifact_filename(reference.format)
+            ).stat()
+        except (OSError, ValueError):
+            # Unreadable, absent, or an unsupported format: let the store say
+            # so itself rather than caching a guess.
+            return None
+        return (reference, status.st_size, status.st_mtime_ns)
 
     def _declared_reference(self, artifact_id: str):
         """The digest a bundled or installed manifest declares for this artifact."""

@@ -516,3 +516,48 @@ def test_a_profile_no_lane_can_run_leaves_readiness_quiet(fake_nodes, tmp_path):
     workload = Workload(id="unrunnable", manifest=sample_manifest_with_model())
 
     assert service._profile_artifact_ready(workload) == (True, "")
+
+
+def test_a_resolution_is_not_recomputed_until_the_artifact_moves(fake_nodes, tmp_path):
+    """Resolution re-digests the model and its companions, and the publisher
+    asks for every profile on every tick — so a large catalogue was hashed end
+    to end twice a second for an answer that changes only when a file does."""
+    import hashlib
+
+    add_pcie_tpu(fake_nodes)
+    store = tmp_path / "artifacts"
+    source = tmp_path / "model.tflite"
+    source.write_bytes(MODEL_PAYLOAD)
+    reference = ArtifactReference("runnable-model", "1.0.0", "tflite-edgetpu", MODEL_DIGEST)
+    ArtifactInstaller(store).install(reference, source)
+
+    workloads_root = tmp_path / "workloads"
+    workloads_root.mkdir(exist_ok=True)
+    write_workload(workloads_root, sample_manifest_with_model())
+    service = OmniTensorService(
+        snapshot_path=tmp_path / "state/runtime-snapshot.json",
+        policy_path=tmp_path / "state/policy.json",
+        workloads_path=workloads_root,
+        discovery_paths=fake_nodes,
+        artifact_root=store,
+    )
+    calls = []
+    real = service._artifact_store.resolve
+    service._artifact_store.resolve = lambda ref: (calls.append(ref) or real(ref))
+
+    first = service._resolve_artifact("runnable-model")
+    for _ in range(5):
+        service._resolve_artifact("runnable-model")
+
+    assert first.ready is True
+    assert len(calls) == 1, "asked once, then answered from what was already proven"
+
+    # A file replaced in place moves its mtime, so the cache cannot hold a
+    # verdict the store would now refuse.
+    installed = store / "runnable-model" / "1.0.0" / "model.tflite"
+    installed.write_bytes(b"substituted after installation")
+    service._resolve_artifact("runnable-model")
+
+    assert len(calls) == 2
+    assert service._resolve_artifact("runnable-model").ready is False
+    assert hashlib.sha256(installed.read_bytes()).hexdigest() != MODEL_DIGEST
