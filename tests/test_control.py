@@ -287,3 +287,83 @@ def test_a_boolean_is_never_accepted_as_a_weight(tmp_path):
     }))
     acknowledgement = apply(control, command("set-profile-weight", "visual-library", True))
     assert acknowledgement["status"] == "rejected"
+
+
+def batch(changes, revision=0, command_id="tpuwm-batch"):
+    return json.dumps({
+        "version": 1,
+        "id": command_id,
+        "issuedAt": 1_700_000_000_000,
+        "expectedRevision": revision,
+        "operation": "apply-profiles",
+        "profileId": None,
+        "value": None,
+        "changes": changes,
+    })
+
+
+def test_a_batch_is_one_call_one_revision_and_one_acknowledgement(control):
+    """The same settings sent one at a time spend a revision each."""
+    acknowledgement = apply(control, batch([
+        {"profileId": "visual-library", "enabled": True, "weight": 5},
+        {"profileId": "hardware-health", "enabled": False},
+    ]))
+
+    assert acknowledgement["status"] == "applied"
+    assert acknowledgement["revision"] == 1
+    portfolio = acknowledgement["portfolio"]["profiles"]
+    assert portfolio["visual-library"] == {"enabled": True, "weight": 5}
+    assert portfolio["hardware-health"]["enabled"] is False
+    assert portfolio["hardware-health"]["weight"] == 2, "what it did not name is untouched"
+
+
+def test_a_batch_that_cannot_apply_whole_changes_nothing(control):
+    """Half-applied policy with nothing to retry is the defect this removes."""
+    before = json.loads(asyncio.run(control.apply_command_text(batch([
+        {"profileId": "visual-library", "enabled": True},
+    ]))))["portfolio"]
+
+    acknowledgement = apply(control, batch(
+        [
+            {"profileId": "visual-library", "enabled": False, "weight": 1},
+            {"profileId": "no-such-profile", "enabled": True},
+        ],
+        revision=1,
+        command_id="tpuwm-batch-2",
+    ))
+
+    assert acknowledgement["status"] == "rejected"
+    assert "no-such-profile" in acknowledgement["message"]
+    assert acknowledgement["revision"] == 1, "a refused batch spends no revision"
+    assert acknowledgement["portfolio"] == before, "the earlier change is untouched"
+
+
+def test_a_batch_that_changes_nothing_is_named_rather_than_accepted(control):
+    acknowledgement = apply(control, batch([{"profileId": "visual-library"}]))
+
+    assert acknowledgement["status"] == "rejected"
+    assert "neither enabled nor weight" in acknowledgement["message"]
+    assert acknowledgement["revision"] == 0
+
+
+def test_the_batch_operation_is_bounded_by_the_same_contract_as_the_rest(control):
+    """The schema is the gate; the service never sees a malformed batch."""
+    for changes in ([], [{"profileId": "visual-library", "weight": 9}], [{"weight": 1}]):
+        acknowledgement = apply(control, batch(changes))
+        assert acknowledgement["status"] == "rejected"
+        assert acknowledgement["revision"] == 0
+
+    assert validate_document("runtime-command.schema.json", json.loads(batch([
+        {"profileId": "visual-library", "enabled": True},
+    ]))) == []
+
+
+def test_a_batch_still_obeys_the_revision_compare_and_swap(control):
+    apply(control, command("set-paused", None, True))
+
+    stale = apply(control, batch(
+        [{"profileId": "visual-library", "enabled": True}], revision=0, command_id="tpuwm-stale"
+    ))
+
+    assert stale["status"] == "rejected"
+    assert "revision" in stale["message"].lower()

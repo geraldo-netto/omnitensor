@@ -123,6 +123,8 @@ class ControlService:
 
     def _execute(self, state: PolicyState, command: dict) -> str | None:
         operation = command["operation"]
+        if operation == "apply-profiles":
+            return self._apply_batch(state, command["changes"])
         if operation == "set-paused":
             state.paused = command["value"] is True
             return None
@@ -137,6 +139,40 @@ class ControlService:
         if weight is None or not MIN_WEIGHT <= weight <= MAX_WEIGHT:
             return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
         policy.weight = weight
+        return None
+
+    def _apply_batch(self, state: PolicyState, changes: list) -> str | None:
+        """Apply every change or none of them.
+
+        The caller already mutates a copy and commits only on success, so a
+        refusal anywhere here discards the whole candidate — which is the point:
+        the same settings sent one at a time spend a revision each, and a
+        failure part-way leaves policy half-applied with nothing to retry as a
+        unit.
+
+        Every change is checked before any is made, so a batch naming one
+        unknown profile does not apply the ones before it and then stop.
+        """
+        for change in changes:
+            unknown = self._batch_error(state, change)
+            if unknown is not None:
+                return unknown
+        for change in changes:
+            policy = state.profiles[change["profileId"]]
+            if "enabled" in change:
+                policy.enabled = change["enabled"] is True
+            if "weight" in change:
+                policy.weight = change["weight"]
+        return None
+
+    def _batch_error(self, state: PolicyState, change: dict) -> str | None:
+        profile_id = change["profileId"]
+        if profile_id not in state.profiles:
+            return f"Unknown workload profile: {profile_id}"
+        if "enabled" not in change and "weight" not in change:
+            # A change that changes nothing is a caller mistake worth naming:
+            # silently accepting it would spend a revision and alter nothing.
+            return f"Change for {profile_id} sets neither enabled nor weight"
         return None
 
     def _rejection(self, command_id: str, message: str) -> dict:

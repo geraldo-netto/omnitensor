@@ -4,28 +4,175 @@
   "title": "TPU Workload Manager runtime command",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "id", "issuedAt", "expectedRevision", "operation", "profileId", "value"],
+  "required": [
+    "version",
+    "id",
+    "issuedAt",
+    "expectedRevision",
+    "operation",
+    "profileId",
+    "value"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1, "maxLength": 120},
-    "issuedAt": {"type": "integer", "minimum": 1},
-    "expectedRevision": {"type": "integer", "minimum": 0},
-    "operation": {"enum": ["set-profile-enabled", "set-profile-weight", "set-paused"]},
-    "profileId": {"type": ["string", "null"], "minLength": 1, "maxLength": 80},
-    "value": {"anyOf": [{"type": "boolean"}, {"type": "integer"}]}
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "issuedAt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "operation": {
+      "enum": [
+        "set-profile-enabled",
+        "set-profile-weight",
+        "set-paused",
+        "apply-profiles"
+      ]
+    },
+    "profileId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "changes": {
+      "description": "Several profile settings applied as one command, one revision, and one acknowledgement. Sending them separately spends a call and a revision each, and a failure part-way leaves policy half-applied with no way to retry the rest as a unit \u2014 the batch either applies whole or changes nothing.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profileId"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        }
+      }
+    }
   },
   "allOf": [
     {
-      "if": {"properties": {"operation": {"const": "set-profile-enabled"}}},
-      "then": {"properties": {"profileId": {"type": "string"}, "value": {"type": "boolean"}}}
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-profile-enabled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "value": {
+            "type": "boolean"
+          },
+          "changes": false
+        }
+      }
     },
     {
-      "if": {"properties": {"operation": {"const": "set-profile-weight"}}},
-      "then": {"properties": {"profileId": {"type": "string"}, "value": {"type": "integer", "minimum": 1, "maximum": 5}}}
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-profile-weight"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "changes": false
+        }
+      }
     },
     {
-      "if": {"properties": {"operation": {"const": "set-paused"}}},
-      "then": {"properties": {"profileId": {"type": "null"}, "value": {"type": "boolean"}}}
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-paused"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "null"
+          },
+          "value": {
+            "type": "boolean"
+          },
+          "changes": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "apply-profiles"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "null"
+          },
+          "value": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "changes"
+        ]
+      }
     }
   ]
 }
