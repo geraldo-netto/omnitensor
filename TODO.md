@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0064 | open | high | s | OMNI-0061, OMNI-0074 | network/exec sandbox: deny networking, command execution, child processes, and ambient capabilities by default and selectively enable only declared, granted operations. |
-| OMNI-0071 | open | high | s | OMNI-0039 | D-Bus results: expose bounded progress and terminal-result retrieval with ownership checks, expiry, deterministic not-found semantics, and no unbounded in-memory history. |
 | OMNI-0073 | open | high | s | OMNI-0039, OMNI-0071 | D-Bus hardening: bind jobs to caller identity, enforce method/payload/rate quotas, prevent spoofing, and return stable versioned error codes for every rejected boundary. |
 | OMNI-0079 | blocked | medium | s | OMNI-0077, OMNI-0078 | Cinnamon contract parity: add shared fixtures and compatibility documentation proving old snapshots still render and new health/result states map deterministically in the applet. — blocked: needs coordinated work in the Cinnamon applet repository, which this repository cannot change. |
 | OMNI-0043 | open | high | s | OMNI-0066, OMNI-0074 | `hardware-health` collectors: collect bounded hwmon/thermal, EDAC/memory, UPS/power, and service-health signals with explicit permissions, stable units, missing-source health, and replayable fixtures. |
@@ -64,6 +63,8 @@
 
 
 | OMNI-0169 | open | high | s | OMNI-0067, OMNI-0070 | runner service wiring: `PipelineRunner` is complete but the service constructs none, so no bundled profile runs a pipeline yet and `JobCancellationRegistry.recover()` is never called at startup; build one runner per active plugin and reconcile interrupted jobs on start. |
+
+| OMNI-0170 | open | high | s | OMNI-0071, OMNI-0073 | result owner identity: `JobResultStore` scopes retrieval by an owner token, but no transport supplies one — D-Bus method handlers do not receive the sender — so ownership cannot yet be enforced end to end; resolve the caller's unique bus name and pass it through submit, cancel, and retrieval. |
 
 ## Rejected / Won't fix
 

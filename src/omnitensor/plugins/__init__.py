@@ -230,6 +230,7 @@ from .protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
+from .results import JobRecord, JobResultError, JobResultStore
 from .revocation import (
     DEFAULT_REVOCATION_POLL_SECONDS,
     MAX_REVOCATION_POLL_SECONDS,
@@ -533,6 +534,9 @@ __all__ = [
     "PipelineSnapshot",
     "PipelinePolicyGate",
     "PipelineRunner",
+    "JobResultStore",
+    "JobRecord",
+    "JobResultError",
     "StageFailure",
     "STAGE_ORDER",
     "PluginFlowController",
