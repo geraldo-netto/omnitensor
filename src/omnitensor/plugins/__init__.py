@@ -77,6 +77,12 @@ from .discovery import (
     PluginSource,
     discover_plugin_metadata,
 )
+from .flow import (
+    FlowRefusal,
+    FlowRefusedError,
+    FlowSnapshot,
+    PluginFlowController,
+)
 from .grants import (
     DEFAULT_AUDIT_EVENTS,
     DEFAULT_MAX_GRANTS_BYTES,
@@ -518,6 +524,10 @@ __all__ = [
     "remove_worker_cgroup",
     "PipelineSnapshot",
     "PipelinePolicyGate",
+    "PluginFlowController",
+    "FlowRefusal",
+    "FlowRefusedError",
+    "FlowSnapshot",
     "PolicyDecision",
     "PolicyRefusal",
     "PolicyRefusedError",

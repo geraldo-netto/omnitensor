@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0064 | open | high | s | OMNI-0061, OMNI-0074 | network/exec sandbox: deny networking, command execution, child processes, and ambient capabilities by default and selectively enable only declared, granted operations. |
-| OMNI-0069 | open | high | s | OMNI-0038, OMNI-0066 | pipeline flow control: enforce per-plugin backpressure, deadlines, drop/coalescing rules, idempotency keys, and bounded retry semantics without duplicate delivery. |
 | OMNI-0070 | open | high | s | OMNI-0038, OMNI-0065 | pipeline cancellation: propagate caller, policy, deadline, worker, and shutdown cancellation through every stage and recover queued/in-flight state cleanly after restart. |
 | OMNI-0071 | open | high | s | OMNI-0039 | D-Bus results: expose bounded progress and terminal-result retrieval with ownership checks, expiry, deterministic not-found semantics, and no unbounded in-memory history. |
 | OMNI-0073 | open | high | s | OMNI-0039, OMNI-0071 | D-Bus hardening: bind jobs to caller identity, enforce method/payload/rate quotas, prevent spoofing, and return stable versioned error codes for every rejected boundary. |
@@ -63,6 +62,8 @@
 | OMNI-0165 | open | medium | s | OMNI-0160 | model digest adoption: `requirements.model.sha256` is optional, so a manifest that omits it still dispatches on the weaker install-time guarantee; publish digests for the bundled catalog and then make the field required in a coordinated manifest version bump. |
 
 | OMNI-0166 | open | high | s | OMNI-0068, OMNI-0069, OMNI-0070 | pipeline policy wiring: `PipelinePolicyGate` is implemented and tested but no stage executor consults it yet, because the collect/preprocess/infer/deliver runner does not exist; call `require()` at every stage transition once that runner lands. |
+
+| OMNI-0167 | open | medium | s | OMNI-0069, OMNI-0166 | flow control wiring: `PluginFlowController` is implemented and tested but nothing constructs one per plugin, so backpressure, coalescing, idempotency, and retry are not yet applied to real triggers; wire it into the trigger coordinator alongside the policy gate. |
 
 ## Rejected / Won't fix
 
