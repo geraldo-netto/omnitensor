@@ -32,7 +32,13 @@ from .registry import (
 
 # Every document the applet exchanges with the service.  A packaging mistake
 # that drops one of these only surfaces when a user triggers that exact path.
+# Stated rather than discovered: a check that verifies whatever it happens to
+# find can never report one missing, which is the failure it exists for — an
+# install whose schema directory did not ship.  ``test_acceptance_install.py``
+# asserts this list equals the schemas in the tree, so it cannot fall behind a
+# new contract the way it fell behind ``runtime-contract``.
 REQUIRED_SCHEMAS = (
+    "runtime-contract.schema.json",
     "runtime-snapshot.schema.json",
     "runtime-command.schema.json",
     "runtime-acknowledgement.schema.json",

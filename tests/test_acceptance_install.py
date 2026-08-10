@@ -441,3 +441,16 @@ def test_no_backend_entry_names_the_cpu():
     from omnitensor.acceptance import BACKEND_RUNTIMES
 
     assert "cpu" not in {backend for backend, _module, _remedy in BACKEND_RUNTIMES}
+
+
+def test_every_shipped_schema_is_one_the_install_check_requires():
+    """A check that lists its own expectations falls behind them.
+
+    ``runtime-contract.schema.json`` shipped, was resolvable, and answered on
+    the bus while this check still reported eleven schemas — so an install
+    missing it would have passed.
+    """
+    from omnitensor.acceptance import REQUIRED_SCHEMAS
+    from omnitensor.registry import schema_names
+
+    assert sorted(REQUIRED_SCHEMAS) == sorted(schema_names())

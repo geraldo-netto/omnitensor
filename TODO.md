@@ -69,6 +69,7 @@
 
 
 
+| OMNI-0205 | open | low | s | — | Three places restate the same contract and two of them fell behind it in one change. `acceptance.py` `REQUIRED_SCHEMAS` listed eleven schemas while twelve shipped, so `omnitensor-verify-install` would have passed an install missing `runtime-contract.schema.json`; the applet's hand-written snapshot validator rejected every published snapshot after `profiles[].reason` was added, and reported it as a service that is not running. Both are now pinned by tests (`test_acceptance_install.py`, cinnamon-tpuwlm `snapshot-validator-schema-parity-contract.test.js`), which polices the duplication rather than removing it. The durable fix is for each restatement to derive its expectations from the shipped schemas at load; recorded rather than done, because on the applet side that means reading JSON in a GJS path that deliberately avoids a schema engine. |
 
 ## Rejected / Won't fix
 
