@@ -550,3 +550,54 @@ def test_cancel_still_reports_cancellation_when_the_job_really_stopped():
 
     assert reply["status"] == "cancelled"
     assert reply["code"] == "job-cancelled"
+
+
+def test_another_caller_cannot_cancel_a_job_it_did_not_submit():
+    """The answer is identical to a job that never existed, deliberately."""
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        job_id = accepted["jobId"]
+        stranger = decode(
+            await service.cancel_job_text(
+                json.dumps(cancel_document(job_id)), owner="uid:1001"
+            )
+        )
+        absent = decode(
+            await service.cancel_job_text(
+                json.dumps(cancel_document("job-that-never-existed")), owner="uid:1001"
+            )
+        )
+        dispatcher.release.set()
+        owner = decode(
+            await service.cancel_job_text(
+                json.dumps(cancel_document(job_id, "cancel-2")), owner="uid:1000"
+            )
+        )
+        return stranger, absent, owner
+
+    stranger, absent, owner = run_scenario(scenario())
+
+    assert stranger["status"] == absent["status"] == "not-found"
+    assert stranger["code"] == absent["code"] == "job-not-found"
+    assert stranger["message"] == absent["message"]
+    assert owner["status"] != "not-found"
+
+
+def test_an_unowned_job_is_cancellable_by_an_unidentified_caller():
+    """Without credentials every caller is anonymous, and anonymous is one owner."""
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all())
+        accepted = decode(await service.submit_job_text(json.dumps(submit_document())))
+        dispatcher.release.set()
+        return decode(
+            await service.cancel_job_text(json.dumps(cancel_document(accepted["jobId"])))
+        )
+
+    assert run_scenario(scenario())["status"] != "not-found"

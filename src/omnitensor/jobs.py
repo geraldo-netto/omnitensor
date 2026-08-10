@@ -13,6 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 
+from .callers import ANONYMOUS_OWNER
 from .registry import validate_document
 
 JOB_API_VERSION = 1
@@ -58,6 +59,7 @@ class JobRequest:
 class _ActiveJob:
     workload_id: str
     task: asyncio.Future
+    owner: str = ANONYMOUS_OWNER
 
 
 class _DenyAllAuthorizer:
@@ -138,7 +140,7 @@ class JobSubmissionService:
     def active_job_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._active))
 
-    async def submit_job_text(self, text: str) -> str:
+    async def submit_job_text(self, text: str, *, owner: str = ANONYMOUS_OWNER) -> str:
         try:
             document = _parse_request(
                 text,
@@ -174,7 +176,7 @@ class JobSubmissionService:
                 job_id, request.workload_id, request.payload
             )
             task = asyncio.ensure_future(operation)
-            self._active[job_id] = _ActiveJob(request.workload_id, task)
+            self._active[job_id] = _ActiveJob(request.workload_id, task, owner)
             task.add_done_callback(
                 lambda completed, current_id=job_id: self._job_completed(
                     current_id, completed
@@ -213,7 +215,7 @@ class JobSubmissionService:
                 "Internal error while submitting the job",
             )
 
-    async def cancel_job_text(self, text: str) -> str:
+    async def cancel_job_text(self, text: str, *, owner: str = ANONYMOUS_OWNER) -> str:
         try:
             document = _parse_request(
                 text,
@@ -223,7 +225,11 @@ class JobSubmissionService:
             request_id = document["requestId"]
             job_id = document["jobId"]
             active = self._active.get(job_id)
-            if active is None:
+            if active is None or active.owner != owner:
+                # Someone else's job answers exactly as a job that never
+                # existed: any other answer tells an unauthorized caller which
+                # job ids are real, which is worth nothing to a legitimate
+                # caller and quite a lot to anyone else.
                 return self._reply(
                     request_id,
                     job_id,

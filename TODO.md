@@ -50,7 +50,6 @@
 
 
 
-| OMNI-0170 | open | high | s | OMNI-0071, OMNI-0073 | result owner identity: `JobResultStore` scopes retrieval by an owner token, but no transport supplies one — D-Bus method handlers do not receive the sender — so ownership cannot yet be enforced end to end; resolve the caller's unique bus name and pass it through submit, cancel, and retrieval. |
 
 | OMNI-0171 | open | high | m | OMNI-0064 | worker exec/fork denial: the sandbox now denies networking and drops all capabilities, but command execution and child processes are still permitted — bwrap can only refuse them through a seccomp filter (`--seccomp`/`--add-seccomp-fd`), which is not built; compile a BPF filter denying `execve`/`execveat`/`clone`/`fork` except for the declared, granted operations. |
 

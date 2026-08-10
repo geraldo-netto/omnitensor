@@ -33,6 +33,7 @@ from dbus_fast import BusType, RequestNameReply
 from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
+from .callers import CallerIdentityResolver, caller_capture_handler, unix_user_lookup
 from .control import ControlService
 from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
 from .dispatch import (
@@ -100,19 +101,23 @@ class RuntimeAPI:
         control: ControlService,
         jobs: JobSubmissionService,
         inspector: Callable[[], str] | None = None,
+        callers: CallerIdentityResolver | None = None,
     ) -> None:
         self._control = control
         self._jobs = jobs
         self._inspector = inspector or _no_inventory
+        # Resolving here rather than in the store keeps every transport-shaped
+        # concern on the transport side of the facade.
+        self._callers = callers or CallerIdentityResolver()
 
     async def apply_command_text(self, text: str) -> str:
         return await self._control.apply_command_text(text)
 
     async def submit_job_text(self, text: str) -> str:
-        return await self._jobs.submit_job_text(text)
+        return await self._jobs.submit_job_text(text, owner=await self._callers.owner_token())
 
     async def cancel_job_text(self, text: str) -> str:
-        return await self._jobs.cancel_job_text(text)
+        return await self._jobs.cancel_job_text(text, owner=await self._callers.owner_token())
 
     def describe_plugins_text(self) -> str:
         return self._inspector()
@@ -177,10 +182,12 @@ class DbusControlTransport:
         *,
         bus_factory=None,
         bus_name: str = BUS_NAME,
+        callers: CallerIdentityResolver | None = None,
     ):
         self._bus_type = bus_type
         self._bus_factory = bus_factory
         self._bus_name = bus_name
+        self._callers = callers
         self._bus = None
 
     async def start(self, handler: RuntimeHandler) -> None:
@@ -189,6 +196,11 @@ class DbusControlTransport:
         else:
             bus = await MessageBus(bus_type=self._bus_type).connect()
         try:
+            # Installed before the interface is exported so no message can be
+            # dispatched with an unbound — that is, inherited — sender.
+            bus.add_message_handler(caller_capture_handler())
+            if self._callers is not None:
+                self._callers.attach(unix_user_lookup(bus))
             bus.export(OBJECT_PATH, OmniTensorInterface(handler))
             reply = await bus.request_name(self._bus_name)
             if reply != RequestNameReply.PRIMARY_OWNER:
@@ -305,7 +317,8 @@ class OmniTensorService:
     ):
         self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
         self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
-        self._transport = transport or DbusControlTransport()
+        self._callers = CallerIdentityResolver()
+        self._transport = transport or DbusControlTransport(callers=self._callers)
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path()
         )
@@ -327,7 +340,9 @@ class OmniTensorService:
             self._job_dispatcher,
             PredicateJobAuthorizer(self._job_authorized),
         )
-        self.runtime_api = RuntimeAPI(self.control, self.jobs, self._describe_plugins)
+        self.runtime_api = RuntimeAPI(
+            self.control, self.jobs, self._describe_plugins, self._callers
+        )
         self.result_summaries = result_summaries or ResultSummaryRegistry(
             alert_id_factory=lambda: f"alert-{secrets.token_hex(16)}"
         )

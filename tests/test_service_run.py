@@ -913,9 +913,16 @@ class FakeBus:
         self.exported = []
         self.disconnected = 0
         self.requested = []
+        self.handlers = []
+        self.order = []
+
+    def add_message_handler(self, handler):
+        self.handlers.append(handler)
+        self.order.append("handler")
 
     def export(self, path, interface):
         self.exported.append((path, interface))
+        self.order.append("export")
 
     async def request_name(self, name):
         self.requested.append(name)
@@ -1242,3 +1249,96 @@ def test_inventory_readiness_falls_back_to_the_active_version_without_a_digest(t
     service._resolve_artifact("unknown-model")
 
     assert store.by_id == ["unknown-model"]
+
+
+def test_the_sender_is_captured_before_any_method_can_be_dispatched():
+    """An exported method reached first would run with an inherited sender."""
+    from dbus_fast import RequestNameReply
+
+    from omnitensor.callers import current_sender
+    from omnitensor.service import DbusControlTransport
+
+    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
+
+    async def factory():
+        return bus
+
+    async def scenario():
+        transport = DbusControlTransport(bus_factory=factory)
+        await transport.start(object())
+        await transport.stop()
+
+    asyncio.run(scenario())
+
+    assert bus.order == ["handler", "export"]
+
+    class Message:
+        sender = ":1.42"
+
+    assert bus.handlers[0](Message()) is None
+    assert current_sender() == ":1.42"
+
+
+def test_the_transport_attaches_the_credential_lookup_to_its_resolver():
+    from dbus_fast import RequestNameReply
+
+    from omnitensor.callers import CallerIdentityResolver
+    from omnitensor.service import DbusControlTransport
+
+    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
+    resolver = CallerIdentityResolver()
+
+    async def factory():
+        return bus
+
+    async def scenario():
+        transport = DbusControlTransport(bus_factory=factory, callers=resolver)
+        await transport.start(object())
+        await transport.stop()
+        return await resolver.resolve(":1.7")
+
+    identity = asyncio.run(scenario())
+
+    assert resolver._unix_user is not None
+    assert identity.unique_name == ":1.7"
+
+
+def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
+    """End to end: the sender the transport bound decides who owns the job."""
+    from omnitensor.callers import CallerIdentityResolver, bind_sender
+    from omnitensor.service import RuntimeAPI
+
+    class RecordingJobs:
+        def __init__(self):
+            self.owners = []
+
+        async def submit_job_text(self, text, *, owner):
+            self.owners.append(("submit", owner))
+            return "{}"
+
+        async def cancel_job_text(self, text, *, owner):
+            self.owners.append(("cancel", owner))
+            return "{}"
+
+    async def unix_user(name):
+        return {":1.7": 1000, ":1.8": 1001}[name]
+
+    resolver = CallerIdentityResolver(unix_user)
+    jobs = RecordingJobs()
+    api = RuntimeAPI(None, jobs, lambda: "{}", resolver)
+
+    async def scenario():
+        bind_sender(":1.7")
+        await api.submit_job_text("{}")
+        bind_sender(":1.8")
+        await api.cancel_job_text("{}")
+        bind_sender(None)
+        await api.submit_job_text("{}")
+
+    asyncio.run(scenario())
+
+    assert jobs.owners == [
+        ("submit", "uid:1000"),
+        ("cancel", "uid:1001"),
+        ("submit", "anonymous"),
+    ]
