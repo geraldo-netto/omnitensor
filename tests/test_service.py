@@ -132,8 +132,17 @@ def test_publish_prefers_kernel_gpu_utilization(fake_nodes, tmp_path):
     assert snapshot["devices"][0]["load"] == 42.0
 
 
-def sample_manifest_with_model():
-    """A profile that can actually execute, so a runner is built for it."""
+MODEL_PAYLOAD = b"a tflite model would live here"
+MODEL_DIGEST = hashlib.sha256(MODEL_PAYLOAD).hexdigest()
+
+
+def sample_manifest_with_model(digest=MODEL_DIGEST):
+    """A profile that can actually execute, so a runner is built for it.
+
+    It pins its model, because an unpinned one no longer runs: the store can
+    prove a file has not changed since installation and cannot prove it is the
+    file the publisher meant.
+    """
     manifest = sample_manifest()
     manifest["id"] = "runnable-workload"
     manifest["requirements"]["model"] = {
@@ -143,6 +152,7 @@ def sample_manifest_with_model():
         "fullyQuantized": True,
         "minimumCompilerVersion": "validated-release",
         "minimumRuntimeVersion": "validated-release",
+        "sha256": digest,
     }
     return manifest
 
@@ -275,12 +285,9 @@ def test_a_profile_serves_once_its_artifact_is_installed_and_the_job_is_admitted
     """The other direction, so the test above cannot pass by never serving."""
     add_pcie_tpu(fake_nodes)
     store = tmp_path / "artifacts"
-    payload = b"a tflite model would live here"
     source = tmp_path / "model.tflite"
-    source.write_bytes(payload)
-    reference = ArtifactReference(
-        "runnable-model", "1.0.0", "tflite-edgetpu", hashlib.sha256(payload).hexdigest()
-    )
+    source.write_bytes(MODEL_PAYLOAD)
+    reference = ArtifactReference("runnable-model", "1.0.0", "tflite-edgetpu", MODEL_DIGEST)
     ArtifactInstaller(store).install(reference, source)
 
     workloads_root = tmp_path / "workloads"

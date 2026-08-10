@@ -730,6 +730,14 @@ class OmniTensorService:
         model = workload.model
         if model is None:
             return True, ""
+        if not model.get("sha256"):
+            # Said here as well as at dispatch, so a profile that can never run
+            # says why in the snapshot instead of looking installable and
+            # refusing the first job somebody submits.
+            return False, (
+                "the manifest declares this model without a sha256, so the runtime "
+                "cannot tell which file it means"
+            )
         resolution = self._resolve_artifact(model["id"])
         if getattr(resolution, "ready", False):
             return True, ""
@@ -750,7 +758,9 @@ class OmniTensorService:
         reference = self._declared_reference(artifact_id)
         if reference is not None:
             return self._artifact_store.resolve(reference)
-        return self._artifact_store.resolve_active(artifact_id)
+        return ArtifactResolution(
+            False, None, "no manifest declares a sha256 for this artifact", 0
+        )
 
     def _declared_reference(self, artifact_id: str):
         """The digest a bundled or installed manifest declares for this artifact."""

@@ -243,7 +243,27 @@ omnitensor-prepare-artifact /path/to/squeezenet.param \
 
 It is staged and digested by the same machinery as `model.bin`, so a label
 list swapped after installation makes the artifact unresolvable rather than
-silently renaming every result. Without a labels file a classification reports
+silently renaming every result.
+
+### A model runs only if its manifest names it
+
+`requirements.model.sha256` is what ties a profile to an exact file. Without it
+the strongest available guarantee is the store's own — the active version was
+digest-verified when it was installed and is re-verified on every dispatch —
+and that proves the file has not changed since installation, not that it is the
+file the publisher meant. Anything installed under the same id and version
+satisfies an unpinned manifest, which is precisely what the digest exists to
+rule out.
+
+So an unpinned model does not run. Dispatch refuses it with `model-unpinned`
+before the artifact store is consulted at all, and the snapshot reports the
+profile unavailable with the same reason, so it is visible before somebody
+submits a job rather than at the moment they do.
+
+The field stays optional in the schema. A manifest for an artifact that has not
+been published yet genuinely cannot pin one, and refusing to *load* such a
+document would lose the policy, UI, and acceptance data it carries — the
+profile simply cannot run until the digest is there. Without a labels file a classification reports
 indices — an honest number beats a guessed name, which is wrong in a form that
 reads as right.
 

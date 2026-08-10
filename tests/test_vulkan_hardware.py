@@ -53,6 +53,8 @@ ABSVAL_MODEL = {
     "fullyQuantized": True,
     "minimumCompilerVersion": "1.0.0",
     "minimumRuntimeVersion": "1.0.0",
+    # Pinned, because an unpinned model is refused before it reaches a device.
+    "sha256": "a" * 64,
 }
 
 
@@ -79,20 +81,21 @@ def test_a_dispatched_job_runs_on_a_real_vulkan_device(absval_model):
     manifest["requirements"]["model"] = dict(ABSVAL_MODEL)
     workload = Workload(id="absval-workload", manifest=manifest)
 
-    class ActiveArtifact:
-        def resolve(self, reference):  # pragma: no cover - v1 manifest has no digest
-            raise AssertionError("a v1 manifest declares no digest")
-
-        def resolve_active(self, artifact_id):
-            assert artifact_id == "absval-model"
+    class DeclaredArtifact:
+        def resolve(self, reference):
+            assert reference.id == "absval-model"
+            assert reference.sha256 == ABSVAL_MODEL["sha256"]
             return ArtifactResolution(True, Path(absval_model), "", 1)
+
+        def resolve_active(self, artifact_id):  # pragma: no cover - never consulted
+            raise AssertionError("a pinned model is resolved by its digest")
 
     async def scenario():
         executors = {"gpu": executor}
         scheduler = Scheduler(executors, lambda _profile: 1)
         scheduler.start()
         dispatcher = InferenceJobDispatcher(
-            {workload.id: workload}, scheduler, executors, ActiveArtifact()
+            {workload.id: workload}, scheduler, executors, DeclaredArtifact()
         )
         try:
             result = await asyncio.wait_for(

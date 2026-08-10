@@ -212,14 +212,19 @@ class InferenceJobDispatcher:
         """Resolve the model this manifest declares, and only that one."""
         workload_id = workload.id
         reference = declared_artifact_reference(workload, model)
+        if reference is None:
+            # The store's own digest proves the file has not changed since it
+            # was installed; it cannot prove the publisher meant *this* file.
+            # Anything installed under the same id and version would satisfy an
+            # unpinned manifest, which is the one guarantee the digest exists to
+            # give — so an unpinned model does not run at all.
+            raise JobDispatchError(
+                "model-unpinned",
+                f"{workload_id}: the manifest declares a model without a sha256, so the "
+                "runtime cannot tell which file the publisher meant",
+            )
         try:
-            if reference is not None:
-                resolution = self._artifacts.resolve(reference)
-            else:
-                # A v1 manifest carries no per-model digest, so the strongest
-                # available guarantee is the store's own: the active version was
-                # digest-verified when it was installed and is re-verified here.
-                resolution = self._artifacts.resolve_active(model["id"])
+            resolution = self._artifacts.resolve(reference)
         except Exception as error:  # noqa: BLE001 - store failures are arbitrary
             raise JobDispatchError(
                 "artifact-unavailable",

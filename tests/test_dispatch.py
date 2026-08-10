@@ -26,7 +26,9 @@ MODEL = {
     "fullyQuantized": True,
     "minimumCompilerVersion": "1.0.0",
     "minimumRuntimeVersion": "1.0.0",
+    "sha256": "f" * 64,
 }
+UNPINNED = {name: value for name, value in MODEL.items() if name != "sha256"}
 
 
 def workload(
@@ -202,20 +204,25 @@ def test_a_declared_digest_is_used_to_resolve_the_artifact():
     assert artifacts.resolved_active == []
 
 
-def test_a_manifest_without_a_digest_falls_back_to_the_active_version():
+def test_a_manifest_without_a_digest_does_not_run_at_all():
+    """The store's digest proves the file has not changed since installation.
+
+    It cannot prove the publisher meant this file: anything installed under the
+    same id and version satisfies an unpinned manifest, which is the one thing
+    the digest exists to establish.  So an unpinned model is refused rather than
+    run on the weaker guarantee, and nothing is asked of the store.
+    """
     artifacts = FakeArtifacts()
 
-    async def scenario():
-        dispatch = dispatcher([workload(model=MODEL)], artifacts=artifacts)
-        dispatch._scheduler.start()
-        future = dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1]]})
-        await asyncio.wait_for(future, timeout=5)
-        await dispatch._scheduler.stop()
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatcher([workload(model=UNPINNED)], artifacts=artifacts).dispatch(
+            "job-1", "sample-workload", {"inputs": [[1]]}
+        )
 
-    asyncio.run(scenario())
-
+    assert excinfo.value.code == "model-unpinned"
+    assert "which file the publisher meant" in str(excinfo.value)
     assert artifacts.resolved == []
-    assert artifacts.resolved_active == ["sample-model"]
+    assert artifacts.resolved_active == []
 
 
 def test_the_declared_reference_matches_only_an_exact_entry():
@@ -223,8 +230,13 @@ def test_the_declared_reference_matches_only_an_exact_entry():
         {"id": "sample-model", "version": "9.9.9", "format": "ncnn", "sha256": "b" * 64},
         {"id": "other-model", "version": "1.2.3", "format": "ncnn", "sha256": "c" * 64},
     ]
+    # No allowlist entry matches, so the model's own digest is what remains.
     target = workload(model=MODEL, artifacts=declared)
-    assert declared_artifact_reference(target, MODEL) is None
+    assert declared_artifact_reference(target, MODEL) == ArtifactReference(
+        "sample-model", "1.2.3", "ncnn", "f" * 64
+    )
+    unpinned = workload(model=UNPINNED, artifacts=declared)
+    assert declared_artifact_reference(unpinned, UNPINNED) is None
 
     exact = [{"id": "sample-model", "version": "1.2.3", "format": "ncnn", "sha256": "d" * 64}]
     assert declared_artifact_reference(
@@ -681,3 +693,25 @@ def test_a_model_declaring_no_contract_admits_what_it_always_did():
     dispatch = dispatcher([workload(model=MODEL)])
 
     assert dispatch.admit("sample-workload", {"inputs": [[[1.0, 2.0, 3.0]]]}) is None
+
+
+def test_an_unpinned_model_is_refused_before_the_store_is_touched():
+    """The refusal is a routing decision, not a resolution failure.
+
+    Reaching the store first would report "artifact-unavailable" for a manifest
+    that is simply missing a field, sending somebody to look for a file that is
+    installed and fine.
+    """
+    class ExplodingArtifacts:
+        def resolve(self, reference):  # pragma: no cover - never reached
+            raise AssertionError("the store is not consulted for an unpinned model")
+
+        def resolve_active(self, artifact_id):  # pragma: no cover - never reached
+            raise AssertionError("the store is not consulted for an unpinned model")
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatcher([workload(model=UNPINNED)], artifacts=ExplodingArtifacts()).dispatch(
+            "job-1", "sample-workload", {"inputs": [[1]]}
+        )
+
+    assert excinfo.value.code == "model-unpinned"

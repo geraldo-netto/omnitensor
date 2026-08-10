@@ -1232,7 +1232,13 @@ def test_inventory_readiness_uses_the_declared_digest_like_dispatch_does(tmp_pat
     assert resolution.ready is False
 
 
-def test_inventory_readiness_falls_back_to_the_active_version_without_a_digest(tmp_path):
+def test_inventory_readiness_refuses_an_artifact_no_manifest_pins(tmp_path):
+    """Readiness answers what dispatch would do, and dispatch refuses this.
+
+    Resolving by id alone would report ready for whatever happens to be
+    installed under that name — which is the guarantee the digest exists to
+    give, so neither half offers it.
+    """
     service = build_service(
         tmp_path,
         [sample_manifest()],
@@ -1242,23 +1248,22 @@ def test_inventory_readiness_falls_back_to_the_active_version_without_a_digest(t
         artifact_root=tmp_path / "artifacts",
     )
 
-    class RecordingStore:
+    class RefusingStore:
         def __init__(self):
-            self.by_id = []
+            self.asked = []
 
         def resolve(self, reference):  # pragma: no cover - no digest is declared
             raise AssertionError("no digest is declared for this artifact")
 
-        def resolve_active(self, artifact_id):
-            self.by_id.append(artifact_id)
-            return ArtifactResolution(False, None, "no active version", 0)
+        def resolve_active(self, artifact_id):  # pragma: no cover - never consulted
+            raise AssertionError("an unpinned artifact is never resolved by id alone")
 
-    store = RecordingStore()
-    service._artifact_store = store
+    service._artifact_store = RefusingStore()
 
-    service._resolve_artifact("unknown-model")
+    resolution = service._resolve_artifact("unknown-model")
 
-    assert store.by_id == ["unknown-model"]
+    assert resolution.ready is False
+    assert "sha256" in resolution.reason
 
 
 def test_the_sender_is_captured_before_any_method_can_be_dispatched():
