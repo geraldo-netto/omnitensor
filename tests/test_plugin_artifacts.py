@@ -758,3 +758,40 @@ def test_a_declared_reference_with_the_wrong_digest_does_not_resolve(tmp_path):
 
     forged = ArtifactReference("demo-ncnn", "1.0.0", "ncnn", "0" * 64)
     assert installer.resolve(forged).ready is False
+
+
+def openvino_pair(tmp_path):
+    graph = tmp_path / "ir.xml"
+    graph.write_bytes(b"<net name='m'/>")
+    weights = tmp_path / "ir.bin"
+    weights.write_bytes(b"WEIGHTS" * 40)
+    return graph, weights
+
+
+def test_an_openvino_artifact_also_carries_its_weights(tmp_path):
+    """IR is a graph in .xml and weights in .bin — the same shape as ncnn."""
+    from omnitensor.plugins.artifacts import ArtifactReference, companion_filenames
+
+    assert companion_filenames("openvino") == ("model.bin",)
+    graph, weights = openvino_pair(tmp_path)
+    reference = ArtifactReference(
+        "demo-ir", "1.0.0", "openvino", hashlib.sha256(graph.read_bytes()).hexdigest()
+    )
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    installed = installer.install(reference, graph, companions={"model.bin": weights})
+
+    assert (installed.path.parent / "model.bin").read_bytes() == weights.read_bytes()
+    assert installer.resolve_active("demo-ir").ready is True
+
+
+def test_an_openvino_artifact_without_weights_is_refused(tmp_path):
+    from omnitensor.plugins.artifacts import ArtifactReference
+
+    graph, _weights = openvino_pair(tmp_path)
+    reference = ArtifactReference(
+        "demo-ir", "1.0.0", "openvino", hashlib.sha256(graph.read_bytes()).hexdigest()
+    )
+
+    with pytest.raises(ArtifactInstallationError, match="companion-missing"):
+        ArtifactInstaller(tmp_path / "store").install(reference, graph)

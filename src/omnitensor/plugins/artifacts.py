@@ -24,9 +24,18 @@ _FILENAMES = {
 # Formats whose primary file is not the whole model.  An ncnn ".param" is only
 # the graph; every weight lives in the sibling ".bin", so installing the param
 # alone produces an artifact that resolves ready and cannot be executed.
-COMPANION_FILENAMES: dict[str, tuple[str, ...]] = {"ncnn": ("model.bin",)}
+COMPANION_FILENAMES: dict[str, tuple[str, ...]] = {
+    "ncnn": ("model.bin",),
+    # OpenVINO IR is a graph in .xml and its weights in a sibling .bin, so it
+    # has exactly the same defect ncnn had: install the primary alone and the
+    # artifact resolves ready while the weights are absent.
+    "openvino": ("model.bin",),
+}
 # How to find each companion beside the primary source file.
-COMPANION_SOURCE_SUFFIXES: dict[str, dict[str, str]] = {"ncnn": {"model.bin": ".bin"}}
+COMPANION_SOURCE_SUFFIXES: dict[str, dict[str, str]] = {
+    "ncnn": {"model.bin": ".bin"},
+    "openvino": {"model.bin": ".bin"},
+}
 
 
 def companion_filenames(model_format: str) -> tuple[str, ...]:
