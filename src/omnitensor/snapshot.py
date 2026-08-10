@@ -51,8 +51,20 @@ def input_roots_document(
     Empty is the honest answer for the default configuration: this service will
     read no referenced file at all.
     """
+    declared = list(roots)
+    if len(declared) > MAX_PUBLISHED_INPUT_ROOTS:
+        # Truncating would leave the service reading from a directory it never
+        # told anyone about: the applet would not list that root's pictures for
+        # a path the runtime would happily accept, which is the discoverability
+        # gap this block exists to close. A configuration nobody can publish is
+        # a configuration error, said at startup rather than half-honoured.
+        raise ValueError(
+            f"{len(declared)} input roots are configured; at most "
+            f"{MAX_PUBLISHED_INPUT_ROOTS} can be published, and a root the "
+            "snapshot cannot name is one no consumer can use"
+        )
     return {
-        "roots": [str(root) for root in list(roots)[:MAX_PUBLISHED_INPUT_ROOTS]],
+        "roots": [str(root) for root in declared],
         "maxBytes": int(max_bytes),
     }
 

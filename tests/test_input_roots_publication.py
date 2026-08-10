@@ -56,10 +56,18 @@ def test_a_service_that_reads_nothing_says_so_rather_than_staying_silent():
     assert snapshot(inputs=input_roots_document(()))["inputs"]["roots"] == []
 
 
-def test_the_published_list_is_bounded_like_every_other_collection():
+def test_more_roots_than_can_be_published_is_a_configuration_error():
+    """Truncating would leave the service reading a directory nobody was told
+    about: it accepts references from a root the applet never lists, which is
+    the discoverability gap this block was added to close."""
     roots = [f"/root{index}" for index in range(MAX_PUBLISHED_INPUT_ROOTS + 4)]
 
-    assert len(input_roots_document(roots)["roots"]) == MAX_PUBLISHED_INPUT_ROOTS
+    with pytest.raises(ValueError, match="input roots are configured"):
+        input_roots_document(roots)
+
+    assert len(input_roots_document(roots[:MAX_PUBLISHED_INPUT_ROOTS])["roots"]) == (
+        MAX_PUBLISHED_INPUT_ROOTS
+    )
 
 
 def test_a_snapshot_carrying_the_block_is_contract_valid():
