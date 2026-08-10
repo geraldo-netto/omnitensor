@@ -16,7 +16,12 @@ class FakeGpuInfo:
 
 
 class FakeMat(list):
-    pass
+    def clone(self):
+        # The real Mat borrows the numpy buffer it was built from and does not
+        # keep the owner alive, so the executor clones every Mat before it
+        # reaches ncnn. A fake that could not be cloned would let that
+        # requirement be removed without a test noticing.
+        return FakeMat(self)
 
 
 class FakeExtractor:

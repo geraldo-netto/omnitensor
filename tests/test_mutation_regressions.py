@@ -665,7 +665,10 @@ def test_vulkan_availability_reasons_are_exact():
 
 
 class FakeMat(list):
-    pass
+    def clone(self):
+        # The real Mat borrows the buffer it was built from, so the executor
+        # clones every Mat before ncnn sees it.
+        return FakeMat(self)
 
 
 class FakeExtractor:
@@ -820,8 +823,13 @@ def test_vulkan_mat_conversions_are_exact():
     numpy = pytest.importorskip("numpy")
     runtime = FakeNcnn([DISCRETE])
     executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+    # A Mat handed in is cloned like any other: it was built the same way and
+    # borrows its memory the same way, so passing it through untouched would
+    # keep the use-after-free alive on exactly the path that skips conversion.
     existing = FakeMat([1.0])
-    assert executor._to_mat(existing) is existing
+    passed = executor._to_mat(existing)
+    assert passed is not existing
+    assert passed == existing
 
     class NumpyMat:
         def numpy(self):

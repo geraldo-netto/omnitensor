@@ -148,3 +148,52 @@ def test_a_real_batch_is_refused_rather_than_silently_truncated():
 
     with pytest.raises(RuntimeError, match="one image at a time"):
         executor._to_mat([[[[1.0]]], [[[2.0]]]])
+
+
+def test_the_pixels_survive_being_handed_to_ncnn(absval_model):
+    """A Mat must own what it points at.
+
+    ``ncnn.Mat(array)`` wraps the numpy buffer and does not keep the object
+    that owns it alive, so the Mat the executor built died with the array the
+    moment it was constructed — and referenced tensors arrive as nested lists,
+    so that array was always a fresh allocation. The GPU upload happens later,
+    during extraction, and read whatever the allocator had since put in those
+    pages. Usually nothing had, which is why this presented as an intermittent
+    reproducibility problem rather than as a use-after-free.
+
+    Allocation churn between building the Mat and running the model is what
+    makes the difference visible, so this test creates it deliberately.
+    """
+    numpy = pytest.importorskip("numpy")
+    executor = VulkanGpuExecutor(device_present=True)
+    availability = executor.availability()
+    if not availability.available:
+        pytest.skip(f"no usable Vulkan device: {availability.reason}")
+
+    # Big enough that the array is its own allocation rather than a few bytes
+    # in an arena, which is what a real input is and what gets reused.
+    values = [float(index % 17) - 8.0 for index in range(3 * 227 * 227)]
+    mat = executor._to_mat(values)
+
+    # Nothing else holds the source array now. Reuse the pages hard.
+    churn = [numpy.full(len(values), float(index), dtype=numpy.float32) for index in range(64)]
+    del churn
+
+    assert list(mat.numpy().ravel()) == values
+
+
+def test_the_same_input_gives_the_same_answer_every_time(absval_model):
+    """Reproducibility, asserted rather than assumed.
+
+    Until this held, no accuracy number measured on the GPU lane meant
+    anything: the same bytes scored differently from one submission to the
+    next.
+    """
+    executor = VulkanGpuExecutor(device_present=True)
+    if not executor.availability().available:
+        pytest.skip("no usable Vulkan device")
+
+    values = [float(index % 17) - 8.0 for index in range(3 * 32 * 32)]
+    answers = {tuple(executor.run(absval_model, [values]).outputs[0]) for _ in range(8)}
+
+    assert len(answers) == 1, "the same input produced more than one answer"

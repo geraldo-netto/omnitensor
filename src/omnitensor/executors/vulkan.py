@@ -42,14 +42,18 @@ class VulkanGpuExecutor:
         Enumerating Vulkan is not a read-only question: it initialises the
         loader and queries every driver.  The snapshot publisher asks whether
         this backend is available on every tick — twice a second — from a
-        different thread from the one running inference, and doing that while
-        a model is executing corrupted its results: the same image scored
-        0.999 on one submission and 0.658 on the next, from a byte-identical
-        input, on a device whose own answer never varies.
+        different thread from the one running inference, which is a great deal
+        of driver work to repeat under a running job.
 
         Which device is present changes only when hardware does, and discovery
         rebuilds these executors when it does, so the answer is cached for the
         life of the executor rather than recomputed under a running job.
+
+        This is hygiene, and it is credited with nothing.  It was once
+        suspected of causing the same image to score differently from one
+        submission to the next; measurement did not support that, and the
+        cause turned out to be a Mat pointing at freed pixels (see
+        ``_to_mat``).
         """
         if self._selected is None:
             self._selected = self._enumerate_device()
@@ -141,9 +145,22 @@ class VulkanGpuExecutor:
         scores, which is the worst possible failure: every classification this
         executor produced was of a one-channel tensor assembled from the wrong
         axes, and looked exactly like a working one.
+
+        The clone is the other half of that.  ``Mat(array)`` *wraps* the numpy
+        buffer — it shares the memory and does not take a reference to the
+        object that owns it — so the Mat built here outlived its pixels the
+        moment this function returned.  A referenced tensor arrives as nested
+        lists, so the array is always freshly allocated and always freed on
+        return, and the upload to the GPU does not happen until ``extract()``.
+        Whatever the allocator had put in those pages by then was what the
+        model classified.  Most of the time nothing had reused them and the
+        answer was right, which is why this read as an intermittent
+        reproducibility problem rather than as the use-after-free it was.
         """
         if isinstance(value, self._runtime.Mat):
-            return value
+            # Cloned like any other, because a Mat handed in from outside was
+            # built the same way and carries the same borrowed memory.
+            return self._owned(value)
         import numpy  # noqa: PLC0415 - shipped with the ncnn wheel
 
         array = numpy.ascontiguousarray(value, dtype=numpy.float32)
@@ -155,7 +172,19 @@ class VulkanGpuExecutor:
             raise RuntimeError(
                 f"ncnn runs one image at a time; received a batch of {array.shape[0]}"
             )
-        return self._runtime.Mat(array)
+        return self._owned(self._runtime.Mat(array))
+
+    @staticmethod
+    def _owned(mat):
+        """A Mat that owns its pixels, so nothing can free them underneath it.
+
+        Keeping the numpy array alive until extraction would also work and
+        would save one copy of the input — 0.1 ms against a job that takes
+        tens of milliseconds — but it makes correctness depend on a lifetime
+        the reader has to reconstruct from two functions. This makes the Mat
+        self-sufficient at the point it is built.
+        """
+        return mat.clone()
 
     @staticmethod
     def _from_mat(mat):
