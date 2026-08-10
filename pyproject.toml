@@ -28,6 +28,10 @@ gpu = ["ncnn>=1.0.20240102", "numpy>=1.24"]
 gpu-onnx-cuda = ["onnxruntime-gpu>=1.17"]
 gpu-onnx-rocm = ["onnxruntime-rocm>=1.17"]
 npu = ["openvino>=2024.0"]
+# Packaging-time only: converts ONNX/TorchScript into the ncnn form the GPU
+# lane executes. Never installed into the service environment — converting on
+# demand would install unverified weights while answering a request.
+convert = ["pnnx>=20240101"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
@@ -42,6 +46,7 @@ omnitensor = "omnitensor.service:main"
 omnitensor-plugin-smoke = "omnitensor.sdk.smoke:main"
 omnitensor-verify-install = "omnitensor.acceptance:main"
 omnitensor-prepare-artifact = "omnitensor.preparation:main"
+omnitensor-convert-model = "omnitensor.conversion:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnitensor"]
