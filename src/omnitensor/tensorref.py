@@ -176,15 +176,49 @@ def verify_reference(
 ) -> None:
     """Refuse a reference that could not be loaded, without loading it.
 
-    Everything :func:`load_referenced_tensor` decides except the values
-    themselves.  The digest is streamed and nothing is retained, so admission
-    can answer a caller in its own submission call without holding a buffer
-    that dispatch will read again anyway.
+    Everything :func:`load_referenced_tensor` decides, including the values —
+    a file of NaNs was previously admitted and refused only in the infer
+    stage, which is the late-failure shape admission exists to remove.  The
+    check rides along with the digest, chunk by chunk, so nothing is retained
+    and dispatch still re-reads what it will actually execute.
     """
     _permitted(reference, policy, max_tensor_bytes)
-    if _digest_of(reference.path, max_tensor_bytes) != reference.sha256:
+    if _digest_and_finite(reference, max_tensor_bytes) != reference.sha256:
         raise TensorReferenceError(
             "input-ref-mismatch", "the file does not match the declared sha256"
+        )
+
+
+def _digest_and_finite(reference: TensorReference, max_bytes: int) -> str:
+    """Digest a referenced buffer and refuse a non-finite value on the way past.
+
+    One pass, no retention: chunks are hashed and checked and dropped.  Only
+    whole elements are decoded, so a value split across a chunk boundary is
+    carried forward rather than half-read.
+    """
+    element = DTYPE_SIZES[reference.dtype]
+    code = _DTYPE_CODES[reference.dtype]
+    checked = code in ("f", "d")
+    digest = hashlib.sha256()
+    carry = b""
+    for chunk in _chunks(reference.path, max_bytes):
+        digest.update(chunk)
+        if not checked:
+            continue
+        carry += chunk
+        whole = len(carry) - (len(carry) % element)
+        if whole:
+            _refuse_non_finite(carry[:whole], code, whole // element)
+            carry = carry[whole:]
+    return digest.hexdigest()
+
+
+def _refuse_non_finite(payload: bytes, code: str, count: int) -> None:
+    if any(not math.isfinite(value) for value in struct.unpack(f"<{count}{code}", payload)):
+        # A NaN reaching a native library mid-inference is a failure with no
+        # useful diagnosis, and the caller learns of it a poll later.
+        raise TensorReferenceError(
+            "input-ref-invalid", "referenced tensors must contain finite numbers"
         )
 
 

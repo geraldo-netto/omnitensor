@@ -10,6 +10,7 @@ from omnitensor.tensorref import (
     MAX_RANK,
     DenyAllInputRoots,
     OptedInInputRoots,
+    TensorReference,
     TensorReferenceError,
     load_referenced_tensor,
     parse_reference,
@@ -387,3 +388,66 @@ def test_parsing_refuses_a_payload_carrying_both_forms(tmp_path):
 
     with pytest.raises(TensorReferenceError, match="never both"):
         parse_references(payload, max_tensors=4)
+
+
+def _digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_a_buffer_of_nans_is_refused_when_it_is_verified(tmp_path):
+    """Admission proved containment, size, and digest but never the values.
+
+    A file of NaNs was admitted and refused only in the infer stage — the
+    late-failure shape admission exists to remove, and the one the caller has
+    to poll for.
+    """
+    path = tmp_path / "nan.f32"
+    path.write_bytes(struct.pack("<3f", 1.0, float("nan"), 3.0))
+    reference = TensorReference(path, (3,), "float32", _digest(path))
+
+    with pytest.raises(TensorReferenceError) as excinfo:
+        verify_reference(reference, OptedInInputRoots([tmp_path]))
+
+    assert excinfo.value.code == "input-ref-invalid"
+    assert "finite" in excinfo.value.detail
+
+
+def test_a_value_split_across_a_read_chunk_is_not_half_checked(tmp_path):
+    """Only whole elements are decoded, so a float straddling a chunk boundary
+    is carried forward rather than misread as two."""
+    from omnitensor import tensorref
+
+    count = 4096
+    values = [1.0] * count
+    values[-1] = float("inf")
+    path = tmp_path / "big.f64"
+    path.write_bytes(struct.pack(f"<{count}d", *values))
+    reference = TensorReference(path, (count,), "float64", _digest(path))
+
+    # A chunk size that is not a multiple of the 8-byte element.
+    original = tensorref._READ_CHUNK_BYTES
+    tensorref._READ_CHUNK_BYTES = 1023
+    try:
+        with pytest.raises(TensorReferenceError) as excinfo:
+            verify_reference(reference, OptedInInputRoots([tmp_path]))
+    finally:
+        tensorref._READ_CHUNK_BYTES = original
+
+    assert excinfo.value.code == "input-ref-invalid"
+
+
+def test_an_integer_buffer_is_digested_without_a_finiteness_check(tmp_path):
+    """There is no such thing as a non-finite int32; checking would be theatre."""
+    path = tmp_path / "ints.i32"
+    path.write_bytes(struct.pack("<3i", 1, -2, 3))
+    reference = TensorReference(path, (3,), "int32", _digest(path))
+
+    verify_reference(reference, OptedInInputRoots([tmp_path]))
+
+
+def test_a_finite_buffer_still_verifies(tmp_path):
+    path = tmp_path / "fine.f32"
+    path.write_bytes(struct.pack("<3f", 1.0, 2.0, 3.0))
+    reference = TensorReference(path, (3,), "float32", _digest(path))
+
+    verify_reference(reference, OptedInInputRoots([tmp_path]))
