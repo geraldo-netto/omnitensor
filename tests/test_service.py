@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 
 from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
 
 from omnitensor.discovery import Device, detect_devices
+from omnitensor.executors.base import Availability
+from omnitensor.jobs import UnavailableJobDispatcher
+from omnitensor.plugins import ArtifactInstaller, ArtifactReference
 from omnitensor.registry import validate_document
 from omnitensor.service import OmniTensorService, build_executors, profile_statuses
 
@@ -218,3 +222,74 @@ def test_the_snapshot_and_the_dispatcher_consult_the_same_resolver(fake_nodes, t
 
     assert ready is False
     assert reason == service._resolve_artifact("runnable-model").reason
+
+
+SERVING_STATUSES = frozenset({"watching", "running"})
+
+
+class _AvailableExecutor:
+    """The narrowest thing ``pick_backend`` accepts as a working backend."""
+
+    model_formats = ("tflite-edgetpu",)
+
+    def availability(self) -> Availability:
+        return Availability(True, "")
+
+
+def _serving_profiles(service) -> set[str]:
+    return {
+        workload_id
+        for workload_id, entry in service._build_runtime_snapshot()["profiles"].items()
+        if entry["status"] in SERVING_STATUSES
+    }
+
+
+def test_no_profile_serves_where_the_dispatcher_refuses_every_job(fake_nodes, tmp_path):
+    """The status a user reads and the answer SubmitJob gives must agree.
+
+    With no artifact root the dispatcher is fail-closed for every workload, so
+    any serving profile in the snapshot is a promise the service cannot keep.
+    Asserted over the whole snapshot rather than one profile, because the two
+    halves are computed by different code and only their agreement matters.
+    """
+    add_pcie_tpu(fake_nodes)
+    service = build_service(
+        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
+    )
+
+    assert isinstance(service._job_dispatcher, UnavailableJobDispatcher)
+    assert _serving_profiles(service) == set()
+
+
+def test_a_profile_serves_once_its_artifact_is_installed_and_the_job_is_admitted(
+    fake_nodes, tmp_path
+):
+    """The other direction, so the test above cannot pass by never serving."""
+    add_pcie_tpu(fake_nodes)
+    store = tmp_path / "artifacts"
+    payload = b"a tflite model would live here"
+    source = tmp_path / "model.tflite"
+    source.write_bytes(payload)
+    reference = ArtifactReference(
+        "runnable-model", "1.0.0", "tflite-edgetpu", hashlib.sha256(payload).hexdigest()
+    )
+    ArtifactInstaller(store).install(reference, source)
+
+    workloads_root = tmp_path / "workloads"
+    workloads_root.mkdir(exist_ok=True)
+    write_workload(workloads_root, sample_manifest_with_model())
+    service = OmniTensorService(
+        snapshot_path=tmp_path / "state/runtime-snapshot.json",
+        policy_path=tmp_path / "state/policy.json",
+        workloads_path=workloads_root,
+        discovery_paths=fake_nodes,
+        artifact_root=store,
+    )
+
+    # This host has no Edge TPU runtime, so the backend that would serve the
+    # profile is stubbed. Everything the assertion is about — the resolver, the
+    # dispatcher, and the status they agree on — is still the real thing.
+    service._executors = {"tpu": _AvailableExecutor()}
+
+    assert not isinstance(service._job_dispatcher, UnavailableJobDispatcher)
+    assert _serving_profiles(service) == {"runnable-workload"}
