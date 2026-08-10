@@ -195,6 +195,13 @@ from .pipeline import (
     ResolvedOutput,
     StageOutput,
 )
+from .policy import (
+    ADMITTED,
+    PipelinePolicyGate,
+    PolicyDecision,
+    PolicyRefusal,
+    PolicyRefusedError,
+)
 from .protocol import (
     CancellationToken,
     JsonObject,
@@ -510,6 +517,11 @@ __all__ = [
     "join_worker_cgroup",
     "remove_worker_cgroup",
     "PipelineSnapshot",
+    "PipelinePolicyGate",
+    "PolicyDecision",
+    "PolicyRefusal",
+    "PolicyRefusedError",
+    "ADMITTED",
     "PipelineStage",
     "PipelineStateMachine",
     "PipelineTransitionError",
