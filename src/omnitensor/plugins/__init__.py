@@ -67,6 +67,13 @@ from .budgets import (
     join_worker_cgroup,
     remove_worker_cgroup,
 )
+from .cancellation import (
+    Cancellation,
+    CancellationReason,
+    JobCancellationRegistry,
+    JobCancellationToken,
+    JobCancelledError,
+)
 from .discovery import (
     MAX_DISTRIBUTION_FILES,
     MAX_PLUGIN_CANDIDATES,
@@ -525,6 +532,11 @@ __all__ = [
     "PipelineSnapshot",
     "PipelinePolicyGate",
     "PluginFlowController",
+    "JobCancellationRegistry",
+    "JobCancellationToken",
+    "JobCancelledError",
+    "Cancellation",
+    "CancellationReason",
     "FlowRefusal",
     "FlowRefusedError",
     "FlowSnapshot",
