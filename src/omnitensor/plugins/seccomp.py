@@ -87,6 +87,14 @@ _AUDIT_ARCH = {"x86_64": AUDIT_ARCH_X86_64, "aarch64": AUDIT_ARCH_AARCH64}
 _DENIED_OUTRIGHT = ("execve", "execveat", "fork", "vfork")
 
 
+#: Architectures whose syscall numbering is written down here, and therefore
+#: the only ones where a plugin worker can be confined.  A table is not
+#: guesswork that can be extended from documentation alone: applying a filter
+#: built from the wrong ABI's numbers denies unrelated syscalls, so an entry
+#: belongs here only once somebody has run the suite on that machine.
+SUPPORTED_MACHINES: tuple[str, ...] = ("aarch64", "x86_64")
+
+
 class SeccompUnsupportedError(RuntimeError):
     """This architecture's syscall numbering is not written down here."""
 
@@ -94,7 +102,10 @@ class SeccompUnsupportedError(RuntimeError):
         self.machine = machine
         super().__init__(
             f"no seccomp syscall table for {machine}; refusing to apply a filter"
-            " written for another ABI"
+            " written for another ABI. Confinement is implemented for "
+            f"{', '.join(SUPPORTED_MACHINES)}; on any other machine a plugin "
+            "worker cannot be sandboxed and will not start unless --no-seccomp "
+            "is passed deliberately"
         )
 
 

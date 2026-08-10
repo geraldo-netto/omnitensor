@@ -143,6 +143,14 @@ before the report; that output is the hardware talking, not a fault.
 | Package | Needed for | Without it |
 | --- | --- | --- |
 | `bubblewrap` | plugin worker sandbox | external plugin workers cannot start |
+
+Plugin workers are confined by a seccomp filter built from a per-architecture
+syscall table, and tables are written down for **x86_64 and aarch64 only**. On
+any other machine a worker refuses to start rather than run plugin code
+unconfined; `--no-seccomp` exists as a deliberate operator override and is not
+selected automatically. A table cannot be extended from documentation alone —
+a filter built from the wrong ABI's numbers denies unrelated syscalls — so an
+architecture joins that list only once the suite has been run on it.
 | `mesa-vulkan-drivers` (or vendor driver) | Vulkan GPU inference | `ncnn` reports zero GPUs |
 | `dbus` session bus | the whole control surface | the service cannot own its bus name |
 | `clang`, `bpftool`, `libbpf-dev` | building the eBPF helper only | `helpers/bpf/build.sh` refuses to run |
