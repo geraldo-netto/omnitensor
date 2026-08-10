@@ -26,6 +26,7 @@ from .ipc import (
     ready_frame,
 )
 from .protocol import PluginContext, WorkloadPlugin
+from .seccomp import install_filter
 
 WORKER_CAPABILITIES = frozenset({"cancel", "health"})
 
@@ -165,6 +166,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--distribution", required=True)
     parser.add_argument("--import-path", action="append", default=[])
     parser.add_argument("--permission", action="append", default=[])
+    parser.add_argument(
+        "--no-seccomp",
+        action="store_true",
+        help="run without the exec/fork filter; only for kernels that cannot install one",
+    )
     return parser
 
 
@@ -190,6 +196,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     channel = claim_frame_channel()
     for path in reversed(arguments.import_path):
         sys.path.insert(0, path)
+    if not arguments.no_seccomp:
+        # Before the plugin is imported, because importing it already runs its
+        # code, and a filter applied afterwards would have arrived too late.
+        install_filter()
     plugin = load_external_plugin(
         arguments.plugin_id,
         arguments.entry_point,

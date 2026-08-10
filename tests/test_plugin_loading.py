@@ -427,8 +427,11 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
     monkeypatch.setattr(worker_module.sys, "stdin", stdin)
     monkeypatch.setattr(worker_module.sys, "path", list(sys.path))
 
+    # --no-seccomp: installing the real filter here would confine the test
+    # process itself, and a seccomp filter cannot be removed once applied.
     worker_module.main(
         [
+            "--no-seccomp",
             "--plugin-id",
             "external-example",
             "--entry-point",
@@ -722,3 +725,69 @@ def test_worker_answers_the_handshake_before_its_plugin_starts():
         WorkerMessageType.HELLO,
         WorkerMessageType.READY,
     ]
+
+
+def test_the_worker_confines_itself_before_it_imports_the_plugin(monkeypatch, tmp_path):
+    """Importing a plugin already runs its code; a later filter is too late."""
+    order = []
+
+    def install():
+        order.append("install")
+        return 15
+
+    def load(*identity):
+        order.append("load")
+        return TrackingPlugin()
+
+    monkeypatch.setattr(worker_module, "install_filter", install)
+    monkeypatch.setattr(worker_module, "load_external_plugin", load)
+    monkeypatch.setattr(worker_module, "serve_worker", lambda *a, **k: order.append("serve"))
+    monkeypatch.setattr(
+        worker_module, "claim_frame_channel", lambda: io.BytesIO()
+    )
+    monkeypatch.setattr(
+        worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})()
+    )
+
+    worker_module.main(
+        [
+            "--plugin-id",
+            "external-example",
+            "--entry-point",
+            "external-example",
+            "--target",
+            "external_package:Plugin",
+            "--distribution",
+            "external-dist",
+        ]
+    )
+
+    assert order == ["install", "load", "serve"]
+
+
+def test_a_worker_told_not_to_confine_itself_does_not(monkeypatch):
+    """Only for kernels that cannot install one; it is never the default."""
+    installed = []
+    monkeypatch.setattr(worker_module, "install_filter", lambda: installed.append(1))
+    monkeypatch.setattr(worker_module, "load_external_plugin", lambda *a: TrackingPlugin())
+    monkeypatch.setattr(worker_module, "serve_worker", lambda *a, **k: None)
+    monkeypatch.setattr(worker_module, "claim_frame_channel", lambda: io.BytesIO())
+    monkeypatch.setattr(
+        worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})()
+    )
+
+    worker_module.main(
+        [
+            "--no-seccomp",
+            "--plugin-id",
+            "external-example",
+            "--entry-point",
+            "external-example",
+            "--target",
+            "external_package:Plugin",
+            "--distribution",
+            "external-dist",
+        ]
+    )
+
+    assert installed == []
