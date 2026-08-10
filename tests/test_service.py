@@ -179,3 +179,42 @@ def test_a_clean_start_reconciles_nothing(fake_nodes, tmp_path):
     add_pcie_tpu(fake_nodes)
     service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
     assert service.reconcile_interrupted_jobs().interrupted == ()
+
+
+def test_a_declared_model_that_is_not_installed_is_not_reported_as_serving(
+    fake_nodes, tmp_path
+):
+    """Declaring a model is not having one. Every fresh checkout ships the
+    manifest without the artifact, and this claimed the profile was working."""
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
+
+    statuses = service._build_runtime_snapshot()["profiles"]
+
+    entry = statuses["runnable-workload"]
+    assert entry["status"] == "unavailable"
+    assert "Serving" not in entry["detail"]
+
+
+def test_a_profile_with_no_model_is_never_told_its_artifact_is_missing(fake_nodes, tmp_path):
+    """A profile that declares nothing cannot be missing anything."""
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    entry = service._build_runtime_snapshot()["profiles"]["sample-workload"]
+
+    assert "artifact" not in entry["detail"]
+    assert entry["status"] != "watching"
+    ready, reason = service._profile_artifact_ready(service._workloads["sample-workload"])
+    assert (ready, reason) == (True, "")
+
+
+def test_the_snapshot_and_the_dispatcher_consult_the_same_resolver(fake_nodes, tmp_path):
+    """Otherwise the snapshot can promise what dispatch would refuse."""
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
+
+    ready, reason = service._profile_artifact_ready(service._workloads["runnable-workload"])
+
+    assert ready is False
+    assert reason == service._resolve_artifact("runnable-model").reason

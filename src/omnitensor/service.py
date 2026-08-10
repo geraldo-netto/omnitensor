@@ -315,6 +315,7 @@ def profile_statuses(
     executors: dict,
     scheduler: Scheduler,
     policy: PolicyState,
+    artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
     per_profile = scheduler.profile_stats()
@@ -324,12 +325,19 @@ def profile_statuses(
             executors,
             per_profile.get(workload_id, {"queued": 0, "running": 0}),
             policy,
+            artifact_ready,
         )
         for workload_id, workload in workloads.items()
     }
 
 
-def _profile_status(workload: Workload, executors: dict, counts: dict, policy: PolicyState) -> dict:
+def _profile_status(
+    workload: Workload,
+    executors: dict,
+    counts: dict,
+    policy: PolicyState,
+    artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
+) -> dict:
     queued = counts["queued"]
     profile_policy = policy.profiles.get(workload.id)
     if policy.paused:
@@ -342,6 +350,18 @@ def _profile_status(workload: Workload, executors: dict, counts: dict, policy: P
     if workload.model is None:
         detail = f"Ready on {backend}; no model bundled"
         return {"status": "idle", "queued": queued, "detail": detail}
+    if artifact_ready is not None:
+        ready, reason = artifact_ready(workload)
+        if not ready:
+            # Declaring a model is not the same as having one.  Reporting
+            # "serving" here told a user a profile was working on every host
+            # where the manifest shipped but the artifact had not been
+            # installed — which is every fresh checkout.
+            return {
+                "status": "unavailable",
+                "queued": queued,
+                "detail": f"{backend}: {reason}"[:240],
+            }
     return {
         "status": "running" if counts["running"] > 0 else "watching",
         "queued": queued,
@@ -543,6 +563,20 @@ class OmniTensorService:
         )
         return json.dumps(document, separators=(",", ":"))
 
+    def _profile_artifact_ready(self, workload: Workload) -> tuple[bool, str]:
+        """Whether the model a profile declares is actually installed here.
+
+        Asked of the same resolver dispatch uses, so the snapshot cannot
+        promise a profile the dispatcher would then refuse.
+        """
+        model = workload.model
+        if model is None:
+            return True, ""
+        resolution = self._resolve_artifact(model["id"])
+        if getattr(resolution, "ready", False):
+            return True, ""
+        return False, getattr(resolution, "reason", "") or "model artifact is not installed"
+
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
         """Report readiness exactly as dispatch would decide it.
 
@@ -587,7 +621,11 @@ class OmniTensorService:
             devices=devices,
             metrics=stats,
             profiles=profile_statuses(
-                self._workloads, self._executors, self._scheduler, self.control.state,
+                self._workloads,
+                self._executors,
+                self._scheduler,
+                self.control.state,
+                self._profile_artifact_ready,
             ),
             alerts=self.result_summaries.documents(),
             plugin_telemetry=self.plugin_telemetry.documents(),
