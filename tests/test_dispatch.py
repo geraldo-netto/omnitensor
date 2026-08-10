@@ -17,6 +17,7 @@ from omnitensor.jobs import JobDispatchError
 from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
 from omnitensor.registry import Workload
 from omnitensor.scheduler import Scheduler
+from omnitensor.tensorref import OptedInInputRoots
 
 MODEL = {
     "id": "sample-model",
@@ -613,3 +614,70 @@ def test_admission_leaves_routing_and_resolution_to_dispatch():
     with pytest.raises(JobDispatchError) as failure:
         subject.dispatch("job-1", "sample-workload", {"inputs": [[1.0]]})
     assert failure.value.code == "no-backend-available"
+
+
+CONTRACT = {
+    **MODEL,
+    "tensorContract": {
+        "inputs": [{"shape": [1, 2, 2], "dtype": "float32", "layout": "NCHW"}],
+    },
+}
+
+
+def test_a_shape_the_model_cannot_accept_is_refused_in_the_submitting_call():
+    """It used to surface as `ncnn extraction failed for output prob`, raised
+    inside the executor after the job was admitted, queued, and dispatched."""
+    dispatch = dispatcher([workload(model=CONTRACT)])
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatch.admit("sample-workload", {"inputs": [[[1.0, 2.0, 3.0]]]})
+
+    assert excinfo.value.code == "input-contract-mismatch"
+    assert "[1, 2, 2]" in str(excinfo.value)
+
+
+def test_an_input_the_model_declares_is_admitted():
+    dispatch = dispatcher([workload(model=CONTRACT)])
+
+    # One tensor of shape (1, 2, 2): the batch dimension is part of the
+    # declared contract, and the reference path that works today carries it.
+    admitted = dispatch.admit("sample-workload", {"inputs": [[[[1.0, 2.0], [3.0, 4.0]]]]})
+
+    assert admitted is None
+
+
+def test_a_referenced_input_is_checked_against_the_contract_before_it_is_read(tmp_path):
+    """The reference declares its own shape and dtype, so the disagreement is
+    found without opening the file at all."""
+    dispatch = dispatcher([workload(model=CONTRACT)], input_roots=OptedInInputRoots([tmp_path]))
+    absent = tmp_path / "never-opened.f32"
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatch.admit("sample-workload", {"inputRefs": [{
+            "path": str(absent), "shape": [1, 3, 8, 8],
+            "dtype": "float32", "sha256": "0" * 64,
+        }]})
+
+    assert excinfo.value.code == "input-contract-mismatch"
+    assert absent.exists() is False
+
+
+def test_a_referenced_dtype_the_model_does_not_take_is_refused(tmp_path):
+    dispatch = dispatcher([workload(model=CONTRACT)], input_roots=OptedInInputRoots([tmp_path]))
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatch.admit("sample-workload", {"inputRefs": [{
+            "path": str(tmp_path / "x.bin"), "shape": [1, 2, 2],
+            "dtype": "int32", "sha256": "0" * 64,
+        }]})
+
+    assert excinfo.value.code == "input-contract-mismatch"
+    assert "int32" in str(excinfo.value)
+
+
+def test_a_model_declaring_no_contract_admits_what_it_always_did():
+    """Absent means no check: every profile written before the field behaves
+    exactly as it did."""
+    dispatch = dispatcher([workload(model=MODEL)])
+
+    assert dispatch.admit("sample-workload", {"inputs": [[[1.0, 2.0, 3.0]]]}) is None

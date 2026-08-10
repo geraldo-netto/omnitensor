@@ -26,6 +26,7 @@ from .jobs import JobDispatchError
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .registry import Workload
 from .scheduler import QueueFullError, Scheduler, pick_backend
+from .tensorcontract import contract_error, declared_inputs, measured_shape
 from .tensorref import (
     DenyAllInputRoots,
     InputRootPolicy,
@@ -91,11 +92,17 @@ class InferenceJobDispatcher:
         condition of the runtime at dispatch time, and answering it at
         submission would refuse jobs that would have run.
         """
-        self._runnable(workload_id)
+        workload = self._runnable(workload_id)
+        specs = declared_inputs(workload.model)
         references = self._references(payload)
         if references is None:
-            self._validated(_inline_inputs(payload, self._max_input_tensors))
+            inputs = self._validated(_inline_inputs(payload, self._max_input_tensors))
+            self._agrees(specs, [(measured_shape(tensor), None) for tensor in inputs])
             return
+        self._agrees(
+            specs,
+            [(reference.shape, reference.dtype) for reference in references],
+        )
         budget = _ElementBudget(
             self._max_input_elements, code="payload-invalid", label="Job payload"
         )
@@ -104,6 +111,16 @@ class InferenceJobDispatcher:
             # its file is opened rather than after it has been read.
             budget.spend(reference.element_count)
             self._verify(reference)
+
+    def _agrees(self, specs, shapes) -> None:
+        """Refuse an input the model cannot accept, in the submitting call.
+
+        The alternative was an opaque native failure from inside the executor,
+        after the job had been admitted, queued, and dispatched.
+        """
+        mismatch = contract_error(specs, shapes)
+        if mismatch is not None:
+            raise JobDispatchError("input-contract-mismatch", mismatch)
 
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
         """Admit, resolve, route, and queue one job; never run it inline."""

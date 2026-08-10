@@ -275,6 +275,94 @@
               "description": "Digest of the exact artifact this profile may run. Optional for compatibility with manifests written before dispatch verified it; when absent the runtime can only trust the digest recorded when the artifact was installed.",
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
+            },
+            "tensorContract": {
+              "description": "What this model expects of its input. Absent means no check: a manifest written before this field still loads and still runs. Split deliberately in two \u2014 shape and dtype are facts the runtime enforces at admission, while preprocess is advice for whoever turns a picture into a buffer and is never enforced, because the runtime decodes nothing and cannot tell a correctly normalised tensor from a wrong one.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputs"
+              ],
+              "properties": {
+                "inputs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "shape",
+                      "dtype"
+                    ],
+                    "properties": {
+                      "shape": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65536
+                        }
+                      },
+                      "dtype": {
+                        "enum": [
+                          "float32",
+                          "float64",
+                          "int32",
+                          "int64",
+                          "uint8"
+                        ]
+                      },
+                      "layout": {
+                        "enum": [
+                          "NCHW",
+                          "NHWC",
+                          "NC",
+                          "N"
+                        ]
+                      },
+                      "preprocess": {
+                        "description": "How the values were produced, for a caller that has pixels and needs a buffer. Stated by the publisher because nothing in the artifact records it: an ncnn .param declares its input size and says nothing about mean subtraction or channel order, and a tensor normalised the wrong way infers successfully and means nothing.",
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "channelOrder",
+                          "mean",
+                          "scale"
+                        ],
+                        "properties": {
+                          "channelOrder": {
+                            "enum": [
+                              "RGB",
+                              "BGR",
+                              "GRAY"
+                            ]
+                          },
+                          "mean": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                              "type": "number"
+                            }
+                          },
+                          "scale": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }

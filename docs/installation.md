@@ -174,6 +174,49 @@ the publisher is accountable for the graph and not for the weights. Tampering
 after installation is caught; a substituted weights file at publication time is
 not.
 
+#### Declaring what the model expects
+
+`requirements.model.tensorContract` states what a caller must supply. It is
+optional — a manifest without it loads and runs exactly as before — and it is
+deliberately in two halves:
+
+```json
+"tensorContract": {
+  "inputs": [{
+    "shape": [1, 3, 227, 227],
+    "dtype": "float32",
+    "layout": "NCHW",
+    "preprocess": {
+      "channelOrder": "BGR",
+      "mean": [104.0, 117.0, 123.0],
+      "scale": [1.0, 1.0, 1.0]
+    }
+  }]
+}
+```
+
+`shape` and `dtype` are **enforced at admission**. A job whose input disagrees
+is refused in the submitting call with `input-contract-mismatch`, instead of
+failing later inside the executor as `ncnn extraction failed for output prob`
+— a message raised after the job was admitted, queued, and dispatched, with
+nothing in it a caller could act on.
+
+`preprocess` is **published and never checked**. The service decodes nothing:
+it never sees a picture, only a buffer, and a buffer normalised the wrong way
+is a valid tensor that infers successfully and means nothing. Stating it is
+still the point — no artifact records it. An ncnn `.param` declares its input
+size in its `Input` layer and is silent about channel order and mean
+subtraction, so without a published contract every caller guesses.
+
+The bundled `visual-library` values come from the artifact's identity, not
+from inspection. Its `model.param` and `model.bin` are byte-identical to
+upstream ncnn's `squeezenet_v1.1` (Caffe layer naming, a `Softmax prob`
+output), whose documented preprocessing is 227x227 BGR with mean subtraction
+of `104, 117, 123` and no scaling. The shape half is verified against the
+installed `.param` by `tests/test_tensorcontract.py`; the preprocessing half
+rests on that identity and would have to be restated if the artifact were
+ever replaced.
+
 ### Large inputs
 
 A model input does not fit in a job submission. One 3x227x227 float image is
