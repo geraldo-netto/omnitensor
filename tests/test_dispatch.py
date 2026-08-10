@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -280,3 +281,65 @@ def test_a_non_result_from_an_executor_is_refused():
     with pytest.raises(JobDispatchError) as excinfo:
         inference_result_payload({"outputs": []})
     assert excinfo.value.code == "executor-result-invalid"
+
+
+def result(outputs, duration_ms=1.0):
+    return InferenceResult(outputs=outputs, duration_ms=duration_ms)
+
+
+def test_a_numpy_output_is_encoded_as_json_values():
+    """tflite, OpenVINO, and onnxruntime all hand back numpy arrays."""
+    numpy = pytest.importorskip("numpy")
+    payload = inference_result_payload(result([numpy.array([[1.5, 2.0], [3.0, 4.0]])]))
+    assert payload["outputs"] == [[[1.5, 2.0], [3.0, 4.0]]]
+    assert json.dumps(payload)
+
+
+def test_an_ncnn_mat_is_encoded_through_its_numpy_view():
+    class FakeMat:
+        def numpy(self):
+            import numpy
+
+            return numpy.array([1.0, 2.0])
+
+    pytest.importorskip("numpy")
+    assert inference_result_payload(result([FakeMat()]))["outputs"] == [[1.0, 2.0]]
+
+
+def test_nested_sequences_and_scalars_pass_through():
+    payload = inference_result_payload(result([[1, 2], (3.5, True), 7]))
+    assert payload["outputs"] == [[1, 2], [3.5, True], 7]
+
+
+def test_a_non_finite_output_is_refused():
+    with pytest.raises(JobDispatchError) as excinfo:
+        inference_result_payload(result([[float("nan")]]))
+    assert excinfo.value.code == "executor-result-invalid"
+
+
+def test_a_non_finite_duration_is_refused():
+    with pytest.raises(JobDispatchError) as excinfo:
+        inference_result_payload(result([[1]], duration_ms=float("inf")))
+    assert excinfo.value.code == "executor-result-invalid"
+
+
+def test_an_unencodable_output_is_refused_rather_than_stringified():
+    with pytest.raises(JobDispatchError) as excinfo:
+        inference_result_payload(result([{"tensor": 1}]))
+    assert excinfo.value.code == "executor-result-invalid"
+    assert "unencodable dict" in excinfo.value.message
+
+
+def test_the_total_element_count_is_bounded_across_all_tensors():
+    with pytest.raises(JobDispatchError) as excinfo:
+        inference_result_payload(result([[1, 2], [3, 4]]), max_elements=3)
+    assert "exceeds 3 tensor elements" in excinfo.value.message
+
+
+def test_a_result_at_the_element_bound_is_accepted():
+    assert inference_result_payload(result([[1, 2]]), max_elements=2)["outputs"] == [[1, 2]]
+
+
+def test_bytes_are_not_treated_as_a_tensor():
+    with pytest.raises(JobDispatchError):
+        inference_result_payload(result([b"raw"]))

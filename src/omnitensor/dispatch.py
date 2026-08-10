@@ -17,6 +17,7 @@ stable refusal naming why each candidate was rejected.
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
@@ -27,6 +28,8 @@ from .registry import Workload
 from .scheduler import QueueFullError, Scheduler, pick_backend
 
 MAX_INPUT_TENSORS = 64
+# One result must stay small enough to cross IPC as a single bounded frame.
+MAX_TENSOR_ELEMENTS = 1 << 20
 
 
 @runtime_checkable
@@ -146,13 +149,80 @@ def declared_artifact_reference(
     return None
 
 
-def inference_result_payload(result: InferenceResult) -> dict:
-    """Map an executor outcome back into a plugin-facing job result."""
+def inference_result_payload(
+    result: InferenceResult, *, max_elements: int = MAX_TENSOR_ELEMENTS
+) -> dict:
+    """Map an executor outcome back into a plugin-facing job result.
+
+    Executors return whatever their backend hands them — a numpy array from
+    tflite, OpenVINO, and onnxruntime, an ncnn Mat from Vulkan — none of which
+    survive JSON encoding.  Converting here rather than inside each executor
+    keeps native tensors available to anything that chains stages internally,
+    while guaranteeing that what crosses IPC is encodable.
+    """
     if not isinstance(result, InferenceResult):
         raise JobDispatchError(
             "executor-result-invalid", "Executor returned a non-result value"
         )
-    return {
-        "outputs": list(result.outputs),
-        "durationMs": round(float(result.duration_ms), 3),
-    }
+    budget = _ElementBudget(max_elements)
+    outputs = [encode_tensor(tensor, budget) for tensor in result.outputs]
+    duration = float(result.duration_ms)
+    if not math.isfinite(duration):
+        raise JobDispatchError(
+            "executor-result-invalid", "Executor reported a non-finite duration"
+        )
+    return {"outputs": outputs, "durationMs": round(duration, 3)}
+
+
+class _ElementBudget:
+    """Bound the total elements one result may carry across all its tensors."""
+
+    def __init__(self, maximum: int) -> None:
+        if maximum < 1:
+            raise ValueError("max_elements must be positive")
+        self._remaining = maximum
+        self._maximum = maximum
+
+    def spend(self, count: int = 1) -> None:
+        self._remaining -= count
+        if self._remaining < 0:
+            raise JobDispatchError(
+                "executor-result-invalid",
+                f"Inference result exceeds {self._maximum} tensor elements",
+            )
+
+
+def encode_tensor(value: object, budget: _ElementBudget | None = None) -> object:
+    """Convert one backend-native tensor into JSON-encodable values.
+
+    Rejects rather than coerces anything unrecognised: silently stringifying a
+    tensor would put an unusable value on the wire that only fails much later,
+    in the consumer.
+    """
+    budget = budget or _ElementBudget(MAX_TENSOR_ELEMENTS)
+    if isinstance(value, bool):
+        budget.spend()
+        return value
+    if isinstance(value, int):
+        budget.spend()
+        return value
+    if isinstance(value, float):
+        budget.spend()
+        if not math.isfinite(value):
+            raise JobDispatchError(
+                "executor-result-invalid",
+                "Inference result contains a non-finite value",
+            )
+        return value
+    # numpy, torch, and anything else exposing the array protocol.
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        return encode_tensor(value.tolist(), budget)
+    # ncnn Mat exposes numpy() rather than tolist().
+    if hasattr(value, "numpy"):
+        return encode_tensor(value.numpy().tolist(), budget)
+    if isinstance(value, (list, tuple)):
+        return [encode_tensor(item, budget) for item in value]
+    raise JobDispatchError(
+        "executor-result-invalid",
+        f"Inference result contains an unencodable {type(value).__name__}",
+    )
