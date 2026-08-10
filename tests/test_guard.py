@@ -307,11 +307,11 @@ def test_a_refusal_is_not_mistaken_for_a_job_acknowledgement():
 
 
 def test_a_full_reconciliation_burst_is_admitted():
-    """A client reconciling a large catalogue must not be refused partway.
+    """A bulk policy change must not be refused partway through.
 
-    Measured live: nine profiles cost 23 ApplyCommand calls in one burst, and
-    a refusal midway leaves the client and the runtime divergent with nothing
-    shown to the user.
+    One call per profile per setting means a catalogue-wide change is dozens
+    of calls in a short window, and a refusal midway leaves policy
+    half-applied with no error the caller can act on.
     """
     subject, _clock = guard()
 

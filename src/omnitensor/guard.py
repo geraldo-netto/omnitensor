@@ -88,12 +88,11 @@ class MethodQuota:
 
 
 DEFAULT_QUOTAS: Mapping[str, MethodQuota] = {
-    # ApplyCommand is not the small, rare call it looks like.  A client whose
-    # stored profile state diverges reconciles by sending one command per
-    # profile per setting, which was measured at 23 calls in a single burst for
-    # nine profiles — and a refusal partway through leaves the two sides
-    # divergent with no error the user can see.  The allowance is sized for a
-    # full reconciliation of a large catalogue rather than for the steady state.
+    # ApplyCommand is one call per profile per setting, so any bulk change —
+    # a user working through a catalogue, or a client applying several
+    # settings — costs many calls in a short window, and a refusal partway
+    # through leaves policy half-applied with no error the caller can act on.
+    # The allowance is sized for that rather than for the steady state.
     "ApplyCommand": MethodQuota(max_bytes=64 * 1024, max_calls=240, max_concurrent=4),
     # Jobs are larger and burstier; describing plugins is read-only and cheap
     # but trivially spammable.
