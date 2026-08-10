@@ -74,6 +74,14 @@ from .cancellation import (
     JobCancellationToken,
     JobCancelledError,
 )
+from .collection import (
+    MAX_COLLECTED_ITEMS,
+    BoundedCollector,
+    CollectionError,
+    ReplaySource,
+    SourceSnapshot,
+    validated_allowlist,
+)
 from .discovery import (
     MAX_DISTRIBUTION_FILES,
     MAX_PLUGIN_CANDIDATES,
@@ -103,6 +111,15 @@ from .grants import (
     GrantOrigin,
     GrantProvenance,
     GrantSnapshot,
+)
+from .hardware_collection import (
+    HARDWARE_METADATA_PERMISSION,
+    HardwareHealthCollector,
+    HardwareSample,
+    SensorHealth,
+    SensorKind,
+    hardware_sample_error,
+    hardware_sensor_permission,
 )
 from .identity import (
     MAX_DISTRIBUTION_NAME_LENGTH,
@@ -534,6 +551,19 @@ __all__ = [
     "PipelineSnapshot",
     "PipelinePolicyGate",
     "PipelineRunner",
+    "BoundedCollector",
+    "CollectionError",
+    "ReplaySource",
+    "SourceSnapshot",
+    "validated_allowlist",
+    "MAX_COLLECTED_ITEMS",
+    "HardwareHealthCollector",
+    "HardwareSample",
+    "SensorHealth",
+    "SensorKind",
+    "hardware_sample_error",
+    "hardware_sensor_permission",
+    "HARDWARE_METADATA_PERMISSION",
     "JobResultStore",
     "JobRecord",
     "JobResultError",
