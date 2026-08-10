@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 from conftest import add_pcie_tpu, sample_manifest, write_workload
@@ -508,3 +509,91 @@ def test_the_usable_lane_on_this_host_is_the_one_that_serves_jobs():
         # makes, not a sentence this check invented.
         assert isinstance(verdict, str) and verdict, f"{backend}:{module}"
         assert verdict != DEVICE_ABSENT
+
+
+def _applet_with_schema(root, schema: dict):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "runtime-snapshot.schema.json").write_text(json.dumps(schema), encoding="utf-8")
+    return root
+
+
+def test_an_applet_that_cannot_read_the_snapshot_is_named_at_install_time(tmp_path):
+    """The failure this catches reads to a user as a service that has stopped.
+
+    The applet validates a snapshot as a closed record, so a field the service
+    added and the installed payload does not know invalidates the whole
+    document — and "no runtime service is publishing state" is what the user
+    sees, which is what a dead service looks like too.
+    """
+    from omnitensor.acceptance import check_applet_contract
+
+    older = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["version"],
+        "properties": {"version": {"const": 1}},
+    }
+    snapshot = tmp_path / "state.json"
+    snapshot.write_text(json.dumps({"version": 1, "inputs": {"roots": []}}), encoding="utf-8")
+    root = _applet_with_schema(tmp_path / "applet", older)
+
+    check = check_applet_contract(root, snapshot)
+
+    assert check.ok is False
+    assert "cannot read the snapshot this service publishes" in check.detail
+    assert "install the applet built from these contracts" in check.detail
+
+
+def test_an_applet_that_knows_the_field_passes(tmp_path):
+    from omnitensor.acceptance import check_applet_contract
+
+    current = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["version"],
+        "properties": {"version": {"const": 1}, "inputs": {"type": "object"}},
+    }
+    snapshot = tmp_path / "state.json"
+    snapshot.write_text(json.dumps({"version": 1, "inputs": {"roots": []}}), encoding="utf-8")
+
+    check = check_applet_contract(_applet_with_schema(tmp_path / "applet", current), snapshot)
+
+    assert check.ok is True
+
+
+def test_an_applet_shipping_no_contract_is_a_broken_payload(tmp_path):
+    from omnitensor.acceptance import check_applet_contract
+
+    snapshot = tmp_path / "state.json"
+    snapshot.write_text("{}", encoding="utf-8")
+    empty = tmp_path / "applet"
+    empty.mkdir()
+
+    check = check_applet_contract(empty, snapshot)
+
+    assert check.ok is False
+    assert "ships no snapshot contract" in check.detail
+
+
+def test_an_unreadable_pair_is_reported_rather_than_raised(tmp_path):
+    from omnitensor.acceptance import check_applet_contract
+
+    root = _applet_with_schema(tmp_path / "applet", {"type": "object"})
+    check = check_applet_contract(root, tmp_path / "absent.json")
+
+    assert check.ok is False
+    assert "could not compare contracts" in check.detail
+
+
+def test_the_installed_applet_reads_what_this_service_publishes():
+    """The real pair on this host, which is the only place the order matters."""
+    from omnitensor.acceptance import DEFAULT_APPLET_ROOT, check_applet_contract
+
+    root = Path(DEFAULT_APPLET_ROOT).expanduser()
+    snapshot = Path("~/.local/state/tpu-workload-manager/state.json").expanduser()
+    if not root.is_dir() or not snapshot.is_file():
+        pytest.skip("no applet and snapshot pair is installed on this host")
+
+    assert check_applet_contract(root, snapshot).ok is True

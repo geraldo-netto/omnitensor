@@ -271,6 +271,51 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
     return Check("applet", True, f"{len(checksums)} applet files match their checksums")
 
 
+DEFAULT_APPLET_ROOT = "~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto"
+
+
+def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
+    """The installed applet must be able to read what this service publishes.
+
+    The applet validates a snapshot as a closed record, so a field this service
+    added and the installed payload does not know invalidates the *whole*
+    document — and the applet reports that as "no runtime service is publishing
+    state", which is indistinguishable from a service that has stopped.
+
+    Optional fields do not prevent it and neither does landing the applet
+    change first: what matters is the order the two are *deployed*, and nothing
+    stated that anywhere.  This states it, against the snapshot actually on
+    disk rather than against a fixture, so the mismatch is named at install
+    time instead of appearing later as an outage.
+    """
+    import jsonschema  # noqa: PLC0415 - only needed for this probe
+
+    schema_file = Path(applet_root) / "runtime-snapshot.schema.json"
+    if not schema_file.is_file():
+        return Check("applet-contract", False, f"applet ships no snapshot contract: {schema_file}")
+    try:
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
+        snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return Check("applet-contract", False, f"could not compare contracts: {error}")
+    violations = [
+        f"{'/'.join(str(part) for part in error.path)}: {error.message}"
+        for error in jsonschema.Draft202012Validator(schema).iter_errors(snapshot)
+    ]
+    if violations:
+        return Check(
+            "applet-contract",
+            False,
+            "the installed applet cannot read the snapshot this service publishes "
+            f"({violations[0]}); install the applet built from these contracts",
+        )
+    return Check(
+        "applet-contract",
+        True,
+        "the installed applet reads the snapshot this service publishes",
+    )
+
+
 # Every accelerator lane and the runtime import that proves it can execute.
 # There is no CPU entry by design: a CPU-only runtime is not a backend here.
 BACKEND_RUNTIMES = (
@@ -495,8 +540,15 @@ def build_default_report(
         check_snapshot(snapshot_path, now_ms=now_ms),
         check_backends(),
     ]
-    if applet_root is not None and applet_checksums is not None:
-        checks.append(check_applet(applet_root, load_applet_checksums(applet_checksums)))
+    # Run against whatever applet is actually installed, because the failure
+    # this catches only exists on a host where both halves are present. A
+    # service-only install skips it rather than failing for an applet nobody
+    # asked for.
+    root = Path(applet_root) if applet_root is not None else Path(DEFAULT_APPLET_ROOT).expanduser()
+    if root.is_dir():
+        checks.append(check_applet_contract(root, snapshot_path))
+        if applet_checksums is not None:
+            checks.append(check_applet(root, load_applet_checksums(applet_checksums)))
     return verify_installation(checks)
 
 
@@ -519,7 +571,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ).expanduser(),
     )
-    parser.add_argument("--applet-root", type=Path, default=None)
+    parser.add_argument(
+        "--applet-root",
+        type=Path,
+        default=None,
+        help=f"installed applet to check against (default {DEFAULT_APPLET_ROOT})",
+    )
     parser.add_argument("--applet-checksums", type=Path, default=None)
     arguments = parser.parse_args(argv)
 

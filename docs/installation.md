@@ -39,6 +39,26 @@ each plugin worker can be accounted in its own cgroup.
 
 ### Where the applet reads the snapshot
 
+### Deploy the applet before, or with, the service
+
+The applet validates a snapshot as a closed record. A field this service adds
+and the installed applet does not know invalidates the *whole* document, and
+the applet reports that as "No runtime service is publishing state" — which is
+exactly what a service that has stopped looks like.
+
+Making the field optional does not prevent it, and neither does merging the
+applet change first: what matters is the order the two are *deployed*. Install
+the applet payload built from the same contracts before restarting a service
+that publishes a new field, or accept a window where the desktop reads as dead.
+
+`omnitensor-verify-install` now checks this against the snapshot actually on
+disk and the applet actually installed, so a mismatch is named at install time
+rather than turning up later as an outage:
+
+```
+PASS  applet-contract: the installed applet reads the snapshot this service publishes
+```
+
 The service publishes one file and the Cinnamon applet reads it; that file is
 the only place the two meet. Each side names it independently, so moving it is
 a two-sided edit and changing one side alone is silent:
