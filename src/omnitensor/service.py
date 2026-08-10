@@ -66,7 +66,8 @@ from .plugins.orchestration import (
     with_recovery,
 )
 from .plugins.results import JobResultStore
-from .plugins.summaries import ResultSummaryRegistry
+from .plugins.secrets import SecretRedactor
+from .plugins.summaries import ResultSummaryRegistry, SummaryError
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
     ControlTransport,
@@ -641,6 +642,45 @@ class OmniTensorService:
 
     def _deliver_job_output(self, job_id: str, output: dict) -> None:
         self.jobs.note_progress(job_id, "deliver", 1.0, "Result delivered")
+        self._summarize(job_id, output)
+
+    def _summarize(self, job_id: str, output: dict) -> None:
+        """Publish what a finished job found, so a desktop can see it happened.
+
+        The snapshot is the only surface the applet reads, and nothing ever
+        wrote to this registry, so every completed job was invisible there.
+        Only a reading is summarised: a thousand raw scores have no sentence in
+        them, and publishing "a job finished" for each of those would fill the
+        surface with rows carrying no information.
+        """
+        reading = output.get("reading") if isinstance(output, dict) else None
+        profile_id = output.get("profileId") if isinstance(output, dict) else None
+        if not isinstance(reading, dict) or not isinstance(profile_id, str):
+            return
+        top = reading.get("top") or []
+        if not top:
+            return
+        best = top[0]
+        named = best.get("label") or f"class {best.get('index')}"
+        score = best.get("score")
+        try:
+            self.result_summaries.publish(
+                plugin_id=profile_id,
+                title=str(named)[:120],
+                summary=f"{len(top)} candidates, best {score:.3f}"
+                if isinstance(score, (int, float))
+                else f"{len(top)} candidates",
+                timestamp_ms=max(1, int(time.time() * 1000)),
+                # Not a risk and not a probability the runtime can vouch for: a
+                # softmax score is the model's confidence in its own ranking,
+                # which is a different claim from the one these fields make.
+                confidence=None,
+                risk_score=None,
+                result_reference=f"result-{job_id}",
+                redactor=SecretRedactor(()),
+            )
+        except (SummaryError, TypeError, ValueError) as error:
+            LOGGER.debug("result summary not published for %s: %s", job_id, error)
 
     def reconcile_interrupted_jobs(self) -> RunnerSet:
         """Report the jobs a previous process left in flight, once, at startup.

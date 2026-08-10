@@ -1760,3 +1760,109 @@ def test_the_job_service_reports_an_outcome_without_a_result_store():
     asyncio.run(scenario())
 
     assert seen == [("visual-library", "succeeded", "Job completed")]
+
+
+def test_a_readable_result_becomes_something_the_desktop_can_see(tmp_path):
+    """The snapshot is the only surface the applet reads, and nothing ever
+    wrote to the summary registry, so every completed job was invisible."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    service._deliver_job_output("job-1", {
+        "profileId": "visual-library",
+        "outputs": [[0.1, 0.9]],
+        "reading": {"kind": "classification", "top": [
+            {"index": 1, "score": 0.9}, {"index": 0, "score": 0.1},
+        ]},
+    })
+
+    alerts = service.result_summaries.documents()
+    assert len(alerts) == 1
+    assert alerts[0]["profileId"] == "visual-library"
+    assert alerts[0]["title"] == "class 1"
+    assert "best 0.900" in alerts[0]["summary"]
+    assert alerts[0]["resultRef"] == "result-job-1"
+
+
+def test_a_label_is_preferred_over_an_index_when_the_model_supplies_one(tmp_path):
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    service._deliver_job_output("job-2", {
+        "profileId": "visual-library",
+        "reading": {"kind": "classification", "top": [
+            {"index": 7, "score": 0.5, "label": "golden retriever"},
+        ]},
+    })
+
+    assert service.result_summaries.documents()[0]["title"] == "golden retriever"
+
+
+def test_a_result_with_nothing_to_say_publishes_nothing(tmp_path):
+    """A thousand raw scores have no sentence in them, and a row per job
+    carrying no information is worse than no row."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    for output in (
+        {"profileId": "visual-library", "outputs": [[0.1, 0.9]]},
+        {"profileId": "visual-library", "reading": {"kind": "classification", "top": []}},
+        {"reading": {"kind": "classification", "top": [{"index": 1, "score": 0.9}]}},
+        {"profileId": "visual-library", "reading": "classification"},
+        "not a document",
+    ):
+        service._deliver_job_output("job-3", output)
+
+    assert service.result_summaries.documents() == []
+
+
+def test_a_summary_that_cannot_be_published_never_fails_the_job(tmp_path):
+    """Delivery has already happened; a bookkeeping refusal here would turn a
+    finished job into a failed one."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    reading = {"kind": "classification", "top": [{"index": 1, "score": 0.9}]}
+
+    # A profile id the summary registry refuses outright.
+    service._deliver_job_output("job-4", {"profileId": "Not An Id", "reading": reading})
+    # Two jobs sharing an id: the second reference collides with the first.
+    service._deliver_job_output("job-5", {"profileId": "visual-library", "reading": reading})
+
+    assert [item["profileId"] for item in service.result_summaries.documents()] == [
+        "visual-library"
+    ]
+
+
+def test_the_published_snapshot_carries_the_summary(tmp_path):
+    """End to end through the document the applet actually reads."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    service._deliver_job_output("job-6", {
+        "profileId": "visual-library",
+        "reading": {"kind": "classification", "top": [{"index": 3, "score": 0.42}]},
+    })
+
+    snapshot = service.publish_once()
+
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+    assert [alert["title"] for alert in snapshot["alerts"]] == ["class 3"]
