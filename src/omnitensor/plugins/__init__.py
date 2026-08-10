@@ -131,6 +131,14 @@ from .identity import (
     ResolvedPlugin,
     resolve_plugin_identities,
 )
+from .ingestion import (
+    IngestedFile,
+    IngestionError,
+    IngestionRejection,
+    IngestionScan,
+    OptedInRootScanner,
+    RejectedFile,
+)
 from .ipc import (
     DEFAULT_MAX_FRAME_BYTES,
     FRAME_FORMAT_VERSION,
@@ -580,6 +588,12 @@ __all__ = [
     "HardwareHealthCollector",
     "StorageIntelligenceCollector",
     "ResourceSchedulerCollector",
+    "OptedInRootScanner",
+    "IngestedFile",
+    "IngestionScan",
+    "IngestionError",
+    "IngestionRejection",
+    "RejectedFile",
     "ResourceSample",
     "ResourceScope",
     "PressureStall",
