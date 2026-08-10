@@ -256,3 +256,11 @@ def test_a_registry_without_a_journal_still_tracks_in_memory():
 
 async def _value(result):
     return result
+
+
+def test_an_empty_registry_is_still_truthy():
+    """__len__ would otherwise make `registry or default()` swap in a second one."""
+    registry = JobCancellationRegistry()
+    assert len(registry) == 0
+    assert bool(registry) is True
+    assert (registry or JobCancellationRegistry()) is registry

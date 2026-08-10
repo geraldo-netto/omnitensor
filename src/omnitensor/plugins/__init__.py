@@ -237,6 +237,7 @@ from .revocation import (
     LiveGrantView,
     RevocationError,
 )
+from .runner import STAGE_ORDER, PipelineRunner, StageFailure
 from .sandbox import (
     BWRAP_PATH,
     MAX_SANDBOX_PATHS,
@@ -531,6 +532,9 @@ __all__ = [
     "remove_worker_cgroup",
     "PipelineSnapshot",
     "PipelinePolicyGate",
+    "PipelineRunner",
+    "StageFailure",
+    "STAGE_ORDER",
     "PluginFlowController",
     "JobCancellationRegistry",
     "JobCancellationToken",

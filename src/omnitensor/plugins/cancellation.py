@@ -144,6 +144,15 @@ class JobCancellationRegistry:
     def __len__(self) -> int:
         return len(self._tokens)
 
+    def __bool__(self) -> bool:
+        """A registry always exists, however many jobs it happens to hold.
+
+        Without this, ``__len__`` makes an empty registry falsy, so the common
+        ``registry or default()`` wiring silently substitutes a second registry
+        and cancellation reaches jobs nobody is tracking.
+        """
+        return True
+
     def __iter__(self) -> Iterator[str]:
         return iter(tuple(self._tokens))
 

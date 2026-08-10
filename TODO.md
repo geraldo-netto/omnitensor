@@ -60,11 +60,10 @@
 
 | OMNI-0165 | open | medium | s | OMNI-0160 | model digest adoption: `requirements.model.sha256` is optional, so a manifest that omits it still dispatches on the weaker install-time guarantee; publish digests for the bundled catalog and then make the field required in a coordinated manifest version bump. |
 
-| OMNI-0166 | open | high | s | OMNI-0068, OMNI-0069, OMNI-0070 | pipeline policy wiring: `PipelinePolicyGate` is implemented and tested but no stage executor consults it yet, because the collect/preprocess/infer/deliver runner does not exist; call `require()` at every stage transition once that runner lands. |
 
-| OMNI-0167 | open | medium | s | OMNI-0069, OMNI-0166 | flow control wiring: `PluginFlowController` is implemented and tested but nothing constructs one per plugin, so backpressure, coalescing, idempotency, and retry are not yet applied to real triggers; wire it into the trigger coordinator alongside the policy gate. |
 
-| OMNI-0168 | open | high | s | OMNI-0070, OMNI-0166 | cancellation wiring: `JobCancellationRegistry` is implemented and tested but nothing tracks a real job, cancels on shutdown or worker loss, or calls `recover()` at startup; wire it into the service lifecycle and the stage runner. |
+
+| OMNI-0169 | open | high | s | OMNI-0067, OMNI-0070 | runner service wiring: `PipelineRunner` is complete but the service constructs none, so no bundled profile runs a pipeline yet and `JobCancellationRegistry.recover()` is never called at startup; build one runner per active plugin and reconcile interrupted jobs on start. |
 
 ## Rejected / Won't fix
 
