@@ -84,13 +84,14 @@ class FakeArtifacts:
         return self._resolution
 
 
-def dispatcher(workloads, executors=None, artifacts=None, scheduler=None):
+def dispatcher(workloads, executors=None, artifacts=None, scheduler=None, input_roots=None):
     executor = executors if executors is not None else {"gpu": FakeExecutor()}
     return InferenceJobDispatcher(
         {item.id: item for item in workloads},
         scheduler or Scheduler(executor, lambda _p: 1),
         executor,
         artifacts or FakeArtifacts(),
+        input_roots=input_roots,
     )
 
 
@@ -456,3 +457,64 @@ def test_a_digested_v1_model_is_resolved_by_reference_not_by_id():
 
     assert [item.sha256 for item in artifacts.resolved] == ["e" * 64]
     assert artifacts.resolved_active == []
+
+
+def buffer_reference(tmp_path, values, shape):
+    import hashlib
+    import struct
+
+    payload = struct.pack(f"<{len(values)}f", *values)
+    path = tmp_path / "input.f32"
+    path.write_bytes(payload)
+    return {
+        "path": str(path),
+        "shape": list(shape),
+        "dtype": "float32",
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def test_a_referenced_input_is_dispatched_like_an_inline_one(tmp_path):
+    """An input too large to inline reaches the executor by the same route."""
+    from omnitensor.tensorref import OptedInInputRoots
+
+    reference = buffer_reference(tmp_path, [1.0, 2.0, 3.0, 4.0], (2, 2))
+
+    async def scenario():
+        dispatch = dispatcher(
+            [workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path])
+        )
+        dispatch._scheduler.start()
+        future = dispatch.dispatch("job-1", "sample-workload", {"inputRefs": [reference]})
+        await asyncio.wait_for(future, timeout=5)
+        await dispatch._scheduler.stop()
+        return dispatch
+
+    dispatch = asyncio.run(scenario())
+    [(_path, inputs)] = dispatch._executors["gpu"].ran
+    # The executor received the reshaped buffer, not a path or a reference.
+    assert inputs == [[[1.0, 2.0], [3.0, 4.0]]]
+
+
+def test_referencing_a_file_is_denied_until_roots_are_configured(tmp_path):
+    """The capability is off by default, so a default install cannot be used
+    to read a caller-named file."""
+    reference = buffer_reference(tmp_path, [1.0, 2.0], (2,))
+    subject = dispatcher([workload(model=MODEL)])
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch("job-1", "sample-workload", {"inputRefs": [reference]})
+
+    assert failure.value.code == "input-ref-denied"
+
+
+def test_a_malformed_reference_is_one_error_vocabulary(tmp_path):
+    """However the input arrived, the caller sees a dispatch failure."""
+    from omnitensor.tensorref import OptedInInputRoots
+
+    subject = dispatcher([workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path]))
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch("job-1", "sample-workload", {"inputRefs": [{"path": "/x"}]})
+
+    assert failure.value.code == "input-ref-invalid"

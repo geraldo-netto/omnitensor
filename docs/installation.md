@@ -151,6 +151,41 @@ the publisher is accountable for the graph and not for the weights. Tampering
 after installation is caught; a substituted weights file at publication time is
 not.
 
+### Large inputs
+
+A model input does not fit in a job submission. One 3x227x227 float image is
+774,394 bytes of JSON against a 262,144-byte quota, and the argv limit refuses
+it before the bus does — so an image or audio model cannot be driven by
+embedding its input in the request, whatever the quota is set to.
+
+Submit a reference instead. `payload.inputRefs` names a raw little-endian
+buffer with its exact shape, dtype, and digest:
+
+```json
+{"inputRefs": [{"path": "/home/u/inputs/frame.f32",
+                "shape": [3, 227, 227], "dtype": "float32",
+                "sha256": "<sha256 of the file>"}]}
+```
+
+That submission is 254 bytes. Nothing is decoded — the file is raw numbers,
+never a PNG or a WAV — because decoding untrusted media in the service, before
+admission, is where the memory bombs would land.
+
+Reading a caller-named file is a capability and is **off by default**. Enable
+it by naming the roots a caller may reference from:
+
+```sh
+systemctl --user edit omnitensor.service
+# [Service]
+# Environment=OMNITENSOR_INPUT_ROOTS=%h/inputs:%h/Pictures
+```
+
+A path outside those roots is refused, and so is a symlink that leaves them —
+containment is judged by where a path resolves to, not where it sits. A file
+whose size or digest disagrees with the declaration is refused rather than
+truncated or padded, because both of those produce a tensor that infers
+successfully and means nothing.
+
 ### Uninstalling
 
 Removing the package leaves state behind on purpose — artifacts are expensive

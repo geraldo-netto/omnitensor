@@ -26,7 +26,7 @@ import logging
 import os
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from dbus_fast import BusType, RequestNameReply
@@ -78,6 +78,7 @@ from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .scheduler import Scheduler, pick_backend
 from .snapshot import build_snapshot, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
+from .tensorref import OptedInInputRoots
 
 LOGGER = logging.getLogger(__name__)
 
@@ -366,11 +367,13 @@ class OmniTensorService:
         plugin_telemetry: PluginTelemetryRegistry | None = None,
         transport: ControlTransport | None = None,
         cancellation_journal_path: Path | None = None,
+        input_roots: Sequence[Path | str] = (),
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
     ):
         self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
         self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
+        self._input_roots = tuple(input_roots)
         self._callers = CallerIdentityResolver()
         self._transport = transport or DbusControlTransport(callers=self._callers)
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
@@ -456,7 +459,13 @@ class OmniTensorService:
         if self._artifact_store is None:
             return UnavailableJobDispatcher()
         return InferenceJobDispatcher(
-            self._workloads, self._scheduler, self._executors, self._artifact_store
+            self._workloads,
+            self._scheduler,
+            self._executors,
+            self._artifact_store,
+            # Referencing a file is a capability the operator grants, so the
+            # roots come from configuration and default to none.
+            input_roots=OptedInInputRoots(self._input_roots),
         )
 
     def _build_runners(self) -> RunnerSet:
@@ -660,6 +669,16 @@ def _env_path(name: str, fallback: str) -> Path:
     return Path(os.environ.get(name, fallback)).expanduser()
 
 
+def _env_paths(name: str) -> tuple[Path, ...]:
+    """Colon-separated roots a caller may reference inputs from.
+
+    Empty by default: reading a file a caller names is a capability, and one
+    that is on unless configured off is one nobody chose.
+    """
+    raw = os.environ.get(name, "")
+    return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
+
+
 def build_service_from_env() -> OmniTensorService:
     """The production service instance, configured from the environment."""
     return OmniTensorService(
@@ -667,6 +686,7 @@ def build_service_from_env() -> OmniTensorService:
         policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
         workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
         artifact_root=_env_path("OMNITENSOR_ARTIFACT_ROOT", DEFAULT_ARTIFACT_ROOT),
+        input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS"),
     )
 
 

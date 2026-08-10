@@ -26,6 +26,12 @@ from .jobs import JobDispatchError
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .registry import Workload
 from .scheduler import QueueFullError, Scheduler, pick_backend
+from .tensorref import (
+    DenyAllInputRoots,
+    InputRootPolicy,
+    TensorReferenceError,
+    referenced_inputs,
+)
 
 MAX_INPUT_TENSORS = 64
 # One result must stay small enough to cross IPC as a single bounded frame.
@@ -53,6 +59,7 @@ class InferenceJobDispatcher:
         *,
         max_input_tensors: int = MAX_INPUT_TENSORS,
         max_input_elements: int = MAX_TENSOR_ELEMENTS,
+        input_roots: InputRootPolicy | None = None,
     ) -> None:
         if max_input_tensors < 1:
             raise ValueError("max_input_tensors must be positive")
@@ -64,6 +71,8 @@ class InferenceJobDispatcher:
         self._artifacts = artifacts
         self._max_input_tensors = max_input_tensors
         self._max_input_elements = max_input_elements
+        # Denied by default: referencing a file is a capability, not a default.
+        self._input_roots = input_roots or DenyAllInputRoots()
 
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
         """Admit, resolve, route, and queue one job; never run it inline."""
@@ -102,6 +111,20 @@ class InferenceJobDispatcher:
         """
         if not isinstance(payload, dict):
             raise JobDispatchError("payload-invalid", "Job payload must be an object")
+        try:
+            referenced = referenced_inputs(
+                payload,
+                self._input_roots,
+                max_tensors=self._max_input_tensors,
+            )
+        except TensorReferenceError as error:
+            # Re-raised as a dispatch failure so the caller sees one error
+            # vocabulary regardless of how it supplied the input.
+            raise JobDispatchError(error.code, error.detail) from error
+        if referenced is not None:
+            # Already shaped, digest-checked, and bounded on the way in, so it
+            # rejoins the inline path here and is validated identically.
+            return self._validated(referenced)
         inputs = payload.get("inputs")
         if not isinstance(inputs, list):
             raise JobDispatchError(
@@ -112,6 +135,14 @@ class InferenceJobDispatcher:
                 "payload-invalid",
                 f"At most {self._max_input_tensors} input tensors may be submitted",
             )
+        return self._validated(inputs)
+
+    def _validated(self, inputs: list) -> list:
+        """The one place tensor shape and element budget are enforced.
+
+        Inline and referenced inputs both arrive here, so a tensor cannot be
+        admitted by one route under rules the other would refuse.
+        """
         budget = _ElementBudget(
             self._max_input_elements, code="payload-invalid", label="Job payload"
         )
