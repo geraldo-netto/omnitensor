@@ -233,6 +233,46 @@ def test_registry_default_preference_when_omitted(tmp_path):
     assert load_workloads(tmp_path)["sample-workload"].preference == ("tpu", "npu", "gpu")
 
 
+@pytest.mark.parametrize(
+    ("accelerator", "preference"),
+    [
+        ("gpu", ["tpu", "npu", "gpu"]),
+        ("tpu", ["gpu"]),
+        ("npu", ["gpu", "npu"]),
+    ],
+)
+def test_registry_rejects_preference_not_led_by_the_designed_for_accelerator(
+    tmp_path, accelerator, preference,
+):
+    """The applet's own manifest checker enforces this; so must the schema."""
+    manifest = sample_manifest(accelerator=accelerator, acceleratorPreference=preference)
+    write_workload(tmp_path, manifest)
+    with pytest.raises(ManifestError, match="acceleratorPreference"):
+        load_workloads(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("accelerator", "preference"),
+    [
+        ("tpu", ["tpu", "npu", "gpu"]),
+        ("npu", ["npu", "gpu"]),
+        ("gpu", ["gpu"]),
+    ],
+)
+def test_registry_accepts_preference_led_by_the_designed_for_accelerator(
+    tmp_path, accelerator, preference,
+):
+    manifest = sample_manifest(accelerator=accelerator, acceleratorPreference=preference)
+    write_workload(tmp_path, manifest)
+    assert load_workloads(tmp_path)["sample-workload"].preference == tuple(preference)
+
+
+def test_bundled_catalog_leads_every_preference_with_its_own_accelerator():
+    """Every shipped manifest must satisfy the rule the applet already applies."""
+    for workload in load_workloads(bundled_workloads_path()).values():
+        assert workload.preference[0] == workload.accelerator
+
+
 def test_registry_rejects_invalid_manifest(tmp_path):
     bad = sample_manifest()
     bad["requirements"]["accelerator"] = "edge-tpu"

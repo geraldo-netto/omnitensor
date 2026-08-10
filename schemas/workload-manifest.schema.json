@@ -205,6 +205,7 @@
           ]
         },
         "acceleratorPreference": {
+          "description": "Ordered routing intent. The first entry must be the accelerator the profile was designed for; the rest are fallbacks in order. Omitted means the global tpu > npu > gpu default.",
           "type": "array",
           "minItems": 1,
           "maxItems": 3,
@@ -307,6 +308,75 @@
                         "const": true
                       }
                     }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "accelerator": {
+                "const": "tpu"
+              }
+            },
+            "required": [
+              "accelerator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "acceleratorPreference": {
+                "prefixItems": [
+                  {
+                    "const": "tpu"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "accelerator": {
+                "const": "npu"
+              }
+            },
+            "required": [
+              "accelerator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "acceleratorPreference": {
+                "prefixItems": [
+                  {
+                    "const": "npu"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "accelerator": {
+                "const": "gpu"
+              }
+            },
+            "required": [
+              "accelerator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "acceleratorPreference": {
+                "prefixItems": [
+                  {
+                    "const": "gpu"
                   }
                 ]
               }

@@ -57,7 +57,8 @@ mirror copies. OmniTensor:
 ## Routing
 
 Each workload manifest declares `requirements.accelerator` (the backend it was
-designed for) and an optional ordered `acceleratorPreference` list. The router
+designed for) and an optional ordered `acceleratorPreference` list whose first
+entry must be that same accelerator; the rest are fallbacks in order. The router
 dispatches to the first preferred backend whose executor is available and whose
 model format is compatible; otherwise the profile reports `unavailable`.
 
