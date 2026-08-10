@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 from conftest import sample_manifest
@@ -1128,6 +1129,28 @@ def test_a_model_that_cannot_be_stated_is_never_cached(tmp_path):
 
     assert len(builds) == 3
     assert len(cache) == 0
+
+
+def test_a_changed_companion_invalidates_its_cached_model(tmp_path):
+    cache = ModelCache()
+    model = _model_file(tmp_path, "model.param")
+    companion = _model_file(tmp_path, "model.bin")
+    builds = []
+
+    for _ in range(2):
+        cache.get_or_build(
+            model,
+            lambda: builds.append(1),
+            companion_paths=(companion,),
+        )
+    Path(companion).write_bytes(b"replacement with a different size")
+    cache.get_or_build(
+        model,
+        lambda: builds.append(1),
+        companion_paths=(companion,),
+    )
+
+    assert len(builds) == 2
 
 
 @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "2"])

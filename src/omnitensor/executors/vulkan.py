@@ -10,10 +10,19 @@ the host CPU.  Discrete devices are preferred over integrated ones.
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
-from .base import DEVICE_ABSENT, RUNTIME_MISSING, RUNTIME_UNUSABLE, Availability, InferenceResult
+from .base import (
+    DEFAULT_MAX_CACHED_MODELS,
+    DEVICE_ABSENT,
+    RUNTIME_MISSING,
+    RUNTIME_UNUSABLE,
+    Availability,
+    InferenceResult,
+    ModelCache,
+)
 
 # ncnn VkGpuInfo.type(): 0 discrete, 1 integrated, 2 virtual, 3 cpu (software).
 _DEVICE_PREFERENCE = {0: 0, 1: 1, 2: 2}
@@ -31,10 +40,18 @@ class VulkanGpuExecutor:
     backend = "gpu"
     model_formats = frozenset({"ncnn"})
 
-    def __init__(self, device_present: bool, runtime=None):
+    def __init__(
+        self,
+        device_present: bool,
+        runtime=None,
+        *,
+        max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+    ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_ncnn()
         self._selected: tuple[int | None, str] | None = None
+        self._nets = ModelCache(max_cached_models)
+        self._net_cache_lock = threading.Lock()
 
     def _select_device(self) -> tuple[int | None, str]:
         """Choose a device once and keep the answer.
@@ -97,15 +114,7 @@ class VulkanGpuExecutor:
         device, reason, _code = self._available_device()
         if device is None:
             raise RuntimeError(f"{self.backend} executor unavailable: {reason}")
-        param_path = Path(model_path)
-        bin_path = param_path.with_suffix(".bin")
-        net = self._runtime.Net()
-        net.opt.use_vulkan_compute = True
-        net.set_vulkan_device(device)
-        if net.load_param(str(param_path)) != 0:
-            raise RuntimeError(f"Could not load ncnn param: {param_path}")
-        if net.load_model(str(bin_path)) != 0:
-            raise RuntimeError(f"Could not load ncnn model: {bin_path}")
+        net = self._loaded(model_path, device)
         extractor = net.create_extractor()
         try:
             input_names = net.input_names()
@@ -129,11 +138,57 @@ class VulkanGpuExecutor:
             # released the allocators while the extractor still referenced
             # them, which ncnn reports as "pool allocator destroyed too early"
             # when it notices — and which otherwise leaves freed device memory
-            # to be handed to a later job. That showed up as an occasional
-            # confident-looking wrong answer in whichever job ran next.
+            # to be handed to a later job. The Net now outlives the job, so
+            # this orders the extractor's release before anything else can
+            # drop the last reference to the Net that owns those allocators.
             del extractor
-            net.clear()
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)
+
+    def _loaded(self, model_path: str, device: int):
+        """The network for this model on this device, built at most once.
+
+        Building it costs 60–190 ms on this machine — reading the weights,
+        compiling every layer's shaders, and warming the driver's pipeline
+        cache — against roughly 1 ms to run an image through it once it
+        exists. Rebuilding per job spent between a tenth and a fifth of a
+        second producing exactly the state the previous job had just
+        discarded, and made `docs/installation.md`'s "roughly 2 ms once the
+        model is cached" a claim about a cache that was not in this path.
+
+        The entry is revalidated against both graph and weights on every
+        lookup, so replacing an artifact in place serves the new model rather
+        than the retired one, and the cache is bounded so a long-running
+        service does not accumulate one network per model it has ever been
+        asked for.
+
+        Eviction drops the reference and does not call `clear()`: a job that
+        is mid-extraction still holds the network it is running on, and
+        tearing down its allocators from another thread is the failure this
+        executor already had once.
+        """
+        param_path = Path(model_path)
+        bin_path = param_path.with_suffix(".bin")
+
+        def build():
+            net = self._runtime.Net()
+            net.opt.use_vulkan_compute = True
+            net.set_vulkan_device(device)
+            if net.load_param(str(param_path)) != 0:
+                raise RuntimeError(f"Could not load ncnn param: {param_path}")
+            if net.load_model(str(bin_path)) != 0:
+                raise RuntimeError(f"Could not load ncnn model: {bin_path}")
+            return net
+
+        # Device selection is immutable for this executor, so its cache and
+        # the parameter path together identify the model/device pair. Jobs run
+        # one at a time per backend, but this also prevents direct callers from
+        # building the same network twice concurrently.
+        with self._net_cache_lock:
+            return self._nets.get_or_build(
+                str(param_path),
+                build,
+                companion_paths=(str(bin_path),),
+            )
 
     def _to_mat(self, value):
         """Build the Mat ncnn expects from the tensor a caller declared.

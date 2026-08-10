@@ -78,6 +78,7 @@ class FakeNcnn:
         self._device_types = device_types
         self.selected_device = None
         self.cleared = 0
+        self.nets_created = 0
 
     def get_gpu_count(self):
         return len(self._device_types)
@@ -86,6 +87,7 @@ class FakeNcnn:
         return FakeGpuInfo(self._device_types[index])
 
     def Net(self):  # noqa: N802 - mirrors the ncnn API
+        self.nets_created += 1
         return FakeNet(self)
 
 
@@ -251,13 +253,74 @@ def test_the_device_is_enumerated_once_and_reused():
     assert runtime.enumerations == 1, "the answer changes only when hardware does"
 
 
-def test_the_net_is_released_in_order_after_every_run():
-    """The extractor borrows Vulkan memory the Net's allocators own, so the
-    Net cannot simply fall out of scope while the extractor still holds it."""
+def test_the_loaded_net_is_reused_between_jobs(tmp_path):
+    """Loading and compiling the same model on every job defeats warm inference."""
     runtime = FakeNcnn([DISCRETE])
     executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+    model = tmp_path / "model.param"
+    model.write_text("parameter graph")
+    model.with_suffix(".bin").write_bytes(b"weights")
 
-    executor.run("model.param", [[1]])
-    executor.run("model.param", [[1]])
+    executor.run(str(model), [[1]])
+    executor.run(str(model), [[1]])
 
-    assert runtime.cleared == 2, "each run releases the Net it created"
+    assert runtime.nets_created == 1
+    assert runtime.cleared == 0, "the cached Net must outlive each extractor"
+
+
+def test_replacing_a_vulkan_model_reloads_its_net(tmp_path):
+    runtime = FakeNcnn([DISCRETE])
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+    model = tmp_path / "model.param"
+    model.write_text("first graph")
+    model.with_suffix(".bin").write_bytes(b"weights")
+
+    executor.run(str(model), [[1]])
+    model.write_text("a different graph with a different size")
+    executor.run(str(model), [[1]])
+
+    assert runtime.nets_created == 2, "the retired graph was served from cache"
+
+
+def test_replacing_vulkan_weights_reloads_their_net(tmp_path):
+    runtime = FakeNcnn([DISCRETE])
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+    model = tmp_path / "model.param"
+    model.write_text("unchanged graph")
+    weights = model.with_suffix(".bin")
+    weights.write_bytes(b"first weights")
+
+    executor.run(str(model), [[1]])
+    weights.write_bytes(b"different replacement weights")
+    executor.run(str(model), [[1]])
+
+    assert runtime.nets_created == 2, "retired weights were served from cache"
+
+
+def test_vulkan_model_cache_is_bounded_and_least_recently_used(tmp_path):
+    runtime = FakeNcnn([DISCRETE])
+    executor = VulkanGpuExecutor(
+        device_present=True,
+        runtime=runtime,
+        max_cached_models=2,
+    )
+    models = []
+    for index in range(3):
+        model = tmp_path / f"model-{index}.param"
+        model.write_text(f"graph {index}")
+        model.with_suffix(".bin").write_bytes(f"weights {index}".encode())
+        models.append(model)
+
+    for model in models[:2]:
+        executor.run(str(model), [[1]])
+    executor.run(str(models[0]), [[1]])
+    executor.run(str(models[2]), [[1]])
+    executor.run(str(models[1]), [[1]])
+
+    assert runtime.nets_created == 4, "least-recently-used model was not evicted"
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 1.5, "2"])
+def test_vulkan_model_cache_bound_must_be_a_positive_integer(bad):
+    with pytest.raises(ValueError, match="max_entries"):
+        VulkanGpuExecutor(True, runtime=FakeNcnn([DISCRETE]), max_cached_models=bad)

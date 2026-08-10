@@ -57,7 +57,6 @@
 
 
 
-| OMNI-0217 | open | low | s | OMNI-0211 | The Vulkan executor rebuilds and reloads the model on every job (`run()` calls `Net()`/`load_param`/`load_model` each time, vulkan.py:101) while `docs/installation.md:352` promises "roughly 2 ms once the model is cached" — measured end to end this session: 11–49 ms per job, and no cache exists in that path; `ModelCache` in `executors/base.py` sits unused beside it. The doc claim predates the executor or describes driver-level pipeline caching, and either way it is not what ships. Fixing this is deliberately coupled to OMNI-0211: the per-job churn is that row's standing corruption suspect, so a persistent Net per model+device would be tested for correctness first and speed second. |
 | OMNI-0218 | open | low | s | — | A fresh full-test mutmut stats run cannot complete in its isolated tree: first `helpers/bpf/omnitensor-bpf-helper.py` is absent, and after copying that tree the installed-wheel restart test launches its worker against the editable checkout outside the sandbox and dies with `worker handshake rejected: truncated-frame`. Make the isolated worker bootstrap use the copied source before relying on mutmut's default full-test selection; changed-code runs can select their relevant tests meanwhile. |
 
 ## Rejected / Won't fix

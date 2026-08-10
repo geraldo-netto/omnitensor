@@ -103,18 +103,27 @@ class ModelCache:
     place — silently returning results from a model the operator has retired.
 
     Entries are therefore bounded by count with least-recently-used eviction,
-    and revalidated against the file's modification time and size on every
-    lookup.  Callers hold their own lock; this class does no locking.
+    and revalidated against the model and any companion files' modification
+    times and sizes on every lookup. Callers hold their own lock; this class
+    does no locking.
     """
 
     def __init__(self, max_entries: int = DEFAULT_MAX_CACHED_MODELS) -> None:
         if type(max_entries) is not int or max_entries < 1:
             raise ValueError("max_entries must be a positive integer")
         self._max_entries = max_entries
-        self._entries: OrderedDict[str, tuple[tuple[int, int], object]] = OrderedDict()
+        self._entries: OrderedDict[
+            str, tuple[tuple[tuple[int, int], ...], object]
+        ] = OrderedDict()
 
-    def get_or_build(self, model_path: str, build: Callable[[], object]) -> object:
-        revision = _model_revision(model_path)
+    def get_or_build(
+        self,
+        model_path: str,
+        build: Callable[[], object],
+        *,
+        companion_paths: Iterable[str] = (),
+    ) -> object:
+        revision = _model_revision(model_path, companion_paths)
         cached = self._entries.get(model_path)
         if revision is not None and cached is not None and cached[0] == revision:
             self._entries.move_to_end(model_path)
@@ -140,10 +149,16 @@ class ModelCache:
         return tuple(self._entries)
 
 
-def _model_revision(model_path: str) -> tuple[int, int] | None:
-    """Identify the model file on disk, or ``None`` when it cannot be read."""
-    try:
-        status = os.stat(model_path)
-    except OSError:
-        return None
-    return status.st_mtime_ns, status.st_size
+def _model_revision(
+    model_path: str,
+    companion_paths: Iterable[str] = (),
+) -> tuple[tuple[int, int], ...] | None:
+    """Identify every file needed by a model, or ``None`` if one is unreadable."""
+    revision = []
+    for path in (model_path, *companion_paths):
+        try:
+            status = os.stat(path)
+        except OSError:
+            return None
+        revision.append((status.st_mtime_ns, status.st_size))
+    return tuple(revision)
