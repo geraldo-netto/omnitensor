@@ -422,22 +422,44 @@ class ArtifactInstaller:
         destination: Path,
         reference: ArtifactReference,
     ) -> None:
-        """Refuse to report success for companions this install cannot add."""
-        staged = sorted(
-            path.name for path in stage.iterdir() if path.name not in _GENERATED_FILES
-        )
-        installed = sorted(
-            path.name for path in destination.iterdir() if path.name not in _GENERATED_FILES
-        )
+        """Refuse to report success for an install this version cannot absorb.
+
+        Compared by digest and not by name.  A version is immutable, so
+        reinstalling identical bytes is correctly a no-op — but two files that
+        merely share a name are not identical bytes, and returning the
+        installed one reported an install that did not happen.  With a
+        manifest-declared digest that surfaces much later as "companion file
+        does not match the digest its manifest declares", blaming the store
+        for what the install quietly refused to do; for an undeclared optional
+        companion it never surfaces at all.
+        """
+        staged = self._file_digests(stage)
+        installed = self._file_digests(destination)
         if staged == installed:
             return
         added = sorted(set(staged) - set(installed))
+        altered = sorted(
+            name for name in set(staged) & set(installed) if staged[name] != installed[name]
+        )
+        changes = []
+        if added:
+            changes.append(f"gain {', '.join(added)}")
+        if altered:
+            changes.append(f"replace {', '.join(altered)}")
         raise ArtifactInstallationError(
             "version-immutable",
             f"{reference.id} {reference.version} is already installed with "
-            f"{', '.join(installed) or 'no files'}; it cannot gain "
-            f"{', '.join(added) or 'a different file set'} without a new version",
+            f"{', '.join(sorted(installed)) or 'no files'}; it cannot "
+            f"{' and '.join(changes) or 'change its file set'} without a new version",
         )
+
+    def _file_digests(self, root: Path) -> dict[str, str]:
+        """Every artifact file in one directory, by name and content."""
+        return {
+            path.name: _digest_file(path, self._max_artifact_bytes)
+            for path in root.iterdir()
+            if path.is_file() and path.name not in _GENERATED_FILES
+        }
 
     def _activate_version(
         self,

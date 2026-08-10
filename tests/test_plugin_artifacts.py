@@ -829,3 +829,39 @@ def test_a_companion_the_manifest_declares_is_checked_against_the_manifest(tmp_p
 
     absent = ArtifactReference("m", "1.0.0", "ncnn", digest, (("labels.txt", "b" * 64),))
     assert "the manifest declares is missing" in installer.resolve(absent).reason
+
+
+def test_reinstalling_a_version_with_different_companion_bytes_is_refused(tmp_path):
+    """A shared name is not identical bytes.
+
+    Comparing file *names* let a companion be swapped for a different file of
+    the same name and the install return the old one while reporting success —
+    the silent no-op the file-set check removed, one level deeper. With a
+    declared digest it surfaces later as a store integrity failure, blaming
+    the store for what the install refused to do; undeclared, never.
+    """
+    store = tmp_path / "store"
+    source = tmp_path / "model.param"
+    source.write_bytes(b"7767517 graph")
+    weights = tmp_path / "model.bin"
+    weights.write_bytes(b"the weights")
+    installer = ArtifactInstaller(store)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    reference = ArtifactReference("m", "1.0.0", "ncnn", digest)
+    installer.install(reference, source, companions={"model.bin": weights})
+
+    # Identical bytes stay a no-op: a version is immutable, not un-reinstallable.
+    assert installer.install(
+        reference, source, companions={"model.bin": weights}
+    ).reference == reference
+
+    swapped = tmp_path / "other.bin"
+    swapped.write_bytes(b"different weights entirely")
+
+    with pytest.raises(ArtifactInstallationError) as excinfo:
+        installer.install(reference, source, companions={"model.bin": swapped})
+
+    assert excinfo.value.code == "version-immutable"
+    assert "replace model.bin" in str(excinfo.value)
+    # And the installed file is still the one that was there.
+    assert (store / "m" / "1.0.0" / "model.bin").read_bytes() == b"the weights"
