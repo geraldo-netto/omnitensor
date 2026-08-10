@@ -20,6 +20,14 @@ the same user, so uid scoping separates almost nothing; it earns its keep when
 the socket is reachable by another uid, and it never claims isolation it does
 not have.  The unique name is carried alongside for audit, where "which
 connection did this" is the question being asked.
+
+Per-connection scoping is deliberately not offered as an alternative.  The
+Cinnamon applet calls through ``Gio.DBus.session``, a per-process singleton, so
+its unique name is shared with every other applet in that process — narrowing
+to it would separate the applet from nothing while making its jobs unreachable
+across the reconnect that a Cinnamon reload performs.  ``docs/bus-boundary.md``
+records that decision, what the boundary does and does not separate, and the
+one property the applet actually relies on.
 """
 
 from __future__ import annotations

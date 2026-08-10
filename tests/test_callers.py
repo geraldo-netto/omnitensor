@@ -231,3 +231,22 @@ def test_a_bus_that_does_not_describe_the_caller_raises(reply):
 
     with pytest.raises(CallerError, match="caller-unknown"):
         asyncio.run(unix_user_lookup(Bus())(":1.7"))
+
+
+def test_an_owner_token_survives_the_reconnect_the_applet_performs():
+    """The one property the applet relies on, pinned.
+
+    It submits a job, is handed an id, and polls; between those the Cinnamon
+    process can reconnect to the bus, and it cannot re-submit because the
+    input has already been staged and consumed. Scoping by the unique name
+    would leave that job running, holding a device, and owned by a token
+    nobody can present again — see docs/bus-boundary.md.
+    """
+    submitted = CallerIdentity(":1.7", 1000)
+    after_reload = CallerIdentity(":1.404", 1000)
+
+    assert submitted.owner_token == after_reload.owner_token
+
+    # And a different user is still a different owner, which is the whole of
+    # what the boundary does separate.
+    assert CallerIdentity(":1.7", 1001).owner_token != submitted.owner_token

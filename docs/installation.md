@@ -485,6 +485,14 @@ sudo systemctl daemon-reload
 Removing the snapshot while the applet is running is safe: the applet reports
 an absent runtime rather than showing the last values it saw.
 
+## What the bus boundary separates
+
+Jobs, quotas, and results are scoped by the caller's uid. On a session bus
+that separates you from another *user*, not from another program you are
+running yourself — see [bus-boundary.md](bus-boundary.md) for what the
+boundary is worth, why per-connection scoping is not offered, and what to
+change if it ever needs to be stronger.
+
 ## Applet
 
 Build the payload, install exactly it, and verify the installed tree against
