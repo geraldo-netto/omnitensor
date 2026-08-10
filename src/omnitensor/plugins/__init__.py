@@ -247,6 +247,16 @@ from .protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
+from .resource_collection import (
+    RESOURCE_METADATA_PERMISSION,
+    PressureStall,
+    ResourceSample,
+    ResourceSchedulerCollector,
+    ResourceScope,
+    UnitState,
+    resource_sample_error,
+    resource_unit_permission,
+)
 from .results import JobRecord, JobResultError, JobResultStore
 from .revocation import (
     DEFAULT_REVOCATION_POLL_SECONDS,
@@ -569,6 +579,14 @@ __all__ = [
     "MAX_COLLECTED_ITEMS",
     "HardwareHealthCollector",
     "StorageIntelligenceCollector",
+    "ResourceSchedulerCollector",
+    "ResourceSample",
+    "ResourceScope",
+    "PressureStall",
+    "UnitState",
+    "resource_sample_error",
+    "resource_unit_permission",
+    "RESOURCE_METADATA_PERMISSION",
     "StorageSample",
     "StorageCounters",
     "StorageBus",
