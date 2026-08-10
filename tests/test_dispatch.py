@@ -416,3 +416,43 @@ def test_an_empty_tensor_list_is_accepted():
         return submit({"inputs": []})
 
     assert asyncio.run(scenario()) is not None
+
+
+def test_a_v1_manifest_may_declare_its_model_digest():
+    """Without this a v1 profile could only trust the install-time digest."""
+    digested = dict(MODEL, sha256="e" * 64)
+    target = workload(model=digested)
+
+    assert declared_artifact_reference(target, digested) == ArtifactReference(
+        "sample-model", "1.2.3", "ncnn", "e" * 64
+    )
+
+
+def test_a_declared_artifact_entry_still_wins_over_the_model_digest():
+    """The plugin allowlist is the stronger statement, so it is preferred."""
+    digested = dict(MODEL, sha256="e" * 64)
+    declared = [
+        {"id": "sample-model", "version": "1.2.3", "format": "ncnn", "sha256": "f" * 64}
+    ]
+    target = workload(model=digested, artifacts=declared)
+
+    assert declared_artifact_reference(target, digested).sha256 == "f" * 64
+
+
+def test_a_digested_v1_model_is_resolved_by_reference_not_by_id():
+    artifacts = FakeArtifacts()
+
+    async def scenario():
+        dispatch = dispatcher(
+            [workload(model=dict(MODEL, sha256="e" * 64))], artifacts=artifacts
+        )
+        dispatch._scheduler.start()
+        await asyncio.wait_for(
+            dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1]]}), timeout=5
+        )
+        await dispatch._scheduler.stop()
+
+    asyncio.run(scenario())
+
+    assert [item.sha256 for item in artifacts.resolved] == ["e" * 64]
+    assert artifacts.resolved_active == []

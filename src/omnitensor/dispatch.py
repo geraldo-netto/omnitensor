@@ -194,6 +194,11 @@ def declared_artifact_reference(
             return ArtifactReference(
                 entry["id"], entry["version"], entry["format"], entry["sha256"]
             )
+    digest = model.get("sha256")
+    if digest:
+        return ArtifactReference(
+            model["id"], model["version"], model["format"], digest
+        )
     return None
 
 

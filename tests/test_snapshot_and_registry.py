@@ -473,3 +473,45 @@ def test_a_schema_that_was_never_readable_still_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
     with pytest.raises(FileNotFoundError):
         validate_document("never-present.schema.json", 7)
+
+
+def test_a_manifest_may_declare_a_model_digest(tmp_path):
+    manifest = sample_manifest("digest-workload", accelerator="gpu",
+                               acceleratorPreference=["gpu"])
+    manifest["requirements"]["model"] = {
+        "id": "sample-model",
+        "version": "1.2.3",
+        "format": "ncnn",
+        "sha256": "a" * 64,
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "1.0.0",
+        "minimumRuntimeVersion": "1.0.0",
+    }
+    write_workload(tmp_path, manifest)
+
+    workload = load_workloads(tmp_path)["digest-workload"]
+
+    assert workload.model["sha256"] == "a" * 64
+
+
+def test_a_malformed_model_digest_is_rejected(tmp_path):
+    manifest = sample_manifest("bad-digest", accelerator="gpu",
+                               acceleratorPreference=["gpu"])
+    manifest["requirements"]["model"] = {
+        "id": "sample-model",
+        "version": "1.2.3",
+        "format": "ncnn",
+        "sha256": "not-a-digest",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "1.0.0",
+        "minimumRuntimeVersion": "1.0.0",
+    }
+    write_workload(tmp_path, manifest)
+    with pytest.raises(ManifestError, match="sha256"):
+        load_workloads(tmp_path)
+
+
+def test_a_manifest_without_a_model_digest_still_loads(tmp_path):
+    """The field is optional so manifests written before it keep working."""
+    write_workload(tmp_path, sample_manifest())
+    assert load_workloads(tmp_path)["sample-workload"].model is None

@@ -4,22 +4,58 @@
   "title": "TPU Workload Manager workload manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifestVersion", "id", "version", "capabilities", "requirements", "ui", "defaults", "pipeline", "acceptance"],
+  "required": [
+    "manifestVersion",
+    "id",
+    "version",
+    "capabilities",
+    "requirements",
+    "ui",
+    "defaults",
+    "pipeline",
+    "acceptance"
+  ],
   "properties": {
-    "manifestVersion": {"enum": [1, 2]},
-    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80},
-    "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$", "maxLength": 32},
+    "manifestVersion": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+      "maxLength": 32
+    },
     "capabilities": {
       "type": "array",
       "minItems": 1,
       "maxItems": 32,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80}
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "minLength": 1,
+        "maxLength": 80
+      }
     },
     "plugin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["entryPoint", "protocol", "schemas", "triggers", "artifacts", "permissions"],
+      "required": [
+        "entryPoint",
+        "protocol",
+        "schemas",
+        "triggers",
+        "artifacts",
+        "permissions"
+      ],
       "properties": {
         "entryPoint": {
           "type": "string",
@@ -30,10 +66,21 @@
         "protocol": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minimum", "maximum"],
+          "required": [
+            "minimum",
+            "maximum"
+          ],
           "properties": {
-            "minimum": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "maximum": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "minimum": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "maximum": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
             "capabilities": {
               "type": "array",
               "maxItems": 32,
@@ -50,11 +97,24 @@
         "schemas": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["configuration", "input", "output"],
+          "required": [
+            "configuration",
+            "input",
+            "output"
+          ],
           "properties": {
-            "configuration": {"type": "object", "maxProperties": 64},
-            "input": {"type": "object", "maxProperties": 64},
-            "output": {"type": "object", "maxProperties": 64}
+            "configuration": {
+              "type": "object",
+              "maxProperties": 64
+            },
+            "input": {
+              "type": "object",
+              "maxProperties": 64
+            },
+            "output": {
+              "type": "object",
+              "maxProperties": 64
+            }
           }
         },
         "triggers": {
@@ -62,7 +122,13 @@
           "minItems": 1,
           "maxItems": 8,
           "uniqueItems": true,
-          "items": {"enum": ["manual", "periodic", "event"]}
+          "items": {
+            "enum": [
+              "manual",
+              "periodic",
+              "event"
+            ]
+          }
         },
         "artifacts": {
           "type": "array",
@@ -71,7 +137,12 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "version", "format", "sha256"],
+            "required": [
+              "id",
+              "version",
+              "format",
+              "sha256"
+            ],
             "properties": {
               "id": {
                 "type": "string",
@@ -84,8 +155,19 @@
                 "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
                 "maxLength": 32
               },
-              "format": {"enum": ["tflite-edgetpu", "tflite", "onnx", "openvino", "ncnn"]},
-              "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+              "format": {
+                "enum": [
+                  "tflite-edgetpu",
+                  "tflite",
+                  "onnx",
+                  "openvino",
+                  "ncnn"
+                ]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
             }
           }
         },
@@ -105,45 +187,125 @@
     "requirements": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["runtimeApi", "accelerator", "minimumDevices", "model"],
+      "required": [
+        "runtimeApi",
+        "accelerator",
+        "minimumDevices",
+        "model"
+      ],
       "properties": {
-        "runtimeApi": {"const": 1},
-        "accelerator": {"enum": ["tpu", "npu", "gpu"]},
+        "runtimeApi": {
+          "const": 1
+        },
+        "accelerator": {
+          "enum": [
+            "tpu",
+            "npu",
+            "gpu"
+          ]
+        },
         "acceleratorPreference": {
           "type": "array",
           "minItems": 1,
           "maxItems": 3,
           "uniqueItems": true,
-          "items": {"enum": ["tpu", "npu", "gpu"]}
+          "items": {
+            "enum": [
+              "tpu",
+              "npu",
+              "gpu"
+            ]
+          }
         },
-        "minimumDevices": {"type": "integer", "minimum": 0, "maximum": 16},
+        "minimumDevices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
         "model": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
-          "required": ["id", "version", "format", "fullyQuantized", "minimumCompilerVersion", "minimumRuntimeVersion"],
+          "required": [
+            "id",
+            "version",
+            "format",
+            "fullyQuantized",
+            "minimumCompilerVersion",
+            "minimumRuntimeVersion"
+          ],
           "properties": {
-            "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 120},
-            "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$", "maxLength": 32},
-            "format": {"enum": ["tflite-edgetpu", "tflite", "onnx", "openvino", "ncnn"]},
-            "fullyQuantized": {"type": "boolean"},
-            "minimumCompilerVersion": {"type": "string", "minLength": 1, "maxLength": 80},
-            "minimumRuntimeVersion": {"type": "string", "minLength": 1, "maxLength": 80}
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+              "maxLength": 32
+            },
+            "format": {
+              "enum": [
+                "tflite-edgetpu",
+                "tflite",
+                "onnx",
+                "openvino",
+                "ncnn"
+              ]
+            },
+            "fullyQuantized": {
+              "type": "boolean"
+            },
+            "minimumCompilerVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "minimumRuntimeVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "sha256": {
+              "description": "Digest of the exact artifact this profile may run. Optional for compatibility with manifests written before dispatch verified it; when absent the runtime can only trust the digest recorded when the artifact was installed.",
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         }
       },
       "allOf": [
         {
-          "if": {"properties": {"accelerator": {"const": "tpu"}}, "required": ["accelerator"]},
+          "if": {
+            "properties": {
+              "accelerator": {
+                "const": "tpu"
+              }
+            },
+            "required": [
+              "accelerator"
+            ]
+          },
           "then": {
             "properties": {
               "model": {
                 "anyOf": [
-                  {"type": "null"},
+                  {
+                    "type": "null"
+                  },
                   {
                     "type": "object",
                     "properties": {
-                      "format": {"const": "tflite-edgetpu"},
-                      "fullyQuantized": {"const": true}
+                      "format": {
+                        "const": "tflite-edgetpu"
+                      },
+                      "fullyQuantized": {
+                        "const": true
+                      }
                     }
                   }
                 ]
@@ -156,34 +318,76 @@
     "ui": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "group", "description", "icon", "order"],
+      "required": [
+        "title",
+        "group",
+        "description",
+        "icon",
+        "order"
+      ],
       "properties": {
-        "title": {"type": "string", "minLength": 1, "maxLength": 120},
-        "group": {"type": "string", "minLength": 1, "maxLength": 120},
-        "description": {"type": "string", "minLength": 1, "maxLength": 240},
-        "icon": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-symbolic$", "minLength": 10, "maxLength": 120},
-        "order": {"type": "integer", "minimum": 0, "maximum": 1000}
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-symbolic$",
+          "minLength": 10,
+          "maxLength": 120
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        }
       }
     },
     "defaults": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "weight"],
+      "required": [
+        "enabled",
+        "weight"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "weight": {"type": "integer", "minimum": 1, "maximum": 5}
+        "enabled": {
+          "type": "boolean"
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        }
       }
     },
     "pipeline": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hostResponsibilities"],
+      "required": [
+        "hostResponsibilities"
+      ],
       "properties": {
         "hostResponsibilities": {
           "type": "array",
           "maxItems": 32,
           "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 160}
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
         }
       }
     },
@@ -193,25 +397,66 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["metric", "comparator", "target", "unit", "description"],
+        "required": [
+          "metric",
+          "comparator",
+          "target",
+          "unit",
+          "description"
+        ],
         "properties": {
-          "metric": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80},
-          "comparator": {"enum": ["at-least", "at-most", "equal"]},
-          "target": {"type": "number"},
-          "unit": {"type": "string", "minLength": 1, "maxLength": 40},
-          "description": {"type": "string", "minLength": 1, "maxLength": 240}
+          "metric": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "comparator": {
+            "enum": [
+              "at-least",
+              "at-most",
+              "equal"
+            ]
+          },
+          "target": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
         }
       }
     }
   },
   "oneOf": [
     {
-      "properties": {"manifestVersion": {"const": 1}},
-      "not": {"required": ["plugin"]}
+      "properties": {
+        "manifestVersion": {
+          "const": 1
+        }
+      },
+      "not": {
+        "required": [
+          "plugin"
+        ]
+      }
     },
     {
-      "properties": {"manifestVersion": {"const": 2}},
-      "required": ["plugin"]
+      "properties": {
+        "manifestVersion": {
+          "const": 2
+        }
+      },
+      "required": [
+        "plugin"
+      ]
     }
   ]
 }
