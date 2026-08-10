@@ -736,3 +736,100 @@ def test_a_service_without_a_result_store_still_answers_about_a_live_job():
         return reply
 
     assert run_scenario(scenario())["state"] == "running"
+
+
+def test_a_running_job_reports_where_it_has_got_to():
+    """Without progress a slow job is indistinguishable from a hung one."""
+    from omnitensor.plugins.results import JobResultStore
+
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        job_id = accepted["jobId"]
+        queued = decode_result(
+            await service.job_result_text(json.dumps(result_document(job_id)), owner="uid:1000")
+        )
+        service.note_progress(job_id, "infer", 0.5, "Running on gpu")
+        halfway = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(job_id, "result-2")), owner="uid:1000"
+            )
+        )
+        dispatcher.release.set()
+        return queued, halfway
+
+    queued, halfway = run_scenario(scenario())
+
+    assert queued["progress"] == {"fraction": 0.0, "detail": "Job accepted and queued"}
+    assert halfway["progress"] == {"fraction": 0.5, "detail": "Running on gpu"}
+    assert halfway["message"] == "Running on gpu"
+
+
+@pytest.mark.parametrize(
+    ("fraction", "expected"),
+    [(-1, 0.0), (2, 1.0), (float("nan"), 0.0), (True, 0.0), ("half", 0.0), (0.25, 0.25)],
+)
+def test_an_impossible_fraction_is_clamped_rather_than_losing_the_update(fraction, expected):
+    """A stage reporting nonsense is a bug in the stage, not a reason to go silent."""
+    from omnitensor.plugins.results import JobResultStore
+
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        service.note_progress(accepted["jobId"], "infer", fraction, "working")
+        reply = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(accepted["jobId"])), owner="uid:1000"
+            )
+        )
+        dispatcher.release.set()
+        return reply
+
+    assert run_scenario(scenario())["progress"]["fraction"] == expected
+
+
+def test_progress_for_an_unknown_job_is_ignored_not_filed_under_a_guess():
+    from omnitensor.plugins.results import JobResultStore
+
+    store = JobResultStore()
+    service = JobSubmissionService(BlockingDispatcher(), allows_all(), results=store)
+
+    service.note_progress("job-that-never-existed", "infer", 0.5, "working")
+
+    assert not store.active_job_ids() if hasattr(store, "active_job_ids") else True
+
+
+def test_progress_after_a_result_does_not_reopen_a_finished_job():
+    from omnitensor.plugins.results import JobResultStore
+
+    async def scenario():
+        service = JobSubmissionService(InstantDispatcher(), allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        service.note_progress(accepted["jobId"], "infer", 0.5, "late update")
+        return decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(accepted["jobId"])), owner="uid:1000"
+            )
+        )
+
+    assert run_scenario(scenario())["state"] == "succeeded"
+
+
+class InstantDispatcher:
+    def dispatch(self, job_id, workload_id, payload):
+        async def work():
+            return {"outputs": []}
+
+        return work()

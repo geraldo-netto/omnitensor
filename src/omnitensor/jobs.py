@@ -9,11 +9,12 @@ import math
 import secrets
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 
 from .callers import ANONYMOUS_OWNER
-from .plugins.protocol import PluginResult, PluginResultStatus
+from .plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
 from .plugins.results import JobRecord, JobResultError, JobResultStore
 from .registry import validate_document
 
@@ -140,6 +141,25 @@ class JobSubmissionService:
         self._active: dict[str, _ActiveJob] = {}
         self._results = results
 
+    def note_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
+        """Record where a running job has got to, against its owner.
+
+        The owner lives here rather than in the dispatcher, so progress is
+        reported through this method instead of written to the store directly:
+        a dispatcher that guessed an owner could file one caller's progress
+        under another's job.
+        """
+        active = self._active.get(job_id)
+        if active is None or self._results is None:
+            return
+        with suppress(JobResultError):
+            self._results.record_progress(
+                job_id,
+                active.owner,
+                PluginProgress(job_id, stage, _clamped(fraction), str(detail)[:200],
+                               self._clock_ms()),
+            )
+
     def active_job_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._active))
 
@@ -180,6 +200,9 @@ class JobSubmissionService:
             )
             task = asyncio.ensure_future(operation)
             self._active[job_id] = _ActiveJob(request.workload_id, task, owner)
+            # Recorded before the reply so a caller that polls immediately sees
+            # a queued job rather than a job it cannot distinguish from a hang.
+            self.note_progress(job_id, "queued", 0.0, "Job accepted and queued")
             task.add_done_callback(
                 lambda completed, current_id=job_id: self._job_completed(
                     current_id, completed
@@ -306,9 +329,11 @@ class JobSubmissionService:
         outcome can be kept; dropping it here is what made a submitted job
         unanswerable for the rest of its life.
         """
-        if self._results is None:
-            return
         status, detail = _terminal_status(task)
+        if self._results is None:
+            # Still consulted the task above: an exception nobody retrieves is
+            # reported by asyncio as an unhandled error at collection time.
+            return
         output = task.result() if status is PluginResultStatus.SUCCEEDED else {}
         self._results.record_result(
             job_id,
@@ -508,6 +533,15 @@ def _validate_integer_bound(name: str, value: object, minimum: int, maximum: int
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
 
 
+def _clamped(fraction: object) -> float:
+    """Progress outside [0, 1] is a bug in a stage, not a reason to lose the update."""
+    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+        return 0.0
+    if not math.isfinite(fraction):
+        return 0.0
+    return float(min(max(fraction, 0.0), 1.0))
+
+
 def _terminal_status(task: asyncio.Future) -> tuple[PluginResultStatus, str]:
     """How a job actually ended, from the task rather than from intent."""
     if task.cancelled():
@@ -549,7 +583,7 @@ def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
                 "jobId": record.job_id,
                 "state": "running",
                 "code": "job-running",
-                "message": "Job is still running",
+                "message": progress.detail[:500] if progress else "Job is still running",
                 "timestamp": timestamp,
                 "progress": (
                     None
