@@ -37,6 +37,12 @@ from .registry import (
 # install whose schema directory did not ship.  ``test_acceptance_install.py``
 # asserts this list equals the schemas in the tree, so it cannot fall behind a
 # new contract the way it fell behind ``runtime-contract``.
+#
+# Written out rather than read from the directory, and that is the whole point:
+# a check that verifies whatever it happens to find can never report something
+# missing.  This is the one restatement of the contract that must stay a
+# restatement — the applet's validator was derived from the schema precisely
+# because it is the opposite case, a second description of the same rules.
 REQUIRED_SCHEMAS = (
     "runtime-contract.schema.json",
     "runtime-snapshot.schema.json",
