@@ -58,6 +58,7 @@ from .jobs import (
 from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.cancellation import JobCancellationRegistry
+from .plugins.grants import GrantLedger
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.orchestration import (
     RunnerBackedDispatcher,
@@ -94,6 +95,7 @@ DEFAULT_STATE_PATH = "~/.local/state/tpu-workload-manager/state.json"
 DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
+DEFAULT_GRANTS_PATH = "~/.local/state/omnitensor/grants.json"
 
 
 def _no_inventory() -> str:
@@ -497,6 +499,8 @@ class OmniTensorService:
         plugin_runtime: PluginRuntime | None = None,
         job_dispatcher: JobDispatcher | None = None,
         artifact_root: Path | None = None,
+        grants_path: Path | str = DEFAULT_GRANTS_PATH,
+        grants: GrantLedger | None = None,
         result_summaries: ResultSummaryRegistry | None = None,
         job_results: JobResultStore | None = None,
         plugin_telemetry: PluginTelemetryRegistry | None = None,
@@ -511,8 +515,13 @@ class OmniTensorService:
         self._input_roots = tuple(input_roots)
         self._callers = CallerIdentityResolver()
         self._transport = transport or DbusControlTransport(callers=self._callers)
+        # Consent has a home now.  The ledger was written, tested, and never
+        # constructed, so `active_permissions` came from a deny-all stub: every
+        # declared permission read as ungranted and nothing could change that.
+        self._grants = grants if grants is not None else GrantLedger(grants_path)
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
-            bundled_workloads_path()
+            bundled_workloads_path(),
+            grant_source=self._grants,
         )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
@@ -630,11 +639,29 @@ class OmniTensorService:
             cancellations=self._cancellations,
             is_paused=lambda: self.control.state.paused,
             is_enabled=self._admits,
+            allows_permission=self._permitted,
             # Without a delivery sink the final stage is a no-op, so a job that
             # reached DELIVER left nothing a caller could collect.
             deliver=self._deliver_job_output,
             progress=self._note_job_progress,
         )
+
+    def _permitted(self, permission: str) -> bool:
+        """Whether any installed plugin holds an active grant for this.
+
+        Re-read first: the ledger in memory is a snapshot taken at
+        construction, so a grant revoked by the CLI while a job sits in a queue
+        would otherwise stay in force until the service restarted — which is
+        the opposite of what revoking means.
+        """
+        self._grants.reload()
+        for plugin in self._plugin_runtime.snapshot.catalog.plugins:
+            declared = set(plugin.manifest["plugin"]["permissions"])
+            if permission in declared and self._grants.is_granted(
+                plugin.plugin_id, permission, declared
+            ):
+                return True
+        return False
 
     def _note_job_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         # Late-bound: runners are built before the job service they report to.
@@ -906,6 +933,7 @@ def build_service_from_env() -> OmniTensorService:
         policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
         workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
         artifact_root=_env_path("OMNITENSOR_ARTIFACT_ROOT", DEFAULT_ARTIFACT_ROOT),
+        grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH),
         input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS"),
     )
 

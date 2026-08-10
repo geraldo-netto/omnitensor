@@ -380,6 +380,41 @@ picture for it is not offered a picture at all — the applet says what the
 manifest failed to state rather than guessing RGB where the model wanted BGR,
 which is a wrong answer that looks exactly like a right one.
 
+### Granting a plugin the permissions it declares
+
+A plugin declares what it needs in `plugin.permissions`, and the runtime
+refuses its jobs with `consent-missing` until each one is granted. Nothing
+could grant them: the ledger existed, the service never constructed it, and
+every declared permission read as ungranted for ever — a refusal with no
+remedy, which looks like a decision somebody made.
+
+```sh
+omnitensor-grant list sample-plugin
+omnitensor-grant grant sample-plugin files:read --reason "indexing my pictures"
+omnitensor-grant revoke sample-plugin files:read
+```
+
+This is a command and not a bus method on purpose. A grant authorises a plugin
+to reach something outside itself, which is a larger thing to hand out than
+enabling a profile, and on a session bus every peer runs as the same user — the
+service cannot tell one from another, so a bus method would accept consent from
+anything already able to talk to it and record it as yours. Running a command
+requires access to this account before it starts.
+
+What a grant means:
+
+- **Per plugin and permission.** Granting one says nothing about any other.
+- **Only what the manifest declared.** A permission the plugin never asked for
+  cannot be granted, and a manifest that later drops one stops it being usable.
+- **Persistent until revoked.** Re-consenting every boot trains people to say
+  yes without reading.
+- **Withdrawn immediately.** Enforcement re-reads the ledger before it decides,
+  so revoking stops a job already sitting in a queue.
+
+Every change records who made it, when, and why. The ledger lives at
+`OMNITENSOR_GRANTS_PATH` (default `~/.local/state/omnitensor/grants.json`) and
+carries its own revision, so two shells racing cannot both write.
+
 ### Uninstalling
 
 Removing the package leaves state behind on purpose — artifacts are expensive
