@@ -276,6 +276,18 @@
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
             },
+            "companions": {
+              "description": "Digests for the files that travel with the primary one \u2014 ncnn keeps every weight in the .bin beside the .param, and OpenVINO IR has the same split. Without these the publisher vouches for the graph and not for the weights: the store re-verifies its own record on every resolve, which catches a companion replaced after installation and not one substituted before it. Names are the installed filenames, which the format fixes, so a companion the format does not define is refused rather than installed under a name nothing checks.",
+              "type": "object",
+              "maxProperties": 8,
+              "propertyNames": {
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
             "tensorContract": {
               "description": "What this model expects of its input. Absent means no check: a manifest written before this field still loads and still runs. Split deliberately in two \u2014 shape and dtype are facts the runtime enforces at admission, while preprocess is advice for whoever turns a picture into a buffer and is never enforced, because the runtime decodes nothing and cannot tell a correctly normalised tensor from a wrong one.",
               "type": "object",

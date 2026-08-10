@@ -53,8 +53,10 @@ ABSVAL_MODEL = {
     "fullyQuantized": True,
     "minimumCompilerVersion": "1.0.0",
     "minimumRuntimeVersion": "1.0.0",
-    # Pinned, because an unpinned model is refused before it reaches a device.
+    # Pinned, because an unpinned model is refused before it reaches a device —
+    # and ncnn keeps its weights in the companion, so that is pinned too.
     "sha256": "a" * 64,
+    "companions": {"model.bin": "b" * 64},
 }
 
 

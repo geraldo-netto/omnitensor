@@ -57,12 +57,29 @@ def permitted_companion_filenames(model_format: str) -> frozenset[str]:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactReference:
-    """Manifest identity and expected digest for one model artifact."""
+    """Manifest identity and expected digests for one model artifact.
+
+    ``companions`` is what the publisher vouches for beyond the primary file.
+    Empty means it vouched for nothing else, which for a format that keeps its
+    weights in a companion means it vouched for the graph and not the numbers.
+    """
 
     id: str
     version: str
     format: str
     sha256: str
+    companions: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def declared_companions(self) -> dict[str, str]:
+        return dict(self.companions)
+
+    def unpinned_companions(self) -> tuple[str, ...]:
+        """Required companions of this format the manifest does not name."""
+        declared = self.declared_companions
+        return tuple(
+            name for name in companion_filenames(self.format) if name not in declared
+        )
 
 
 @dataclass(frozen=True, slots=True)

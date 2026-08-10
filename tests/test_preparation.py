@@ -247,3 +247,37 @@ def test_installing_an_ncnn_pair_yields_a_ready_artifact(tmp_path):
     resolution = ArtifactInstaller(tmp_path / "artifacts").resolve_active("sq")
     assert resolution.ready is True, resolution.reason
     assert (Path(resolution.path).parent / "model.bin").is_file()
+
+
+def test_the_printed_block_names_every_file_a_profile_must_vouch_for(tmp_path):
+    """Following the documented steps must not build a profile that refuses.
+
+    ncnn keeps its weights in the companion and dispatch refuses a model that
+    does not name it, so a block printed without the companion digest would be
+    a documented route to `companion-unpinned`.
+    """
+    source = tmp_path / "squeezenet.param"
+    source.write_bytes(b"7767517 graph")
+    weights = tmp_path / "squeezenet.bin"
+    weights.write_bytes(b"the weights")
+
+    prepared = prepare_artifact(
+        source, artifact_id="sample-model", version="1.0.0", model_format="ncnn"
+    )
+    fragment = prepared.manifest_fragment()
+
+    assert fragment["companions"] == {
+        "model.bin": hashlib.sha256(b"the weights").hexdigest(),
+    }
+    assert prepared.reference.unpinned_companions() == ()
+
+
+def test_a_single_file_format_prints_no_companions_at_all(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"a model")
+
+    fragment = prepare_artifact(
+        source, artifact_id="sample-model", version="1.0.0", model_format="onnx"
+    ).manifest_fragment()
+
+    assert "companions" not in fragment

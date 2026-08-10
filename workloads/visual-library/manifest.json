@@ -21,6 +21,9 @@
       "minimumCompilerVersion": "validated-release",
       "minimumRuntimeVersion": "validated-release",
       "sha256": "6a38784ab51f056e5ecdf208120f8a9174b74831255e66b74c4dd6bf755a4324",
+      "companions": {
+        "model.bin": "928c82c485a16064df88794d83c333025055e60c08f73217222244ab0ed2dbc6"
+      },
       "tensorContract": {
         "inputs": [
           {

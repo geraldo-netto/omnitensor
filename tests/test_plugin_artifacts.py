@@ -795,3 +795,37 @@ def test_an_openvino_artifact_without_weights_is_refused(tmp_path):
 
     with pytest.raises(ArtifactInstallationError, match="companion-missing"):
         ArtifactInstaller(tmp_path / "store").install(reference, graph)
+
+
+def test_a_companion_the_manifest_declares_is_checked_against_the_manifest(tmp_path):
+    """The store's own record cannot catch a substitution before installation.
+
+    It records whatever it was handed and re-verifies that faithfully for ever,
+    so a companion swapped on the way in is recorded as correct and stays
+    correct.  Only the publisher's own statement can catch it, which is what
+    ``requirements.model.companions`` is.
+    """
+    store = tmp_path / "store"
+    source = tmp_path / "model.param"
+    source.write_bytes(b"7767517 graph")
+    companion = tmp_path / "model.bin"
+    companion.write_bytes(b"the weights")
+    installer = ArtifactInstaller(store)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    weights = hashlib.sha256(companion.read_bytes()).hexdigest()
+    installer.install(
+        ArtifactReference("m", "1.0.0", "ncnn", digest),
+        source,
+        companions={"model.bin": companion},
+    )
+
+    honest = ArtifactReference("m", "1.0.0", "ncnn", digest, (("model.bin", weights),))
+    assert installer.resolve(honest).ready is True
+
+    substituted = ArtifactReference("m", "1.0.0", "ncnn", digest, (("model.bin", "a" * 64),))
+    resolution = installer.resolve(substituted)
+    assert resolution.ready is False
+    assert "does not match the digest its manifest declares" in resolution.reason
+
+    absent = ArtifactReference("m", "1.0.0", "ncnn", digest, (("labels.txt", "b" * 64),))
+    assert "the manifest declares is missing" in installer.resolve(absent).reason

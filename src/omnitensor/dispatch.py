@@ -223,6 +223,16 @@ class InferenceJobDispatcher:
                 f"{workload_id}: the manifest declares a model without a sha256, so the "
                 "runtime cannot tell which file the publisher meant",
             )
+        unpinned = reference.unpinned_companions()
+        if unpinned:
+            # For ncnn and OpenVINO IR the weights live in the companion, so a
+            # manifest that names only the primary file has vouched for the
+            # graph and not for the numbers it runs.
+            raise JobDispatchError(
+                "companion-unpinned",
+                f"{workload_id}: the manifest declares no digest for "
+                f"{', '.join(unpinned)}, which is where this format keeps its weights",
+            )
         try:
             resolution = self._artifacts.resolve(reference)
         except Exception as error:  # noqa: BLE001 - store failures are arbitrary
@@ -295,6 +305,7 @@ def declared_artifact_reference(
     v1 shape.  Returning ``None`` rather than inventing a digest keeps the
     weaker guarantee visible at the call site instead of pretending to verify.
     """
+    companions = _declared_companions(model)
     declared = workload.manifest.get("plugin", {}).get("artifacts") or ()
     for entry in declared:
         if (
@@ -303,14 +314,22 @@ def declared_artifact_reference(
             and entry["format"] == model["format"]
         ):
             return ArtifactReference(
-                entry["id"], entry["version"], entry["format"], entry["sha256"]
+                entry["id"], entry["version"], entry["format"], entry["sha256"], companions
             )
     digest = model.get("sha256")
     if digest:
         return ArtifactReference(
-            model["id"], model["version"], model["format"], digest
+            model["id"], model["version"], model["format"], digest, companions
         )
     return None
+
+
+def _declared_companions(model: dict) -> tuple[tuple[str, str], ...]:
+    """The companion digests a manifest publishes, in a stable order."""
+    companions = model.get("companions")
+    if not isinstance(companions, dict):
+        return ()
+    return tuple(sorted((str(name), str(digest)) for name, digest in companions.items()))
 
 
 def inference_result_payload(

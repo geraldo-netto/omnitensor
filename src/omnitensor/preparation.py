@@ -73,12 +73,19 @@ class PreparedArtifact:
         model is a decision for whoever maintains that profile, and silently
         editing a manifest would make a tool the author of a contract.
         """
-        return {
+        fragment = {
             "id": self.reference.id,
             "version": self.reference.version,
             "format": self.reference.format,
             "sha256": self.reference.sha256,
         }
+        if self.reference.companions:
+            # Printed rather than left to the reader: a format that keeps its
+            # weights in a companion refuses to dispatch without these, so a
+            # block that omitted them would be a documented way to build a
+            # profile that cannot run.
+            fragment["companions"] = self.reference.declared_companions
+        return fragment
 
     def document(self) -> dict:
         return {
@@ -150,11 +157,18 @@ def prepare_artifact(
         raise PreparationError("source-invalid", f"cannot read {path}: {error}") from error
     if size == 0:
         raise PreparationError("source-invalid", "an empty file is not a model")
+    companions = {**_discover_companions(path, model_format), **_labels_companion(labels)}
     return PreparedArtifact(
-        ArtifactReference(artifact_id, version, model_format, digest),
+        ArtifactReference(
+            artifact_id,
+            version,
+            model_format,
+            digest,
+            tuple(sorted((name, file_digest(source)) for name, source in companions.items())),
+        ),
         path,
         size,
-        {**_discover_companions(path, model_format), **_labels_companion(labels)},
+        companions,
     )
 
 

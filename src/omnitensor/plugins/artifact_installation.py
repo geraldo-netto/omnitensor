@@ -238,6 +238,30 @@ class ArtifactInstaller:
                 return f"companion file does not match its recorded digest: {name}"
         return ""
 
+    def verify_declared_companions(self, version_root: Path, reference) -> str:
+        """Check installed companions against what the *manifest* declares.
+
+        `verify_companions` compares the store against its own record, which
+        catches a file replaced after installation.  This compares it against
+        the publisher's, which is the only thing that can catch one substituted
+        before installation — the store would have recorded the substitute and
+        happily re-verified it ever after.
+        """
+        for name, expected in sorted(reference.declared_companions.items()):
+            path = Path(version_root) / name
+            if not path.is_file():
+                return f"companion file the manifest declares is missing: {name}"
+            try:
+                observed = _digest_file(path, self._max_artifact_bytes)
+            except OSError as error:
+                return f"companion file is unreadable: {name}: {error}"
+            if observed != expected:
+                return (
+                    "companion file does not match the digest its manifest declares: "
+                    f"{name}"
+                )
+        return ""
+
     def activation(self, artifact_id: str) -> ArtifactActivation:
         """Read strict activation state; absence means no version is active."""
         artifact_root = self._artifact_root(artifact_id)
@@ -286,6 +310,9 @@ class ArtifactInstaller:
         companion = self.verify_companions(version_root)
         if companion:
             return ArtifactResolution(False, None, companion, 0)
+        declared = self.verify_declared_companions(version_root, reference)
+        if declared:
+            return ArtifactResolution(False, None, declared, 0)
         return ArtifactResolver(
             [self._root],
             max_artifact_bytes=self._max_artifact_bytes,

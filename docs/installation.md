@@ -160,9 +160,21 @@ manifest, with the digest computed from the file it installed:
   "fullyQuantized": false,
   "minimumCompilerVersion": "validated-release",
   "minimumRuntimeVersion": "validated-release",
-  "sha256": "<printed by the command>"
+  "sha256": "<printed by the command>",
+  "companions": {
+    "model.bin": "<printed by the command>"
+  }
 }
 ```
+
+`companions` is not optional in practice for ncnn or OpenVINO IR. Those formats
+keep every weight in the file beside the primary one, so a manifest that names
+only the primary has vouched for the graph and not for the numbers it runs, and
+dispatch refuses it with `companion-unpinned`. The store re-verifies its own
+record of a companion on every resolve, which catches one replaced after
+installation — it cannot catch one substituted before it, because the store
+recorded the substitute and re-verifies that faithfully for ever. Only the
+publisher's own digest closes it, which is what this block is.
 
 `requirements.accelerator` must match what the format can run on — an ncnn
 artifact is GPU-only, and a manifest declaring `tpu` with an ncnn model is

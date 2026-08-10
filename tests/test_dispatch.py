@@ -27,8 +27,13 @@ MODEL = {
     "minimumCompilerVersion": "1.0.0",
     "minimumRuntimeVersion": "1.0.0",
     "sha256": "f" * 64,
+    # ncnn keeps its weights in the companion, so a manifest that names only the
+    # graph has vouched for half the model.
+    "companions": {"model.bin": "e" * 64},
 }
+COMPANIONS = (("model.bin", "e" * 64),)
 UNPINNED = {name: value for name, value in MODEL.items() if name != "sha256"}
+UNVOUCHED = {name: value for name, value in MODEL.items() if name != "companions"}
 
 
 def workload(
@@ -199,7 +204,7 @@ def test_a_declared_digest_is_used_to_resolve_the_artifact():
     asyncio.run(scenario())
 
     assert artifacts.resolved == [
-        ArtifactReference("sample-model", "1.2.3", "ncnn", "a" * 64)
+        ArtifactReference("sample-model", "1.2.3", "ncnn", "a" * 64, COMPANIONS)
     ]
     assert artifacts.resolved_active == []
 
@@ -233,7 +238,7 @@ def test_the_declared_reference_matches_only_an_exact_entry():
     # No allowlist entry matches, so the model's own digest is what remains.
     target = workload(model=MODEL, artifacts=declared)
     assert declared_artifact_reference(target, MODEL) == ArtifactReference(
-        "sample-model", "1.2.3", "ncnn", "f" * 64
+        "sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS
     )
     unpinned = workload(model=UNPINNED, artifacts=declared)
     assert declared_artifact_reference(unpinned, UNPINNED) is None
@@ -241,7 +246,7 @@ def test_the_declared_reference_matches_only_an_exact_entry():
     exact = [{"id": "sample-model", "version": "1.2.3", "format": "ncnn", "sha256": "d" * 64}]
     assert declared_artifact_reference(
         workload(model=MODEL, artifacts=exact), MODEL
-    ) == ArtifactReference("sample-model", "1.2.3", "ncnn", "d" * 64)
+    ) == ArtifactReference("sample-model", "1.2.3", "ncnn", "d" * 64, COMPANIONS)
 
 
 def test_a_dispatched_job_reaches_the_executor_and_returns_its_outcome():
@@ -438,7 +443,7 @@ def test_a_v1_manifest_may_declare_its_model_digest():
     target = workload(model=digested)
 
     assert declared_artifact_reference(target, digested) == ArtifactReference(
-        "sample-model", "1.2.3", "ncnn", "e" * 64
+        "sample-model", "1.2.3", "ncnn", "e" * 64, COMPANIONS
     )
 
 
@@ -715,3 +720,42 @@ def test_an_unpinned_model_is_refused_before_the_store_is_touched():
         )
 
     assert excinfo.value.code == "model-unpinned"
+
+
+def test_a_format_that_hides_its_weights_must_vouch_for_them():
+    """ncnn and OpenVINO IR keep every weight in the companion.
+
+    A manifest naming only the primary file has attested to the graph and not
+    to the numbers it runs, and the store cannot close that: it records the
+    companion it was given, so a file substituted before installation is
+    recorded and then faithfully re-verified for ever.
+    """
+    class ExplodingArtifacts:
+        def resolve(self, reference):  # pragma: no cover - never reached
+            raise AssertionError("an unvouched companion never reaches the store")
+
+        def resolve_active(self, artifact_id):  # pragma: no cover - never reached
+            raise AssertionError("an unvouched companion never reaches the store")
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatcher([workload(model=UNVOUCHED)], artifacts=ExplodingArtifacts()).dispatch(
+            "job-1", "sample-workload", {"inputs": [[1]]}
+        )
+
+    assert excinfo.value.code == "companion-unpinned"
+    assert "model.bin" in str(excinfo.value)
+
+
+def test_a_format_with_no_companions_is_fully_vouched_by_its_own_digest():
+    """tflite is one file, so naming it is naming the whole model."""
+    single = dict(UNVOUCHED, format="tflite-edgetpu")
+    reference = declared_artifact_reference(workload(model=single), single)
+
+    assert reference.unpinned_companions() == ()
+
+
+def test_the_declared_companions_travel_with_the_reference():
+    reference = declared_artifact_reference(workload(model=MODEL), MODEL)
+
+    assert reference.declared_companions == {"model.bin": "e" * 64}
+    assert reference.unpinned_companions() == ()
