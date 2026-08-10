@@ -399,6 +399,7 @@ def profile_statuses(
     scheduler: Scheduler,
     policy: PolicyState,
     artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
+    permissions_missing: Callable[[Workload], tuple[str, ...]] | None = None,
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
     per_profile = scheduler.profile_stats()
@@ -409,6 +410,7 @@ def profile_statuses(
             per_profile.get(workload_id, {"queued": 0, "running": 0}),
             policy,
             artifact_ready,
+            permissions_missing,
         )
         for workload_id, workload in workloads.items()
     }
@@ -424,6 +426,7 @@ PROFILE_DISABLED = "profile-disabled"
 NO_MODEL = "no-model"
 ARTIFACT_UNAVAILABLE = "artifact-unavailable"
 SERVING = "serving"
+CONSENT_MISSING = "consent-missing"
 
 
 def _profile_status(
@@ -432,6 +435,7 @@ def _profile_status(
     counts: dict,
     policy: PolicyState,
     artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
+    permissions_missing: Callable[[Workload], tuple[str, ...]] | None = None,
 ) -> dict:
     queued = counts["queued"]
     profile_policy = policy.profiles.get(workload.id)
@@ -463,6 +467,17 @@ def _profile_status(
             "queued": queued,
             "detail": f"Ready on {choice.backend}; no model bundled",
             "reason": NO_MODEL,
+        }
+    ungranted = permissions_missing(workload) if permissions_missing is not None else ()
+    if ungranted:
+        # The gate refuses this profile's jobs, so saying "serving" would
+        # promise something the first job would be refused for — and the
+        # remedy is a command, which is worth naming where a user reads it.
+        return {
+            "status": "unavailable",
+            "queued": queued,
+            "detail": f"needs consent for {', '.join(ungranted)}"[:240],
+            "reason": CONSENT_MISSING,
         }
     if artifact_ready is not None:
         ready, reason = artifact_ready(workload)
@@ -646,6 +661,26 @@ class OmniTensorService:
             progress=self._note_job_progress,
         )
 
+    def _profile_permissions_missing(self, workload: Workload) -> tuple[str, ...]:
+        """Permissions this profile declares and has not been granted.
+
+        Reported in the snapshot rather than only refused at job time: a
+        profile whose jobs will all be refused should say so before somebody
+        submits one, and the remedy — a command — is worth naming where it is
+        read.
+        """
+        from .plugins.orchestration import _required_permissions  # noqa: PLC0415
+
+        declared = _required_permissions(workload)
+        if not declared:
+            return ()
+        self._grants.reload()
+        return tuple(
+            permission
+            for permission in declared
+            if not self._grants.is_granted(workload.id, permission, set(declared))
+        )
+
     def _permitted(self, permission: str) -> bool:
         """Whether any installed plugin holds an active grant for this.
 
@@ -822,6 +857,7 @@ class OmniTensorService:
                 self._scheduler,
                 self.control.state,
                 self._profile_artifact_ready,
+                self._profile_permissions_missing,
             ),
             alerts=self.result_summaries.documents(),
             plugin_telemetry=self.plugin_telemetry.documents(),

@@ -13,7 +13,12 @@ from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins import ArtifactInstaller, ArtifactReference
 from omnitensor.registry import _schema_path, validate_document
 from omnitensor.scheduler import select_backend
-from omnitensor.service import OmniTensorService, build_executors, profile_statuses
+from omnitensor.service import (
+    OmniTensorService,
+    _profile_status,
+    build_executors,
+    profile_statuses,
+)
 
 
 def build_service(fake_nodes, tmp_path, manifests=()):
@@ -374,3 +379,75 @@ def test_a_backend_reason_survives_as_a_code_not_a_sentence(fake_nodes, tmp_path
     assert (missing.backend, missing.code) == (None, "runtime-missing")
     assert (unsupported.backend, unsupported.code) == (None, "format-unsupported")
     assert select_backend(workload, {}).code == "no-executor"
+
+
+def test_a_profile_that_needs_consent_says_so_before_a_job_is_submitted(fake_nodes, tmp_path):
+    """The gate refuses these jobs, so reporting 'serving' would promise
+    something the first job is refused for — and the remedy is a command
+    nobody would guess."""
+    from omnitensor.registry import Workload
+
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+    # Only a version 2 plugin manifest can declare permissions; the workload
+    # schema forbids them on a version 1 document, which is why no bundled
+    # profile has ever exercised this gate.
+    declaring = Workload(
+        id="declaring-workload",
+        manifest={
+            **sample_manifest_with_model(),
+            "plugin": {"permissions": ["files:read", "net:connect"]},
+        },
+    )
+
+    missing = service._profile_permissions_missing(declaring)
+
+    assert missing == ("files:read", "net:connect")
+
+    # A backend that resolves, so the status reaches the consent branch rather
+    # than stopping at a lane this host does not have.
+    entry = _profile_status(
+        declaring,
+        {"tpu": _AvailableExecutor()},
+        {"queued": 0, "running": 0},
+        service.control.state,
+        lambda _workload: (True, ""),
+        lambda _workload: ("files:read",),
+    )
+
+    assert entry["reason"] == "consent-missing"
+    assert entry["status"] == "unavailable"
+    assert "files:read" in entry["detail"]
+
+
+def test_a_profile_declaring_nothing_is_never_told_it_needs_consent(fake_nodes, tmp_path):
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    assert service._profile_permissions_missing(service._workloads["sample-workload"]) == ()
+
+
+def test_a_granted_permission_stops_being_reported_as_missing(fake_nodes, tmp_path):
+    from omnitensor.plugins.grants import GrantLedger, GrantOrigin, GrantProvenance
+    from omnitensor.registry import Workload
+
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+    ledger = GrantLedger(tmp_path / "grants.json")
+    service._grants = ledger
+    workload = Workload(
+        id="declaring-workload",
+        manifest={**sample_manifest_with_model(), "plugin": {"permissions": ["files:read"]}},
+    )
+
+    assert service._profile_permissions_missing(workload) == ("files:read",)
+
+    ledger.grant(
+        "declaring-workload",
+        "files:read",
+        {"files:read"},
+        GrantProvenance("tester", GrantOrigin.USER, "test", 1, "req-1"),
+        expected_revision=ledger.revision,
+    )
+
+    assert service._profile_permissions_missing(workload) == ()
