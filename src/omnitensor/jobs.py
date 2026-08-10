@@ -99,6 +99,31 @@ class UnavailableJobDispatcher:
         raise JobDispatchError("dispatch-unavailable", _UNAVAILABLE_DISPATCHER)
 
 
+class JobLifecycleObserver(Protocol):
+    """Told when a job starts and how it ended, for surfaces that only watch.
+
+    A port rather than the telemetry registry itself: whether a finished job
+    becomes a counter, a summary, or nothing is a question for the service
+    wiring, and the job service should not learn the vocabulary of whichever
+    answer is current.  Observation must never change an outcome, so an
+    implementation that raises is a defect in the implementation.
+    """
+
+    def job_started(self, workload_id: str) -> None: ...
+
+    def job_finished(self, workload_id: str, status: str, detail: str) -> None: ...
+
+
+class NoJobObserver:
+    """The default: nothing watches, and nothing is recorded."""
+
+    def job_started(self, workload_id: str) -> None:
+        return None
+
+    def job_finished(self, workload_id: str, status: str, detail: str) -> None:
+        return None
+
+
 class PredicateJobAuthorizer:
     """Small adapter keeping service policy outside the job domain."""
 
@@ -132,6 +157,7 @@ class JobSubmissionService:
         clock_ms: Callable[[], int] | None = None,
         results: JobResultStore | None = None,
         admission: JobAdmission | None = None,
+        observer: JobLifecycleObserver | None = None,
     ) -> None:
         _validate_integer_bound(
             "max_active_jobs", max_active_jobs, 1, MAX_ACTIVE_JOBS_LIMIT
@@ -164,6 +190,7 @@ class JobSubmissionService:
         # Absent by default: with no admission check a job is refused wherever
         # it was refused before, never earlier and never for a new reason.
         self._admission = admission
+        self._observer = observer or NoJobObserver()
 
     def note_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         """Record where a running job has got to, against its owner.
@@ -229,6 +256,7 @@ class JobSubmissionService:
             )
             task = asyncio.ensure_future(operation)
             self._active[job_id] = _ActiveJob(request.workload_id, task, owner)
+            self._observer.job_started(request.workload_id)
             # Recorded before the reply so a caller that polls immediately sees
             # a queued job rather than a job it cannot distinguish from a hang.
             self.note_progress(job_id, "queued", 0.0, "Job accepted and queued")
@@ -359,6 +387,9 @@ class JobSubmissionService:
         unanswerable for the rest of its life.
         """
         status, detail = _terminal_status(task)
+        # Before the early return below: a profile's counters must not depend
+        # on whether a result store happens to be wired.
+        self._observer.job_finished(workload_id, str(status), detail[:200])
         if self._results is None:
             # Still consulted the task above: an exception nobody retrieves is
             # reported by asyncio as an unhandled error at collection time.

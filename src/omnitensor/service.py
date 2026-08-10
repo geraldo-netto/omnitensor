@@ -201,6 +201,55 @@ BUS_METHODS = (
 )
 
 
+class TelemetryJobObserver:
+    """Adapter from the job lifecycle onto per-profile telemetry counters.
+
+    The registry enforces a state machine — a job is queued, then started,
+    then ends — and refuses anything out of order.  That is right for the
+    registry and wrong to propagate: bookkeeping must never fail the job it is
+    counting, so a refusal is logged and dropped.  A gap in a counter is a
+    worse report; a job that failed because its counter would not increment is
+    a worse service.
+    """
+
+    def __init__(self, telemetry: PluginTelemetryRegistry, clock_ms=None) -> None:
+        self._telemetry = telemetry
+        self._clock_ms = clock_ms or (lambda: max(1, int(time.time() * 1000)))
+
+    def job_started(self, workload_id: str) -> None:
+        # Queued and started together: the scheduler owns the queue, and the
+        # moment between the two is not observable from here.
+        self._guarded(workload_id, self._telemetry.queue_job)
+        self._guarded(workload_id, self._telemetry.start_job)
+
+    def job_finished(self, workload_id: str, status: str, detail: str) -> None:
+        if status == "succeeded":
+            self._guarded(
+                workload_id,
+                lambda plugin_id: self._telemetry.succeed(
+                    plugin_id, completed_at_ms=self._clock_ms()
+                ),
+            )
+        elif status == "cancelled":
+            self._guarded(workload_id, self._telemetry.cancel)
+        else:
+            self._guarded(
+                workload_id,
+                lambda plugin_id: self._telemetry.fail(
+                    plugin_id,
+                    "job-failed",
+                    detail or "the job failed",
+                    completed_at_ms=self._clock_ms(),
+                ),
+            )
+
+    def _guarded(self, workload_id: str, call) -> None:
+        try:
+            call(workload_id)
+        except (KeyError, ValueError) as error:
+            LOGGER.debug("plugin telemetry not updated for %s: %s", workload_id, error)
+
+
 class OmniTensorInterface(ServiceInterface):
     """Transport-only D-Bus shim; all logic stays in the injected handler."""
 
@@ -486,6 +535,14 @@ class OmniTensorService:
             cancellation_journal_path or (snapshot_path.parent / "cancellations.json")
         )
         self.runners = self._build_runners()
+        self.plugin_telemetry = plugin_telemetry or PluginTelemetryRegistry()
+        # Every profile, not only version-two manifests.  Gating on the
+        # manifest version meant no bundled profile was ever registered, so the
+        # snapshot carried an empty telemetry list on every host and a user
+        # could not tell a profile that had run a thousand jobs from one that
+        # had never run at all.
+        for workload in self._workloads.values():
+            self.plugin_telemetry.register(workload.id)
         self.jobs = JobSubmissionService(
             # Routed through the runners, so a profile that has a pipeline runs
             # its pipeline; without this the runners were built and never used.
@@ -500,6 +557,7 @@ class OmniTensorService:
                 if isinstance(self._job_dispatcher, JobAdmission)
                 else None
             ),
+            observer=TelemetryJobObserver(self.plugin_telemetry),
         )
         self.runtime_api = RuntimeAPI(
             self.control, self.jobs, self._describe_plugins, self._callers
@@ -507,10 +565,6 @@ class OmniTensorService:
         self.result_summaries = result_summaries or ResultSummaryRegistry(
             alert_id_factory=lambda: f"alert-{secrets.token_hex(16)}"
         )
-        self.plugin_telemetry = plugin_telemetry or PluginTelemetryRegistry()
-        for workload in self._workloads.values():
-            if workload.manifest["manifestVersion"] >= 2:
-                self.plugin_telemetry.register(workload.id)
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 

@@ -478,9 +478,12 @@ def test_runtime_snapshot_registers_and_publishes_installed_plugin_telemetry(tmp
         "version": 1,
         "plugins": service.plugin_telemetry.documents(),
     }
-    assert [item["id"] for item in snapshot["pluginTelemetry"]["plugins"]] == [
-        "observed-plugin"
-    ]
+    # Every profile, not only version-two manifests. Gating registration on the
+    # manifest version left the telemetry list empty on every host that ships
+    # only bundled profiles, which is every host.
+    published = [item["id"] for item in snapshot["pluginTelemetry"]["plugins"]]
+    assert "observed-plugin" in published
+    assert set(published) == set(service._workloads)
 
 
 def test_dbus_interface_is_a_pure_passthrough_shim():
@@ -1663,3 +1666,97 @@ def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):
     # than reporting a readiness it never checked.
     assert entry["ready"] is False
     assert entry["reason"] != ""
+
+
+def test_a_finished_job_moves_the_counters_a_user_can_see(tmp_path):
+    """Registering a profile was never the gap on its own.
+
+    No telemetry mutator was called anywhere in the service, so every counter
+    would have stayed at zero however many jobs ran — a snapshot that says a
+    profile exists and nothing about what it has done.
+    """
+    from omnitensor.service import TelemetryJobObserver
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    observer = TelemetryJobObserver(service.plugin_telemetry, clock_ms=lambda: 1_700)
+
+    observer.job_started("visual-library")
+    started = service.plugin_telemetry.snapshot("visual-library")
+    observer.job_finished("visual-library", "succeeded", "")
+    finished = service.plugin_telemetry.snapshot("visual-library")
+
+    assert started.active_jobs == 1
+    assert (finished.active_jobs, finished.successes) == (0, 1)
+    assert finished.last_success_at_ms == 1_700
+
+
+def test_a_failed_and_a_cancelled_job_are_counted_apart(tmp_path):
+    from omnitensor.service import TelemetryJobObserver
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    observer = TelemetryJobObserver(service.plugin_telemetry, clock_ms=lambda: 1_700)
+
+    observer.job_started("visual-library")
+    observer.job_finished("visual-library", "failed", "the model refused it")
+    failed = service.plugin_telemetry.snapshot("visual-library")
+    observer.job_started("visual-library")
+    observer.job_finished("visual-library", "cancelled", "")
+    cancelled = service.plugin_telemetry.snapshot("visual-library")
+
+    assert (failed.failures, failed.last_error_code) == (1, "job-failed")
+    assert "refused" in failed.last_error_detail
+    assert (cancelled.cancellations, cancelled.failures) == (1, 1)
+
+
+def test_bookkeeping_never_fails_the_job_it_is_counting(tmp_path):
+    """The registry enforces a state machine and refuses anything out of order.
+    Right for the registry, wrong to propagate: a job that failed because its
+    counter would not increment is a worse service than a gap in a counter."""
+    from omnitensor.service import TelemetryJobObserver
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    observer = TelemetryJobObserver(service.plugin_telemetry)
+
+    # Never registered, and finished without ever having started.
+    observer.job_started("no-such-profile")
+    observer.job_finished("no-such-profile", "succeeded", "")
+    observer.job_finished("visual-library", "succeeded", "")
+    observer.job_finished("visual-library", "cancelled", "")
+
+    assert service.plugin_telemetry.snapshot("visual-library").successes == 0
+
+
+def test_the_job_service_reports_an_outcome_without_a_result_store():
+    """A profile's counters must not depend on whether a store is wired."""
+    from omnitensor.jobs import JobSubmissionService, NoJobObserver
+
+    seen = []
+
+    class Recording(NoJobObserver):
+        def job_finished(self, workload_id, status, detail):
+            seen.append((workload_id, status, detail))
+
+    async def scenario():
+        service = JobSubmissionService(results=None, observer=Recording())
+        finished: asyncio.Future = asyncio.get_running_loop().create_future()
+        finished.set_result({"outputs": []})
+        service._record_outcome("job-1", "uid:0", "visual-library", finished)
+
+    asyncio.run(scenario())
+
+    assert seen == [("visual-library", "succeeded", "Job completed")]
