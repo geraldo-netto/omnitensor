@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -180,3 +181,87 @@ def _binding(command: tuple[str, ...], option: str, source: str) -> tuple[str, s
     while command[index + 1] != source:
         index = command.index(option, index + 1)
     return command[index : index + 3]
+
+
+def test_a_worker_gets_no_network_by_default():
+    """Nothing unshared the network namespace, so workers had full host reach."""
+    policy = FilesystemSandbox.from_permissions(set(), set())
+
+    command = policy.wrap(("/usr/bin/python3", "-m", "worker"))
+
+    assert policy.network is False
+    assert "--unshare-net" in command
+    assert "--share-net" not in command
+
+
+def test_localhost_is_served_by_the_private_namespace():
+    """bwrap gives a new netns its own loopback, so this needs no host sharing."""
+    policy = FilesystemSandbox.from_permissions(
+        {"network:localhost"}, {"network:localhost"}
+    )
+
+    command = policy.wrap(("/usr/bin/python3",))
+
+    assert policy.network is False
+    assert "--unshare-net" in command
+
+
+def test_only_an_outbound_grant_shares_the_host_network():
+    policy = FilesystemSandbox.from_permissions(
+        {"network:outbound"}, {"network:outbound"}
+    )
+
+    command = policy.wrap(("/usr/bin/python3",))
+
+    assert policy.network is True
+    assert "--share-net" in command
+    assert "--unshare-net" not in command
+
+
+def test_a_declared_but_ungranted_network_permission_grants_nothing():
+    policy = FilesystemSandbox.from_permissions({"network:outbound"}, set())
+    assert policy.network is False
+    assert "--unshare-net" in policy.wrap(("/usr/bin/python3",))
+
+
+@pytest.mark.parametrize(
+    "permission", ["network:", "network:internet", "network:0.0.0.0", "network:*"]
+)
+def test_an_unrecognised_network_scope_is_refused_rather_than_ignored(permission):
+    with pytest.raises(SandboxPolicyError, match="network permission scope"):
+        FilesystemSandbox.from_permissions({permission}, {permission})
+
+
+def test_every_capability_is_dropped():
+    command = FilesystemSandbox.from_permissions(set(), set()).wrap(("/usr/bin/python3",))
+    assert "--cap-drop" in command
+    assert command[command.index("--cap-drop") + 1] == "ALL"
+
+
+_NETWORK_PROBE = """
+import socket
+sock = socket.socket()
+sock.settimeout(3)
+try:
+    sock.connect(("1.1.1.1", 53))
+    print("reachable")
+except OSError:
+    print("unreachable")
+"""
+
+
+@pytest.mark.skipif(not Path(BWRAP_PATH).exists(), reason="bwrap is not installed")
+@pytest.mark.parametrize(
+    ("granted", "expected"),
+    [(set(), "unreachable"), ({"network:outbound"}, "reachable")],
+)
+def test_network_isolation_holds_against_real_bwrap(granted, expected):
+    """The argv is only a claim; this runs it and checks what actually happens."""
+    policy = FilesystemSandbox.from_permissions(granted, granted)
+    argv = policy.wrap((sys.executable, "-c", _NETWORK_PROBE))
+
+    completed = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+
+    if completed.returncode != 0:
+        pytest.skip(f"bwrap could not run here: {completed.stderr.strip()[:120]}")
+    assert completed.stdout.strip() == expected

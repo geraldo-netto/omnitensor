@@ -12,6 +12,17 @@ from pathlib import Path, PurePosixPath
 BWRAP_PATH = "/usr/bin/bwrap"
 MAX_SANDBOX_PATHS = 64
 _FILESYSTEM_ACTIONS = frozenset({"read", "write", "device"})
+# The only permission that re-opens the network namespace.  Anything else a
+# plugin declares leaves the worker with no route to anywhere.
+NETWORK_ACTION = "network"
+# bwrap gives a new network namespace its own loopback, so "localhost" is a
+# scope the sandbox can honour exactly: the worker can talk to itself and to
+# nothing else.  "outbound" is the only scope that shares the host namespace,
+# because bwrap has no partial sharing to offer — anything narrower would be a
+# claim the sandbox cannot enforce.
+NETWORK_LOCALHOST = "localhost"
+NETWORK_OUTBOUND = "outbound"
+_NETWORK_SCOPES = frozenset({NETWORK_LOCALHOST, NETWORK_OUTBOUND})
 _DEVICE_PATH = re.compile(
     r"^/dev/(?:apex_[0-9]+|accel/accel[0-9]+|dri/renderD[0-9]+)$"
 )
@@ -43,6 +54,7 @@ class FilesystemSandbox:
     write_paths: tuple[str, ...]
     device_paths: tuple[str, ...]
     runtime_paths: tuple[str, ...]
+    network: bool = False
 
     @classmethod
     def from_permissions(
@@ -84,6 +96,7 @@ class FilesystemSandbox:
             tuple(sorted(writes)),
             tuple(sorted(devices)),
             trusted,
+            _network_granted(granted_set),
         )
 
     def wrap(self, argv: Sequence[str]) -> tuple[str, ...]:
@@ -100,6 +113,11 @@ class FilesystemSandbox:
             "--unshare-uts",
             "--unshare-ipc",
             "--unshare-cgroup",
+            # Every capability is dropped rather than relied upon to be absent:
+            # the worker is unprivileged in the parent namespace already, and
+            # stating it here keeps that true if the launcher ever changes.
+            "--cap-drop",
+            "ALL",
             "--proc",
             "/proc",
             "--dev",
@@ -117,6 +135,10 @@ class FilesystemSandbox:
             "PYTHONNOUSERSITE",
             "1",
         ]
+        # A worker with no declared network grant gets its own empty network
+        # namespace, so a plugin cannot reach a socket, a name server, or the
+        # local bus regardless of what its code attempts.
+        command.append("--share-net" if self.network else "--unshare-net")
         runtime_roots = [
             path for path in _SYSTEM_RUNTIME_ROOTS if Path(path).exists()
         ]
@@ -141,6 +163,28 @@ class FilesystemSandbox:
             command.extend(("--dev-bind-try", path, path))
         command.extend(("--", *argv))
         return tuple(command)
+
+
+def _network_granted(granted: Collection[str]) -> bool:
+    """Whether the host network namespace is shared with the worker.
+
+    A malformed scope is rejected rather than ignored: treating it as "no
+    network" would hide a policy the author intended, and treating it as
+    "network" would grant more than was declared.  Only ``outbound`` shares
+    the host namespace; ``localhost`` is served by the private namespace the
+    worker gets anyway.
+    """
+    enabled = False
+    for permission in sorted(granted):
+        action, separator, value = permission.partition(":")
+        if action != NETWORK_ACTION:
+            continue
+        if not separator or value not in _NETWORK_SCOPES:
+            raise SandboxPolicyError(
+                f"network permission scope is not recognised: {permission}"
+            )
+        enabled = enabled or value == NETWORK_OUTBOUND
+    return enabled
 
 
 def _permission_path(action: str, value: str) -> str:

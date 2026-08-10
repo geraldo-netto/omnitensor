@@ -40,3 +40,28 @@ wait for graceful exit, then terminate and finally kill after bounded waits.
 This lifecycle is the process foundation; permission-derived filesystem,
 device, network, and execution restrictions are layered on by the sandbox
 policy items.
+
+## Network and capabilities
+
+A worker gets its own empty network namespace unless its manifest declares and
+is granted a network permission, so a plugin cannot reach a socket, a name
+server, or the session bus regardless of what its code attempts. Every
+capability is dropped explicitly rather than assumed absent.
+
+Two network scopes are recognised, and each maps to something the sandbox can
+actually enforce:
+
+| Permission | Effect |
+| --- | --- |
+| *(none)* | private network namespace; loopback only |
+| `network:localhost` | same — a new namespace gets its own loopback |
+| `network:outbound` | the host network namespace is shared |
+
+There is no narrower scope, because bwrap offers no partial sharing and a
+finer-grained claim would be one the sandbox could not enforce. An unrecognised
+scope is refused rather than ignored: treating it as "no network" would hide a
+policy the author intended, and treating it as "network" would grant more than
+was declared.
+
+`tests/test_plugin_sandbox.py` runs the real `bwrap` and checks what actually
+happens rather than trusting the constructed argv.
