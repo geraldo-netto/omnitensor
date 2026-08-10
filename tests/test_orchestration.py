@@ -180,7 +180,7 @@ def test_a_disabled_profile_stops_the_job(tmp_path):
 
 
 def test_a_missing_permission_stops_the_job(tmp_path):
-    built, _registry = runners(tmp_path, allows_permission=lambda _permission: False)
+    built, _registry = runners(tmp_path, allows_permission=lambda _profile, _permission: False)
     assert run(built).status is PluginResultStatus.CANCELLED
 
 
@@ -370,7 +370,9 @@ def test_permissions_are_read_from_a_flat_manifest_too(tmp_path):
             "permissions": ["read:flat"],
         },
     )
-    built, _registry = runners(tmp_path, {"flat": flat}, allows_permission=lambda _p: False)
+    built, _registry = runners(
+        tmp_path, {"flat": flat}, allows_permission=lambda _profile, _p: False
+    )
     assert run(built, profile_id="flat").status is PluginResultStatus.CANCELLED
 
 
@@ -472,7 +474,9 @@ def test_a_profile_declaring_permissions_nowhere_still_runs(tmp_path):
             "defaults": {"enabled": True, "weight": 1},
         },
     )
-    built, _registry = runners(tmp_path, {"quiet": quiet}, allows_permission=lambda _p: False)
+    built, _registry = runners(
+        tmp_path, {"quiet": quiet}, allows_permission=lambda _profile, _p: False
+    )
     assert run(built, profile_id="quiet").status is PluginResultStatus.SUCCEEDED
 
 

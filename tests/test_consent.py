@@ -148,15 +148,16 @@ def test_the_service_consults_the_ledger_rather_than_a_deny_all_stub(tmp_path):
     )
 
     assert isinstance(service._grants, GrantLedger)
-    assert service._permitted("files:read") is False
+    assert service._permitted("visual-library", "files:read") is False
 
-    # No installed plugin declares a permission, so nothing is permitted — and
+    # No installed profile declares a permission, so nothing is permitted — and
     # that is a fact about the catalogue rather than about the wiring.
     assert service._plugin_runtime._grant_source is service._grants
 
 
 def test_a_withdrawn_grant_stops_a_job_already_queued(tmp_path, monkeypatch):
     """Enforcement re-reads before it decides, so revoking means revoking now."""
+    from omnitensor.registry import Workload
     from omnitensor.service import OmniTensorService
 
     grants = tmp_path / "grants.json"
@@ -168,41 +169,87 @@ def test_a_withdrawn_grant_stops_a_job_already_queued(tmp_path, monkeypatch):
         artifact_root=tmp_path / "artifacts",
         grants=ledger,
     )
-
-    class Plugin:
-        plugin_id = "sample-plugin"
-        manifest = {"plugin": {"permissions": ["files:read"]}}
-
-    monkeypatch.setattr(
-        type(service._plugin_runtime),
-        "snapshot",
-        property(
-            lambda _self: type(
-                "S", (), {"catalog": type("C", (), {"plugins": [Plugin()]})()}
-            )()
-        ),
+    declaring = Workload(
+        id="declaring-profile",
+        manifest={"plugin": {"permissions": ["files:read"]}},
     )
+    service._workloads["declaring-profile"] = declaring
 
-    assert service._permitted("files:read") is False
+    assert service._permitted("declaring-profile", "files:read") is False
 
-    consent.run(["--grants-path", str(grants), "grant", "sample-plugin", "files:read"])
-    monkeypatch.setattr(consent, "declared_permissions", lambda _id: {"files:read"})
+    provenance = consent._provenance("test", "req-1")
     ledger.grant(
-        "sample-plugin",
+        "declaring-profile",
         "files:read",
         {"files:read"},
-        consent._provenance("test", "req-1"),
+        provenance,
         expected_revision=ledger.revision,
     )
 
-    assert service._permitted("files:read") is True
+    assert service._permitted("declaring-profile", "files:read") is True
 
     ledger.revoke(
-        "sample-plugin",
+        "declaring-profile",
         "files:read",
         {"files:read"},
         consent._provenance("test", "req-2"),
         expected_revision=ledger.revision,
     )
 
-    assert service._permitted("files:read") is False, "a withdrawal takes effect at once"
+    assert service._permitted("declaring-profile", "files:read") is False, (
+        "a withdrawal takes effect at once"
+    )
+
+
+def test_consent_given_to_one_profile_does_not_authorise_another(tmp_path):
+    """A permission name is not an identity.
+
+    Answering "does any installed plugin hold a grant for this string" made
+    consent transitive: granting `files:read` to a photo indexer also
+    satisfied the gate of anything else that asked for `files:read`, which is
+    the opposite of what granting one thing means.
+    """
+    from omnitensor.registry import Workload
+    from omnitensor.service import OmniTensorService
+
+    ledger = GrantLedger(tmp_path / "grants.json")
+    service = OmniTensorService(
+        snapshot_path=tmp_path / "state.json",
+        policy_path=tmp_path / "policy.json",
+        workloads_path=tmp_path / "workloads",
+        artifact_root=tmp_path / "artifacts",
+        grants=ledger,
+    )
+    for profile_id in ("consented-profile", "other-profile"):
+        service._workloads[profile_id] = Workload(
+            id=profile_id, manifest={"plugin": {"permissions": ["files:read"]}}
+        )
+
+    ledger.grant(
+        "consented-profile",
+        "files:read",
+        {"files:read"},
+        consent._provenance("indexing my pictures", "req-1"),
+        expected_revision=ledger.revision,
+    )
+
+    assert service._permitted("consented-profile", "files:read") is True
+    assert service._permitted("other-profile", "files:read") is False
+
+
+def test_a_permission_a_profile_never_declared_is_never_permitted(tmp_path):
+    """The manifest bounds what consent can be given for."""
+    from omnitensor.registry import Workload
+    from omnitensor.service import OmniTensorService
+
+    service = OmniTensorService(
+        snapshot_path=tmp_path / "state.json",
+        policy_path=tmp_path / "policy.json",
+        workloads_path=tmp_path / "workloads",
+        artifact_root=tmp_path / "artifacts",
+        grants=GrantLedger(tmp_path / "grants.json"),
+    )
+    service._workloads["quiet"] = Workload(id="quiet", manifest={"plugin": {"permissions": []}})
+
+    assert service._permitted("quiet", "files:read") is False
+    assert service._permitted("no-such-profile", "files:read") is False

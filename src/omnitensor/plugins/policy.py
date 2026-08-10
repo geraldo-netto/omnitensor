@@ -57,7 +57,7 @@ class PipelinePolicyGate:
         is_paused: Callable[[], bool],
         is_enabled: Callable[[str], bool],
         required_permissions: Collection[str] = (),
-        allows_permission: Callable[[str], bool] = lambda _permission: True,
+        allows_permission: Callable[[str, str], bool] = lambda _profile, _permission: True,
         artifact_ready: Callable[[str], tuple[bool, str]] = lambda _p: (True, ""),
     ) -> None:
         self._profile_id = profile_id
@@ -84,7 +84,10 @@ class PipelinePolicyGate:
                 f"{self._profile_id} is disabled by policy",
             )
         for permission in self._required_permissions:
-            if not self._allows_permission(permission):
+            # Asked of *this* profile: a permission name alone cannot say who
+            # was consented to, and answering "does anybody hold this" let a
+            # grant issued to one plugin satisfy another plugin's gate.
+            if not self._allows_permission(self._profile_id, permission):
                 return PolicyDecision(
                     False,
                     PolicyRefusal.CONSENT_MISSING,

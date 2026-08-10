@@ -64,6 +64,7 @@ from .plugins.orchestration import (
     RunnerBackedDispatcher,
     RunnerSet,
     build_plugin_runners,
+    required_permissions,
     with_recovery,
 )
 from .plugins.results import JobResultStore
@@ -669,9 +670,7 @@ class OmniTensorService:
         submits one, and the remedy — a command — is worth naming where it is
         read.
         """
-        from .plugins.orchestration import _required_permissions  # noqa: PLC0415
-
-        declared = _required_permissions(workload)
+        declared = required_permissions(workload)
         if not declared:
             return ()
         self._grants.reload()
@@ -681,22 +680,30 @@ class OmniTensorService:
             if not self._grants.is_granted(workload.id, permission, set(declared))
         )
 
-    def _permitted(self, permission: str) -> bool:
-        """Whether any installed plugin holds an active grant for this.
+    def _permitted(self, profile_id: str, permission: str) -> bool:
+        """Whether *this* profile holds an active grant for this permission.
+
+        Asked of the profile rather than of the catalogue.  Answering "does any
+        installed plugin hold a grant for this permission name" made consent
+        transitive: a grant a user issued to one plugin satisfied every other
+        plugin's gate for the same string, which is the opposite of what
+        granting one thing means.
 
         Re-read first: the ledger in memory is a snapshot taken at
         construction, so a grant revoked by the CLI while a job sits in a queue
         would otherwise stay in force until the service restarted — which is
         the opposite of what revoking means.
         """
+        workload = self._workloads.get(profile_id)
+        if workload is None:
+            return False
+        declared = set(required_permissions(workload))
+        if permission not in declared:
+            # Never declared, so never grantable: the manifest bounds what
+            # consent can be given for.
+            return False
         self._grants.reload()
-        for plugin in self._plugin_runtime.snapshot.catalog.plugins:
-            declared = set(plugin.manifest["plugin"]["permissions"])
-            if permission in declared and self._grants.is_granted(
-                plugin.plugin_id, permission, declared
-            ):
-                return True
-        return False
+        return self._grants.is_granted(profile_id, permission, declared)
 
     def _note_job_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         # Late-bound: runners are built before the job service they report to.

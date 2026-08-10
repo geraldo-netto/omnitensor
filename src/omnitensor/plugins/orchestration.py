@@ -336,7 +336,7 @@ def build_plugin_runners(
     cancellations: JobCancellationRegistry,
     is_paused: Callable[[], bool],
     is_enabled: Callable[[str], bool],
-    allows_permission: Callable[[str], bool] = lambda _permission: True,
+    allows_permission: Callable[[str, str], bool] = lambda _profile, _permission: True,
     deliver: Callable[[str, dict], None] | None = None,
     progress: ProgressSink | None = None,
     flow_options: Mapping[str, object] | None = None,
@@ -373,7 +373,7 @@ def build_plugin_runners(
                 profile_id,
                 is_paused=is_paused,
                 is_enabled=is_enabled,
-                required_permissions=_required_permissions(workload),
+                required_permissions=required_permissions(workload),
                 allows_permission=allows_permission,
                 artifact_ready=lambda _profile: (True, ""),
             ),
@@ -386,7 +386,7 @@ def build_plugin_runners(
     return RunnerSet(runners, skipped)
 
 
-def _required_permissions(workload: Workload) -> tuple[str, ...]:
+def required_permissions(workload: Workload) -> tuple[str, ...]:
     """Permissions the profile declares, from either manifest shape.
 
     A workload manifest carries none; a plugin manifest nests them under

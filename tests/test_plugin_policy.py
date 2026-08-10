@@ -22,7 +22,7 @@ def gate(**changes):
         "is_paused": lambda: False,
         "is_enabled": lambda _profile: True,
         "required_permissions": (),
-        "allows_permission": lambda _permission: True,
+        "allows_permission": lambda _profile, _permission: True,
         "artifact_ready": lambda _profile: (True, ""),
     }
     options.update(changes)
@@ -56,7 +56,7 @@ def test_withdrawn_consent_refuses_at_every_stage(stage):
     """Consent withdrawn mid-flight must stop the job wherever it is."""
     decision = gate(
         required_permissions=(READ_SENSOR,),
-        allows_permission=lambda _permission: False,
+        allows_permission=lambda _profile, _permission: False,
     ).evaluate(stage)
     assert decision.refusal is PolicyRefusal.CONSENT_MISSING
     assert READ_SENSOR in decision.detail
@@ -68,7 +68,7 @@ def test_the_pause_reason_is_reported_before_a_per_profile_reason():
         is_paused=lambda: True,
         is_enabled=lambda _profile: False,
         required_permissions=(READ_SENSOR,),
-        allows_permission=lambda _permission: False,
+        allows_permission=lambda _profile, _permission: False,
         artifact_ready=lambda _profile: (False, "no active version"),
     ).evaluate()
     assert decision.refusal is PolicyRefusal.PAUSED
@@ -78,7 +78,7 @@ def test_an_actionable_reason_is_reported_before_readiness():
     """Readiness is the one condition a user cannot fix from the applet."""
     decision = gate(
         required_permissions=(READ_SENSOR,),
-        allows_permission=lambda _permission: False,
+        allows_permission=lambda _profile, _permission: False,
         artifact_ready=lambda _profile: (False, "no active version"),
     ).evaluate()
     assert decision.refusal is PolicyRefusal.CONSENT_MISSING
@@ -118,15 +118,15 @@ def test_an_unready_artifact_without_a_reason_still_explains_itself():
 def test_every_required_permission_is_checked_in_stable_order():
     asked = []
 
-    def allows(permission):
-        asked.append(permission)
+    def allows(profile_id, permission):
+        asked.append((profile_id, permission))
         return False
 
     decision = gate(
         required_permissions=("z:last", "a:first"), allows_permission=allows
     ).evaluate()
 
-    assert asked == ["a:first"]
+    assert asked == [(PROFILE, "a:first")], "asked of this profile, not of the catalogue"
     assert "a:first" in decision.detail
 
 
