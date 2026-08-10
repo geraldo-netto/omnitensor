@@ -282,7 +282,7 @@ BACKEND_RUNTIMES = (
 
 
 def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) -> Check:
-    """At least one accelerator runtime must be importable.
+    """At least one accelerator runtime must be usable — not merely present.
 
     Without this the whole report can pass while the service can execute
     nothing: it starts, publishes a contract-valid snapshot, answers the bus,
@@ -290,29 +290,99 @@ def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) 
     misleading state this install has, and it was reached by the documented
     install command, which omitted the accelerator extra.
 
-    Importability is necessary, not sufficient — a present runtime may still
-    find no device — so this reports what resolved rather than promising it
-    will run.
+    Importability was the wrong question.  A plain ``onnxruntime`` wheel ships
+    ``CPUExecutionProvider`` only, and ``executors/gpu.py`` refuses it by
+    design — there is no CPU backend here — so this check reported a GPU lane
+    as available while dispatch answered ``runtime-unusable`` for the same
+    install.  A gate telling an operator the opposite of what the runtime does
+    is worse than no gate.
+
+    So it asks the executors.  Each one already knows whether it can run, and
+    says why when it cannot; a device that is simply absent is reported
+    separately, because an install can be correct on a machine with no
+    accelerator plugged in.
     """
     import importlib.util  # noqa: PLC0415 - only needed for this probe
 
-    resolved = []
+    usable: list[str] = []
+    present: list[str] = []
+    reasons: list[str] = []
     for backend, module, _remedy in runtimes:
         try:
-            if importlib.util.find_spec(module) is not None:
-                resolved.append(f"{backend}:{module}")
+            if importlib.util.find_spec(module) is None:
+                continue
         except (ImportError, ValueError):
             # A broken or half-removed distribution is not an installed one.
             continue
-    if not resolved:
-        remedies = sorted({remedy for _backend, _module, remedy in runtimes})
+        present.append(f"{backend}:{module}")
+        verdict = _runtime_verdict(module)
+        if verdict is None:
+            usable.append(f"{backend}:{module}")
+        else:
+            reasons.append(f"{backend}:{module} ({verdict})")
+    if usable:
+        return Check("backends", True, f"accelerator runtimes usable: {', '.join(usable)}")
+    if present:
+        # Installed and refused is a different problem from not installed, and
+        # the executor's own words are the remedy.
         return Check(
             "backends",
             False,
-            "no accelerator runtime is importable, so every profile is unavailable; "
-            + "; ".join(remedies),
+            "no installed accelerator runtime is usable: " + "; ".join(reasons),
         )
-    return Check("backends", True, f"accelerator runtimes available: {', '.join(resolved)}")
+    remedies = sorted({remedy for _backend, _module, remedy in runtimes})
+    return Check(
+        "backends",
+        False,
+        "no accelerator runtime is importable, so every profile is unavailable; "
+        + "; ".join(remedies),
+    )
+
+
+def _executor_for(module: str):
+    """The executor that would actually run this runtime.
+
+    Asked per module rather than per backend: the GPU lane is a composite of
+    Vulkan and ONNX Runtime, so asking it reports available whenever *either*
+    works — which is exactly how a CPU-only ``onnxruntime`` came to be listed
+    as a usable GPU runtime.
+    """
+    from .executors.gpu import GpuExecutor  # noqa: PLC0415 - probe-only imports
+    from .executors.npu import NpuExecutor  # noqa: PLC0415
+    from .executors.tpu import TpuExecutor  # noqa: PLC0415
+    from .executors.vulkan import VulkanGpuExecutor  # noqa: PLC0415
+
+    builders = {
+        "ncnn": VulkanGpuExecutor,
+        "onnxruntime": GpuExecutor,
+        "openvino": NpuExecutor,
+        "tflite_runtime": TpuExecutor,
+    }
+    builder = builders.get(module)
+    return None if builder is None else builder(True)
+
+
+def _runtime_verdict(module: str) -> str | None:
+    """Why this runtime cannot be used, or ``None`` when it can.
+
+    A device that is not plugged in is not an installation fault, so an absent
+    device reports as usable: the runtime is correctly installed and waiting
+    for hardware.  Anything else — a driver that will not load, a provider the
+    executor refuses — is the install being wrong, and the executor's own
+    sentence is the remedy.
+    """
+    from .executors.base import DEVICE_ABSENT  # noqa: PLC0415 - probe-only import
+
+    executor = _executor_for(module)
+    if executor is None:
+        return None
+    try:
+        availability = executor.availability()
+    except Exception as error:  # noqa: BLE001 - a probe must not fail the report
+        return type(error).__name__
+    if availability.available or availability.code == DEVICE_ABSENT:
+        return None
+    return availability.reason
 
 
 def verify_installation(checks: Sequence[Check]) -> InstallationReport:

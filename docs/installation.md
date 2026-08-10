@@ -112,6 +112,12 @@ would turn a future wheel change into an `ImportError` at inference time.
 A profile reporting `unavailable: gpu: ncnn is not installed` means the extra
 was omitted; a profile reporting `Ready on gpu` means the runtime resolved.
 
+`omnitensor-verify-install` asks the executors whether each installed runtime
+is usable, not merely whether it imports — so a plain `onnxruntime` is reported
+as unusable with the executor's own reason rather than counted as a GPU lane.
+It probes the accelerator to answer that, so ncnn prints the devices it finds
+before the report; that output is the hardware talking, not a fault.
+
 ### System packages
 
 | Package | Needed for | Without it |

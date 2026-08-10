@@ -454,3 +454,57 @@ def test_every_shipped_schema_is_one_the_install_check_requires():
     from omnitensor.registry import schema_names
 
     assert sorted(REQUIRED_SCHEMAS) == sorted(schema_names())
+
+
+def test_a_runtime_the_executor_refuses_is_not_reported_as_usable():
+    """The check used to ask the import system a question only the executor
+    can answer.
+
+    A plain ``onnxruntime`` wheel ships ``CPUExecutionProvider`` only, and
+    ``executors/gpu.py`` refuses it by design — there is no CPU backend here.
+    Importability reported the GPU lane available while dispatch answered
+    ``runtime-unusable`` for the same install, so the acceptance gate told an
+    operator the opposite of what the runtime would do.
+    """
+    from omnitensor.acceptance import check_backends
+
+    runtimes = (("gpu", "onnxruntime", "install a vendor extra"),)
+    check = check_backends(runtimes)
+
+    assert check.ok is False
+    assert "no installed accelerator runtime is usable" in check.detail
+    assert "onnxruntime" in check.detail
+    assert "provider" in check.detail, "the executor's own reason is the remedy"
+
+
+def test_an_absent_device_is_an_install_that_is_waiting_not_one_that_is_wrong():
+    """A Coral that is not plugged in does not make tflite-runtime unusable."""
+    from omnitensor.acceptance import _runtime_verdict
+
+    assert _runtime_verdict("tflite_runtime") in (None, "tflite-runtime is not installed")
+    assert _runtime_verdict("not-a-runtime") is None
+
+
+def test_a_runtime_nothing_can_import_still_reports_its_remedy():
+    from omnitensor.acceptance import check_backends
+
+    check = check_backends((("npu", "no_such_module", "install the [npu] extra"),))
+
+    assert check.ok is False
+    assert "no accelerator runtime is importable" in check.detail
+    assert "install the [npu] extra" in check.detail
+
+
+def test_the_usable_lane_on_this_host_is_the_one_that_serves_jobs():
+    """Whatever this machine has, the check and dispatch must agree about it."""
+    from omnitensor.acceptance import BACKEND_RUNTIMES, _runtime_verdict
+    from omnitensor.executors.base import DEVICE_ABSENT
+
+    for backend, module, _remedy in BACKEND_RUNTIMES:
+        verdict = _runtime_verdict(module)
+        if verdict is None:
+            continue
+        # Anything reported unusable must be a refusal the executor actually
+        # makes, not a sentence this check invented.
+        assert isinstance(verdict, str) and verdict, f"{backend}:{module}"
+        assert verdict != DEVICE_ABSENT
