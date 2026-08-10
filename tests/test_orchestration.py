@@ -474,3 +474,81 @@ def test_a_profile_declaring_permissions_nowhere_still_runs(tmp_path):
     )
     built, _registry = runners(tmp_path, {"quiet": quiet}, allows_permission=lambda _p: False)
     assert run(built, profile_id="quiet").status is PluginResultStatus.SUCCEEDED
+
+
+def test_a_profile_with_a_runner_is_dispatched_through_its_pipeline(tmp_path):
+    """Runners nobody routes to are why the pipeline layer stayed unreachable."""
+    from omnitensor.plugins.orchestration import RunnerBackedDispatcher
+
+    inner = Dispatcher()
+    built, _registry = runners(tmp_path, dispatcher=inner)
+
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def dispatch(self, job_id, workload_id, payload):
+            self.calls.append(job_id)
+            future = asyncio.get_running_loop().create_future()
+            future.set_result({})
+            return future
+
+    fallback = Fallback()
+    routed = RunnerBackedDispatcher(built, fallback)
+
+    output = asyncio.run(routed.dispatch("job-1", "visual-library", {"inputs": [[1]]}))
+
+    assert fallback.calls == []
+    assert inner.calls == [("job-1", "visual-library", {"inputs": [[1]]})]
+    assert output["profileId"] == "visual-library"
+
+
+def test_a_profile_without_a_runner_falls_back_to_direct_dispatch(tmp_path):
+    from omnitensor.plugins.orchestration import RunnerBackedDispatcher
+
+    catalog = {"desktop-context": workload("desktop-context", model=False)}
+    built, _registry = runners(tmp_path, catalog)
+
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def dispatch(self, job_id, workload_id, payload):
+            self.calls.append(workload_id)
+            return "dispatched-directly"
+
+    fallback = Fallback()
+    routed = RunnerBackedDispatcher(built, fallback)
+
+    assert routed.dispatch("job-1", "desktop-context", {}) == "dispatched-directly"
+    assert fallback.calls == ["desktop-context"]
+
+
+def test_a_pipeline_that_does_not_succeed_raises_rather_than_claiming_success(tmp_path):
+    from omnitensor.plugins.orchestration import PipelineFailedError, RunnerBackedDispatcher
+
+    built, _registry = runners(tmp_path, is_paused=lambda: True)
+    routed = RunnerBackedDispatcher(built, Dispatcher())
+
+    with pytest.raises(PipelineFailedError) as failure:
+        asyncio.run(routed.dispatch("job-1", "visual-library", {"inputs": [[1]]}))
+
+    assert failure.value.status == "cancelled"
+
+
+def test_the_routed_runner_set_must_be_a_runner_set():
+    from omnitensor.plugins.orchestration import RunnerBackedDispatcher
+
+    with pytest.raises(OrchestrationError, match="runners-invalid"):
+        RunnerBackedDispatcher(object(), Dispatcher())
+
+
+def test_the_router_reports_what_it_wraps(tmp_path):
+    from omnitensor.plugins.orchestration import RunnerBackedDispatcher
+
+    built, _registry = runners(tmp_path)
+    fallback = Dispatcher()
+    routed = RunnerBackedDispatcher(built, fallback)
+
+    assert routed.fallback is fallback
+    assert routed.runners is built

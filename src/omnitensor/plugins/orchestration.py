@@ -338,6 +338,8 @@ def with_recovery(runner_set: RunnerSet, cancellations: JobCancellationRegistry)
 
 __all__ = [
     "JobSubmission",
+    "PipelineFailedError",
+    "RunnerBackedDispatcher",
     "OrchestrationError",
     "RunnerSet",
     "STAGE_ORDER",
@@ -346,3 +348,58 @@ __all__ = [
     "recover_interrupted_jobs",
     "with_recovery",
 ]
+
+
+class RunnerBackedDispatcher:
+    """Send a job through its profile's pipeline, or straight to the accelerator.
+
+    Building runners nobody routes to is how the pipeline layer stayed
+    unreachable from the bus: submission dispatched directly and the policy,
+    flow, and cancellation controls the runner holds never applied to a real
+    job.  This sits in front of the raw dispatcher and prefers the runner
+    whenever one exists for the profile.
+
+    The runner's own infer stage calls the *raw* dispatcher, not this one, so
+    routing here cannot loop back into itself.
+    """
+
+    def __init__(self, runners: RunnerSet, fallback: Dispatcher) -> None:
+        if not isinstance(runners, RunnerSet):
+            raise OrchestrationError("runners-invalid", "runners must be a RunnerSet")
+        self._runners = runners
+        self._fallback = fallback
+
+    @property
+    def fallback(self) -> Dispatcher:
+        """Where a profile without a runner is dispatched."""
+        return self._fallback
+
+    @property
+    def runners(self) -> RunnerSet:
+        return self._runners
+
+    def dispatch(self, job_id: str, workload_id: str, payload: dict):
+        if self._runners.get(workload_id) is None:
+            # A profile with no runner is not an error: it has no model and is
+            # dispatched exactly as it was before runners existed.
+            return self._fallback.dispatch(job_id, workload_id, payload)
+        return self._run(job_id, workload_id, payload)
+
+    async def _run(self, job_id: str, workload_id: str, payload: dict) -> dict:
+        result = await self._runners.submit(workload_id, job_id, payload)
+        status = str(getattr(result, "status", ""))
+        if status != "succeeded":
+            # Surfaced as a failure so the job service records why, rather than
+            # storing a terminal result that claims success with no output.
+            raise PipelineFailedError(status or "unknown", getattr(result, "detail", ""))
+        output = getattr(result, "output", {})
+        return dict(output) if isinstance(output, Mapping) else {"value": output}
+
+
+class PipelineFailedError(RuntimeError):
+    """A job that ran through a pipeline and did not succeed."""
+
+    def __init__(self, status: str, detail: str):
+        self.status = status
+        self.detail = detail
+        super().__init__(f"{status}: {detail}" if detail else status)

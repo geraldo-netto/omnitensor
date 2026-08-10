@@ -57,7 +57,12 @@ from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.cancellation import JobCancellationRegistry
 from .plugins.loading import InstalledPluginRuntime
-from .plugins.orchestration import RunnerSet, build_plugin_runners, with_recovery
+from .plugins.orchestration import (
+    RunnerBackedDispatcher,
+    RunnerSet,
+    build_plugin_runners,
+    with_recovery,
+)
 from .plugins.results import JobResultStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
@@ -389,8 +394,14 @@ class OmniTensorService:
         # store outlives the call, the outcome has nowhere to be kept and a
         # caller can never learn what happened to the job it submitted.
         self.job_results = job_results or JobResultStore()
+        self._cancellations = JobCancellationRegistry(
+            cancellation_journal_path or (snapshot_path.parent / "cancellations.json")
+        )
+        self.runners = self._build_runners()
         self.jobs = JobSubmissionService(
-            self._job_dispatcher,
+            # Routed through the runners, so a profile that has a pipeline runs
+            # its pipeline; without this the runners were built and never used.
+            RunnerBackedDispatcher(self.runners, self._job_dispatcher),
             PredicateJobAuthorizer(self._job_authorized),
             results=self.job_results,
         )
@@ -404,10 +415,6 @@ class OmniTensorService:
         for workload in self._workloads.values():
             if workload.manifest["manifestVersion"] >= 2:
                 self.plugin_telemetry.register(workload.id)
-        self._cancellations = JobCancellationRegistry(
-            cancellation_journal_path or (snapshot_path.parent / "cancellations.json")
-        )
-        self.runners = self._build_runners()
         self._snapshot_retracted = False
         self._stopping = asyncio.Event()
 
@@ -466,7 +473,13 @@ class OmniTensorService:
             cancellations=self._cancellations,
             is_paused=lambda: self.control.state.paused,
             is_enabled=self._admits,
+            # Without a delivery sink the final stage is a no-op, so a job that
+            # reached DELIVER left nothing a caller could collect.
+            deliver=self._deliver_job_output,
         )
+
+    def _deliver_job_output(self, job_id: str, output: dict) -> None:
+        self.jobs.note_progress(job_id, "deliver", 1.0, "Result delivered")
 
     def reconcile_interrupted_jobs(self) -> RunnerSet:
         """Report the jobs a previous process left in flight, once, at startup.
@@ -496,6 +509,12 @@ class OmniTensorService:
         document = build_plugin_inventory(
             snapshot.catalog.plugins,
             resolve_artifact=self._resolve_artifact,
+            # Without this every permission reports granted:false, so a user
+            # reading the inventory sees a plugin as unauthorised while its
+            # worker is running with the grant.
+            granted_permissions=getattr(
+                self._plugin_runtime, "granted_permissions", lambda _plugin_id: ()
+            ),
             worker_states=states.get,
             generated_at_ms=int(time.time() * 1000),
         )

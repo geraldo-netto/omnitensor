@@ -1121,7 +1121,7 @@ def test_without_an_artifact_store_inference_stays_fail_closed(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    assert isinstance(service.jobs._dispatcher, UnavailableJobDispatcher)
+    assert isinstance(service.jobs._dispatcher.fallback, UnavailableJobDispatcher)
 
 
 def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
@@ -1134,7 +1134,7 @@ def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
         transport=FakeTransport(),
         artifact_root=tmp_path / "artifacts",
     )
-    assert isinstance(service.jobs._dispatcher, InferenceJobDispatcher)
+    assert isinstance(service.jobs._dispatcher.fallback, InferenceJobDispatcher)
 
 
 def test_the_artifact_root_is_configurable_from_the_environment(monkeypatch, tmp_path):
@@ -1149,7 +1149,7 @@ def test_the_artifact_root_is_configurable_from_the_environment(monkeypatch, tmp
 
     service = build_service_from_env()
 
-    assert isinstance(service.jobs._dispatcher, InferenceJobDispatcher)
+    assert isinstance(service.jobs._dispatcher.fallback, InferenceJobDispatcher)
     assert service._artifact_store is not None
 
 
@@ -1469,3 +1469,24 @@ def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
     assert first == {"state": "running"}
     assert jobs.owners == ["uid:1000"]
     assert second["code"] == "rate-limit-exceeded"
+
+
+def test_the_service_routes_submission_through_its_runners(tmp_path):
+    """Built runners that nothing routes to leave the pipeline unreachable."""
+    from omnitensor.plugins.orchestration import RunnerBackedDispatcher
+
+    service = build_service(tmp_path, [sample_manifest()])
+
+    assert isinstance(service.jobs._dispatcher, RunnerBackedDispatcher)
+    assert service.jobs._dispatcher.runners is service.runners
+
+
+def test_the_inventory_reports_the_grants_a_worker_actually_runs_with(tmp_path):
+    """Otherwise every permission reads granted:false while the worker has it."""
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    runtime = InstalledPluginRuntime(tmp_path)
+
+    assert runtime.granted_permissions("absent-plugin") == frozenset()
+    runtime._granted = {"visual-library": frozenset({"read:visual-library"})}
+    assert runtime.granted_permissions("visual-library") == {"read:visual-library"}

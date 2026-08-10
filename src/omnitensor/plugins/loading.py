@@ -63,11 +63,16 @@ class InstalledPluginRuntime:
         self._python_executable = _executable(python_executable)
         self._worker_import_paths = _import_paths(worker_import_paths)
         self._grant_source = grant_source or _DenyAllGrants()
+        self._granted: dict[str, frozenset[str]] = {}
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
 
     @property
     def snapshot(self) -> InstalledPluginSnapshot:
         return self._snapshot
+
+    def granted_permissions(self, plugin_id: str) -> frozenset[str]:
+        """What this plugin was actually granted when its worker started."""
+        return self._granted.get(plugin_id, frozenset())
 
     async def start(self) -> InstalledPluginSnapshot:
         candidates = discover_plugin_metadata(
@@ -83,6 +88,10 @@ class InstalledPluginRuntime:
             for plugin in catalog.plugins
             if plugin.source is PluginSource.EXTERNAL
         }
+        # Retained rather than discarded after launch: the inventory reports
+        # what each plugin was granted, and recomputing it there would let the
+        # answer drift from what the workers actually run with.
+        self._granted = dict(granted_permissions)
         workers = await self._supervisor.start(
             external_worker_specs(
                 catalog.plugins,
