@@ -593,3 +593,26 @@ def test_a_job_that_stops_early_reports_only_the_stages_it_reached(tmp_path):
 def test_progress_reporting_is_optional(tmp_path):
     built, _registry = runners(tmp_path)
     assert run(built).status is PluginResultStatus.SUCCEEDED
+
+
+def test_a_referenced_input_survives_the_pipeline(tmp_path):
+    """Narrowing the payload to its inputs dropped inputRefs entirely, so a
+    referenced input reached the executor as nothing at all."""
+    dispatcher = Dispatcher()
+    built, _registry = runners(tmp_path, dispatcher=dispatcher)
+
+    reference = {"path": "/x/frame.f32", "shape": [1], "dtype": "float32", "sha256": "a" * 64}
+    asyncio.run(built.submit("visual-library", "job-1", {"inputRefs": [reference]}))
+
+    [(_job, _profile, payload)] = dispatcher.calls
+    assert payload["inputRefs"] == [reference]
+
+
+def test_an_inline_input_still_reaches_the_dispatcher_unchanged(tmp_path):
+    dispatcher = Dispatcher()
+    built, _registry = runners(tmp_path, dispatcher=dispatcher)
+
+    asyncio.run(built.submit("visual-library", "job-1", {"inputs": [[1, 2]]}))
+
+    [(_job, _profile, payload)] = dispatcher.calls
+    assert payload["inputs"] == [[1, 2]]

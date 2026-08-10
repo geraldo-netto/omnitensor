@@ -112,7 +112,11 @@ class RunnerSet:
             )
         if not isinstance(payload, Mapping):
             raise OrchestrationError("request-invalid", "job payload must be an object")
-        _RUNNING_JOB.set((job_id, payload.get("inputs", [])))
+        # The whole payload, not just its inputs: how a caller supplies a
+        # tensor is the dispatcher's business, and narrowing it here silently
+        # dropped inputRefs so a referenced input reached the executor as
+        # nothing at all.
+        _RUNNING_JOB.set((job_id, dict(payload)))
         return await runner.run(job_id, JobSubmission(job_id, dict(payload)))
 
     def cancel(self, profile_id: str, job_id: str, detail: str = "") -> bool:
@@ -218,7 +222,9 @@ def _preprocess_stage(workload: Workload) -> Callable:
     async def preprocess(collected: CollectedOutput) -> PreprocessedOutput:
         payload = collected.payload["payload"]
         return PreprocessedOutput(
-            {"inputs": payload.get("inputs", [])},
+            # Carried whole for the same reason: preprocess must not decide
+            # which ways of supplying an input are legitimate.
+            dict(payload),
             {"jobId": collected.payload["jobId"], "profileId": workload.id},
         )
 
@@ -241,10 +247,10 @@ def _infer_stage(
     workload: Workload, dispatcher: Dispatcher, encode_result: Callable[[object], dict]
 ) -> Callable:
     async def infer(resolved: ResolvedOutput) -> InferenceOutput:
-        job_id, inputs = _current_job()
+        job_id, job_payload = _current_job()
         # The dispatcher owns admission, routing, and queueing; re-deciding any
         # of that here would let two code paths disagree about the same job.
-        future = dispatcher.dispatch(job_id, workload.id, {"inputs": inputs})
+        future = dispatcher.dispatch(job_id, workload.id, job_payload)
         return InferenceOutput(encode_result(await future))
 
     return infer
