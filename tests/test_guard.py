@@ -262,3 +262,45 @@ def test_the_context_manager_releases_the_slot_even_when_the_call_raises():
 
     with guarded(subject, "SubmitJob", "uid:1000", "{}") as held:
         assert held is not None
+
+
+def test_every_refusal_validates_against_the_published_contract():
+    """The applet parses replies by schema, so a refusal needs one of its own."""
+    from omnitensor.registry import validate_document
+
+    subject, _clock = guard({"SubmitJob": MethodQuota(max_calls=1, max_bytes=64)})
+    subject.admit("SubmitJob", "uid:1000", "{}")
+
+    refusals = []
+    for method, payload in (
+        ("SubmitJob", "{}"),
+        ("SubmitJob", json.dumps({"padding": "x" * 200})),
+        ("SubmitJob", json.dumps({"owner": "uid:0"})),
+        ("SubmitJob", 7),
+        ("Unlisted", "{}"),
+    ):
+        with pytest.raises(GuardRefusedError) as refusal:
+            subject.admit(method, "uid:1000", payload)
+        refusals.append(refusal.value)
+
+    codes = set()
+    for refusal in refusals:
+        document = json.loads(refusal.text())
+        assert validate_document("runtime-refusal.schema.json", document) == []
+        codes.add(document["code"])
+
+    assert codes == {
+        "rate-limit-exceeded",
+        "payload-too-large",
+        "identity-asserted",
+        "payload-invalid",
+        "method-unknown",
+    }
+
+
+def test_a_refusal_is_not_mistaken_for_a_job_acknowledgement():
+    from omnitensor.registry import validate_document
+
+    document = json.loads(GuardRefusedError("rate-limit-exceeded", "slow down").text())
+
+    assert validate_document("runtime-job-acknowledgement.schema.json", document) != []

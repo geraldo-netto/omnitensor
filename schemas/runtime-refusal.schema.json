@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/runtime-refusal.schema.json",
+  "title": "OmniTensor transport refusal version 1",
+  "description": "Returned when a bus method is refused before it runs, so no method-specific acknowledgement exists yet. Distinct from runtime-acknowledgement and runtime-job-acknowledgement, which describe a request that was accepted for processing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "status",
+    "code",
+    "message",
+    "method"
+  ],
+  "properties": {
+    "version": {"const": 1},
+    "status": {"const": "rejected"},
+    "code": {
+      "enum": [
+        "rate-limit-exceeded",
+        "concurrency-limit-exceeded",
+        "payload-too-large",
+        "payload-invalid",
+        "identity-asserted",
+        "method-unknown",
+        "quota-invalid"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "method": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Za-z][A-Za-z0-9]*$|^$"
+    }
+  }
+}
