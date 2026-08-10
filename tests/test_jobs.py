@@ -833,3 +833,99 @@ class InstantDispatcher:
             return {"outputs": []}
 
         return work()
+
+
+class RefusingAdmission:
+    def __init__(self, code="input-ref-denied", message="that path may not be read"):
+        self.calls = []
+        self._code = code
+        self._message = message
+
+    def admit(self, workload_id, payload):
+        self.calls.append((workload_id, payload))
+        raise JobDispatchError(self._code, self._message)
+
+
+class AcceptingAdmission:
+    def __init__(self):
+        self.calls = []
+
+    def admit(self, workload_id, payload):
+        self.calls.append((workload_id, payload))
+
+
+def test_an_admission_refusal_answers_the_submission_and_queues_nothing():
+    """The caller learns why in the reply, instead of polling for a failure."""
+    async def scenario():
+        dispatcher = BlockingDispatcher()
+        admission = RefusingAdmission()
+        service = JobSubmissionService(dispatcher, allows_all(), admission=admission)
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
+        return reply, dispatcher, admission, service
+
+    reply, dispatcher, admission, service = run_scenario(scenario())
+
+    assert reply["status"] == "rejected"
+    assert reply["code"] == "input-ref-denied"
+    assert reply["jobId"] is None
+    assert reply["requestId"] == "request-1"
+    assert dispatcher.calls == []
+    assert service.active_job_ids() == ()
+    assert admission.calls == [("visual-library", {})]
+
+
+def test_admission_sees_the_payload_the_dispatcher_would_have_seen():
+    async def scenario():
+        admission = AcceptingAdmission()
+        service = JobSubmissionService(
+            ImmediateDispatcher(), allows_all(), admission=admission
+        )
+        await service.submit_job_text(
+            json.dumps(submit_document(payload={"inputRefs": [{"path": "/tmp/x"}]}))
+        )
+        return admission
+
+    assert run_scenario(scenario()).calls == [
+        ("visual-library", {"inputRefs": [{"path": "/tmp/x"}]})
+    ]
+
+
+def test_an_unauthorized_job_is_never_offered_to_admission():
+    """Authorization is the cheaper question and answers first."""
+    async def scenario():
+        admission = RefusingAdmission()
+        service = JobSubmissionService(
+            ImmediateDispatcher(),
+            PredicateJobAuthorizer(lambda action, workload_id: False),
+            admission=admission,
+        )
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
+        return reply, admission
+
+    reply, admission = run_scenario(scenario())
+
+    assert reply["code"] == "not-authorized"
+    assert admission.calls == []
+
+
+def test_without_an_admission_check_nothing_is_refused_earlier_than_before():
+    async def scenario():
+        service = JobSubmissionService(ImmediateDispatcher(), allows_all())
+        return decode(await service.submit_job_text(json.dumps(submit_document())))
+
+    assert run_scenario(scenario())["status"] == "accepted"
+
+
+def test_the_fail_closed_dispatcher_refuses_at_admission_as_well_as_at_dispatch():
+    """A profile whose pipeline would reach it must not be told 'accepted'."""
+    from omnitensor.jobs import UnavailableJobDispatcher
+
+    subject = UnavailableJobDispatcher()
+
+    with pytest.raises(JobDispatchError) as admission:
+        subject.admit("visual-library", {"inputs": []})
+    with pytest.raises(JobDispatchError) as dispatched:
+        subject.dispatch("job-1", "visual-library", {"inputs": []})
+
+    assert admission.value.code == dispatched.value.code == "dispatch-unavailable"
+    assert admission.value.message == dispatched.value.message

@@ -13,7 +13,9 @@ from omnitensor.tensorref import (
     TensorReferenceError,
     load_referenced_tensor,
     parse_reference,
+    parse_references,
     referenced_inputs,
+    verify_reference,
 )
 
 
@@ -306,3 +308,82 @@ def test_a_file_that_grows_between_the_check_and_the_read_is_still_bounded(
 
     with pytest.raises(TensorReferenceError, match="input-ref-too-large"):
         load_referenced_tensor(document, roots(tmp_path), max_tensor_bytes=64)
+
+
+def test_verification_accepts_a_reference_without_reading_it_into_a_tensor(tmp_path):
+    """Admission needs the verdict, not the buffer."""
+    path, digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
+
+    assert (
+        verify_reference(parse_reference(reference(path, digest, (2, 2))), roots(tmp_path))
+        is None
+    )
+
+
+def test_verification_refuses_a_digest_that_does_not_match(tmp_path):
+    """A caller must not learn at result time what submission could have said."""
+    path, _digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
+
+    with pytest.raises(TensorReferenceError) as failure:
+        verify_reference(parse_reference(reference(path, "0" * 64, (4,))), roots(tmp_path))
+
+    assert failure.value.code == "input-ref-mismatch"
+    assert "sha256" in failure.value.detail
+
+
+def test_verification_refuses_a_shape_that_disagrees_with_the_file(tmp_path):
+    path, digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
+
+    with pytest.raises(TensorReferenceError) as failure:
+        verify_reference(parse_reference(reference(path, digest, (3, 2))), roots(tmp_path))
+
+    assert failure.value.code == "input-ref-mismatch"
+    assert "24 bytes" in failure.value.detail
+
+
+def test_verification_refuses_a_path_outside_the_roots(tmp_path):
+    path, digest = buffer_file(tmp_path, [1.0, 2.0])
+
+    with pytest.raises(TensorReferenceError, match="input-ref-denied"):
+        verify_reference(parse_reference(reference(path, digest, (2,))), DenyAllInputRoots())
+
+
+def test_verification_refuses_a_tensor_larger_than_the_limit(tmp_path):
+    path, digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
+
+    with pytest.raises(TensorReferenceError, match="input-ref-too-large"):
+        verify_reference(
+            parse_reference(reference(path, digest, (2, 2))),
+            roots(tmp_path),
+            max_tensor_bytes=8,
+        )
+
+
+def test_verification_refuses_a_missing_file(tmp_path):
+    with pytest.raises(TensorReferenceError, match="input-ref-denied"):
+        verify_reference(
+            parse_reference(reference(tmp_path / "absent.f32", "0" * 64, (2,))),
+            roots(tmp_path),
+        )
+
+
+def test_parsing_references_reads_nothing_from_disk(tmp_path):
+    """Parsing is separate from reading so admission can bound the work it does."""
+    payload = {"inputRefs": [reference(tmp_path / "never-created.f32", "0" * 64, (2,))]}
+
+    [parsed] = parse_references(payload, max_tensors=4)
+
+    assert parsed.shape == (2,)
+    assert parsed.expected_bytes == 8
+
+
+def test_parsing_returns_none_for_an_inline_payload():
+    assert parse_references({"inputs": [[1.0]]}, max_tensors=4) is None
+
+
+def test_parsing_refuses_a_payload_carrying_both_forms(tmp_path):
+    path, digest = buffer_file(tmp_path, [1.0])
+    payload = {"inputs": [[1.0]], "inputRefs": [reference(path, digest, (1,))]}
+
+    with pytest.raises(TensorReferenceError, match="never both"):
+        parse_references(payload, max_tensors=4)

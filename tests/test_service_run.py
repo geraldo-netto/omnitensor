@@ -1490,3 +1490,104 @@ def test_the_inventory_reports_the_grants_a_worker_actually_runs_with(tmp_path):
     assert runtime.granted_permissions("absent-plugin") == frozenset()
     runtime._granted = {"visual-library": frozenset({"read:visual-library"})}
     assert runtime.granted_permissions("visual-library") == {"read:visual-library"}
+
+
+def gpu_model_manifest(workload_id="referenced-workload"):
+    manifest = sample_manifest(
+        workload_id, accelerator="gpu", acceleratorPreference=["gpu"]
+    )
+    manifest["requirements"]["model"] = {
+        "id": "sample-model",
+        "version": "1.2.3",
+        "format": "ncnn",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "1.0.0",
+        "minimumRuntimeVersion": "1.0.0",
+    }
+    return manifest
+
+
+def submit_reference(service, document, request_id="ref-1"):
+    request = {
+        "version": 1,
+        "requestId": request_id,
+        "workloadId": "referenced-workload",
+        "payload": {"inputRefs": [document]},
+    }
+    reply = asyncio.run(service.runtime_api.submit_job_text(json.dumps(request)))
+    parsed = json.loads(reply)
+    assert validate_document("runtime-job-acknowledgement.schema.json", parsed) == []
+    return parsed
+
+
+def test_a_reference_outside_the_granted_roots_is_refused_in_the_submission_reply(tmp_path):
+    """Verified live against /etc/passwd: SubmitJob answered accepted and the
+    refusal only appeared in GetJobResult, having spent a scheduler slot."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    service = build_service(
+        tmp_path,
+        [gpu_model_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+        artifact_root=tmp_path / "artifacts",
+        input_roots=[inputs],
+    )
+
+    reply = submit_reference(
+        service,
+        {
+            "path": "/etc/passwd",
+            "shape": [2],
+            "dtype": "float32",
+            "sha256": "0" * 64,
+        },
+    )
+
+    assert reply["status"] == "rejected"
+    assert reply["code"] == "input-ref-denied"
+    assert reply["jobId"] is None
+    assert service.jobs.active_job_ids() == ()
+
+
+def test_a_digest_that_does_not_match_is_refused_in_the_submission_reply(tmp_path):
+    import hashlib
+    import struct
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    buffer = inputs / "input.f32"
+    buffer.write_bytes(struct.pack("<2f", 1.0, 2.0))
+    service = build_service(
+        tmp_path,
+        [gpu_model_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+        artifact_root=tmp_path / "artifacts",
+        input_roots=[inputs],
+    )
+
+    wrong = submit_reference(
+        service,
+        {"path": str(buffer), "shape": [2], "dtype": "float32", "sha256": "0" * 64},
+        request_id="ref-wrong",
+    )
+    right = submit_reference(
+        service,
+        {
+            "path": str(buffer),
+            "shape": [2],
+            "dtype": "float32",
+            "sha256": hashlib.sha256(buffer.read_bytes()).hexdigest(),
+        },
+        request_id="ref-right",
+    )
+
+    assert wrong["status"] == "rejected"
+    assert wrong["code"] == "input-ref-mismatch"
+    # The matching one is admitted: whether a GPU is present and an artifact is
+    # installed is decided at dispatch, and answering it here would refuse a
+    # job that would have run.
+    assert right["status"] == "accepted"

@@ -29,8 +29,11 @@ from .scheduler import QueueFullError, Scheduler, pick_backend
 from .tensorref import (
     DenyAllInputRoots,
     InputRootPolicy,
+    TensorReference,
     TensorReferenceError,
-    referenced_inputs,
+    load_referenced_tensor,
+    parse_references,
+    verify_reference,
 )
 
 MAX_INPUT_TENSORS = 64
@@ -74,19 +77,38 @@ class InferenceJobDispatcher:
         # Denied by default: referencing a file is a capability, not a default.
         self._input_roots = input_roots or DenyAllInputRoots()
 
+    def admit(self, workload_id: str, payload: dict) -> None:
+        """Refuse, in the submitting call, what a running job would refuse later.
+
+        The pipeline reaches this dispatcher from its infer stage, long after
+        submission has answered ``accepted``, so every refusal below used to
+        arrive as a stored failure a caller had to poll for.  None of these
+        decisions needs the accelerator, the queue, or the tensor values, so
+        they belong in the caller's own call.
+
+        Deliberately not a resolution or a routing decision: an artifact that
+        is momentarily unresolvable or a backend that is momentarily busy is a
+        condition of the runtime at dispatch time, and answering it at
+        submission would refuse jobs that would have run.
+        """
+        self._runnable(workload_id)
+        references = self._references(payload)
+        if references is None:
+            self._validated(_inline_inputs(payload, self._max_input_tensors))
+            return
+        budget = _ElementBudget(
+            self._max_input_elements, code="payload-invalid", label="Job payload"
+        )
+        for reference in references:
+            # From the declared shape, so an oversized tensor is refused before
+            # its file is opened rather than after it has been read.
+            budget.spend(reference.element_count)
+            self._verify(reference)
+
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
         """Admit, resolve, route, and queue one job; never run it inline."""
-        workload = self._workloads.get(workload_id)
-        if workload is None:
-            raise JobDispatchError(
-                "workload-unknown", f"No such workload profile: {workload_id}"
-            )
+        workload = self._runnable(workload_id)
         model = workload.model
-        if model is None:
-            raise JobDispatchError(
-                "workload-has-no-model",
-                f"{workload_id} declares no model and cannot run inference",
-            )
         inputs = self._inputs(payload)
         backend, reason = pick_backend(workload, dict(self._executors))
         if backend is None:
@@ -101,6 +123,37 @@ class InferenceJobDispatcher:
         except RuntimeError as error:
             raise JobDispatchError("scheduler-unavailable", str(error)) from error
 
+    def _runnable(self, workload_id: str) -> Workload:
+        """The profile this job names, if it exists and can run inference."""
+        workload = self._workloads.get(workload_id)
+        if workload is None:
+            raise JobDispatchError(
+                "workload-unknown", f"No such workload profile: {workload_id}"
+            )
+        if workload.model is None:
+            raise JobDispatchError(
+                "workload-has-no-model",
+                f"{workload_id} declares no model and cannot run inference",
+            )
+        return workload
+
+    def _references(self, payload: dict) -> tuple[TensorReference, ...] | None:
+        """The references a payload declares, or ``None`` for an inline payload."""
+        if not isinstance(payload, dict):
+            raise JobDispatchError("payload-invalid", "Job payload must be an object")
+        try:
+            return parse_references(payload, max_tensors=self._max_input_tensors)
+        except TensorReferenceError as error:
+            # Re-raised as a dispatch failure so the caller sees one error
+            # vocabulary regardless of how it supplied the input.
+            raise JobDispatchError(error.code, error.detail) from error
+
+    def _verify(self, reference: TensorReference) -> None:
+        try:
+            verify_reference(reference, self._input_roots)
+        except TensorReferenceError as error:
+            raise JobDispatchError(error.code, error.detail) from error
+
     def _inputs(self, payload: dict) -> list:
         """Validate submitted tensors before anything is queued.
 
@@ -108,34 +161,24 @@ class InferenceJobDispatcher:
         the first thing to reject a malformed tensor is a native library
         running on a shared accelerator.  Validating here keeps that failure a
         stable refusal on the submitting side.
+
+        Referenced inputs are read and re-digested here even when admission
+        already verified them, because the file may have changed since; what
+        runs is the tensor these bytes contain.
         """
-        if not isinstance(payload, dict):
-            raise JobDispatchError("payload-invalid", "Job payload must be an object")
+        references = self._references(payload)
+        if references is None:
+            return self._validated(_inline_inputs(payload, self._max_input_tensors))
         try:
-            referenced = referenced_inputs(
-                payload,
-                self._input_roots,
-                max_tensors=self._max_input_tensors,
-            )
+            loaded = [
+                load_referenced_tensor(reference, self._input_roots)
+                for reference in references
+            ]
         except TensorReferenceError as error:
-            # Re-raised as a dispatch failure so the caller sees one error
-            # vocabulary regardless of how it supplied the input.
             raise JobDispatchError(error.code, error.detail) from error
-        if referenced is not None:
-            # Already shaped, digest-checked, and bounded on the way in, so it
-            # rejoins the inline path here and is validated identically.
-            return self._validated(referenced)
-        inputs = payload.get("inputs")
-        if not isinstance(inputs, list):
-            raise JobDispatchError(
-                "payload-invalid", "Job payload must contain an inputs array"
-            )
-        if len(inputs) > self._max_input_tensors:
-            raise JobDispatchError(
-                "payload-invalid",
-                f"At most {self._max_input_tensors} input tensors may be submitted",
-            )
-        return self._validated(inputs)
+        # Already shaped, digest-checked, and bounded on the way in, so it
+        # rejoins the inline path here and is validated identically.
+        return self._validated(loaded)
 
     def _validated(self, inputs: list) -> list:
         """The one place tensor shape and element budget are enforced.
@@ -170,6 +213,21 @@ class InferenceJobDispatcher:
                 "artifact-unavailable", f"{workload_id}: {resolution.reason}"
             )
         return str(resolution.path)
+
+
+def _inline_inputs(payload: dict, max_input_tensors: int) -> list:
+    """The tensors a payload carries inline, bounded by count."""
+    inputs = payload.get("inputs")
+    if not isinstance(inputs, list):
+        raise JobDispatchError(
+            "payload-invalid", "Job payload must contain an inputs array"
+        )
+    if len(inputs) > max_input_tensors:
+        raise JobDispatchError(
+            "payload-invalid",
+            f"At most {max_input_tensors} input tensors may be submitted",
+        )
+    return inputs
 
 
 def validate_input_tensor(value: object, budget: _ElementBudget) -> object:

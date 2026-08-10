@@ -518,3 +518,98 @@ def test_a_malformed_reference_is_one_error_vocabulary(tmp_path):
         subject.dispatch("job-1", "sample-workload", {"inputRefs": [{"path": "/x"}]})
 
     assert failure.value.code == "input-ref-invalid"
+
+
+def test_admission_refuses_a_reference_outside_the_granted_roots(tmp_path):
+    """The refusal belongs in the submission reply, not in a stored result."""
+    reference = buffer_reference(tmp_path, [1.0, 2.0], (2,))
+    subject = dispatcher([workload(model=MODEL)])
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.admit("sample-workload", {"inputRefs": [reference]})
+
+    assert failure.value.code == "input-ref-denied"
+
+
+def test_admission_refuses_a_digest_that_does_not_match(tmp_path):
+    from omnitensor.tensorref import OptedInInputRoots
+
+    reference = buffer_reference(tmp_path, [1.0, 2.0], (2,))
+    reference["sha256"] = "0" * 64
+    subject = dispatcher([workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path]))
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.admit("sample-workload", {"inputRefs": [reference]})
+
+    assert failure.value.code == "input-ref-mismatch"
+
+
+def test_admission_accepts_a_reference_it_does_not_read(tmp_path):
+    """Admission proves the file; the buffer is still read at dispatch."""
+    from omnitensor.tensorref import OptedInInputRoots
+
+    reference = buffer_reference(tmp_path, [1.0, 2.0, 3.0, 4.0], (2, 2))
+    subject = dispatcher([workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path]))
+
+    assert subject.admit("sample-workload", {"inputRefs": [reference]}) is None
+
+
+def test_admission_refuses_a_referenced_tensor_over_the_element_budget(tmp_path):
+    """Bounded from the declared shape, before the file is opened."""
+    from omnitensor.tensorref import OptedInInputRoots
+
+    reference = buffer_reference(tmp_path, [1.0, 2.0, 3.0, 4.0], (2, 2))
+    subject = InferenceJobDispatcher(
+        {"sample-workload": workload(model=MODEL)},
+        Scheduler({"gpu": FakeExecutor()}, lambda _p: 1),
+        {"gpu": FakeExecutor()},
+        FakeArtifacts(),
+        max_input_elements=3,
+        input_roots=OptedInInputRoots([tmp_path]),
+    )
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.admit("sample-workload", {"inputRefs": [reference]})
+
+    assert failure.value.code == "payload-invalid"
+
+
+@pytest.mark.parametrize(
+    ("workload_id", "payload", "expected"),
+    [
+        ("missing", {"inputs": []}, "workload-unknown"),
+        ("no-model", {"inputs": []}, "workload-has-no-model"),
+        ("sample-workload", "text", "payload-invalid"),
+        ("sample-workload", {"tensor": 1}, "payload-invalid"),
+        ("sample-workload", {"inputs": [[1.0, float("inf")]]}, "payload-invalid"),
+        ("sample-workload", {"inputRefs": [{"path": "/x"}]}, "input-ref-invalid"),
+    ],
+)
+def test_admission_answers_with_the_same_codes_dispatch_would(workload_id, payload, expected):
+    subject = dispatcher([workload(model=MODEL), workload("no-model")])
+
+    with pytest.raises(JobDispatchError) as admission:
+        subject.admit(workload_id, payload)
+    with pytest.raises(JobDispatchError) as dispatched:
+        subject.dispatch("job-1", workload_id, payload)
+
+    assert admission.value.code == expected
+    assert dispatched.value.code == expected
+
+
+
+
+def test_admission_leaves_routing_and_resolution_to_dispatch():
+    """A backend that is busy or an artifact that is briefly unresolvable is a
+    condition of the runtime, not a reason to refuse the caller's submission."""
+    unavailable = {"gpu": FakeExecutor(available=False, reason="device is warming up")}
+    subject = dispatcher(
+        [workload(model=MODEL)],
+        executors=unavailable,
+        artifacts=FakeArtifacts(ArtifactResolution(False, None, "not installed", 0)),
+    )
+
+    assert subject.admit("sample-workload", {"inputs": [[1.0]]}) is None
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch("job-1", "sample-workload", {"inputs": [[1.0]]})
+    assert failure.value.code == "no-backend-available"

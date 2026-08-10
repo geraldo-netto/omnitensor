@@ -11,7 +11,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .callers import ANONYMOUS_OWNER
 from .plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
@@ -26,6 +26,7 @@ MAX_JOB_REQUEST_BYTES_LIMIT = 1024 * 1024
 DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS = 0.5
 MAX_JOB_CANCEL_TIMEOUT_SECONDS = 30.0
 MAX_JOB_MESSAGE_CHARS = 240
+_UNAVAILABLE_DISPATCHER = "No verified inference dispatcher is ready for this workload"
 
 
 class JobAuthorizer(Protocol):
@@ -36,6 +37,22 @@ class JobDispatcher(Protocol):
     def dispatch(
         self, job_id: str, workload_id: str, payload: dict
     ) -> Awaitable[object]: ...
+
+
+@runtime_checkable
+class JobAdmission(Protocol):
+    """Everything about a job that can be refused before it becomes active.
+
+    Separate from :class:`JobDispatcher` because dispatching is asynchronous by
+    the time a pipeline runs it: whatever the runner's stages decide is decided
+    after this service has already answered ``accepted``.  A refusal a caller
+    can act on has to be reachable synchronously, in the submitting call, which
+    is what this port is for.  ``runtime_checkable`` so wiring can offer a
+    dispatcher that also admits without a second registration.
+    """
+
+    def admit(self, workload_id: str, payload: dict) -> None:
+        """Return normally, or raise :class:`JobDispatchError` with a reason."""
 
 
 class JobDispatchError(RuntimeError):
@@ -72,11 +89,14 @@ class _DenyAllAuthorizer:
 class UnavailableJobDispatcher:
     """Fail-closed wiring used until a verified inference dispatcher is injected."""
 
+    def admit(self, workload_id: str, payload: dict) -> None:
+        # Also refused at admission: with no verified dispatcher there is
+        # nothing that could succeed later, so accepting the job would promise
+        # a result that a caller then has to poll for to be told this.
+        raise JobDispatchError("dispatch-unavailable", _UNAVAILABLE_DISPATCHER)
+
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> Awaitable[object]:
-        raise JobDispatchError(
-            "dispatch-unavailable",
-            "No verified inference dispatcher is ready for this workload",
-        )
+        raise JobDispatchError("dispatch-unavailable", _UNAVAILABLE_DISPATCHER)
 
 
 class PredicateJobAuthorizer:
@@ -111,6 +131,7 @@ class JobSubmissionService:
         id_factory: Callable[[], str] | None = None,
         clock_ms: Callable[[], int] | None = None,
         results: JobResultStore | None = None,
+        admission: JobAdmission | None = None,
     ) -> None:
         _validate_integer_bound(
             "max_active_jobs", max_active_jobs, 1, MAX_ACTIVE_JOBS_LIMIT
@@ -140,6 +161,9 @@ class JobSubmissionService:
         self._clock_ms = clock_ms or (lambda: max(1, int(time.time() * 1000)))
         self._active: dict[str, _ActiveJob] = {}
         self._results = results
+        # Absent by default: with no admission check a job is refused wherever
+        # it was refused before, never earlier and never for a new reason.
+        self._admission = admission
 
     def note_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         """Record where a running job has got to, against its owner.
@@ -191,6 +215,11 @@ class JobSubmissionService:
                     "capacity-exceeded",
                     "Active job capacity is exhausted",
                 )
+            if self._admission is not None:
+                # Before an id is minted and before anything is queued, so a
+                # refused job leaves nothing behind for a caller to poll and
+                # occupies no scheduler slot.
+                self._admission.admit(request.workload_id, request.payload)
             job_id = self._id_factory()
             _validate_identifier("generated job ID", job_id)
             if job_id in self._active:

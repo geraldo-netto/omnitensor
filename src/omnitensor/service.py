@@ -48,6 +48,7 @@ from .executors.vulkan import VulkanGpuExecutor
 from .guard import BusGuard, GuardRefusedError, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
 from .jobs import (
+    JobAdmission,
     JobDispatcher,
     JobSubmissionService,
     PredicateJobAuthorizer,
@@ -407,6 +408,14 @@ class OmniTensorService:
             RunnerBackedDispatcher(self.runners, self._job_dispatcher),
             PredicateJobAuthorizer(self._job_authorized),
             results=self.job_results,
+            # The raw dispatcher, not the runner-backed one: routing through a
+            # pipeline is what defers every refusal past the submission reply,
+            # and this is the same object that would have raised them.
+            admission=(
+                self._job_dispatcher
+                if isinstance(self._job_dispatcher, JobAdmission)
+                else None
+            ),
         )
         self.runtime_api = RuntimeAPI(
             self.control, self.jobs, self._describe_plugins, self._callers

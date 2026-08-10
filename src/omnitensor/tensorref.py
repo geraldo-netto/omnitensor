@@ -25,6 +25,12 @@ in the service, on behalf of whoever asked.
 *The declared size must equal the file's size.*  A shape that disagrees with
 the bytes is refused rather than truncated or padded, because both of those
 produce a tensor that infers successfully and means nothing.
+
+Every one of those rules can be applied without keeping a single byte, so the
+module exposes the check on its own as well as the load.  Admission uses the
+check to refuse a bad reference in the submitting call; dispatch still reads
+and re-digests the file when it actually needs the values, because a file can
+change between the two and only the bytes that were read are proven.
 """
 
 from __future__ import annotations
@@ -162,6 +168,26 @@ def _parse_shape(value: object) -> tuple[int, ...]:
     return tuple(dimensions)
 
 
+def verify_reference(
+    reference: TensorReference,
+    policy: InputRootPolicy,
+    *,
+    max_tensor_bytes: int = DEFAULT_MAX_TENSOR_BYTES,
+) -> None:
+    """Refuse a reference that could not be loaded, without loading it.
+
+    Everything :func:`load_referenced_tensor` decides except the values
+    themselves.  The digest is streamed and nothing is retained, so admission
+    can answer a caller in its own submission call without holding a buffer
+    that dispatch will read again anyway.
+    """
+    _permitted(reference, policy, max_tensor_bytes)
+    if _digest_of(reference.path, max_tensor_bytes) != reference.sha256:
+        raise TensorReferenceError(
+            "input-ref-mismatch", "the file does not match the declared sha256"
+        )
+
+
 def load_referenced_tensor(
     reference: TensorReference,
     policy: InputRootPolicy,
@@ -171,8 +197,23 @@ def load_referenced_tensor(
     """Read a referenced buffer into nested lists, or refuse it.
 
     Returns the same shape of value an inline tensor would have, so nothing
-    downstream needs to know how the input arrived.
+    downstream needs to know how the input arrived.  The digest is checked
+    against the bytes this call read, not against an earlier verification: a
+    file re-read is a file that may have changed.
     """
+    _permitted(reference, policy, max_tensor_bytes)
+    payload, digest = _read_digested(reference.path, max_tensor_bytes)
+    if digest != reference.sha256:
+        raise TensorReferenceError(
+            "input-ref-mismatch", "the file does not match the declared sha256"
+        )
+    return _reshape(_unpack(payload, reference), reference.shape)
+
+
+def _permitted(
+    reference: TensorReference, policy: InputRootPolicy, max_tensor_bytes: int
+) -> None:
+    """The rules that hold before a single byte is read."""
     if not policy.permits(reference.path):
         # Identical answer whether the path is outside the roots or does not
         # exist, so a caller cannot probe the filesystem through refusals.
@@ -198,17 +239,10 @@ def load_referenced_tensor(
             "input-ref-mismatch",
             f"declared shape needs {reference.expected_bytes} bytes, file holds {size}",
         )
-    payload, digest = _read_digested(reference.path, max_tensor_bytes)
-    if digest != reference.sha256:
-        raise TensorReferenceError(
-            "input-ref-mismatch", "the file does not match the declared sha256"
-        )
-    return _reshape(_unpack(payload, reference), reference.shape)
 
 
-def _read_digested(path: Path, max_bytes: int) -> tuple[bytes, str]:
-    digest = hashlib.sha256()
-    chunks: list[bytes] = []
+def _chunks(path: Path, max_bytes: int):
+    """Yield the file's bytes, refusing one larger than the caller allows."""
     total = 0
     try:
         with path.open("rb") as stream:
@@ -218,12 +252,26 @@ def _read_digested(path: Path, max_bytes: int) -> tuple[bytes, str]:
                     raise TensorReferenceError(
                         "input-ref-too-large", f"file exceeds {max_bytes} bytes"
                     )
-                digest.update(chunk)
-                chunks.append(chunk)
+                yield chunk
     except OSError as error:
         raise TensorReferenceError(
             "input-ref-denied", f"that path may not be read: {error}"
         ) from error
+
+
+def _digest_of(path: Path, max_bytes: int) -> str:
+    digest = hashlib.sha256()
+    for chunk in _chunks(path, max_bytes):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_digested(path: Path, max_bytes: int) -> tuple[bytes, str]:
+    digest = hashlib.sha256()
+    chunks: list[bytes] = []
+    for chunk in _chunks(path, max_bytes):
+        digest.update(chunk)
+        chunks.append(chunk)
     return b"".join(chunks), digest.hexdigest()
 
 
@@ -249,14 +297,12 @@ def _reshape(flat: list, shape: tuple[int, ...]) -> list:
     ]
 
 
-def referenced_inputs(
-    payload: dict,
-    policy: InputRootPolicy,
-    *,
-    max_tensors: int,
-    max_tensor_bytes: int = DEFAULT_MAX_TENSOR_BYTES,
-) -> list | None:
-    """The tensors a payload references, or ``None`` when it references none."""
+def parse_references(payload: dict, *, max_tensors: int) -> tuple[TensorReference, ...] | None:
+    """The references a payload declares, parsed but not read.
+
+    ``None`` when it declares none, which is how an inline payload is told
+    apart from a referenced one without either caller inspecting the key.
+    """
     references = payload.get("inputRefs")
     if references is None:
         return None
@@ -272,7 +318,21 @@ def referenced_inputs(
         raise TensorReferenceError(
             "input-ref-invalid", "a payload carries either inputs or inputRefs, never both"
         )
+    return tuple(parse_reference(item) for item in references)
+
+
+def referenced_inputs(
+    payload: dict,
+    policy: InputRootPolicy,
+    *,
+    max_tensors: int,
+    max_tensor_bytes: int = DEFAULT_MAX_TENSOR_BYTES,
+) -> list | None:
+    """The tensors a payload references, or ``None`` when it references none."""
+    references = parse_references(payload, max_tensors=max_tensors)
+    if references is None:
+        return None
     return [
-        load_referenced_tensor(parse_reference(item), policy, max_tensor_bytes=max_tensor_bytes)
-        for item in references
+        load_referenced_tensor(reference, policy, max_tensor_bytes=max_tensor_bytes)
+        for reference in references
     ]
