@@ -34,6 +34,7 @@ from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
 from .callers import CallerIdentityResolver, caller_capture_handler, unix_user_lookup
+from .contract import contract_document_text
 from .control import ControlService
 from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
 from .dispatch import (
@@ -159,6 +160,19 @@ class RuntimeAPI:
         except GuardRefusedError as refusal:
             return refusal.text()
 
+    def describe_contract_text(self) -> str:
+        """Answer what this service speaks, before it is asked to speak it.
+
+        Guarded like every other method: a handshake a caller can issue
+        without limit is a way to keep the service busy answering handshakes.
+        """
+        owner = self._callers.cached_owner_token()
+        try:
+            with guarded(self._guard, "DescribeContract", owner):
+                return contract_document_text(BUS_METHODS)
+        except GuardRefusedError as refusal:
+            return refusal.text()
+
     async def _guarded(self, method: str, text: str, call, *, owner: str | None = None) -> str:
         """Admit one call, run it, and release the slot however it ends.
 
@@ -172,6 +186,19 @@ class RuntimeAPI:
                 return await call(text)
         except GuardRefusedError as refusal:
             return refusal.text()
+
+
+# Named once, here, because the handshake announces exactly this list and a
+# second hand-kept copy is how a method comes to exist unannounced.
+# ``test_contract.py`` asserts it against the decorated methods below.
+BUS_METHODS = (
+    "ApplyCommand",
+    "SubmitJob",
+    "CancelJob",
+    "GetJobResult",
+    "DescribePlugins",
+    "DescribeContract",
+)
 
 
 class OmniTensorInterface(ServiceInterface):
@@ -200,6 +227,10 @@ class OmniTensorInterface(ServiceInterface):
     @method()
     def DescribePlugins(self) -> s:  # noqa: F821, N802 - D-Bus contract names
         return self._runtime.describe_plugins_text()
+
+    @method()
+    def DescribeContract(self) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return self._runtime.describe_contract_text()
 
 
 class SysfsDeviceDiscovery:

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/runtime-contract.schema.json",
+  "title": "OmniTensor runtime contract description version 1",
+  "description": "What the running service speaks, answerable before any other call. A client that cannot ask this has to discover an unsupported method by calling it and reading the failure, which is indistinguishable from a service that is broken rather than older. Introspection alone would enumerate method names but not which version of each document body they accept.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "methods", "schemas"],
+  "properties": {
+    "version": {
+      "description": "Version of this description document, not of the contracts it describes.",
+      "const": 1
+    },
+    "methods": {
+      "description": "Every method the bus interface exports, including this one.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]{0,63}$"}
+    },
+    "schemas": {
+      "description": "Version of each named wire contract this service accepts and emits. A name absent here is a document this service does not speak.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+      "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 65535}
+    }
+  }
+}

@@ -39,3 +39,39 @@ requires must never mean importing and running its code.
 
 The method is read-only and takes no arguments, so it cannot be used to change
 policy or to probe for a plugin that is not installed.
+
+## Contract handshake (`DescribeContract`)
+
+Every other method assumes the caller already knows what this service speaks.
+Before this method existed there was no way to ask: a client called something
+and read the failure, and "this service is older than you" arrives looking
+exactly like "this service is broken" — a D-Bus `UnknownMethod`, or a refusal
+code. Introspection does not close the gap either, because it enumerates
+method *names*, and two services can both export `SubmitJob` while disagreeing
+completely about what a submission looks like.
+
+`DescribeContract` takes no arguments and returns a document validated against
+`runtime-contract.schema.json`:
+
+```json
+{
+  "version": 1,
+  "methods": ["ApplyCommand", "CancelJob", "DescribeContract", "…"],
+  "schemas": {"runtime-job-submit": 1, "runtime-snapshot": 1, "…": 1}
+}
+```
+
+`version` is the version of this description, not of the contracts it
+describes. `methods` is every method the bus interface exports, including this
+one — a handshake a client must already know another method to reach is not a
+handshake. `schemas` maps each wire contract to the version its own schema
+pins; a name absent from the map is a document this service does not speak.
+
+Neither list is written by hand. `methods` is asserted against the decorated
+methods on the bus interface and `schemas` is read from the shipped schema
+files, so a method or a contract added on one side cannot go unannounced on
+the other. A schema pinning no version is omitted rather than guessed at: an
+announced version nobody enforces is worse than no announcement.
+
+The method is quota-guarded like every other, with the smallest allowance of
+any of them, because a handshake is issued once per client per connection.

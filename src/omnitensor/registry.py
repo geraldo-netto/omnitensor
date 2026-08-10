@@ -49,6 +49,18 @@ def _schema_path(name: str) -> Path:
     raise FileNotFoundError(f"canonical schema is not installed: {name}")
 
 
+def schema_names() -> tuple[str, ...]:
+    """Every canonical schema shipped with this build, packaged or in-tree."""
+    roots = [_PACKAGED_SCHEMAS]
+    if _SOURCE_SCHEMAS is not None:
+        roots.append(_SOURCE_SCHEMAS)
+    found: set[str] = set()
+    for root in roots:
+        if root.is_dir():
+            found.update(path.name for path in root.glob("*.schema.json"))
+    return tuple(sorted(found))
+
+
 def load_schema(name: str) -> dict:
     # Contracts are deliberately read for each validation.  Operators can
     # atomically update a schema without restarting the long-running service.

@@ -101,6 +101,11 @@ DEFAULT_QUOTAS: Mapping[str, MethodQuota] = {
     # Polled while a job runs, so the rate is higher and the payload tiny.
     "GetJobResult": MethodQuota(max_bytes=16 * 1024, max_calls=240, max_concurrent=8),
     "DescribePlugins": MethodQuota(max_bytes=1, max_calls=30, max_concurrent=4),
+    # A handshake is issued once per client per connection, so the allowance is
+    # the smallest of any method — but it must exist, because an unlisted
+    # method is refused, and a client refused the handshake cannot tell an
+    # older service from a busy one, which is the confusion it exists to end.
+    "DescribeContract": MethodQuota(max_bytes=1, max_calls=20, max_concurrent=4),
 }
 
 

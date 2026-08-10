@@ -1434,7 +1434,9 @@ def test_the_bus_exposes_a_way_to_learn_a_job_outcome(tmp_path):
     ]
 
     assert "GetJobResult" in exported
-    assert {"ApplyCommand", "SubmitJob", "CancelJob", "DescribePlugins"} <= set(exported)
+    assert {
+        "ApplyCommand", "SubmitJob", "CancelJob", "DescribePlugins", "DescribeContract",
+    } <= set(exported)
 
 
 def test_the_service_keeps_a_result_store_so_outcomes_outlive_the_call(tmp_path):
@@ -1598,3 +1600,34 @@ def test_a_digest_that_does_not_match_is_refused_in_the_submission_reply(tmp_pat
     # installed is decided at dispatch, and answering it here would refuse a
     # job that would have run.
     assert right["status"] == "accepted"
+
+
+def test_the_contract_handshake_is_answerable_over_the_bus(tmp_path):
+    """A client must be able to ask what this service speaks before it speaks."""
+    from omnitensor.service import BUS_METHODS, OmniTensorInterface, RuntimeAPI
+
+    api = RuntimeAPI(None, None, lambda: "{}")
+    interface = OmniTensorInterface(api)
+
+    document = json.loads(interface.DescribeContract.__wrapped__(interface))
+
+    assert document["version"] == 1
+    assert document["methods"] == sorted(BUS_METHODS)
+    assert document["schemas"]["runtime-job-submit"] == 1
+
+
+def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
+    """Otherwise asking what the service speaks is a way to keep it busy."""
+    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.service import RuntimeAPI
+
+    api = RuntimeAPI(
+        None,
+        None,
+        lambda: "{}",
+        None,
+        BusGuard({"DescribeContract": MethodQuota(max_calls=1, max_bytes=1)}),
+    )
+
+    assert json.loads(api.describe_contract_text())["version"] == 1
+    assert json.loads(api.describe_contract_text())["code"] == "rate-limit-exceeded"

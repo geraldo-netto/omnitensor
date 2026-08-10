@@ -332,3 +332,12 @@ def test_apply_command_is_still_bounded():
 
     with pytest.raises(GuardRefusedError, match="rate-limit-exceeded"):
         subject.admit("ApplyCommand", "uid:1000", "{}")
+
+
+def test_every_bus_method_has_a_quota():
+    """An unlisted method is refused, so a method added without a quota is
+    exported and unreachable at the same time."""
+    from omnitensor.guard import DEFAULT_QUOTAS
+    from omnitensor.service import BUS_METHODS
+
+    assert set(BUS_METHODS) == set(DEFAULT_QUOTAS)
