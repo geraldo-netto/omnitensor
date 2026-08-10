@@ -34,6 +34,9 @@ from .artifacts import (
 
 _ACTIVATION_FILE = "activation.json"
 _ARTIFACT_METADATA_FILE = "artifact.json"
+# Written by the installer itself, so they are not part of the artifact's own
+# file set when deciding whether two installs describe the same thing.
+_GENERATED_FILES = frozenset({"artifact.json", "provenance.json"})
 _MAX_METADATA_BYTES = 64 * 1024
 _DOCUMENT_VERSION = 1
 _READ_CHUNK_BYTES = 1024 * 1024
@@ -413,6 +416,29 @@ class ArtifactInstaller:
             raise ArtifactInstallationError("digest-mismatch", "artifact sha256 mismatch")
         return total
 
+    def _refuse_changed_companions(
+        self,
+        stage: Path,
+        destination: Path,
+        reference: ArtifactReference,
+    ) -> None:
+        """Refuse to report success for companions this install cannot add."""
+        staged = sorted(
+            path.name for path in stage.iterdir() if path.name not in _GENERATED_FILES
+        )
+        installed = sorted(
+            path.name for path in destination.iterdir() if path.name not in _GENERATED_FILES
+        )
+        if staged == installed:
+            return
+        added = sorted(set(staged) - set(installed))
+        raise ArtifactInstallationError(
+            "version-immutable",
+            f"{reference.id} {reference.version} is already installed with "
+            f"{', '.join(installed) or 'no files'}; it cannot gain "
+            f"{', '.join(added) or 'a different file set'} without a new version",
+        )
+
     def _activate_version(
         self,
         stage: Path,
@@ -427,6 +453,13 @@ class ArtifactInstaller:
                 max_artifact_bytes=self._max_artifact_bytes,
             ).resolve(reference)
             if resolution.ready and resolution.path is not None:
+                # A version is immutable, so reinstalling the same bytes is a
+                # no-op rather than an error. Arriving with a *different* set of
+                # companions is neither: the artifact has changed, and silently
+                # keeping the old one reported an install that did not happen —
+                # observed when adding a labels file to an installed model,
+                # where the command printed success and changed nothing.
+                self._refuse_changed_companions(stage, destination, reference)
                 return resolution.path
             raise ArtifactInstallationError(
                 "version-conflict",

@@ -15,13 +15,14 @@
     "minimumDevices": 1,
     "model": {
       "id": "visual-library-classifier",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "format": "ncnn",
       "fullyQuantized": false,
       "minimumCompilerVersion": "validated-release",
       "minimumRuntimeVersion": "validated-release",
       "sha256": "6a38784ab51f056e5ecdf208120f8a9174b74831255e66b74c4dd6bf755a4324",
       "companions": {
+        "labels.txt": "e697a491aa735cc6c2aaf982f8e86e8fc7b0a1ea7750a2cc6a2bdfc1e109012f",
         "model.bin": "928c82c485a16064df88794d83c333025055e60c08f73217222244ab0ed2dbc6"
       },
       "tensorContract": {
@@ -57,7 +58,8 @@
       },
       "outputContract": {
         "kind": "classification",
-        "topK": 5
+        "topK": 5,
+        "labels": "labels.txt"
       }
     }
   },

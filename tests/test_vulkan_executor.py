@@ -42,6 +42,12 @@ class FakeNet:
     def set_vulkan_device(self, device):
         self._runtime.selected_device = device
 
+    def clear(self):
+        # The real Net releases the Vulkan allocators its extractor borrows;
+        # the executor now tears them down in order rather than leaving it to
+        # garbage collection, so the fake has to answer for it.
+        self._runtime.cleared += 1
+
     def load_param(self, path):
         return 0 if path.endswith(".param") else -1
 
@@ -66,6 +72,7 @@ class FakeNcnn:
     def __init__(self, device_types):
         self._device_types = device_types
         self.selected_device = None
+        self.cleared = 0
 
     def get_gpu_count(self):
         return len(self._device_types)
@@ -210,3 +217,42 @@ def test_composite_with_real_onnx_fallback_shape():
     assert availability.available is False
     assert "CPU execution is not used" in availability.reason
     assert "CPU provider is not used" in availability.reason
+
+
+def test_the_device_is_enumerated_once_and_reused():
+    """Enumerating Vulkan is not a read-only question.
+
+    It initialises the loader and queries every driver, and the snapshot
+    publisher asks whether this backend is available twice a second from a
+    different thread from the one running inference. Doing that under a
+    running job corrupted its results.
+    """
+    class CountingNcnn(FakeNcnn):
+        def __init__(self):
+            super().__init__([INTEGRATED, DISCRETE])
+            self.enumerations = 0
+
+        def get_gpu_count(self):
+            self.enumerations += 1
+            return super().get_gpu_count()
+
+    runtime = CountingNcnn()
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+
+    for _ in range(5):
+        executor.availability()
+    executor.run("model.param", [[1]])
+
+    assert runtime.enumerations == 1, "the answer changes only when hardware does"
+
+
+def test_the_net_is_released_in_order_after_every_run():
+    """The extractor borrows Vulkan memory the Net's allocators own, so the
+    Net cannot simply fall out of scope while the extractor still holds it."""
+    runtime = FakeNcnn([DISCRETE])
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+
+    executor.run("model.param", [[1]])
+    executor.run("model.param", [[1]])
+
+    assert runtime.cleared == 2, "each run releases the Net it created"

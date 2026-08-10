@@ -693,6 +693,9 @@ class FakeNet:
         self.extractor = None
         runtime.net = self
 
+    def clear(self):
+        """The executor releases the Net's allocators explicitly now."""
+
     def set_vulkan_device(self, device):
         self._runtime.selected_device = device
 

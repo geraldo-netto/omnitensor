@@ -34,8 +34,28 @@ class VulkanGpuExecutor:
     def __init__(self, device_present: bool, runtime=None):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_ncnn()
+        self._selected: tuple[int | None, str] | None = None
 
     def _select_device(self) -> tuple[int | None, str]:
+        """Choose a device once and keep the answer.
+
+        Enumerating Vulkan is not a read-only question: it initialises the
+        loader and queries every driver.  The snapshot publisher asks whether
+        this backend is available on every tick — twice a second — from a
+        different thread from the one running inference, and doing that while
+        a model is executing corrupted its results: the same image scored
+        0.999 on one submission and 0.658 on the next, from a byte-identical
+        input, on a device whose own answer never varies.
+
+        Which device is present changes only when hardware does, and discovery
+        rebuilds these executors when it does, so the answer is cached for the
+        life of the executor rather than recomputed under a running job.
+        """
+        if self._selected is None:
+            self._selected = self._enumerate_device()
+        return self._selected
+
+    def _enumerate_device(self) -> tuple[int | None, str]:
         try:
             count = self._runtime.get_gpu_count()
         except Exception as error:  # noqa: BLE001 - loader failures are arbitrary
@@ -83,18 +103,32 @@ class VulkanGpuExecutor:
         if net.load_model(str(bin_path)) != 0:
             raise RuntimeError(f"Could not load ncnn model: {bin_path}")
         extractor = net.create_extractor()
-        input_names = net.input_names()
-        output_names = net.output_names()
-        for name, value in zip(input_names, inputs, strict=True):
-            extractor.input(name, self._to_mat(value))
-        started = time.monotonic()
-        outputs = []
-        for name in output_names:
-            code, mat = extractor.extract(name)
-            if code != 0:
-                raise RuntimeError(f"ncnn extraction failed for output {name}")
-            outputs.append(self._from_mat(mat))
-        duration_ms = (time.monotonic() - started) * 1000
+        try:
+            input_names = net.input_names()
+            output_names = net.output_names()
+            for name, value in zip(input_names, inputs, strict=True):
+                extractor.input(name, self._to_mat(value))
+            started = time.monotonic()
+            outputs = []
+            for name in output_names:
+                code, mat = extractor.extract(name)
+                if code != 0:
+                    raise RuntimeError(f"ncnn extraction failed for output {name}")
+                # Copied out of the Mat here, while the Net that owns its
+                # memory is still alive.
+                outputs.append(self._from_mat(mat))
+                del mat
+            duration_ms = (time.monotonic() - started) * 1000
+        finally:
+            # The extractor holds Vulkan memory the Net's allocators own, and
+            # nothing ordered their teardown: letting both fall out of scope
+            # released the allocators while the extractor still referenced
+            # them, which ncnn reports as "pool allocator destroyed too early"
+            # when it notices — and which otherwise leaves freed device memory
+            # to be handed to a later job. That showed up as an occasional
+            # confident-looking wrong answer in whichever job ran next.
+            del extractor
+            net.clear()
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)
 
     def _to_mat(self, value):
