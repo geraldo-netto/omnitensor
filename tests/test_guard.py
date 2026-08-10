@@ -304,3 +304,31 @@ def test_a_refusal_is_not_mistaken_for_a_job_acknowledgement():
     document = json.loads(GuardRefusedError("rate-limit-exceeded", "slow down").text())
 
     assert validate_document("runtime-job-acknowledgement.schema.json", document) != []
+
+
+def test_a_full_reconciliation_burst_is_admitted():
+    """A client reconciling a large catalogue must not be refused partway.
+
+    Measured live: nine profiles cost 23 ApplyCommand calls in one burst, and
+    a refusal midway leaves the client and the runtime divergent with nothing
+    shown to the user.
+    """
+    subject, _clock = guard()
+
+    for index in range(120):
+        subject.admit("ApplyCommand", "uid:1000", "{}")
+        subject.release("ApplyCommand", "uid:1000")
+        assert index >= 0
+
+
+def test_apply_command_is_still_bounded():
+    """Sized for reconciliation, not unlimited."""
+    subject, _clock = guard()
+    quota = subject.quota_for("ApplyCommand")
+
+    for _ in range(quota.max_calls):
+        subject.admit("ApplyCommand", "uid:1000", "{}")
+        subject.release("ApplyCommand", "uid:1000")
+
+    with pytest.raises(GuardRefusedError, match="rate-limit-exceeded"):
+        subject.admit("ApplyCommand", "uid:1000", "{}")

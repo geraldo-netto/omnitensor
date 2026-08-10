@@ -88,9 +88,15 @@ class MethodQuota:
 
 
 DEFAULT_QUOTAS: Mapping[str, MethodQuota] = {
-    # Policy changes are small and rare; jobs are larger and burstier;
-    # describing plugins is read-only and cheap but trivially spammable.
-    "ApplyCommand": MethodQuota(max_bytes=64 * 1024, max_calls=30, max_concurrent=4),
+    # ApplyCommand is not the small, rare call it looks like.  A client whose
+    # stored profile state diverges reconciles by sending one command per
+    # profile per setting, which was measured at 23 calls in a single burst for
+    # nine profiles — and a refusal partway through leaves the two sides
+    # divergent with no error the user can see.  The allowance is sized for a
+    # full reconciliation of a large catalogue rather than for the steady state.
+    "ApplyCommand": MethodQuota(max_bytes=64 * 1024, max_calls=240, max_concurrent=4),
+    # Jobs are larger and burstier; describing plugins is read-only and cheap
+    # but trivially spammable.
     "SubmitJob": MethodQuota(max_bytes=256 * 1024, max_calls=60, max_concurrent=8),
     "CancelJob": MethodQuota(max_bytes=16 * 1024, max_calls=60, max_concurrent=8),
     # Polled while a job runs, so the rate is higher and the payload tiny.
