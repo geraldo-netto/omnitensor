@@ -1,1 +1,41 @@
-{"manifestVersion":1,"id":"visual-library","version":"1.0.0","capabilities":["image-classification","image-embedding"],"requirements":{"runtimeApi":1,"accelerator":"tpu","acceleratorPreference":["tpu","npu","gpu"],"minimumDevices":1,"model":null},"ui":{"title":"Visual library","group":"Local workflows","description":"Search · tagging · scenes","icon":"image-x-generic-symbolic","order":50},"defaults":{"enabled":true,"weight":2},"pipeline":{"hostResponsibilities":[]},"acceptance":[]}
+{
+  "manifestVersion": 1,
+  "id": "visual-library",
+  "version": "1.0.0",
+  "capabilities": [
+    "image-classification",
+    "image-embedding"
+  ],
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": [
+      "gpu"
+    ],
+    "minimumDevices": 1,
+    "model": {
+      "id": "visual-library-classifier",
+      "version": "1.1.0",
+      "format": "ncnn",
+      "fullyQuantized": false,
+      "minimumCompilerVersion": "validated-release",
+      "minimumRuntimeVersion": "validated-release",
+      "sha256": "6a38784ab51f056e5ecdf208120f8a9174b74831255e66b74c4dd6bf755a4324"
+    }
+  },
+  "ui": {
+    "title": "Visual library",
+    "group": "Local workflows",
+    "description": "Search \u00b7 tagging \u00b7 scenes",
+    "icon": "image-x-generic-symbolic",
+    "order": 50
+  },
+  "defaults": {
+    "enabled": true,
+    "weight": 2
+  },
+  "pipeline": {
+    "hostResponsibilities": []
+  },
+  "acceptance": []
+}

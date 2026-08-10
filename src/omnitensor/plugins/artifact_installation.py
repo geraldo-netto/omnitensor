@@ -271,6 +271,25 @@ class ArtifactInstaller:
             max_artifact_bytes=self._max_artifact_bytes,
         ).resolve(active)
 
+    def resolve(self, reference: ArtifactReference) -> ArtifactResolution:
+        """Resolve one manifest-declared reference, digest and companions included.
+
+        The service asks by reference when a manifest pins a digest, so this
+        path only runs for a profile that actually declares a model — which is
+        why it went unexercised until one did.
+        """
+        trust = self._stored_trust(reference)
+        if trust:
+            return ArtifactResolution(False, None, trust, 0)
+        version_root = self._artifact_root(reference.id) / reference.version
+        companion = self.verify_companions(version_root)
+        if companion:
+            return ArtifactResolution(False, None, companion, 0)
+        return ArtifactResolver(
+            [self._root],
+            max_artifact_bytes=self._max_artifact_bytes,
+        ).resolve(reference)
+
     @_store_locked
     def rollback(self, artifact_id: str) -> ArtifactInstallation:
         """Atomically swap active and rollback versions after re-verification."""

@@ -720,3 +720,41 @@ def test_a_store_written_before_companions_existed_still_resolves(tmp_path):
     metadata_path.write_text(json.dumps(document))
 
     assert installer.resolve_active("legacy").ready is True
+
+
+def test_a_manifest_declared_reference_resolves_through_the_installer(tmp_path):
+    """The path the service takes when a profile actually declares a model.
+
+    It went unexercised until one did, and was broken the whole time.
+    """
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    reference = ncnn_reference(param)
+    installer.install(reference, param, companions={"model.bin": binary})
+
+    resolution = installer.resolve(reference)
+
+    assert resolution.ready is True, resolution.reason
+    assert Path(resolution.path).name == "model.param"
+
+
+def test_a_declared_reference_whose_weights_changed_does_not_resolve(tmp_path):
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    reference = ncnn_reference(param)
+    installed = installer.install(reference, param, companions={"model.bin": binary})
+
+    (installed.path.parent / "model.bin").write_bytes(b"swapped")
+
+    assert installer.resolve(reference).ready is False
+
+
+def test_a_declared_reference_with_the_wrong_digest_does_not_resolve(tmp_path):
+    from omnitensor.plugins.artifacts import ArtifactReference
+
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
+
+    forged = ArtifactReference("demo-ncnn", "1.0.0", "ncnn", "0" * 64)
+    assert installer.resolve(forged).ready is False
