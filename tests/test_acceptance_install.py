@@ -380,3 +380,26 @@ def test_the_cli_exits_zero_when_everything_passes(monkeypatch, capsys, tmp_path
 def test_the_dbus_probe_derives_its_object_path_from_the_bus_name():
     probe = DbusApplyCommandProbe(bus_name="org.cinnamon.OmniTensor1")
     assert probe._bus_name == "org.cinnamon.OmniTensor1"
+
+
+def test_a_snapshot_read_a_moment_after_it_was_written_is_not_negative(tmp_path, fake_nodes):
+    """Publisher and verifier read the same clock microseconds apart."""
+    path = snapshot_file(tmp_path, fake_nodes, generated_at_ms=1_000_100)
+
+    check = check_snapshot(path, now_ms=1_000_000, max_age_ms=30_000)
+
+    assert check.ok is True
+    assert "0 ms old" in check.detail
+    assert "-100 ms" not in check.detail
+
+
+def test_a_snapshot_stamped_in_the_future_fails_rather_than_reading_as_fresh(
+    tmp_path, fake_nodes
+):
+    """A future timestamp would otherwise pass the staleness check forever."""
+    path = snapshot_file(tmp_path, fake_nodes, generated_at_ms=2_000_000)
+
+    check = check_snapshot(path, now_ms=1_000_000, max_age_ms=30_000)
+
+    assert check.ok is False
+    assert "in the future" in check.detail

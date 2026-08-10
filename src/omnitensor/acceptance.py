@@ -46,6 +46,9 @@ REQUIRED_SCHEMAS = (
     "runtime-job-result.schema.json",
 )
 DEFAULT_SNAPSHOT_MAX_AGE_MS = 30_000
+# Publisher and verifier clocks are the same clock here, but they are read a
+# moment apart, so a small negative age is ordinary rounding, not a fault.
+FUTURE_TOLERANCE_MS = 2_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +218,18 @@ def check_snapshot(
     violations = validate_document("runtime-snapshot.schema.json", document)
     if violations:
         return Check("snapshot", False, f"snapshot violates contract: {violations[0]}")
-    age_ms = now_ms - document["generatedAt"]
+    generated_at = document["generatedAt"]
+    if generated_at - now_ms > FUTURE_TOLERANCE_MS:
+        # A future timestamp would otherwise read as permanently fresh, which
+        # is exactly the staleness this check exists to catch: a publisher with
+        # a wrong clock, or a document nobody is updating any more, would pass
+        # forever.
+        return Check(
+            "snapshot",
+            False,
+            f"snapshot is stamped {generated_at - now_ms} ms in the future",
+        )
+    age_ms = max(0, now_ms - generated_at)
     if age_ms > max_age_ms:
         return Check("snapshot", False, f"snapshot is {age_ms} ms old; limit is {max_age_ms}")
     return Check("snapshot", True, f"snapshot is contract-valid and {age_ms} ms old")
