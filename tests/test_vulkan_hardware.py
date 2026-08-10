@@ -114,3 +114,37 @@ def test_a_dispatched_job_runs_on_a_real_vulkan_device(absval_model):
 
     assert payload["outputs"] == [[1.5, 2.0, 3.0]]
     assert payload["durationMs"] >= 0
+
+
+def test_a_declared_batch_axis_does_not_become_a_one_channel_mat(absval_model):
+    """An ncnn Mat is CHW and carries no batch axis.
+
+    A contract states its input as NCHW, so handing ``[1, C, H, W]`` straight
+    to ``Mat`` builds a four-dimensional Mat with one channel. The network runs
+    on it and returns a full set of scores, so the failure looks exactly like a
+    working inference — every classification produced this way was of a tensor
+    assembled from the wrong axes.
+    """
+    executor = VulkanGpuExecutor(device_present=True)
+    availability = executor.availability()
+    if not availability.available:
+        pytest.skip(f"no usable Vulkan device: {availability.reason}")
+
+    planar = [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]], [[9.0, 10.0], [11.0, 12.0]]]
+
+    batched = executor._to_mat([planar])
+    bare = executor._to_mat(planar)
+
+    assert (batched.dims, batched.c) == (3, 3), "the batch axis is dropped, not carried"
+    assert (bare.dims, bare.c) == (3, 3)
+    assert batched.w == bare.w and batched.h == bare.h
+
+
+def test_a_real_batch_is_refused_rather_than_silently_truncated():
+    """Answering for the first image would discard the rest without saying so."""
+    executor = VulkanGpuExecutor(device_present=True)
+    if not executor.availability().available:
+        pytest.skip("no usable Vulkan device")
+
+    with pytest.raises(RuntimeError, match="one image at a time"):
+        executor._to_mat([[[[1.0]]], [[[2.0]]]])

@@ -98,11 +98,30 @@ class VulkanGpuExecutor:
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)
 
     def _to_mat(self, value):
+        """Build the Mat ncnn expects from the tensor a caller declared.
+
+        An ncnn Mat is channels-height-width and carries no batch axis, while
+        a model contract states its input as NCHW — so handing ``[1, 3, H, W]``
+        straight to ``Mat`` produces a *four-dimensional* Mat with a single
+        channel.  The network still runs on it and returns a full set of
+        scores, which is the worst possible failure: every classification this
+        executor produced was of a one-channel tensor assembled from the wrong
+        axes, and looked exactly like a working one.
+        """
         if isinstance(value, self._runtime.Mat):
             return value
         import numpy  # noqa: PLC0415 - shipped with the ncnn wheel
 
-        return self._runtime.Mat(numpy.ascontiguousarray(value, dtype=numpy.float32))
+        array = numpy.ascontiguousarray(value, dtype=numpy.float32)
+        while array.ndim > 3 and array.shape[0] == 1:
+            array = array[0]
+        if array.ndim > 3:
+            # Answering for the first image of several would report a confident
+            # result about one input while silently discarding the rest.
+            raise RuntimeError(
+                f"ncnn runs one image at a time; received a batch of {array.shape[0]}"
+            )
+        return self._runtime.Mat(array)
 
     @staticmethod
     def _from_mat(mat):
