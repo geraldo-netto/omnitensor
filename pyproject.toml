@@ -18,8 +18,15 @@ dependencies = [
 
 [project.optional-dependencies]
 tpu = ["tflite-runtime>=2.14"]
-gpu = ["ncnn>=1.0.20240102"]
-gpu-onnx = ["onnxruntime>=1.17"]
+# numpy is named explicitly rather than relied on as an ncnn transitive: the
+# Vulkan executor imports it directly, so a future ncnn wheel that dropped it
+# would break inference with an ImportError instead of a clear resolver error.
+gpu = ["ncnn>=1.0.20240102", "numpy>=1.24"]
+# NOT plain onnxruntime: that wheel ships CPUExecutionProvider only, which
+# executors/gpu.py deliberately refuses, so it can never satisfy the GPU lane.
+# Pick the extra matching the vendor's runtime.
+gpu-onnx-cuda = ["onnxruntime-gpu>=1.17"]
+gpu-onnx-rocm = ["onnxruntime-rocm>=1.17"]
 npu = ["openvino>=2024.0"]
 dev = [
     "pytest>=8.0",

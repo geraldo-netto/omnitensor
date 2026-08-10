@@ -15,10 +15,12 @@ happens to contain:
 
 ```sh
 python3 -m venv ~/.local/share/omnitensor/venv
-~/.local/share/omnitensor/venv/bin/pip install /path/to/omnitensor
+~/.local/share/omnitensor/venv/bin/pip install '/path/to/omnitensor[gpu]'
 ln -sf ~/.local/share/omnitensor/venv/bin/omnitensor ~/.local/bin/omnitensor
 ln -sf ~/.local/share/omnitensor/venv/bin/omnitensor-verify-install \
        ~/.local/bin/omnitensor-verify-install
+ln -sf ~/.local/share/omnitensor/venv/bin/omnitensor-prepare-artifact \
+       ~/.local/bin/omnitensor-prepare-artifact
 
 install -Dm0644 systemd/omnitensor.service ~/.config/systemd/user/omnitensor.service
 systemctl --user daemon-reload
@@ -45,6 +47,99 @@ dbus-send --session --dest=org.freedesktop.DBus --print-reply \
   /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID \
   string:org.cinnamon.OmniTensor1
 ```
+
+## Dependencies
+
+An install with no accelerator extra starts, publishes a contract-valid
+snapshot, answers the bus, and passes every acceptance check — while being
+unable to run a single inference, because no execution runtime is importable.
+That is the most misleading state this service has, so choose an extra
+deliberately rather than taking the default.
+
+### Python packages
+
+| Extra | Installs | Needed for |
+| --- | --- | --- |
+| *(none)* | `cryptography`, `jsonschema`, `dbus-fast` | the service, bus, schemas, policy — **no inference** |
+| `[gpu]` | `ncnn`, `numpy` | GPU inference over Vulkan; the only lane that works on AMD |
+| `[gpu-onnx-cuda]` | `onnxruntime-gpu` | GPU inference on NVIDIA |
+| `[gpu-onnx-rocm]` | `onnxruntime-rocm` | GPU inference on AMD via ROCm, instead of Vulkan |
+| `[npu]` | `openvino` | Intel NPU |
+| `[tpu]` | `tflite-runtime` | Coral Edge TPU |
+| `[dev]` | pytest, ruff, hypothesis, mutmut | tests and linting only |
+
+Do not install plain `onnxruntime`. That wheel ships `CPUExecutionProvider`
+only, and `executors/gpu.py` refuses it by design — OmniTensor has no CPU
+backend — so it can never satisfy the GPU lane no matter how it is configured.
+
+`[gpu]` is not small: `ncnn` pulls `opencv-python` (~72 MB), `requests`,
+`tqdm`, and `portalocker` transitively. `numpy` is declared explicitly because
+the Vulkan executor imports it directly; relying on it arriving with `ncnn`
+would turn a future wheel change into an `ImportError` at inference time.
+
+```sh
+# Install, or add an accelerator to an existing environment
+~/.local/share/omnitensor/venv/bin/pip install '/path/to/omnitensor[gpu]'
+
+# Confirm a backend is actually importable — this is what the profile status
+# reflects, and it is not covered by omnitensor-verify-install
+~/.local/share/omnitensor/venv/bin/python -c 'import ncnn; print(ncnn.get_gpu_count())'
+```
+
+A profile reporting `unavailable: gpu: ncnn is not installed` means the extra
+was omitted; a profile reporting `Ready on gpu` means the runtime resolved.
+
+### System packages
+
+| Package | Needed for | Without it |
+| --- | --- | --- |
+| `bubblewrap` | plugin worker sandbox | external plugin workers cannot start |
+| `mesa-vulkan-drivers` (or vendor driver) | Vulkan GPU inference | `ncnn` reports zero GPUs |
+| `dbus` session bus | the whole control surface | the service cannot own its bus name |
+| `clang`, `bpftool`, `libbpf-dev` | building the eBPF helper only | `helpers/bpf/build.sh` refuses to run |
+
+The kernel must expose BTF at `/sys/kernel/btf/vmlinux` for the eBPF helper;
+CO-RE cannot be built without it.
+
+```sh
+sudo apt install bubblewrap mesa-vulkan-drivers        # runtime
+sudo apt install clang bpftool libbpf-dev              # eBPF helper build only
+```
+
+### Uninstalling
+
+Removing the package leaves state behind on purpose — artifacts are expensive
+to re-verify and policy is a user's own configuration — so the data is removed
+separately and deliberately.
+
+```sh
+# 1. Stop and remove the service
+systemctl --user disable --now omnitensor.service
+rm -f ~/.config/systemd/user/omnitensor.service
+systemctl --user daemon-reload
+
+# 2. Remove the environment and its launchers
+rm -f ~/.local/bin/omnitensor ~/.local/bin/omnitensor-verify-install \
+      ~/.local/bin/omnitensor-prepare-artifact
+rm -rf ~/.local/share/omnitensor/venv
+
+# 3. Remove one accelerator without removing the service
+~/.local/share/omnitensor/venv/bin/pip uninstall -y ncnn numpy opencv-python
+
+# 4. State — only if you mean it. Artifacts, policy, recorded telemetry.
+rm -rf ~/.local/share/omnitensor/artifacts     # verified models
+rm -rf ~/.local/state/omnitensor               # policy, cancellation journal
+rm -f  ~/.local/state/tpu-workload-manager/state.json   # published snapshot
+
+# 5. The privileged eBPF helper, if it was installed
+sudo systemctl disable --now omnitensor-bpf.service
+sudo rm -f /etc/systemd/system/omnitensor-bpf.service
+sudo rm -rf /usr/lib/omnitensor /sys/fs/bpf/omnitensor
+sudo systemctl daemon-reload
+```
+
+Removing the snapshot while the applet is running is safe: the applet reports
+an absent runtime rather than showing the last values it saw.
 
 ## Applet
 
