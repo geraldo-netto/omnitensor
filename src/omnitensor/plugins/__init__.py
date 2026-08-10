@@ -82,6 +82,17 @@ from .collection import (
     SourceSnapshot,
     validated_allowlist,
 )
+from .desktop_collection import (
+    DESKTOP_CONSENT_PERMISSION,
+    DESKTOP_METADATA_PERMISSION,
+    DesktopContextCollector,
+    DesktopSession,
+    WindowRole,
+    WindowSample,
+    WindowState,
+    window_identity,
+    window_sample_error,
+)
 from .discovery import (
     MAX_DISTRIBUTION_FILES,
     MAX_PLUGIN_CANDIDATES,
@@ -599,6 +610,15 @@ __all__ = [
     "ResourceSchedulerCollector",
     "OptedInRootScanner",
     "DocumentIngestor",
+    "DesktopContextCollector",
+    "DesktopSession",
+    "WindowSample",
+    "WindowRole",
+    "WindowState",
+    "window_identity",
+    "window_sample_error",
+    "DESKTOP_CONSENT_PERMISSION",
+    "DESKTOP_METADATA_PERMISSION",
     "DocumentCandidate",
     "DocumentScan",
     "DocumentRejection",
