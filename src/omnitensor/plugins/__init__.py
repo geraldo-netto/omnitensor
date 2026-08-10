@@ -67,6 +67,14 @@ from .budgets import (
     join_worker_cgroup,
     remove_worker_cgroup,
 )
+from .build_ingestion import (
+    BUILD_METADATA_PERMISSION,
+    BuildMetadataIngestor,
+    BuildOutcome,
+    BuildRecord,
+    RepositoryProfile,
+    build_record_error,
+)
 from .cancellation import (
     Cancellation,
     CancellationReason,
@@ -610,6 +618,12 @@ __all__ = [
     "ResourceSchedulerCollector",
     "OptedInRootScanner",
     "DocumentIngestor",
+    "BuildMetadataIngestor",
+    "BuildRecord",
+    "BuildOutcome",
+    "RepositoryProfile",
+    "build_record_error",
+    "BUILD_METADATA_PERMISSION",
     "DesktopContextCollector",
     "DesktopSession",
     "WindowSample",
