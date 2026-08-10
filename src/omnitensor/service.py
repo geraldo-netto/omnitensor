@@ -80,7 +80,7 @@ from .ports import (
     SnapshotPublisher,
 )
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
-from .scheduler import Scheduler, select_backend
+from .scheduler import Scheduler, runnable_model, select_backend
 from .snapshot import build_snapshot, input_roots_document, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
 from .tensorref import OptedInInputRoots
@@ -791,13 +791,22 @@ class OmniTensorService:
         return json.dumps(document, separators=(",", ":"))
 
     def _profile_artifact_ready(self, workload: Workload) -> tuple[bool, str]:
-        """Whether the model a profile declares is actually installed here.
+        """Whether the model this profile would actually run is installed.
 
-        Asked of the same resolver dispatch uses, so the snapshot cannot
-        promise a profile the dispatcher would then refuse.
+        Asked of the lane dispatch would choose, not of the first entry the
+        manifest happens to list.  A profile declaring one model per
+        accelerator has as many answers as it has entries, and reading only
+        the first reported unavailable for a profile the runtime would serve —
+        or serving for one whose chosen lane refuses — which is the
+        snapshot-versus-dispatch disagreement this resolver exists to prevent.
         """
-        model = workload.model
+        if not workload.models:
+            return True, ""
+        model = runnable_model(workload, self._selected_backend(workload), self._executors)
         if model is None:
+            # No lane can run any declared model; `select_backend` already
+            # reports that as the profile's status, so readiness stays quiet
+            # rather than adding a second, vaguer reason for the same fact.
             return True, ""
         if not model.get("sha256"):
             # Said here as well as at dispatch, so a profile that can never run
@@ -811,6 +820,17 @@ class OmniTensorService:
         if getattr(resolution, "ready", False):
             return True, ""
         return False, getattr(resolution, "reason", "") or "model artifact is not installed"
+
+    def _selected_backend(self, workload: Workload) -> str:
+        """The lane dispatch would take for this profile, or its first choice.
+
+        Falling back to the preference head keeps readiness answerable on a
+        host where nothing is available: the profile is unavailable for that
+        reason anyway, and asking about a lane is better than asking about
+        none.
+        """
+        choice = select_backend(workload, self._executors)
+        return choice.backend or (workload.preference[0] if workload.preference else "")
 
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
         """Report readiness exactly as dispatch would decide it.

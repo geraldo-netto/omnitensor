@@ -10,7 +10,7 @@ from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import UnavailableJobDispatcher
-from omnitensor.plugins import ArtifactInstaller, ArtifactReference
+from omnitensor.plugins import ArtifactInstaller, ArtifactReference, ArtifactResolution
 from omnitensor.registry import _schema_path, validate_document
 from omnitensor.scheduler import select_backend
 from omnitensor.service import (
@@ -451,3 +451,68 @@ def test_a_granted_permission_stops_being_reported_as_missing(fake_nodes, tmp_pa
     )
 
     assert service._profile_permissions_missing(workload) == ()
+
+
+def test_readiness_follows_the_lane_dispatch_would_choose(fake_nodes, tmp_path):
+    """A profile declaring one model per accelerator has one answer per lane.
+
+    Reading only the first declared entry reported unavailable for a profile
+    the runtime would serve, and serving for one whose chosen lane refuses —
+    the snapshot-versus-dispatch disagreement the resolver exists to prevent.
+    """
+    from omnitensor.registry import Workload
+
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+    resolved: list[str] = []
+    service._resolve_artifact = lambda artifact_id: (
+        resolved.append(artifact_id) or ArtifactResolution(True, None, "", 1)
+    )
+
+    manifest = sample_manifest_with_model()
+    requirements = manifest["requirements"]
+    requirements.pop("model")
+    requirements["acceleratorPreference"] = ["tpu", "gpu"]
+    requirements["models"] = [
+        {
+            "id": "gpu-model",
+            "version": "1.0.0",
+            "format": "ncnn",
+            "fullyQuantized": False,
+            "minimumCompilerVersion": "v",
+            "minimumRuntimeVersion": "v",
+            "sha256": "a" * 64,
+        },
+        {
+            "id": "tpu-model",
+            "version": "1.0.0",
+            "format": "tflite-edgetpu",
+            "fullyQuantized": True,
+            "minimumCompilerVersion": "v",
+            "minimumRuntimeVersion": "v",
+            "sha256": "b" * 64,
+        },
+    ]
+    workload = Workload(id="multi-lane", manifest=manifest)
+    service._executors = {"tpu": _AvailableExecutor()}
+
+    ready, _reason = service._profile_artifact_ready(workload)
+
+    assert ready is True
+    assert resolved == ["tpu-model"], "the TPU lane won, so its own artifact was asked about"
+
+
+def test_a_profile_no_lane_can_run_leaves_readiness_quiet(fake_nodes, tmp_path):
+    """`select_backend` already reports that; a second vaguer reason helps nobody."""
+    from omnitensor.registry import Workload
+
+    add_pcie_tpu(fake_nodes)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+    def _never(_artifact_id):
+        raise AssertionError("the store must not be consulted for an unrunnable profile")
+
+    service._resolve_artifact = _never
+    service._executors = {"gpu": _OnnxOnlyExecutor()}
+    workload = Workload(id="unrunnable", manifest=sample_manifest_with_model())
+
+    assert service._profile_artifact_ready(workload) == (True, "")
