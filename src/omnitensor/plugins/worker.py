@@ -26,7 +26,7 @@ from .ipc import (
     ready_frame,
 )
 from .protocol import PluginContext, WorkloadPlugin
-from .seccomp import install_filter
+from .seccomp import confinement_error, install_filter
 
 WORKER_CAPABILITIES = frozenset({"cancel", "health"})
 
@@ -199,6 +199,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not arguments.no_seccomp:
         # Before the plugin is imported, because importing it already runs its
         # code, and a filter applied afterwards would have arrived too late.
+        #
+        # Probed first so the refusal names its cause. Failing closed here is
+        # right — a worker that believes it is confined and is not would run
+        # plugin code under a guarantee that does not exist — but a stack trace
+        # from deep inside ctypes told an operator nothing about their kernel.
+        blocked = confinement_error()
+        if blocked:
+            raise SystemExit(
+                f"{arguments.plugin_id}: cannot be confined and will not run unconfined: "
+                f"{blocked}. Pass --no-seccomp to accept that deliberately."
+            )
         install_filter()
     plugin = load_external_plugin(
         arguments.plugin_id,

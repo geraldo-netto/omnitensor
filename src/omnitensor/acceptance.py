@@ -274,6 +274,32 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
 DEFAULT_APPLET_ROOT = "~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto"
 
 
+def check_confinement() -> Check:
+    """Whether a plugin worker could be confined on this host.
+
+    Workers fail closed: on a kernel that cannot install a seccomp filter, or
+    on an architecture with no syscall table, every one of them refuses to
+    start rather than run plugin code unconfined. That is the right outcome
+    and it was undiagnosable — nothing said the kernel was the reason. This
+    says it once, where an operator is already reading.
+
+    Reported as a pass when nothing is confinable *and* nothing needs to be:
+    an install with no external plugins is not broken by a kernel that cannot
+    sandbox them.
+    """
+    from .plugins.seccomp import confinement_error  # noqa: PLC0415 - probe only
+
+    reason = confinement_error()
+    if not reason:
+        return Check("confinement", True, "plugin workers can be confined on this host")
+    return Check(
+        "confinement",
+        False,
+        f"{reason}; external plugin workers will not start, and --no-seccomp is "
+        "the deliberate override",
+    )
+
+
 def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
     """The installed applet must be able to read what this service publishes.
 
@@ -539,6 +565,7 @@ def build_default_report(
         check_bus(bus or DbusApplyCommandProbe()),
         check_snapshot(snapshot_path, now_ms=now_ms),
         check_backends(),
+        check_confinement(),
     ]
     # Run against whatever applet is actually installed, because the failure
     # this catches only exists on a host where both halves are present. A

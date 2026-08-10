@@ -42,6 +42,7 @@ import ctypes
 import os
 import platform
 import struct
+from pathlib import Path
 
 # Classic BPF, as the kernel's seccomp(2) accepts it.
 _BPF_LD_W_ABS = 0x20
@@ -187,6 +188,39 @@ class SeccompInstallError(RuntimeError):
 
 class _SockFprog(ctypes.Structure):
     _fields_ = (("len", ctypes.c_ushort), ("filter", ctypes.c_void_p))
+
+
+def confinement_error(machine: str | None = None) -> str:
+    """Why a worker could not be confined on this host, or ``""``.
+
+    A probe rather than an attempt: installing a filter is irreversible for
+    the process that does it, so this answers from what can be read — the
+    syscall table for this ABI, and the kernel's own statement that it
+    supports the filter mode.
+
+    It exists because failing closed is right and being undiagnosable is not.
+    On a kernel without ``CONFIG_SECCOMP_FILTER`` every plugin worker refused
+    to start, correctly, and nothing anywhere said that the kernel was the
+    reason.
+    """
+    machine = machine or current_machine()
+    if machine not in SYSCALLS:
+        return (
+            f"no seccomp syscall table for {machine}; confinement is implemented "
+            f"for {', '.join(SUPPORTED_MACHINES)}"
+        )
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+    except OSError:
+        # Nothing readable to judge by, so claim nothing: the worker's own
+        # attempt remains the authority.
+        return ""
+    if "Seccomp:" not in status:
+        return (
+            "this kernel does not report seccomp support (no Seccomp field in "
+            "/proc/self/status); a plugin worker cannot be confined and will not start"
+        )
+    return ""
 
 
 def install_filter(program: bytes | None = None, *, machine: str | None = None, libc=None) -> int:
