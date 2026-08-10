@@ -343,3 +343,76 @@ def test_a_result_at_the_element_bound_is_accepted():
 def test_bytes_are_not_treated_as_a_tensor():
     with pytest.raises(JobDispatchError):
         inference_result_payload(result([b"raw"]))
+
+
+def submit(payload):
+    return dispatcher([workload(model=MODEL)]).dispatch("job-1", "sample-workload", payload)
+
+
+def test_a_ragged_input_tensor_is_refused_before_it_reaches_a_backend():
+    """Every backend expects a rectangular buffer; ragged input fails natively."""
+    with pytest.raises(JobDispatchError) as excinfo:
+        submit({"inputs": [[[1, 2], [3]]]})
+    assert excinfo.value.code == "payload-invalid"
+    assert "rectangular" in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    "tensor",
+    [
+        [float("nan")],
+        [float("inf")],
+        ["text"],
+        [None],
+        [{"value": 1}],
+        [True],
+    ],
+)
+def test_a_tensor_that_is_not_finite_numbers_is_refused(tensor):
+    with pytest.raises(JobDispatchError) as excinfo:
+        submit({"inputs": [tensor]})
+    assert excinfo.value.code == "payload-invalid"
+
+
+def test_the_total_input_element_count_is_bounded():
+    dispatch = InferenceJobDispatcher(
+        {"sample-workload": workload(model=MODEL)},
+        Scheduler({"gpu": FakeExecutor()}, lambda _p: 1),
+        {"gpu": FakeExecutor()},
+        FakeArtifacts(),
+        max_input_elements=3,
+    )
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1, 2], [3, 4]]})
+    assert excinfo.value.code == "payload-invalid"
+    assert "exceeds 3 tensor elements" in excinfo.value.message
+
+
+def test_the_input_element_bound_must_be_positive():
+    with pytest.raises(ValueError, match="max_input_elements"):
+        InferenceJobDispatcher({}, None, {}, FakeArtifacts(), max_input_elements=0)
+
+
+def test_a_well_formed_nested_tensor_is_accepted():
+    executor = FakeExecutor()
+
+    async def scenario():
+        dispatch = dispatcher([workload(model=MODEL)], executors={"gpu": executor})
+        dispatch._scheduler.start()
+        await asyncio.wait_for(
+            dispatch.dispatch(
+                "job-1", "sample-workload", {"inputs": [[[1.0, 2.0], [3.0, 4.0]]]}
+            ),
+            timeout=5,
+        )
+        await dispatch._scheduler.stop()
+
+    asyncio.run(scenario())
+    assert executor.ran == [("/models/sample.ncnn.param", [[[1.0, 2.0], [3.0, 4.0]]])]
+
+
+def test_an_empty_tensor_list_is_accepted():
+    async def scenario():
+        return submit({"inputs": []})
+
+    assert asyncio.run(scenario()) is not None

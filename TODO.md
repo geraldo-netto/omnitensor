@@ -61,7 +61,6 @@
 | OMNI-0125 | blocked | high | s | OMNI-0087, OMNI-0090, OMNI-0093, OMNI-0096, OMNI-0101, OMNI-0106, OMNI-0111, OMNI-0115, OMNI-0121 | system acceptance hardware: run the reproducible TPU/NPU/GPU matrix, archive evidence, and prevent any profile from claiming operational readiness until its own model, pipeline, safety, and acceptance gates pass. — blocked: the GPU lane is available (Vulkan/ncnn) but no TPU or NPU device is present, so the full matrix cannot be run. |
 
 | OMNI-0160 | open | high | s | OMNI-0067 | model digest coverage: `requirements.model` in a v1 manifest carries no `sha256`, so dispatch can only fall back to `resolve_active` and trust the digest recorded at install; add the declared digest to the v1 model requirement, or migrate the bundled catalog to manifest v2 so every dispatch verifies the exact artifact. |
-| OMNI-0162 | open | medium | s | OMNI-0067 | dispatch input validation: submitted tensors are passed to the executor unvalidated, so shape, dtype, and element bounds are only checked by the backend; validate inputs against the model's declared tensor contract before queueing. |
 
 ## Rejected / Won't fix
 

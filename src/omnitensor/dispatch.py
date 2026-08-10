@@ -52,14 +52,18 @@ class InferenceJobDispatcher:
         artifacts: ArtifactSource,
         *,
         max_input_tensors: int = MAX_INPUT_TENSORS,
+        max_input_elements: int = MAX_TENSOR_ELEMENTS,
     ) -> None:
         if max_input_tensors < 1:
             raise ValueError("max_input_tensors must be positive")
+        if max_input_elements < 1:
+            raise ValueError("max_input_elements must be positive")
         self._workloads = workloads
         self._scheduler = scheduler
         self._executors = executors
         self._artifacts = artifacts
         self._max_input_tensors = max_input_tensors
+        self._max_input_elements = max_input_elements
 
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
         """Admit, resolve, route, and queue one job; never run it inline."""
@@ -89,6 +93,13 @@ class InferenceJobDispatcher:
             raise JobDispatchError("scheduler-unavailable", str(error)) from error
 
     def _inputs(self, payload: dict) -> list:
+        """Validate submitted tensors before anything is queued.
+
+        Unvalidated input reaches the backend as whatever the caller sent, so
+        the first thing to reject a malformed tensor is a native library
+        running on a shared accelerator.  Validating here keeps that failure a
+        stable refusal on the submitting side.
+        """
         if not isinstance(payload, dict):
             raise JobDispatchError("payload-invalid", "Job payload must be an object")
         inputs = payload.get("inputs")
@@ -101,7 +112,10 @@ class InferenceJobDispatcher:
                 "payload-invalid",
                 f"At most {self._max_input_tensors} input tensors may be submitted",
             )
-        return list(inputs)
+        budget = _ElementBudget(
+            self._max_input_elements, code="payload-invalid", label="Job payload"
+        )
+        return [validate_input_tensor(tensor, budget) for tensor in inputs]
 
     def _model_path(self, workload: Workload, model: dict) -> str:
         """Resolve the model this manifest declares, and only that one."""
@@ -125,6 +139,40 @@ class InferenceJobDispatcher:
                 "artifact-unavailable", f"{workload_id}: {resolution.reason}"
             )
         return str(resolution.path)
+
+
+def validate_input_tensor(value: object, budget: _ElementBudget) -> object:
+    """Accept one rectangular tensor of finite numbers, or refuse it.
+
+    Ragged nesting is rejected because every backend expects a rectangular
+    buffer: accepting it here would turn a caller's mistake into an error
+    raised deep inside a native library, mid-inference, on a shared device.
+    """
+    if isinstance(value, bool):
+        raise JobDispatchError("payload-invalid", "Input tensors must contain numbers")
+    if isinstance(value, (int, float)):
+        budget.spend()
+        if isinstance(value, float) and not math.isfinite(value):
+            raise JobDispatchError(
+                "payload-invalid", "Input tensors must contain finite numbers"
+            )
+        return value
+    if not isinstance(value, list):
+        raise JobDispatchError(
+            "payload-invalid",
+            f"Input tensors must be numbers or nested arrays, not {type(value).__name__}",
+        )
+    encoded = [validate_input_tensor(item, budget) for item in value]
+    shapes = {_tensor_shape(item) for item in encoded}
+    if len(shapes) > 1:
+        raise JobDispatchError("payload-invalid", "Input tensors must be rectangular")
+    return encoded
+
+
+def _tensor_shape(value: object) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        return ()
+    return (len(value),) + (_tensor_shape(value[0]) if value else ())
 
 
 def declared_artifact_reference(
@@ -177,18 +225,26 @@ def inference_result_payload(
 class _ElementBudget:
     """Bound the total elements one result may carry across all its tensors."""
 
-    def __init__(self, maximum: int) -> None:
+    def __init__(
+        self,
+        maximum: int,
+        *,
+        code: str = "executor-result-invalid",
+        label: str = "Inference result",
+    ) -> None:
         if maximum < 1:
             raise ValueError("max_elements must be positive")
         self._remaining = maximum
         self._maximum = maximum
+        self._code = code
+        self._label = label
 
     def spend(self, count: int = 1) -> None:
         self._remaining -= count
         if self._remaining < 0:
             raise JobDispatchError(
-                "executor-result-invalid",
-                f"Inference result exceeds {self._maximum} tensor elements",
+                self._code,
+                f"{self._label} exceeds {self._maximum} tensor elements",
             )
 
 
