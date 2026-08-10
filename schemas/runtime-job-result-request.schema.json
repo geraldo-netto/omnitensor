@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/runtime-job-result-request.schema.json",
+  "title": "OmniTensor runtime job result request version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "jobId"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "jobId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"}
+  }
+}

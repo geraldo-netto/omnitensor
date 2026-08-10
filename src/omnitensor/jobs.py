@@ -9,11 +9,12 @@ import math
 import secrets
 import time
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 
 from .callers import ANONYMOUS_OWNER
+from .plugins.protocol import PluginResult, PluginResultStatus
+from .plugins.results import JobRecord, JobResultError, JobResultStore
 from .registry import validate_document
 
 JOB_API_VERSION = 1
@@ -108,6 +109,7 @@ class JobSubmissionService:
         cancel_timeout_seconds: float = DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS,
         id_factory: Callable[[], str] | None = None,
         clock_ms: Callable[[], int] | None = None,
+        results: JobResultStore | None = None,
     ) -> None:
         _validate_integer_bound(
             "max_active_jobs", max_active_jobs, 1, MAX_ACTIVE_JOBS_LIMIT
@@ -136,6 +138,7 @@ class JobSubmissionService:
         self._id_factory = id_factory or (lambda: secrets.token_hex(16))
         self._clock_ms = clock_ms or (lambda: max(1, int(time.time() * 1000)))
         self._active: dict[str, _ActiveJob] = {}
+        self._results = results
 
     def active_job_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._active))
@@ -287,11 +290,76 @@ class JobSubmissionService:
         await asyncio.wait(tasks, timeout=self._cancel_timeout_seconds)
 
     def _job_completed(self, job_id: str, task: asyncio.Future) -> None:
-        with suppress(asyncio.CancelledError):
-            task.exception()
         active = self._active.get(job_id)
+        owner = active.owner if active is not None else ANONYMOUS_OWNER
+        workload_id = active.workload_id if active is not None else ""
+        self._record_outcome(job_id, owner, workload_id, task)
         if active is not None and active.task is task:
             self._active.pop(job_id, None)
+
+    def _record_outcome(
+        self, job_id: str, owner: str, workload_id: str, task: asyncio.Future
+    ) -> None:
+        """Remember how a job ended, because the caller has already been replied to.
+
+        Submission answers with an acceptance, so this is the only place the
+        outcome can be kept; dropping it here is what made a submitted job
+        unanswerable for the rest of its life.
+        """
+        if self._results is None:
+            return
+        status, detail = _terminal_status(task)
+        output = task.result() if status is PluginResultStatus.SUCCEEDED else {}
+        self._results.record_result(
+            job_id,
+            owner,
+            PluginResult(
+                job_id,
+                status,
+                output if isinstance(output, dict) else {"value": output},
+                detail[:200],
+                self._clock_ms(),
+            ),
+        )
+
+    async def job_result_text(self, text: str, *, owner: str = ANONYMOUS_OWNER) -> str:
+        """Report what is known about one job, to the caller that owns it."""
+        request_id = "unknown"
+        try:
+            document = _parse_request(
+                text, "runtime-job-result-request.schema.json", self._max_request_bytes
+            )
+            request_id = document["requestId"]
+            job_id = document["jobId"]
+        except _RequestError as error:
+            return _result_reply(
+                error.request_id, "unknown", "unknown", error.code, error.message,
+                self._clock_ms(),
+            )
+        record = self._lookup(job_id, owner)
+        if record is None:
+            # A job belonging to someone else answers exactly as one that never
+            # existed, so a reply never confirms which job ids are real.
+            return _result_reply(
+                request_id, job_id, "unknown", "job-not-found",
+                "No such job for this caller", self._clock_ms(),
+            )
+        return _record_reply(request_id, record, self._clock_ms())
+
+    def _lookup(self, job_id: str, owner: str):
+        if not isinstance(job_id, str) or not job_id:
+            return None
+        if self._results is not None:
+            try:
+                record = self._results.get(job_id, owner)
+            except JobResultError:
+                record = None
+            if record is not None:
+                return record
+        active = self._active.get(job_id)
+        if active is None or active.owner != owner:
+            return None
+        return JobRecord(job_id, None, None, 0.0)
 
     def _reply(
         self,
@@ -438,3 +506,71 @@ def _validate_integer_bound(name: str, value: object, minimum: int, maximum: int
         or not minimum <= value <= maximum
     ):
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
+
+
+def _terminal_status(task: asyncio.Future) -> tuple[PluginResultStatus, str]:
+    """How a job actually ended, from the task rather than from intent."""
+    if task.cancelled():
+        return PluginResultStatus.CANCELLED, "Job cancelled"
+    error = task.exception()
+    if error is not None:
+        return PluginResultStatus.FAILED, f"{type(error).__name__}: {error}"
+    return PluginResultStatus.SUCCEEDED, "Job completed"
+
+
+def _result_reply(
+    request_id: str, job_id: str, state: str, code: str, message: str, timestamp: int
+) -> str:
+    return json.dumps(
+        {
+            "version": 1,
+            "requestId": request_id if isinstance(request_id, str) else "unknown",
+            "jobId": job_id if isinstance(job_id, str) and job_id else "unknown",
+            "state": state,
+            "code": code,
+            "message": message[:500],
+            "timestamp": timestamp,
+            "progress": None,
+            "output": None,
+        },
+        separators=(",", ":"),
+    )
+
+
+def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
+    """Project a stored record into the published result contract."""
+    result = record.result
+    progress = record.progress
+    if result is None:
+        return json.dumps(
+            {
+                "version": 1,
+                "requestId": request_id,
+                "jobId": record.job_id,
+                "state": "running",
+                "code": "job-running",
+                "message": "Job is still running",
+                "timestamp": timestamp,
+                "progress": (
+                    None
+                    if progress is None
+                    else {"fraction": progress.fraction, "detail": progress.detail[:200]}
+                ),
+                "output": None,
+            },
+            separators=(",", ":"),
+        )
+    return json.dumps(
+        {
+            "version": 1,
+            "requestId": request_id,
+            "jobId": record.job_id,
+            "state": str(result.status),
+            "code": f"job-{result.status}",
+            "message": result.detail[:500] or "Job finished",
+            "timestamp": timestamp,
+            "progress": None,
+            "output": result.output if isinstance(result.output, dict) else None,
+        },
+        separators=(",", ":"),
+    )

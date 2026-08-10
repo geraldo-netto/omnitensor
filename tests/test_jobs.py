@@ -601,3 +601,138 @@ def test_an_unowned_job_is_cancellable_by_an_unidentified_caller():
         )
 
     assert run_scenario(scenario())["status"] != "not-found"
+
+
+def result_document(job_id, request_id="result-1"):
+    return {"version": 1, "requestId": request_id, "jobId": job_id}
+
+
+def decode_result(text):
+    document = json.loads(text)
+    assert validate_document("runtime-job-result.schema.json", document) == []
+    return document
+
+
+def test_a_submitted_job_can_be_asked_about_until_it_finishes():
+    """Submission only answers 'accepted'; without this the outcome is lost."""
+    from omnitensor.plugins.results import JobResultStore
+
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        job_id = accepted["jobId"]
+        running = decode_result(
+            await service.job_result_text(json.dumps(result_document(job_id)), owner="uid:1000")
+        )
+        dispatcher.release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        finished = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(job_id, "result-2")), owner="uid:1000"
+            )
+        )
+        return running, finished
+
+    running, finished = run_scenario(scenario())
+
+    assert running["state"] == "running"
+    assert finished["state"] == "succeeded"
+    assert finished["jobId"] == running["jobId"]
+
+
+def test_a_failed_job_reports_why_rather_than_vanishing():
+    from omnitensor.plugins.results import JobResultStore
+
+    class FailingDispatcher:
+        def dispatch(self, job_id, workload_id, payload):
+            async def fail():
+                raise RuntimeError("the accelerator went away")
+
+            return fail()
+
+    async def scenario():
+        service = JobSubmissionService(FailingDispatcher(), allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(accepted["jobId"])), owner="uid:1000"
+            )
+        )
+
+    finished = run_scenario(scenario())
+
+    assert finished["state"] == "failed"
+    assert "accelerator went away" in finished["message"]
+
+
+def test_another_caller_cannot_read_a_job_it_does_not_own():
+    """Identical to a job that never existed, so ids are never confirmed."""
+    from omnitensor.plugins.results import JobResultStore
+
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all(), results=JobResultStore())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        stranger = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(accepted["jobId"])), owner="uid:1001"
+            )
+        )
+        absent = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document("job-never-existed", "result-3")), owner="uid:1001"
+            )
+        )
+        dispatcher.release.set()
+        return stranger, absent
+
+    stranger, absent = run_scenario(scenario())
+
+    assert stranger["state"] == absent["state"] == "unknown"
+    assert stranger["code"] == absent["code"] == "job-not-found"
+    assert stranger["message"] == absent["message"]
+
+
+def test_a_malformed_result_request_is_answered_not_raised():
+    async def scenario():
+        service = JobSubmissionService(BlockingDispatcher(), allows_all())
+        return [
+            decode_result(await service.job_result_text(text, owner="uid:1000"))
+            for text in ("not json", json.dumps({"version": 2}), json.dumps({"jobId": "x"}))
+        ]
+
+    replies = run_scenario(scenario())
+
+    assert [reply["state"] for reply in replies] == ["unknown"] * 3
+
+
+def test_a_service_without_a_result_store_still_answers_about_a_live_job():
+    """Degrades to liveness rather than failing the call outright."""
+    dispatcher = BlockingDispatcher()
+
+    async def scenario():
+        service = JobSubmissionService(dispatcher, allows_all())
+        accepted = decode(
+            await service.submit_job_text(json.dumps(submit_document()), owner="uid:1000")
+        )
+        reply = decode_result(
+            await service.job_result_text(
+                json.dumps(result_document(accepted["jobId"])), owner="uid:1000"
+            )
+        )
+        dispatcher.release.set()
+        return reply
+
+    assert run_scenario(scenario())["state"] == "running"

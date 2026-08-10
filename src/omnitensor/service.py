@@ -58,6 +58,7 @@ from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.cancellation import JobCancellationRegistry
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.orchestration import RunnerSet, build_plugin_runners, with_recovery
+from .plugins.results import JobResultStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
@@ -134,6 +135,15 @@ class RuntimeAPI:
             owner=owner,
         )
 
+    async def job_result_text(self, text: str) -> str:
+        owner = await self._callers.owner_token()
+        return await self._guarded(
+            "GetJobResult",
+            text,
+            lambda request: self._jobs.job_result_text(request, owner=owner),
+            owner=owner,
+        )
+
     def describe_plugins_text(self) -> str:
         owner = self._callers.cached_owner_token()
         try:
@@ -175,6 +185,10 @@ class OmniTensorInterface(ServiceInterface):
     @method()
     async def CancelJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
         return await self._runtime.cancel_job_text(request)
+
+    @method()
+    async def GetJobResult(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
+        return await self._runtime.job_result_text(request)
 
     @method()
     def DescribePlugins(self) -> s:  # noqa: F821, N802 - D-Bus contract names
@@ -343,6 +357,7 @@ class OmniTensorService:
         job_dispatcher: JobDispatcher | None = None,
         artifact_root: Path | None = None,
         result_summaries: ResultSummaryRegistry | None = None,
+        job_results: JobResultStore | None = None,
         plugin_telemetry: PluginTelemetryRegistry | None = None,
         transport: ControlTransport | None = None,
         cancellation_journal_path: Path | None = None,
@@ -370,9 +385,14 @@ class OmniTensorService:
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
         self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
         self._job_dispatcher = job_dispatcher or self._default_dispatcher()
+        # Constructed here because submission answers with an acceptance: if no
+        # store outlives the call, the outcome has nowhere to be kept and a
+        # caller can never learn what happened to the job it submitted.
+        self.job_results = job_results or JobResultStore()
         self.jobs = JobSubmissionService(
             self._job_dispatcher,
             PredicateJobAuthorizer(self._job_authorized),
+            results=self.job_results,
         )
         self.runtime_api = RuntimeAPI(
             self.control, self.jobs, self._describe_plugins, self._callers

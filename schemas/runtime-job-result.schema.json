@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/runtime-job-result.schema.json",
+  "title": "OmniTensor runtime job result version 1",
+  "description": "What is currently known about one job. 'unknown' is returned both for a job that never existed and for one belonging to another caller, so a reply never reveals which job ids are real.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "jobId", "state", "code", "message", "timestamp"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "jobId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "state": {"enum": ["unknown", "running", "succeeded", "failed", "cancelled"]},
+    "code": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
+    "message": {"type": "string", "maxLength": 500},
+    "timestamp": {"type": "integer", "minimum": 1},
+    "progress": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["fraction", "detail"],
+      "properties": {
+        "fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "detail": {"type": "string", "maxLength": 200}
+      }
+    },
+    "output": {"type": ["object", "null"]}
+  }
+}

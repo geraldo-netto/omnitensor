@@ -93,6 +93,8 @@ DEFAULT_QUOTAS: Mapping[str, MethodQuota] = {
     "ApplyCommand": MethodQuota(max_bytes=64 * 1024, max_calls=30, max_concurrent=4),
     "SubmitJob": MethodQuota(max_bytes=256 * 1024, max_calls=60, max_concurrent=8),
     "CancelJob": MethodQuota(max_bytes=16 * 1024, max_calls=60, max_concurrent=8),
+    # Polled while a job runs, so the rate is higher and the payload tiny.
+    "GetJobResult": MethodQuota(max_bytes=16 * 1024, max_calls=240, max_concurrent=8),
     "DescribePlugins": MethodQuota(max_bytes=1, max_calls=30, max_concurrent=4),
 }
 

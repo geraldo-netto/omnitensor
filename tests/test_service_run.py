@@ -1414,3 +1414,58 @@ def test_describing_plugins_is_rate_limited_too(tmp_path):
 
     assert json.loads(api.describe_plugins_text()) == {"plugins": []}
     assert json.loads(api.describe_plugins_text())["code"] == "rate-limit-exceeded"
+
+
+def test_the_bus_exposes_a_way_to_learn_a_job_outcome(tmp_path):
+    """Without this method a caller submits and can never learn what happened."""
+    from omnitensor.service import OmniTensorInterface
+
+    exported = [
+        name
+        for name in dir(OmniTensorInterface)
+        if not name.startswith("_") and name[0].isupper()
+    ]
+
+    assert "GetJobResult" in exported
+    assert {"ApplyCommand", "SubmitJob", "CancelJob", "DescribePlugins"} <= set(exported)
+
+
+def test_the_service_keeps_a_result_store_so_outcomes_outlive_the_call(tmp_path):
+    service = build_service(tmp_path, [sample_manifest()])
+    assert service.job_results is not None
+
+
+def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
+    from omnitensor.callers import CallerIdentityResolver, bind_sender
+    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.service import RuntimeAPI
+
+    class Jobs:
+        def __init__(self):
+            self.owners = []
+
+        async def job_result_text(self, text, *, owner):
+            self.owners.append(owner)
+            return '{"state":"running"}'
+
+    async def unix_user(name):
+        return {":1.7": 1000}[name]
+
+    jobs = Jobs()
+    api = RuntimeAPI(
+        None,
+        jobs,
+        lambda: "{}",
+        CallerIdentityResolver(unix_user),
+        BusGuard({"GetJobResult": MethodQuota(max_calls=1, max_concurrent=99)}),
+    )
+
+    async def scenario():
+        bind_sender(":1.7")
+        return [json.loads(await api.job_result_text("{}")) for _ in range(2)]
+
+    first, second = asyncio.run(scenario())
+
+    assert first == {"state": "running"}
+    assert jobs.owners == ["uid:1000"]
+    assert second["code"] == "rate-limit-exceeded"

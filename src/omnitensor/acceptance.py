@@ -42,6 +42,8 @@ REQUIRED_SCHEMAS = (
     "workload-manifest.schema.json",
     "plugin-inventory.schema.json",
     "runtime-refusal.schema.json",
+    "runtime-job-result-request.schema.json",
+    "runtime-job-result.schema.json",
 )
 DEFAULT_SNAPSHOT_MAX_AGE_MS = 30_000
 
