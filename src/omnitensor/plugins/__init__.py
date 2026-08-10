@@ -294,6 +294,16 @@ from .settings import (
     PluginSettingsError,
     PluginSettingsStore,
 )
+from .storage_collection import (
+    STORAGE_METADATA_PERMISSION,
+    StorageBus,
+    StorageCounters,
+    StorageHealth,
+    StorageIntelligenceCollector,
+    StorageSample,
+    storage_device_permission,
+    storage_sample_error,
+)
 from .summaries import (
     ADVISORY_RISK_MAX,
     MAX_ALERT_ID_CHARS,
@@ -558,6 +568,14 @@ __all__ = [
     "validated_allowlist",
     "MAX_COLLECTED_ITEMS",
     "HardwareHealthCollector",
+    "StorageIntelligenceCollector",
+    "StorageSample",
+    "StorageCounters",
+    "StorageBus",
+    "StorageHealth",
+    "storage_device_permission",
+    "storage_sample_error",
+    "STORAGE_METADATA_PERMISSION",
     "HardwareSample",
     "SensorHealth",
     "SensorKind",
