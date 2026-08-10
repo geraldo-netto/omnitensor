@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -58,8 +59,11 @@ def test_the_manifest_fragment_matches_the_installed_bytes(tmp_path):
 def test_each_format_names_the_accelerator_it_can_run_on(tmp_path):
     """There is no CPU lane, so a format with no accelerator cannot be prepared."""
     for model_format, accelerator in FORMAT_ACCELERATORS.items():
+        source = model_file(tmp_path, f"m.{model_format}")
+        # ncnn keeps its weights beside the graph, so the pair must exist.
+        source.with_suffix(".bin").write_bytes(b"weights")
         prepared = prepare_artifact(
-            model_file(tmp_path, f"m.{model_format}"),
+            source,
             artifact_id="m",
             version="1.0.0",
             model_format=model_format,
@@ -206,3 +210,40 @@ def test_an_unreadable_file_is_reported_not_raised_as_an_oserror(tmp_path, monke
 
     with pytest.raises(PreparationError, match="cannot read"):
         prepare_artifact(source, artifact_id="m", version="1.0.0", model_format="onnx")
+
+
+def test_ncnn_weights_are_discovered_beside_the_graph(tmp_path):
+    """Asking the caller to name a file that always sits in one place is a
+    step they can only get wrong."""
+    param = tmp_path / "squeezenet.param"
+    param.write_bytes(b"7767517\n2 2\n")
+    weights = tmp_path / "squeezenet.bin"
+    weights.write_bytes(b"WEIGHTS")
+
+    prepared = prepare_artifact(param, artifact_id="sq", version="1.0.0", model_format="ncnn")
+
+    assert prepared.companions == {"model.bin": weights}
+    assert prepared.document()["companions"] == {"model.bin": str(weights)}
+
+
+def test_ncnn_without_its_weights_is_refused_before_installing(tmp_path):
+    param = tmp_path / "squeezenet.param"
+    param.write_bytes(b"7767517\n2 2\n")
+
+    with pytest.raises(PreparationError, match="companion-missing"):
+        prepare_artifact(param, artifact_id="sq", version="1.0.0", model_format="ncnn")
+
+
+def test_installing_an_ncnn_pair_yields_a_ready_artifact(tmp_path):
+    from omnitensor.plugins.artifact_installation import ArtifactInstaller
+
+    param = tmp_path / "squeezenet.param"
+    param.write_bytes(b"7767517\n2 2\n")
+    (tmp_path / "squeezenet.bin").write_bytes(b"WEIGHTS" * 50)
+    prepared = prepare_artifact(param, artifact_id="sq", version="1.0.0", model_format="ncnn")
+
+    install_prepared(prepared, tmp_path / "artifacts")
+
+    resolution = ArtifactInstaller(tmp_path / "artifacts").resolve_active("sq")
+    assert resolution.ready is True, resolution.reason
+    assert (Path(resolution.path).parent / "model.bin").is_file()

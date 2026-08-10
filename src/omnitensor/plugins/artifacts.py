@@ -21,6 +21,19 @@ _FILENAMES = {
 }
 
 
+# Formats whose primary file is not the whole model.  An ncnn ".param" is only
+# the graph; every weight lives in the sibling ".bin", so installing the param
+# alone produces an artifact that resolves ready and cannot be executed.
+COMPANION_FILENAMES: dict[str, tuple[str, ...]] = {"ncnn": ("model.bin",)}
+# How to find each companion beside the primary source file.
+COMPANION_SOURCE_SUFFIXES: dict[str, dict[str, str]] = {"ncnn": {"model.bin": ".bin"}}
+
+
+def companion_filenames(model_format: str) -> tuple[str, ...]:
+    """The files that must accompany the primary file for this format."""
+    return COMPANION_FILENAMES.get(model_format, ())
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactReference:
     """Manifest identity and expected digest for one model artifact."""

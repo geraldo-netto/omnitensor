@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from omnitensor.plugins import (
@@ -427,6 +427,9 @@ def test_version_accounting_wraps_filesystem_failures(tmp_path, monkeypatch):
     assert excinfo.value.detail == "cannot account artifact version: denied"
 
 
+# No deadline: each example installs artifacts and walks a real store, so the
+# per-example time measures the machine rather than the behaviour under test.
+@settings(deadline=None)
 @given(max_items=st.integers(min_value=0, max_value=5))
 def test_protected_versions_survive_arbitrary_item_quotas(max_items):
     with tempfile.TemporaryDirectory() as directory:

@@ -344,6 +344,10 @@ def test_installer_persists_exact_artifact_and_activation_metadata(tmp_path):
             "format": "onnx",
             "sha256": artifact.sha256,
         },
+        # onnx is a single file, so it declares no companions; the key is
+        # always written so a reader never has to distinguish "none" from
+        # "written by a version that did not record them".
+        "companions": {},
     }
     assert json.loads((store / artifact.id / "activation.json").read_text()) == {
         "version": 1,
@@ -570,3 +574,149 @@ def test_stored_artifact_references_fail_closed(document):
     with pytest.raises(ArtifactInstallationError) as excinfo:
         artifact_reference_from_document(document)
     assert excinfo.value.code == "metadata-invalid"
+
+
+def ncnn_pair(tmp_path, graph=b"7767517\n2 2\n", weights=b"WEIGHTS" * 100):
+    param = tmp_path / "src.param"
+    param.write_bytes(graph)
+    binary = tmp_path / "src.bin"
+    binary.write_bytes(weights)
+    return param, binary
+
+
+def ncnn_reference(param, version="1.0.0"):
+    from omnitensor.plugins.artifacts import ArtifactReference
+
+    return ArtifactReference(
+        "demo-ncnn", version, "ncnn", hashlib.sha256(param.read_bytes()).hexdigest()
+    )
+
+
+def test_an_ncnn_artifact_installs_its_weights_beside_the_graph(tmp_path):
+    """The param is only the graph; without the bin nothing can execute."""
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    installed = installer.install(
+        ncnn_reference(param), param, companions={"model.bin": binary}
+    )
+
+    assert (installed.path.parent / "model.param").is_file()
+    assert (installed.path.parent / "model.bin").read_bytes() == binary.read_bytes()
+
+
+def test_an_ncnn_artifact_without_its_weights_is_refused(tmp_path):
+    """It would resolve ready and fail at load; refusing is the honest answer."""
+    param, _binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    with pytest.raises(ArtifactInstallationError) as failure:
+        installer.install(ncnn_reference(param), param)
+
+    assert failure.value.code == "companion-missing"
+    assert "model.bin" in failure.value.detail
+
+
+def test_a_companion_the_format_does_not_declare_is_refused(tmp_path):
+    """An unread file would be installed and digested but never load-bearing."""
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    with pytest.raises(ArtifactInstallationError) as failure:
+        installer.install(
+            ncnn_reference(param), param, companions={"model.bin": binary, "extra.dat": binary}
+        )
+
+    assert failure.value.code == "companion-unexpected"
+
+
+def test_installed_weights_are_digested_and_recorded(tmp_path):
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    installed = installer.install(
+        ncnn_reference(param), param, companions={"model.bin": binary}
+    )
+
+    metadata = json.loads((installed.path.parent / "artifact.json").read_text())
+    assert metadata["companions"] == {
+        "model.bin": hashlib.sha256(binary.read_bytes()).hexdigest()
+    }
+
+
+def test_replaced_weights_are_detected_after_installation(tmp_path):
+    """The manifest pins only the graph, so this is what notices tampering."""
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    installed = installer.install(
+        ncnn_reference(param), param, companions={"model.bin": binary}
+    )
+
+    assert installer.resolve_active("demo-ncnn").ready is True
+
+    (installed.path.parent / "model.bin").write_bytes(b"different weights entirely")
+
+    resolution = installer.resolve_active("demo-ncnn")
+    assert resolution.ready is False
+    assert "does not match its recorded digest" in resolution.reason
+
+
+def test_removed_weights_are_detected_after_installation(tmp_path):
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    installed = installer.install(
+        ncnn_reference(param), param, companions={"model.bin": binary}
+    )
+
+    (installed.path.parent / "model.bin").unlink()
+
+    resolution = installer.resolve_active("demo-ncnn")
+    assert resolution.ready is False
+    assert "missing" in resolution.reason
+
+
+def test_a_single_file_format_needs_no_companions(tmp_path):
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"onnx bytes")
+    from omnitensor.plugins.artifacts import ArtifactReference
+
+    reference = ArtifactReference(
+        "demo-onnx", "1.0.0", "onnx", hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    installer.install(reference, source)
+
+    assert installer.resolve_active("demo-onnx").ready is True
+
+
+def test_an_unreadable_companion_is_reported(tmp_path):
+    param, _binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+
+    with pytest.raises(ArtifactInstallationError) as failure:
+        installer.install(
+            ncnn_reference(param), param, companions={"model.bin": tmp_path / "absent.bin"}
+        )
+
+    assert failure.value.code == "companion-unreadable"
+
+
+def test_a_store_written_before_companions_existed_still_resolves(tmp_path):
+    """An older store has no companions key and must not be read as corrupt."""
+    source = tmp_path / "model.onnx"
+    source.write_bytes(b"onnx bytes")
+    from omnitensor.plugins.artifacts import ArtifactReference
+
+    reference = ArtifactReference(
+        "legacy", "1.0.0", "onnx", hashlib.sha256(source.read_bytes()).hexdigest()
+    )
+    installer = ArtifactInstaller(tmp_path / "store")
+    installed = installer.install(reference, source)
+
+    metadata_path = installed.path.parent / "artifact.json"
+    document = json.loads(metadata_path.read_text())
+    del document["companions"]
+    metadata_path.write_text(json.dumps(document))
+
+    assert installer.resolve_active("legacy").ready is True

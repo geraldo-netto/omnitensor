@@ -25,11 +25,16 @@ import argparse
 import hashlib
 import json
 import sys
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .plugins.artifact_installation import ArtifactInstaller
-from .plugins.artifacts import ArtifactReference
+from .plugins.artifacts import (
+    COMPANION_SOURCE_SUFFIXES,
+    ArtifactReference,
+    companion_filenames,
+)
 
 READ_CHUNK_BYTES = 1024 * 1024
 SUPPORTED_FORMATS = ("ncnn", "onnx", "openvino", "tflite-edgetpu")
@@ -59,6 +64,7 @@ class PreparedArtifact:
     reference: ArtifactReference
     source: Path
     size_bytes: int
+    companions: Mapping[str, Path] = field(default_factory=dict)
 
     def manifest_fragment(self) -> dict:
         """The `requirements.model` block a workload manifest needs.
@@ -80,6 +86,9 @@ class PreparedArtifact:
             "accelerator": FORMAT_ACCELERATORS[self.reference.format],
             "sourcePath": str(self.source),
             "sizeBytes": self.size_bytes,
+            "companions": {
+                name: str(path) for name, path in sorted(self.companions.items())
+            },
         }
 
 
@@ -120,14 +129,42 @@ def prepare_artifact(
     if size == 0:
         raise PreparationError("source-invalid", "an empty file is not a model")
     return PreparedArtifact(
-        ArtifactReference(artifact_id, version, model_format, digest), path, size
+        ArtifactReference(artifact_id, version, model_format, digest),
+        path,
+        size,
+        _discover_companions(path, model_format),
     )
+
+
+def _discover_companions(source: Path, model_format: str) -> dict[str, Path]:
+    """Find the files this format needs beside the primary one.
+
+    Discovered rather than asked for: an ncnn ".param" is meaningless without
+    the ".bin" the exporter wrote next to it, and requiring the caller to name
+    a file that always sits in the same place is a step they can only get
+    wrong.
+    """
+    suffixes = COMPANION_SOURCE_SUFFIXES.get(model_format, {})
+    found: dict[str, Path] = {}
+    for name in companion_filenames(model_format):
+        suffix = suffixes.get(name)
+        candidate = source.with_suffix(suffix) if suffix else None
+        if candidate is None or not candidate.is_file():
+            raise PreparationError(
+                "companion-missing",
+                f"{model_format} needs {name}; expected it beside the model at "
+                f"{candidate if candidate is not None else name}",
+            )
+        found[name] = candidate
+    return found
 
 
 def install_prepared(prepared: PreparedArtifact, root: Path | str) -> Path:
     """Install a prepared artifact into the store dispatch reads from."""
     installer = ArtifactInstaller(Path(root))
-    installation = installer.install(prepared.reference, prepared.source)
+    installation = installer.install(
+        prepared.reference, prepared.source, companions=dict(prepared.companions)
+    )
     return Path(getattr(installation, "path", root))
 
 

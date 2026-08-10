@@ -202,7 +202,12 @@ class ArtifactCache:
             raise ArtifactCacheError(
                 "cache-state-invalid", f"cannot read {metadata_path}: {error}"
             ) from error
-        if not isinstance(document, dict) or set(document) != {"version", "artifact"}:
+        # "companions" is optional so a store written before multi-file
+        # artifacts existed still reads; anything else unexpected is a store
+        # this version does not understand and must not garbage-collect.
+        if not isinstance(document, dict) or not {"version", "artifact"} <= set(document):
+            raise ArtifactCacheError("cache-state-invalid", "artifact metadata has invalid fields")
+        if set(document) - {"version", "artifact", "companions"}:
             raise ArtifactCacheError("cache-state-invalid", "artifact metadata has invalid fields")
         if document["version"] != _ARTIFACT_METADATA_VERSION:
             raise ArtifactCacheError("cache-state-invalid", "artifact metadata version is invalid")

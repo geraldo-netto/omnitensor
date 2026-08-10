@@ -9,10 +9,11 @@ import json
 import os
 import stat
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from omnitensor.atomicio import write_json_atomic
+from omnitensor.atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from omnitensor.storelock import store_lock
 
 from .artifact_trust import (
@@ -27,10 +28,12 @@ from .artifacts import (
     ArtifactResolver,
     artifact_filename,
     artifact_reference_error,
+    companion_filenames,
 )
 
 _ACTIVATION_FILE = "activation.json"
 _ARTIFACT_METADATA_FILE = "artifact.json"
+_MAX_METADATA_BYTES = 64 * 1024
 _DOCUMENT_VERSION = 1
 _READ_CHUNK_BYTES = 1024 * 1024
 
@@ -118,18 +121,42 @@ class ArtifactInstaller:
         reference: ArtifactReference,
         source: Path,
         *,
+        companions: Mapping[str, Path] | None = None,
         provenance: ArtifactProvenance | None = None,
     ) -> ArtifactInstallation:
-        """Stage and verify ``source`` before atomically activating its version."""
+        """Stage and verify ``source`` before atomically activating its version.
+
+        ``companions`` carries the files a format needs beside its primary one.
+        An ncnn ``.param`` is only the graph, so installing it alone yields an
+        artifact that resolves ready and cannot execute; every companion the
+        format declares is therefore required, copied, and digested here.
+        """
         invalid = artifact_reference_error(reference)
         if invalid:
             raise ArtifactInstallationError("reference-invalid", invalid)
+        supplied = dict(companions or {})
+        required = companion_filenames(reference.format)
+        missing = [name for name in required if name not in supplied]
+        if missing:
+            raise ArtifactInstallationError(
+                "companion-missing",
+                f"{reference.format} requires {', '.join(missing)} beside its primary file",
+            )
+        unexpected = sorted(set(supplied) - set(required))
+        if unexpected:
+            # An unlisted file would be installed and digested but never read,
+            # which reads as protection that is not actually load-bearing.
+            raise ArtifactInstallationError(
+                "companion-unexpected",
+                f"{reference.format} declares no companion named {unexpected[0]}",
+            )
         artifact_root = self._artifact_root(reference.id)
         current = self.activation(reference.id)
         stage = Path(tempfile.mkdtemp(prefix=".install-", dir=artifact_root))
         try:
             staged_path = stage / artifact_filename(reference.format)
             self._copy_verified(Path(source), staged_path, reference.sha256)
+            companion_digests = self._stage_companions(stage, supplied)
             self._verify_trust(reference, provenance)
             if self._trust_verifier is not None:
                 write_json_atomic(
@@ -139,7 +166,11 @@ class ArtifactInstaller:
                 )
             write_json_atomic(
                 stage / _ARTIFACT_METADATA_FILE,
-                {"version": _DOCUMENT_VERSION, "artifact": artifact_reference_document(reference)},
+                {
+                    "version": _DOCUMENT_VERSION,
+                    "artifact": artifact_reference_document(reference),
+                    "companions": companion_digests,
+                },
                 prefix=".artifact-metadata-",
             )
             _fsync_directory(stage)
@@ -157,6 +188,54 @@ class ArtifactInstaller:
             return ArtifactInstallation(reference, active_path, current.active)
         finally:
             _remove_stage(stage)
+
+    def _stage_companions(self, stage: Path, companions: Mapping[str, Path]) -> dict[str, str]:
+        """Copy each companion into the stage, returning the digest observed.
+
+        The digest is computed from the bytes that landed rather than taken on
+        trust, so what is recorded describes what was actually installed.
+        """
+        digests: dict[str, str] = {}
+        for name, path in sorted(companions.items()):
+            destination = stage / name
+            try:
+                digest = _copy_digested(Path(path), destination, self._max_artifact_bytes)
+            except OSError as error:
+                raise ArtifactInstallationError(
+                    "companion-unreadable", f"could not read companion {name}: {error}"
+                ) from error
+            digests[name] = digest
+        return digests
+
+    def verify_companions(self, version_root: Path) -> str:
+        """Re-check installed companions against the digests recorded for them.
+
+        The manifest pins only the primary file, so this is what notices a
+        weights file replaced after installation.  It does not make the
+        publisher accountable for those bytes — only the manifest could — so it
+        is reported as an integrity check, not as provenance.
+        """
+        metadata_path = Path(version_root) / _ARTIFACT_METADATA_FILE
+        try:
+            document = read_json_bounded(metadata_path, _MAX_METADATA_BYTES)
+        except FileNotFoundError:
+            return ""
+        except (OSError, ValueError, JsonTooLargeError) as error:
+            return f"artifact metadata is unreadable: {error}"
+        recorded = document.get("companions") if isinstance(document, dict) else None
+        if not isinstance(recorded, dict):
+            return ""
+        for name, expected in sorted(recorded.items()):
+            path = Path(version_root) / name
+            if not path.is_file():
+                return f"companion file is missing: {name}"
+            try:
+                observed = _digest_file(path, self._max_artifact_bytes)
+            except OSError as error:
+                return f"companion file is unreadable: {name}: {error}"
+            if observed != expected:
+                return f"companion file does not match its recorded digest: {name}"
+        return ""
 
     def activation(self, artifact_id: str) -> ArtifactActivation:
         """Read strict activation state; absence means no version is active."""
@@ -183,6 +262,10 @@ class ArtifactInstaller:
         trust = self._stored_trust(active)
         if trust:
             return ArtifactResolution(False, None, trust, 0)
+        version_root = self._artifact_root(active.id) / active.version
+        companion = self.verify_companions(version_root)
+        if companion:
+            return ArtifactResolution(False, None, companion, 0)
         return ArtifactResolver(
             [self._root],
             max_artifact_bytes=self._max_artifact_bytes,
@@ -252,7 +335,7 @@ class ArtifactInstaller:
             )
         return artifact_root
 
-    def _copy_verified(self, source: Path, destination: Path, expected_digest: str) -> int:
+    def _copy_verified(self, source: Path, destination: Path, expected_digest: str) -> int:  # noqa: E501
         try:
             source_fd = _open_regular_file(source)
         except OSError as error:
@@ -393,3 +476,44 @@ ARTIFACT_STORE_LOCK_FILE = ".artifact-store.lock"
 def artifact_store_lock(root: Path):
     """Serialize activation, rollback, and cache collection across processes."""
     return store_lock(root, ARTIFACT_STORE_LOCK_FILE)
+
+
+def _copy_digested(source: Path, destination: Path, max_bytes: int) -> str:
+    """Copy a companion file and return the digest of the bytes that landed.
+
+    No expected digest is taken: the manifest pins only the primary file, so
+    what is recorded here has to describe what was actually written rather
+    than restate a claim made elsewhere.
+    """
+    digest = hashlib.sha256()
+    total = 0
+    source_fd = _open_regular_file(source)
+    try:
+        with os.fdopen(source_fd, "rb") as input_stream, destination.open("xb") as output:
+            while chunk := input_stream.read(_READ_CHUNK_BYTES):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ArtifactInstallationError(
+                        "companion-too-large", f"companion exceeds {max_bytes} bytes"
+                    )
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        with contextlib.suppress(OSError):
+            destination.unlink()
+        raise
+    return digest.hexdigest()
+
+
+def _digest_file(path: Path, max_bytes: int) -> str:
+    digest = hashlib.sha256()
+    total = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            total += len(chunk)
+            if total > max_bytes:
+                raise OSError(f"file exceeds {max_bytes} bytes")
+            digest.update(chunk)
+    return digest.hexdigest()
