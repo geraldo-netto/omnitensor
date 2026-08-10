@@ -37,6 +37,29 @@ The unit uses `StateDirectory=`, so systemd creates the state directories on
 first start; it needs no pre-existing paths. It also declares `Delegate=yes` so
 each plugin worker can be accounted in its own cgroup.
 
+### Where the applet reads the snapshot
+
+The service publishes one file and the Cinnamon applet reads it; that file is
+the only place the two meet. Each side names it independently, so moving it is
+a two-sided edit and changing one side alone is silent:
+
+| Side | What names the path | Default |
+| --- | --- | --- |
+| Service | `OMNITENSOR_STATE_PATH` | `~/.local/state/tpu-workload-manager/state.json` |
+| Applet | The `runtime-state-path` setting, shown as "Runtime snapshot file" | the same path |
+
+```sh
+systemctl --user edit omnitensor.service
+# [Service]
+# Environment=OMNITENSOR_STATE_PATH=/new/path/state.json
+systemctl --user restart omnitensor.service
+```
+
+Set the same path in the applet setting. An applet pointed at a file nobody
+writes reports "No runtime service is publishing state", which reads exactly
+like a service that is not running — so check both names before concluding the
+service is down.
+
 The service refuses to start when `org.cinnamon.OmniTensor1` is already owned,
 because two instances would publish to the same snapshot path. If start fails
 with `already owned`, find the other instance and stop it first — an instance
