@@ -92,6 +92,15 @@ from .discovery import (
     PluginSource,
     discover_plugin_metadata,
 )
+from .document_ingestion import (
+    DocumentCandidate,
+    DocumentIngestor,
+    DocumentRejection,
+    DocumentScan,
+    RefusedDocument,
+    container_depth,
+    detect_document_type,
+)
 from .flow import (
     FlowRefusal,
     FlowRefusedError,
@@ -589,6 +598,13 @@ __all__ = [
     "StorageIntelligenceCollector",
     "ResourceSchedulerCollector",
     "OptedInRootScanner",
+    "DocumentIngestor",
+    "DocumentCandidate",
+    "DocumentScan",
+    "DocumentRejection",
+    "RefusedDocument",
+    "detect_document_type",
+    "container_depth",
     "IngestedFile",
     "IngestionScan",
     "IngestionError",
