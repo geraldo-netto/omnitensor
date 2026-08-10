@@ -4,7 +4,7 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0073 | open | high | s | OMNI-0039, OMNI-0071 | D-Bus hardening: bind jobs to caller identity, enforce method/payload/rate quotas, prevent spoofing, and return stable versioned error codes for every rejected boundary. |
+| OMNI-0048 | blocked | high | s | OMNI-0036 | `low-light-enhancement` artifact: supply a checksummed, signed, fully quantized `low-light-tonal-curve` model plus tensor contract and compiler report proving its target mapping. — blocked: targets the Edge TPU specifically, and no Coral device is present. Retargeting this profile to the available Vulkan GPU is a design decision. |
 | OMNI-0079 | blocked | medium | s | OMNI-0077, OMNI-0078 | Cinnamon contract parity: add shared fixtures and compatibility documentation proving old snapshots still render and new health/result states map deterministically in the applet. — blocked: needs coordinated work in the Cinnamon applet repository, which this repository cannot change. |
 | OMNI-0085 | blocked | high | s | OMNI-0036, OMNI-0043 | `hardware-health` model: define labeled fault/normal evaluation data and metrics, qualify a real accelerator-compatible anomaly model, and publish its immutable verified artifact and tensor contract. — blocked: needs a labeled evaluation corpus and a publisher signing identity. GPU inference is available (Vulkan/ncnn), so hardware is no longer the blocker; the data and the key custody decision are. |
 | OMNI-0086 | blocked | high | s | OMNI-0038, OMNI-0085 | `hardware-health` pipeline: implement feature windows, preprocessing, anomaly inference, calibrated scoring, evidence extraction, and bounded alerts while keeping firmware/shutdown/repair actions deterministic. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. |
@@ -21,7 +21,6 @@
 | OMNI-0097 | blocked | high | s | OMNI-0036, OMNI-0047 | `visual-library` models: define labeled classification/retrieval evaluation data and metrics, qualify real accelerator-compatible classifier/embedding models, and publish verified artifacts and tensor contracts. — blocked: needs a labeled evaluation corpus and a publisher signing identity. GPU inference is available (Vulkan/ncnn), so hardware is no longer the blocker; the data and the key custody decision are. |
 | OMNI-0098 | blocked | high | s | OMNI-0038, OMNI-0097 | `visual-library` inference: implement deterministic resize/normalization, classification/embedding inference, calibrated tags, batching, and bounded failure handling. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. |
 | OMNI-0101 | blocked | high | s | OMNI-0082, OMNI-0100 | `visual-library` acceptance: record malformed-media isolation, index recovery, classification/retrieval quality, privacy, throughput, latency, and named-hardware evidence. — blocked on its model and pipeline rows: there is nothing qualified to measure yet. GPU hardware for the measurements is available. |
-| OMNI-0048 | blocked | high | s | OMNI-0036 | `low-light-enhancement` artifact: supply a checksummed, signed, fully quantized `low-light-tonal-curve` model plus tensor contract and compiler report proving its target mapping. — blocked: targets the Edge TPU specifically, and no Coral device is present. Retargeting this profile to the available Vulkan GPU is a design decision. |
 | OMNI-0102 | blocked | high | s | OMNI-0048, OMNI-0066 | `low-light-enhancement` input: validate/decode bounded images, normalize orientation/color, resize to 256×256, construct exact quantized tensors, and preserve metadata needed for output. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. |
 | OMNI-0103 | blocked | high | s | OMNI-0038, OMNI-0102 | `low-light-enhancement` pipeline: run Edge-TPU inference, validate tonal-curve outputs, apply bounded curve/denoise/color management, and reject invalid or unsafe results deterministically. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. |
 | OMNI-0104 | blocked | medium | s | OMNI-0103 | `low-light-enhancement` delivery: encode atomically to an authorized destination, preserve allowed metadata, expose progress/result details, and clean partial outputs on cancellation or failure. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. — blocked on its model row: the tensor contract and quantization parameters this stage encodes do not exist until the artifact is qualified and published. |
@@ -42,16 +41,19 @@
 | OMNI-0123 | blocked | high | s | OMNI-0122 | system acceptance resilience: exercise device/source loss and recovery, worker crash, backpressure, cancellation, service/Cinnamon restart, and in-flight cleanup across representative plugins. — blocked on the bundled artifacts, which are not published yet. |
 | OMNI-0124 | blocked | high | s | OMNI-0122 | system acceptance lifecycle: verify plugin/artifact/service upgrade, configuration migration, rollback, revocation, cache cleanup, and offline startup without losing valid prior state. — blocked on the bundled artifacts, which are not published yet. |
 | OMNI-0125 | blocked | high | s | OMNI-0087, OMNI-0090, OMNI-0093, OMNI-0096, OMNI-0101, OMNI-0106, OMNI-0111, OMNI-0115, OMNI-0121 | system acceptance hardware: run the reproducible TPU/NPU/GPU matrix, archive evidence, and prevent any profile from claiming operational readiness until its own model, pipeline, safety, and acceptance gates pass. — blocked: the GPU lane is available (Vulkan/ncnn) but no TPU or NPU device is present, so the full matrix cannot be run. |
-
-
 | OMNI-0165 | open | medium | s | OMNI-0160 | model digest adoption: `requirements.model.sha256` is optional, so a manifest that omits it still dispatches on the weaker install-time guarantee; publish digests for the bundled catalog and then make the field required in a coordinated manifest version bump. |
-
-
-
-
-
-
 | OMNI-0171 | open | high | m | OMNI-0064 | worker exec/fork denial: the sandbox now denies networking and drops all capabilities, but command execution and child processes are still permitted — bwrap can only refuse them through a seccomp filter (`--seccomp`/`--add-seccomp-fd`), which is not built; compile a BPF filter denying `execve`/`execveat`/`clone`/`fork` except for the declared, granted operations. |
+| OMNI-0172 | open | medium | s | OMNI-0073 | applet parity for transport refusals: `BusGuard` now answers an over-quota, oversized, or identity-asserting call with a versioned envelope (`{version,status:"rejected",code,message,method}`) that is *not* a job acknowledgement, so an applet that parses every reply against `runtime-job-acknowledgement.schema.json` will treat a refusal as a malformed reply; publish the envelope as a canonical schema and handle the `rate-limit-exceeded`/`payload-too-large`/`identity-asserted`/`concurrency-limit-exceeded`/`method-unknown` codes in the applet. |
+| OMNI-0173 | open | medium | s | OMNI-0169 | no bundled profile runs a pipeline: runners are built only for profiles declaring `requirements.model`, and of the nine bundled manifests only `low-light-enhancement` does (and it is Edge TPU only), so every other profile is recorded as `declares no model` and the pipeline path is unexercised end to end; declare GPU-servable models for the profiles whose plugins are implemented, or state in the manifests that they are host-only. |
+| OMNI-0174 | open | low | s | OMNI-0170 | uid scoping is a weak boundary on a session bus: every peer on a session bus is normally the same uid, so owner scoping separates almost nothing there and only becomes meaningful when the socket is reachable by another uid; decide whether per-connection scoping should be offered for callers that want it, and document which guarantee the applet is relying on. |
+
+
+
+
+
+
+
+
 
 ## Rejected / Won't fix
 

@@ -174,6 +174,20 @@ class CallerIdentityResolver:
     async def owner_token(self, sender: str | None = None) -> str:
         return (await self.resolve(sender)).owner_token
 
+    def cached_owner_token(self, sender: str | None = None) -> str:
+        """The owner token available without a round trip.
+
+        A synchronous method cannot ask the daemon for credentials, so it gets
+        the uid token when one is already cached and the connection-scoped one
+        otherwise.  That is narrower than the uid token, never wider, so a
+        caller can never gain reach by arriving through a synchronous method.
+        """
+        name = sender if sender is not None else current_sender()
+        if not valid_bus_name(name):
+            return ANONYMOUS_OWNER
+        cached = self._cache.get(name)
+        return cached.owner_token if cached is not None else CallerIdentity(name).owner_token
+
     async def _uid_of(self, name: str) -> int | None:
         if self._unix_user is None:
             return None

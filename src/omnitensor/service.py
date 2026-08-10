@@ -45,6 +45,7 @@ from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .guard import BusGuard, GuardRefusedError, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
 from .jobs import (
     JobDispatcher,
@@ -102,6 +103,7 @@ class RuntimeAPI:
         jobs: JobSubmissionService,
         inspector: Callable[[], str] | None = None,
         callers: CallerIdentityResolver | None = None,
+        guard: BusGuard | None = None,
     ) -> None:
         self._control = control
         self._jobs = jobs
@@ -109,18 +111,50 @@ class RuntimeAPI:
         # Resolving here rather than in the store keeps every transport-shaped
         # concern on the transport side of the facade.
         self._callers = callers or CallerIdentityResolver()
+        self._guard = guard or BusGuard()
 
     async def apply_command_text(self, text: str) -> str:
-        return await self._control.apply_command_text(text)
+        return await self._guarded("ApplyCommand", text, self._control.apply_command_text)
 
     async def submit_job_text(self, text: str) -> str:
-        return await self._jobs.submit_job_text(text, owner=await self._callers.owner_token())
+        owner = await self._callers.owner_token()
+        return await self._guarded(
+            "SubmitJob",
+            text,
+            lambda request: self._jobs.submit_job_text(request, owner=owner),
+            owner=owner,
+        )
 
     async def cancel_job_text(self, text: str) -> str:
-        return await self._jobs.cancel_job_text(text, owner=await self._callers.owner_token())
+        owner = await self._callers.owner_token()
+        return await self._guarded(
+            "CancelJob",
+            text,
+            lambda request: self._jobs.cancel_job_text(request, owner=owner),
+            owner=owner,
+        )
 
     def describe_plugins_text(self) -> str:
-        return self._inspector()
+        owner = self._callers.cached_owner_token()
+        try:
+            with guarded(self._guard, "DescribePlugins", owner):
+                return self._inspector()
+        except GuardRefusedError as refusal:
+            return refusal.text()
+
+    async def _guarded(self, method: str, text: str, call, *, owner: str | None = None) -> str:
+        """Admit one call, run it, and release the slot however it ends.
+
+        A refusal is returned as text rather than raised: the bus reply is the
+        only channel the caller has, and an exception here would surface as an
+        opaque internal error instead of a code they can branch on.
+        """
+        resolved = owner if owner is not None else await self._callers.owner_token()
+        try:
+            with guarded(self._guard, method, resolved, text):
+                return await call(text)
+        except GuardRefusedError as refusal:
+            return refusal.text()
 
 
 class OmniTensorInterface(ServiceInterface):

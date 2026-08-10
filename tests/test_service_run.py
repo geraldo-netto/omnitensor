@@ -1342,3 +1342,75 @@ def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
         ("cancel", "uid:1001"),
         ("submit", "anonymous"),
     ]
+
+
+def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
+    """The bus reply is the caller's only channel; an exception says nothing."""
+    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.service import RuntimeAPI
+
+    class Jobs:
+        async def submit_job_text(self, text, *, owner):
+            return '{"accepted":true}'
+
+        async def cancel_job_text(self, text, *, owner):
+            return "{}"
+
+    api = RuntimeAPI(
+        None,
+        Jobs(),
+        lambda: "{}",
+        None,
+        BusGuard({"SubmitJob": MethodQuota(max_calls=1, max_concurrent=99)}),
+    )
+
+    async def scenario():
+        return [json.loads(await api.submit_job_text("{}")) for _ in range(2)]
+
+    accepted, refused = asyncio.run(scenario())
+
+    assert accepted == {"accepted": True}
+    assert refused["status"] == "rejected"
+    assert refused["code"] == "rate-limit-exceeded"
+    assert refused["method"] == "SubmitJob"
+
+
+def test_a_caller_asserted_owner_never_reaches_the_job_service(tmp_path):
+    from omnitensor.service import RuntimeAPI
+
+    class Jobs:
+        def __init__(self):
+            self.calls = []
+
+        async def submit_job_text(self, text, *, owner):
+            self.calls.append(owner)
+            return "{}"
+
+        async def cancel_job_text(self, text, *, owner):
+            return "{}"
+
+    jobs = Jobs()
+    api = RuntimeAPI(None, jobs, lambda: "{}")
+
+    reply = json.loads(
+        asyncio.run(api.submit_job_text(json.dumps({"version": 1, "owner": "uid:0"})))
+    )
+
+    assert reply["code"] == "identity-asserted"
+    assert jobs.calls == []
+
+
+def test_describing_plugins_is_rate_limited_too(tmp_path):
+    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.service import RuntimeAPI
+
+    api = RuntimeAPI(
+        None,
+        None,
+        lambda: '{"plugins":[]}',
+        None,
+        BusGuard({"DescribePlugins": MethodQuota(max_calls=1, max_bytes=1)}),
+    )
+
+    assert json.loads(api.describe_plugins_text()) == {"plugins": []}
+    assert json.loads(api.describe_plugins_text())["code"] == "rate-limit-exceeded"
