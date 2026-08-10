@@ -9,11 +9,13 @@ observes a partial document.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from .atomicio import remove_durable, write_json_atomic
 from .discovery import Device
 from .registry import validate_document
+from .tensorref import DEFAULT_MAX_TENSOR_BYTES
 
 SNAPSHOT_VERSION = 1
 PLUGIN_TELEMETRY_VERSION = 1
@@ -31,6 +33,30 @@ def _metric(metrics: dict, key: str) -> int:
         raise ValueError(f"metrics {key} is not an integer: {metrics.get(key)!r}") from error
 
 
+MAX_PUBLISHED_INPUT_ROOTS = 8
+
+
+def input_roots_document(
+    roots: Sequence[Path | str], max_bytes: int = DEFAULT_MAX_TENSOR_BYTES
+) -> dict:
+    """Where a caller may stage a referenced input, as this service sees it.
+
+    A caller cannot infer these paths and must not guess them.  Referencing a
+    file is a capability that is off unless configured on, and a buffer written
+    anywhere else is refused with the same answer as a path that does not exist
+    — deliberately, so a caller cannot probe the filesystem through refusals.
+    That makes the roots the one thing a caller needs and the one thing it has
+    no way to discover, which is why they are published.
+
+    Empty is the honest answer for the default configuration: this service will
+    read no referenced file at all.
+    """
+    return {
+        "roots": [str(root) for root in list(roots)[:MAX_PUBLISHED_INPUT_ROOTS]],
+        "maxBytes": int(max_bytes),
+    }
+
+
 def build_snapshot(
     devices: list[Device],
     metrics: dict,
@@ -38,6 +64,7 @@ def build_snapshot(
     alerts: list[dict] | None = None,
     plugin_telemetry: list[dict] | None = None,
     generated_at_ms: int | None = None,
+    inputs: dict | None = None,
 ) -> dict:
     """Build a contract-valid snapshot document.
 
@@ -55,6 +82,8 @@ def build_snapshot(
         "profiles": profiles,
         "alerts": alerts or [],
     }
+    if inputs is not None:
+        snapshot["inputs"] = inputs
     if plugin_telemetry is not None:
         snapshot["pluginTelemetry"] = {
             "version": PLUGIN_TELEMETRY_VERSION,

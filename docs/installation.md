@@ -286,6 +286,41 @@ whose size or digest disagrees with the declaration is refused rather than
 truncated or padded, because both of those produce a tensor that infers
 successfully and means nothing.
 
+The refusal for a path outside the roots is identical to the refusal for a path
+that does not exist, so a caller cannot probe the filesystem by trying — which
+also means it cannot find the right directory by trying. The roots are
+therefore published in the snapshot, beside the devices and the profiles:
+
+```json
+"inputs": {"roots": ["/home/u/inputs"], "maxBytes": 67108864}
+```
+
+Empty roots mean this service will read no referenced file at all, which is the
+default. An absent block means a runtime older than the field. Both refuse every
+reference, so a consumer that treats them the same is right.
+
+### Who turns a picture into a tensor
+
+The service does not, and will not. `inputRefs` takes raw numbers; decoding a
+PNG means running an image decoder inside the process that holds the
+accelerator, before admission, on bytes a caller chose.
+
+The caller does it, and the manifest tells it how. `requirements.model
+.tensorContract` states the shape, the dtype, and — separately — the channel
+order, mean, and scale the model was trained with. The first two are enforced
+at admission; the third is published and never checked, because the service
+decodes nothing and so cannot tell a correctly normalised tensor from a wrong
+one. A contract that pretended otherwise would refuse correct jobs and accept
+incorrect ones with equal confidence.
+
+For the desktop, the Cinnamon applet is that caller: it decodes with GdkPixbuf,
+scales to the declared size, applies the declared normalisation, writes the
+buffer into a subdirectory of one of the published roots, and submits a
+reference to it. A profile that states a shape but not how to normalise a
+picture for it is not offered a picture at all — the applet says what the
+manifest failed to state rather than guessing RGB where the model wanted BGR,
+which is a wrong answer that looks exactly like a right one.
+
 ### Uninstalling
 
 Removing the package leaves state behind on purpose — artifacts are expensive

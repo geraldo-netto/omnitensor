@@ -79,7 +79,7 @@ from .ports import (
 )
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .scheduler import Scheduler, select_backend
-from .snapshot import build_snapshot, remove_snapshot, write_snapshot
+from .snapshot import build_snapshot, input_roots_document, remove_snapshot, write_snapshot
 from .state import PolicyState, PolicyStore
 from .tensorref import OptedInInputRoots
 
@@ -787,6 +787,10 @@ class OmniTensorService:
             ),
             alerts=self.result_summaries.documents(),
             plugin_telemetry=self.plugin_telemetry.documents(),
+            # Published every tick rather than once at startup: the roots are
+            # a capability, and a consumer that cached them would keep offering
+            # a directory this service has stopped reading.
+            inputs=input_roots_document(self._input_roots),
         )
 
     def publish_once(self) -> dict:

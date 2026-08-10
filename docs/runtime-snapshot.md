@@ -17,6 +17,26 @@ plugin manifest. Consumers must inspect `pluginTelemetry.version` before using
 its entries and ignore the optional extension when they only implement the
 original snapshot view.
 
+## Input roots (`inputs`)
+
+The optional `inputs` block states where a caller may stage a referenced input
+buffer and how large one may be. It exists because a caller cannot discover
+those paths any other way: a path outside the configured roots is refused with
+the same answer as a path that does not exist, deliberately, so that refusals
+cannot be used to probe the filesystem — and that also makes trial and error
+useless for finding the right directory.
+
+`roots` is bounded at eight entries and `maxBytes` restates the per-reference
+byte ceiling the service enforces. Empty roots mean the service will read no
+referenced file at all, which is the default: referencing a file is a
+capability, not something that is on unless configured off. An absent block
+means a runtime older than the field. Both refuse every reference, so a
+consumer that treats them identically is correct.
+
+The block is republished on every tick rather than fixed at startup, so a
+consumer that cached it would keep offering a directory the service has stopped
+reading.
+
 ## Plugin inventory (`DescribePlugins`)
 
 The snapshot answers "what is the runtime doing"; it deliberately does not

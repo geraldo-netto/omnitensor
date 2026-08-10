@@ -220,6 +220,21 @@
         }
       }
     },
+    "inputs": {
+      "description": "Where a caller may stage a referenced input buffer, and how large one may be. Absent means the runtime predates the field. Empty roots mean it will read no referenced file at all, which is the default: reading a path a caller names is a capability, not something that is on unless configured off. A consumer cannot infer these paths and must not guess them, because a buffer written anywhere else is refused with the same answer as a path that does not exist.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots", "maxBytes"],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "maxBytes": {"type": "integer", "minimum": 0, "maximum": 1073741824}
+      }
+    },
     "pluginTelemetry": {
       "type": "object",
       "additionalProperties": false,
