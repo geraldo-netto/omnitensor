@@ -356,6 +356,32 @@
                               "type": "number",
                               "exclusiveMinimum": 0
                             }
+                          },
+                          "resize": {
+                            "description": "How a picture becomes the declared shape. Absent means the consumer decides, and its choice is then a convention rather than an agreement: two consumers that resize differently build different tensors from the same picture. Measured on one host, that is a 0.986 correlation between two bilinear implementations \u2014 enough to leave a confident answer intact and to reorder an uncertain one. Stated here so the publisher owns the choice rather than inheriting whichever one a consumer happened to make.",
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "filter",
+                              "fit"
+                            ],
+                            "properties": {
+                              "filter": {
+                                "description": "Resampling filter. Named rather than left open because a nearest-neighbour and a bilinear resize of one picture are two different inputs to the model.",
+                                "enum": [
+                                  "nearest",
+                                  "bilinear",
+                                  "bicubic"
+                                ]
+                              },
+                              "fit": {
+                                "description": "exact scales to the declared width and height and distorts the aspect ratio; cover scales until both axes are covered and centre-crops the remainder. Letterboxing is deliberately absent: it needs a declared fill value, and an undeclared fill is the class of problem this field exists to remove.",
+                                "enum": [
+                                  "exact",
+                                  "cover"
+                                ]
+                              }
+                            }
                           }
                         }
                       }

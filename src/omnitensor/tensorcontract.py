@@ -43,19 +43,42 @@ MAX_INPUTS = 8
 
 
 @dataclass(frozen=True, slots=True)
+class ResizeSpec:
+    """How a picture becomes the declared shape.
+
+    Published, never enforced, like the rest of ``preprocess``: this service
+    decodes nothing and so cannot tell a bilinear resize from a bicubic one.
+    It exists because the alternative is each consumer picking its own and the
+    two disagreeing about the same picture — a disagreement that leaves a
+    model's confident answers intact and silently reorders its uncertain ones,
+    which is the worst shape for a defect to have.
+    """
+
+    resample: str
+    fit: str
+
+    def document(self) -> dict:
+        return {"filter": self.resample, "fit": self.fit}
+
+
+@dataclass(frozen=True, slots=True)
 class PreprocessSpec:
     """How the publisher produced the values, for a caller holding pixels."""
 
     channel_order: str
     mean: tuple[float, ...]
     scale: tuple[float, ...]
+    resize: ResizeSpec | None = None
 
     def document(self) -> dict:
-        return {
+        described = {
             "channelOrder": self.channel_order,
             "mean": list(self.mean),
             "scale": list(self.scale),
         }
+        if self.resize is not None:
+            described["resize"] = self.resize.document()
+        return described
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,19 +120,28 @@ def declared_inputs(model: Mapping | None) -> tuple[InputSpec, ...] | None:
     return tuple(_input_spec(item) for item in declared[:MAX_INPUTS])
 
 
+def _resize_spec(preprocess: Mapping) -> ResizeSpec | None:
+    resize = preprocess.get("resize")
+    return ResizeSpec(resize["filter"], resize["fit"]) if isinstance(resize, Mapping) else None
+
+
+def _preprocess_spec(preprocess: object) -> PreprocessSpec | None:
+    if not isinstance(preprocess, Mapping):
+        return None
+    return PreprocessSpec(
+        preprocess["channelOrder"],
+        tuple(float(value) for value in preprocess["mean"]),
+        tuple(float(value) for value in preprocess["scale"]),
+        _resize_spec(preprocess),
+    )
+
+
 def _input_spec(item: Mapping) -> InputSpec:
-    preprocess = item.get("preprocess")
     return InputSpec(
         tuple(item["shape"]),
         item["dtype"],
         item.get("layout"),
-        PreprocessSpec(
-            preprocess["channelOrder"],
-            tuple(float(value) for value in preprocess["mean"]),
-            tuple(float(value) for value in preprocess["scale"]),
-        )
-        if isinstance(preprocess, Mapping)
-        else None,
+        _preprocess_spec(item.get("preprocess")),
     )
 
 

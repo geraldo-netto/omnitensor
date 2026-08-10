@@ -43,7 +43,11 @@
                 1.0,
                 1.0,
                 1.0
-              ]
+              ],
+              "resize": {
+                "filter": "bilinear",
+                "fit": "exact"
+              }
             }
           }
         ]

@@ -175,3 +175,48 @@ def test_the_published_projection_round_trips_what_a_caller_needs():
     }
     assert specs[0].document()["preprocess"]["channelOrder"] == "BGR"
     assert specs[0].document()["layout"] == "NCHW"
+
+
+def test_a_publisher_may_state_how_a_picture_becomes_the_shape():
+    """The resize is the one step the shape does not determine.
+
+    Two consumers that resize the same picture differently build different
+    tensors from it, and the difference leaves a model's confident answers
+    intact while reordering its uncertain ones — the worst shape a defect can
+    have, because it looks like nothing is wrong.
+    """
+    specs = declared_inputs(model())
+
+    assert specs[0].preprocess.resize is None, "absent stays absent, as before the field"
+
+    stated = declared_inputs(
+        model(
+            tensorContract={
+                "inputs": [{
+                    "shape": [1, 3, 8, 8],
+                    "dtype": "float32",
+                    "layout": "NCHW",
+                    "preprocess": {
+                        "channelOrder": "BGR",
+                        "mean": [0.0],
+                        "scale": [1.0],
+                        "resize": {"filter": "bicubic", "fit": "cover"},
+                    },
+                }]
+            }
+        )
+    )
+
+    assert stated[0].preprocess.resize.resample == "bicubic"
+    assert stated[0].preprocess.resize.fit == "cover"
+    assert stated[0].document()["preprocess"]["resize"] == {"filter": "bicubic", "fit": "cover"}
+
+
+def test_the_bundled_profile_states_its_own_resize():
+    manifest = json.loads(BUNDLED.read_text())
+    specs = declared_inputs(manifest["requirements"]["model"])
+
+    assert specs[0].preprocess.resize is not None, (
+        "the one profile that runs should not inherit whichever resize a consumer chose"
+    )
+    assert validate_document("workload-manifest.schema.json", manifest) == []
