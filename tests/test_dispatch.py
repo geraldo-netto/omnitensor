@@ -55,9 +55,9 @@ def workload(
 
 class FakeExecutor:
     backend = "gpu"
-    model_formats = frozenset({"ncnn"})
 
-    def __init__(self, available=True, reason="", outputs=None):
+    def __init__(self, available=True, reason="", outputs=None, model_formats=("ncnn",)):
+        self.model_formats = frozenset(model_formats)
         self._availability = Availability(available, reason)
         self._outputs = outputs if outputs is not None else [[1]]
         self.ran = []
@@ -759,3 +759,102 @@ def test_the_declared_companions_travel_with_the_reference():
 
     assert reference.declared_companions == {"model.bin": "e" * 64}
     assert reference.unpinned_companions() == ()
+
+
+NPU_MODEL = {
+    "id": "sample-model-npu",
+    "version": "1.2.3",
+    "format": "openvino",
+    "fullyQuantized": True,
+    "minimumCompilerVersion": "1.0.0",
+    "minimumRuntimeVersion": "1.0.0",
+    "sha256": "c" * 64,
+    "companions": {"model.bin": "d" * 64},
+}
+
+
+def multi_workload(**overrides):
+    """A profile that declares one artifact per lane, as a real one would."""
+    target = workload(model=MODEL, **overrides)
+    requirements = target.manifest["requirements"]
+    requirements.pop("model")
+    requirements["models"] = [dict(MODEL), dict(NPU_MODEL)]
+    requirements["acceleratorPreference"] = ["npu", "gpu"]
+    return target
+
+
+def test_the_lane_is_chosen_first_and_the_artifact_follows_it():
+    """`acceleratorPreference` means nothing if one format decides the lane."""
+    resolved = []
+
+    class RecordingArtifacts:
+        def resolve(self, reference):
+            resolved.append(reference.format)
+            return ArtifactResolution(True, Path("/models/sample"), "", 1)
+
+        def resolve_active(self, artifact_id):  # pragma: no cover - never consulted
+            raise AssertionError("a pinned model is resolved by its digest")
+
+    async def scenario():
+        dispatch = dispatcher(
+            [multi_workload()],
+            executors={"npu": FakeExecutor(model_formats=("openvino",)),
+                       "gpu": FakeExecutor(model_formats=("ncnn",))},
+            artifacts=RecordingArtifacts(),
+        )
+        dispatch._scheduler.start()
+        await asyncio.wait_for(
+            dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1]]}), timeout=5
+        )
+        await dispatch._scheduler.stop()
+
+    asyncio.run(scenario())
+
+    assert resolved == ["openvino"], "the preferred lane picked its own artifact"
+
+
+def test_a_lane_that_is_unavailable_falls_through_to_one_that_can_run():
+    resolved = []
+
+    class RecordingArtifacts:
+        def resolve(self, reference):
+            resolved.append(reference.format)
+            return ArtifactResolution(True, Path("/models/sample"), "", 1)
+
+        def resolve_active(self, artifact_id):  # pragma: no cover - never consulted
+            raise AssertionError("a pinned model is resolved by its digest")
+
+    async def scenario():
+        dispatch = dispatcher(
+            [multi_workload()],
+            executors={
+                "npu": FakeExecutor(model_formats=("openvino",), available=False),
+                "gpu": FakeExecutor(model_formats=("ncnn",)),
+            },
+            artifacts=RecordingArtifacts(),
+        )
+        dispatch._scheduler.start()
+        await asyncio.wait_for(
+            dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1]]}), timeout=5
+        )
+        await dispatch._scheduler.stop()
+
+    asyncio.run(scenario())
+
+    assert resolved == ["ncnn"], "the lane that could run chose the artifact it can run"
+
+
+def test_a_profile_whose_models_no_backend_can_run_is_refused_by_format():
+    target = multi_workload()
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        dispatcher(
+            [target],
+            executors={
+                "npu": FakeExecutor(model_formats=("tflite-edgetpu",)),
+                "gpu": FakeExecutor(model_formats=("tflite-edgetpu",)),
+            },
+        ).dispatch("job-1", "sample-workload", {"inputs": [[1]]})
+
+    assert excinfo.value.code == "no-backend-available"
+    assert "format not supported" in str(excinfo.value)

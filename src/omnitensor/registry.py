@@ -131,8 +131,40 @@ class Workload:
         return tuple(declared) if declared else DEFAULT_PREFERENCE
 
     @property
+    def models(self) -> tuple[dict, ...]:
+        """Every model this profile declares, whichever spelling states them.
+
+        One representation inside, two on the wire: `model` names a single
+        artifact and `models` names one per lane, and normalising here means
+        nothing downstream has to know which was written.  An artifact is
+        format-specific, so a profile that declares one model can only serve
+        the lane its format belongs to, whatever `acceleratorPreference` says.
+        """
+        requirements = self.manifest["requirements"]
+        declared = requirements.get("models")
+        if declared:
+            return tuple(declared)
+        single = requirements.get("model")
+        return (single,) if single else ()
+
+    def model_for(self, model_format: str) -> dict | None:
+        """The model this profile declares for one format, if it declares one."""
+        for model in self.models:
+            if model["format"] == model_format:
+                return model
+        return None
+
+    @property
     def model(self) -> dict | None:
-        return self.manifest["requirements"]["model"]
+        """The single model, or the first declared one.
+
+        Every entry describes the same network in a different format, and the
+        registry refuses a profile whose entries disagree about their input or
+        output contract, so the parts of a model that are not the artifact are
+        the same whichever entry answers.
+        """
+        models = self.models
+        return models[0] if models else None
 
     def default_policy(self) -> ProfilePolicy:
         defaults = self.manifest["defaults"]
@@ -160,7 +192,35 @@ def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
         raise ManifestError(f"{manifest_path}: {'; '.join(violations)}")
     if manifest["id"] != directory_name:
         raise ManifestError(f"{manifest_path}: id must match directory name")
+    disagreement = declared_models_error(manifest)
+    if disagreement is not None:
+        raise ManifestError(f"{manifest_path}: {disagreement}")
     return manifest
+
+
+def declared_models_error(manifest: dict) -> str | None:
+    """Why a profile's declared models cannot describe one network, or ``None``.
+
+    A schema can say each entry is well formed and cannot say the entries
+    describe the same thing.  Two entries for one format leave the runtime
+    choosing between artifacts with no rule that would not surprise somebody,
+    and entries disagreeing about their input or output contract are not one
+    network in two formats — they are two networks sharing a profile, and every
+    consumer that read the contract before the lane was chosen would be reading
+    whichever one happened to be first.
+    """
+    declared = manifest.get("requirements", {}).get("models")
+    if not declared:
+        return None
+    formats = [model["format"] for model in declared]
+    duplicated = sorted({name for name in formats if formats.count(name) > 1})
+    if duplicated:
+        return f"models declare {', '.join(duplicated)} more than once"
+    for field in ("tensorContract", "outputContract"):
+        stated = [json.dumps(model.get(field), sort_keys=True) for model in declared]
+        if len(set(stated)) > 1:
+            return f"models disagree about {field}; they must describe one network"
+    return None
 
 
 def load_workloads(root: Path, *, strict: bool = True) -> dict[str, Workload]:

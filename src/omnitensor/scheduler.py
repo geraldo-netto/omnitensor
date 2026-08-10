@@ -70,11 +70,16 @@ def select_backend(workload: Workload, executors: dict[str, Executor]) -> Backen
             reasons.append(f"{backend}: no executor")
             codes.append(NO_EXECUTOR)
             continue
-        if not supports_model(executor, workload.model):
+        # A profile may declare a model per lane, so the question is not
+        # "does this backend run *the* model" but "does it run any model this
+        # profile declares" — which is what makes acceleratorPreference mean
+        # anything for a profile that declares one at all.
+        model = _runnable_model(executor, workload)
+        if model is _UNSUPPORTED:
             reasons.append(f"{backend}: model format not supported")
             codes.append(FORMAT_UNSUPPORTED)
             continue
-        availability = availability_for_model(executor, workload.model)
+        availability = availability_for_model(executor, model)
         if not availability.available:
             reasons.append(f"{backend}: {availability.reason}")
             codes.append(availability.code)
@@ -83,6 +88,30 @@ def select_backend(workload: Workload, executors: dict[str, Executor]) -> Backen
     if not reasons:
         return BackendChoice(None, "No backend in preference list", NO_PREFERENCE)
     return BackendChoice(None, "; ".join(reasons), most_actionable(codes) or NO_EXECUTOR)
+
+
+# Distinct from None, which means "declares no model and so runs anywhere".
+_UNSUPPORTED = object()
+
+
+def _runnable_model(executor: Executor, workload: Workload):
+    """The model this executor could run for this profile, or ``_UNSUPPORTED``."""
+    models = workload.models
+    if not models:
+        return None
+    for model in models:
+        if supports_model(executor, model):
+            return model
+    return _UNSUPPORTED
+
+
+def runnable_model(workload: Workload, backend: str, executors: dict[str, Executor]) -> dict | None:
+    """The model a chosen backend will actually run, or ``None``."""
+    executor = executors.get(backend)
+    if executor is None:
+        return None
+    model = _runnable_model(executor, workload)
+    return None if model is _UNSUPPORTED else model
 
 
 def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[str | None, str]:

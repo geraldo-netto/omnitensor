@@ -25,7 +25,7 @@ from .executors.base import Executor, InferenceResult
 from .jobs import JobDispatchError
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .registry import Workload
-from .scheduler import QueueFullError, Scheduler, pick_backend
+from .scheduler import QueueFullError, Scheduler, runnable_model, select_backend
 from .tensorcontract import contract_error, declared_inputs, measured_shape
 from .tensorref import (
     DenyAllInputRoots,
@@ -125,13 +125,23 @@ class InferenceJobDispatcher:
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
         """Admit, resolve, route, and queue one job; never run it inline."""
         workload = self._runnable(workload_id)
-        model = workload.model
         inputs = self._inputs(payload)
-        backend, reason = pick_backend(workload, dict(self._executors))
-        if backend is None:
+        executors = dict(self._executors)
+        choice = select_backend(workload, executors)
+        if choice.backend is None:
             # No CPU fallback exists by design, so an unroutable job is refused
             # with the reason each candidate backend was rejected.
-            raise JobDispatchError("no-backend-available", reason)
+            raise JobDispatchError("no-backend-available", choice.reason)
+        # The lane is chosen first and the artifact follows it: a profile may
+        # declare one model per format, and which one runs is decided by which
+        # accelerator won, never the other way round.
+        model = runnable_model(workload, choice.backend, executors)
+        if model is None:
+            raise JobDispatchError(
+                "no-backend-available",
+                f"{workload_id}: {choice.backend} declares no model this profile can run",
+            )
+        backend = choice.backend
         path = self._model_path(workload, model)
         try:
             return self._scheduler.submit(backend, workload_id, path, inputs)
@@ -147,7 +157,7 @@ class InferenceJobDispatcher:
             raise JobDispatchError(
                 "workload-unknown", f"No such workload profile: {workload_id}"
             )
-        if workload.model is None:
+        if not workload.models:
             raise JobDispatchError(
                 "workload-has-no-model",
                 f"{workload_id} declares no model and cannot run inference",

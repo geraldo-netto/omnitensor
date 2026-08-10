@@ -181,6 +181,33 @@ artifact is GPU-only, and a manifest declaring `tpu` with an ncnn model is
 refused by the schema rather than silently preferring a lane it can never
 take. Restart the service and the profile moves from `idle` to `watching`.
 
+### Serving more than one accelerator
+
+`acceleratorPreference` lists the lanes a profile would like, in order. A
+profile declaring a single `model` can only ever take the lane its format
+belongs to — ncnn is GPU, `tflite-edgetpu` is TPU, OpenVINO IR is NPU — so the
+preference had nothing to choose between.
+
+Declare `requirements.models` instead, one entry per lane, and drop `model`:
+
+```json
+"models": [
+  {"id": "classifier",     "format": "ncnn",     "sha256": "…", "…": "…"},
+  {"id": "classifier-npu", "format": "openvino", "sha256": "…", "…": "…"}
+]
+```
+
+The lane is chosen first and the artifact follows it: the runtime walks the
+preference, takes the first accelerator that is available *and* has an entry it
+can run, then resolves that entry. A manifest declares one spelling or the
+other, never both.
+
+Every entry describes the same network in a different format, so they must
+agree on `tensorContract` and `outputContract` and each format may appear once.
+A manifest that breaks either is refused at load with the reason, because a
+consumer reading the input contract before a lane is chosen would otherwise be
+reading whichever entry happened to be first.
+
 What this does **not** give you: the manifest pins the primary file only, so
 the publisher is accountable for the graph and not for the weights. Tampering
 after installation is caught; a substituted weights file at publication time is

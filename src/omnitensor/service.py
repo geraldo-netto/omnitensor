@@ -455,7 +455,7 @@ def _profile_status(
             "detail": choice.reason[:240],
             "reason": choice.code,
         }
-    if workload.model is None:
+    if not workload.models:
         return {
             "status": "idle",
             "queued": queued,
@@ -765,8 +765,9 @@ class OmniTensorService:
     def _declared_reference(self, artifact_id: str):
         """The digest a bundled or installed manifest declares for this artifact."""
         for workload in self._workloads.values():
-            model = workload.model
-            if model is not None and model["id"] == artifact_id:
+            for model in workload.models:
+                if model["id"] != artifact_id:
+                    continue
                 reference = declared_artifact_reference(workload, model)
                 if reference is not None:
                     return reference
