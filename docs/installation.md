@@ -106,6 +106,51 @@ sudo apt install bubblewrap mesa-vulkan-drivers        # runtime
 sudo apt install clang bpftool libbpf-dev              # eBPF helper build only
 ```
 
+### Installing a model
+
+A profile with no model reports `Ready on gpu; no model bundled` and runs
+nothing. Giving it one is two steps: install the artifact, then declare it in
+the profile's manifest.
+
+Formats whose weights live outside the primary file — ncnn keeps every weight
+in the `.bin` beside the `.param` — are installed as a set. The companion is
+discovered next to the source, copied, digested, and re-verified on every
+resolve, so a weights file replaced after installation makes the artifact
+unresolvable rather than loading silently.
+
+```sh
+# 1. Install. For ncnn, model.bin must sit beside model.param; it is found
+#    automatically and refused if absent.
+omnitensor-prepare-artifact /path/to/squeezenet.param \
+    --id visual-library-classifier --version 1.1.0 --format ncnn \
+    --install-root ~/.local/share/omnitensor/artifacts
+```
+
+The command prints the `requirements.model` block to paste into the profile's
+manifest, with the digest computed from the file it installed:
+
+```json
+{
+  "id": "visual-library-classifier",
+  "version": "1.1.0",
+  "format": "ncnn",
+  "fullyQuantized": false,
+  "minimumCompilerVersion": "validated-release",
+  "minimumRuntimeVersion": "validated-release",
+  "sha256": "<printed by the command>"
+}
+```
+
+`requirements.accelerator` must match what the format can run on — an ncnn
+artifact is GPU-only, and a manifest declaring `tpu` with an ncnn model is
+refused by the schema rather than silently preferring a lane it can never
+take. Restart the service and the profile moves from `idle` to `watching`.
+
+What this does **not** give you: the manifest pins the primary file only, so
+the publisher is accountable for the graph and not for the weights. Tampering
+after installation is caught; a substituted weights file at publication time is
+not.
+
 ### Uninstalling
 
 Removing the package leaves state behind on purpose — artifacts are expensive
@@ -127,6 +172,7 @@ rm -rf ~/.local/share/omnitensor/venv
 ~/.local/share/omnitensor/venv/bin/pip uninstall -y ncnn numpy opencv-python
 
 # 4. State — only if you mean it. Artifacts, policy, recorded telemetry.
+#    Removing an artifact also removes its companion files.
 rm -rf ~/.local/share/omnitensor/artifacts     # verified models
 rm -rf ~/.local/state/omnitensor               # policy, cancellation journal
 rm -f  ~/.local/state/tpu-workload-manager/state.json   # published snapshot
