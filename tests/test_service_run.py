@@ -1631,3 +1631,35 @@ def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
 
     assert json.loads(api.describe_contract_text())["version"] == 1
     assert json.loads(api.describe_contract_text())["code"] == "rate-limit-exceeded"
+
+
+def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):
+    """The inventory exists to answer "what does this need, and does it have
+    it". Every bundled entry answered with silence, including the one profile
+    whose model is declared, installed, and served."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    # The catalogue is discovered on start, so the inventory before it is
+    # empty by design rather than by the defect under test.
+    asyncio.run(service._plugin_runtime.start())
+
+    document = json.loads(service.runtime_api.describe_plugins_text())
+    declaring = {
+        plugin["id"]: plugin["artifacts"]
+        for plugin in document["plugins"]
+        if plugin["artifacts"]
+    }
+
+    assert validate_document("plugin-inventory.schema.json", document) == []
+    assert "visual-library" in declaring, "the one profile with a model reports none"
+    entry = declaring["visual-library"][0]
+    assert entry["format"] == "ncnn"
+    # Not installed in this temporary root, and the inventory says so rather
+    # than reporting a readiness it never checked.
+    assert entry["ready"] is False
+    assert entry["reason"] != ""

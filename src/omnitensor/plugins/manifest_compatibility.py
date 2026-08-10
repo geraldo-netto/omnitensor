@@ -127,6 +127,33 @@ class PluginManifestCompatibilityGate:
         )
 
 
+def declared_model_artifacts(manifest: dict) -> list[dict]:
+    """The model a v1 workload declares, as a plugin artifact declaration.
+
+    A v1 manifest states its model under ``requirements.model`` and knows
+    nothing about ``plugin.artifacts``.  Adapting it to zero artifacts made
+    the inventory answer "what does this need, and does it have it" with
+    silence for every bundled profile — including the one whose model is
+    installed, digest-verified, and serving.
+
+    A declaration without ``sha256`` is dropped rather than invented: an
+    artifact entry is an attestation to an exact file, and one that named a
+    version without saying which bytes would let the inventory report ready
+    for a file the publisher never vouched for.
+    """
+    model = manifest.get("requirements", {}).get("model")
+    if not isinstance(model, dict) or not model.get("sha256"):
+        return []
+    return [
+        {
+            "id": model["id"],
+            "version": model["version"],
+            "format": model["format"],
+            "sha256": model["sha256"],
+        }
+    ]
+
+
 def adapt_bundled_manifest_v1(manifest: dict) -> dict:
     """Create fail-closed execution metadata while preserving all v1 policy data."""
     effective = copy.deepcopy(manifest)
@@ -143,7 +170,7 @@ def adapt_bundled_manifest_v1(manifest: dict) -> dict:
             for name in ("configuration", "input", "output")
         },
         "triggers": ["manual"],
-        "artifacts": [],
+        "artifacts": declared_model_artifacts(effective),
         "permissions": [],
     }
     return effective

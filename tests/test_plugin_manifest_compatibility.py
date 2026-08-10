@@ -223,3 +223,61 @@ def test_manifest_migration_does_not_change_persisted_policy_state(tmp_path):
     assert decision.compatible is True
     assert store.load() == expected
     assert manifest["defaults"] == {"enabled": True, "weight": 2}
+
+
+DIGEST = "6a38784ab51f056e5ecdf208120f8a9174b74831255e66b74c4dd6bf755a4324"
+
+
+def _with_model(manifest: dict, **overrides) -> dict:
+    model = {
+        "id": "sample-model",
+        "version": "1.1.0",
+        "format": "tflite-edgetpu",
+        "fullyQuantized": True,
+        "minimumCompilerVersion": "validated-release",
+        "minimumRuntimeVersion": "validated-release",
+        "sha256": DIGEST,
+    }
+    model.update(overrides)
+    manifest.setdefault("requirements", {})["model"] = model
+    return manifest
+
+
+def test_a_declared_model_becomes_an_artifact_the_inventory_can_report():
+    """DescribePlugins answers "what does this need, and does it have it".
+
+    Adapting every v1 workload to zero artifacts made it answer with silence
+    for every bundled profile, including the one whose model is installed and
+    serving.
+    """
+    adapted = adapt_bundled_manifest_v1(_with_model(sample_manifest("legacy-plugin")))
+
+    assert adapted["plugin"]["artifacts"] == [
+        {"id": "sample-model", "version": "1.1.0", "format": "tflite-edgetpu", "sha256": DIGEST},
+    ]
+
+
+def test_a_model_with_no_digest_is_dropped_rather_than_invented():
+    """An artifact entry attests to exact bytes. One naming a version without
+    saying which bytes would let the inventory report ready for a file the
+    publisher never vouched for."""
+    manifest = _with_model(sample_manifest("legacy-plugin"))
+    del manifest["requirements"]["model"]["sha256"]
+
+    assert adapt_bundled_manifest_v1(manifest)["plugin"]["artifacts"] == []
+
+
+def test_a_workload_declaring_no_model_still_declares_no_artifact():
+    assert adapt_bundled_manifest_v1(sample_manifest("legacy-plugin"))["plugin"]["artifacts"] == []
+    for broken in (None, "model", 42, {}):
+        manifest = sample_manifest("legacy-plugin")
+        manifest.setdefault("requirements", {})["model"] = broken
+        assert adapt_bundled_manifest_v1(manifest)["plugin"]["artifacts"] == []
+
+
+def test_the_adapted_manifest_still_validates_with_the_carried_artifact():
+    from omnitensor.registry import validate_document
+
+    adapted = adapt_bundled_manifest_v1(_with_model(sample_manifest("legacy-plugin")))
+
+    assert validate_document("workload-manifest.schema.json", adapted) == []
