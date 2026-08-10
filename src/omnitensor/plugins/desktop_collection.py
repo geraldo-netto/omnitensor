@@ -2,10 +2,10 @@
 
 This is the most invasive thing the service can be asked to observe, so the
 rules are the strictest.  Window *content* is never collected and there is no
-field that could carry it.  Titles are the one risky field — people put
-document names, ticket numbers, and account names in them — so a title is
-reduced to a coarse category before it is emitted, and the raw string never
-leaves this module.
+field that could carry it.  Titles are the risky field in particular — people
+put document names, ticket numbers, and account names in them — so a title is
+never accepted at all: a coarse role stands in for it, and a source that offers
+one is refused rather than trusted to have redacted it.
 
 Consent is per session and revocable, and a session change invalidates it: a
 grant given on one login is not a grant for the next, because the person at the
