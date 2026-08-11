@@ -318,6 +318,15 @@ def test_onnx_exporter_freezes_inputs_and_executes_recipe_wrapper(tmp_path, iden
     assert math.sqrt(sum(float(value) ** 2 for value in result[0])) == pytest.approx(1.0)
 
 
+def test_bge_exporter_accepts_the_pinned_source_opset(tmp_path):
+    fetched = _fetched(tmp_path, "bge-small-en-v1-5")
+    _source_model(fetched.root / "model.onnx", opset=11)
+
+    SentenceEmbeddingOnnxExporter().export(fetched, tmp_path / "bge.onnx")
+
+    assert onnx.load(tmp_path / "bge.onnx").opset_import[0].version == 11
+
+
 @pytest.mark.parametrize(
     ("opset", "output_name", "detail"),
     [

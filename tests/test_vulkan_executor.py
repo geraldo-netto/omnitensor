@@ -37,12 +37,16 @@ class FakeExtractor:
 
 class FakeOptions:
     use_vulkan_compute = False
+    use_fp16_packed = True
+    use_fp16_storage = True
+    use_fp16_arithmetic = True
 
 
 class FakeNet:
     def __init__(self, runtime):
         self.opt = FakeOptions()
         self._runtime = runtime
+        runtime.last_net = self
 
     def set_vulkan_device(self, device):
         self._runtime.selected_device = device
@@ -79,6 +83,7 @@ class FakeNcnn:
         self.selected_device = None
         self.cleared = 0
         self.nets_created = 0
+        self.last_net = None
 
     def get_gpu_count(self):
         return len(self._device_types)
@@ -101,6 +106,65 @@ def test_vulkan_prefers_discrete_and_never_selects_software_devices():
     result = executor.run("model.param", [[-1, 2, -3]])
     assert runtime.selected_device == 1
     assert result.outputs == [[1, 2, 3]]
+    assert runtime.last_net.opt.use_vulkan_compute is True
+    assert runtime.last_net.opt.use_fp16_packed is False
+    assert runtime.last_net.opt.use_fp16_storage is False
+    assert runtime.last_net.opt.use_fp16_arithmetic is False
+
+
+def test_vulkan_preserves_bounded_integer_inputs_and_floats_everything_else():
+    class TypedMat:
+        def __init__(self, value):
+            self.value = value
+
+        def clone(self):
+            return self
+
+    runtime = FakeNcnn([DISCRETE])
+    runtime.Mat = TypedMat
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+
+    integers = executor._to_mat([[1, 2, 3]])  # noqa: SLF001 - dtype boundary
+    booleans = executor._to_mat([[True, False]])  # noqa: SLF001 - dtype boundary
+    floats = executor._to_mat([[1.25, -2.5]])  # noqa: SLF001 - dtype boundary
+    boundaries = executor._to_mat(  # noqa: SLF001 - dtype boundary
+        [[-(2**31), 2**31 - 1]]
+    )
+
+    assert integers.value.dtype.name == "int32"
+    assert booleans.value.dtype.name == "float32"
+    assert floats.value.dtype.name == "float32"
+    assert floats.value.tolist() == [[1.25, -2.5]]
+    assert boundaries.value.dtype.name == "int32"
+    assert boundaries.value.tolist() == [[-(2**31), 2**31 - 1]]
+    with pytest.raises(RuntimeError) as overflow:
+        executor._to_mat([[2**31]])  # noqa: SLF001 - dtype boundary
+    assert str(overflow.value) == "ncnn integer input exceeds int32 range"
+
+
+def test_vulkan_preserves_three_axes_unwraps_one_batch_and_rejects_many():
+    class ShapedMat:
+        def __init__(self, value):
+            self.value = value
+
+        def clone(self):
+            return self
+
+    runtime = FakeNcnn([DISCRETE])
+    runtime.Mat = ShapedMat
+    executor = VulkanGpuExecutor(device_present=True, runtime=runtime)
+
+    three_axes = executor._to_mat([[[1.0, 2.0]]])  # noqa: SLF001
+    one_batch = executor._to_mat([[[[1.0, 2.0]]]])  # noqa: SLF001
+    assert three_axes.value.shape == (1, 1, 2)
+    assert one_batch.value.shape == (1, 1, 2)
+    assert one_batch.value.tolist() == [[[1.0, 2.0]]]
+
+    with pytest.raises(RuntimeError) as batch:
+        executor._to_mat(  # noqa: SLF001
+            [[[[1.0, 2.0]]], [[[3.0, 4.0]]]]
+        )
+    assert str(batch.value) == "ncnn runs one image at a time; received a batch of 2"
 
 
 def test_vulkan_run_enumerates_devices_once():

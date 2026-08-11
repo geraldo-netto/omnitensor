@@ -238,6 +238,35 @@ def test_model_tooling_guide_covers_every_reviewed_license_and_target_stage():
         assert boundary in normalized
 
 
+def test_document_model_guide_keeps_opsets_one_contract_and_native_gate_explicit():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    guide = LOCAL_TRAINING.read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+
+    assert project["project"]["scripts"]["omnitensor-install-document-model"] == (
+        "omnitensor.training.document_model:main"
+    )
+    assert set(project["project"]["optional-dependencies"]["document-producers"]) >= {
+        "ncnn>=1.0.20260526",
+        "onnxruntime>=1.17",
+        "pnnx>=20260526",
+        "tokenizers>=0.22",
+        "transformers>=4.40",
+    }
+    for boundary in (
+        "ONNX opset 11",
+        "MiniLM mean-pooling wrapper legitimately uses opset 13",
+        "no second service API",
+        "refuses software Vulkan devices and CPU fallback",
+        "cosine parity of at least `0.999`",
+        "maximum absolute error at most `0.001`",
+        "remains disabled by default",
+        "other model-less profiles are untouched",
+        "NPU needs a separately gated OpenVINO artifact",
+    ):
+        assert boundary in normalized
+
+
 def test_use_case_guide_records_source_only_profile_boundaries():
     guide = USE_CASES.read_text(encoding="utf-8")
     expected = {

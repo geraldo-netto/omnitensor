@@ -32,6 +32,10 @@ RECEIPT_FILENAME = "source-receipt.json"
 MAX_BUNDLED_RECIPES = 128
 _RECIPE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _GOOGLE_DRIVE_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{20,100}$")
+_PINNED_REVISION = re.compile(r"^[0-9a-f]{40}$")
+_HUGGING_FACE_CDN = re.compile(
+    r"^(?:(?:[a-z0-9-]+\.)*cdn\.hf\.co|cas-bridge\.xethub\.hf\.co)$"
+)
 REFUSED_BUNDLED_RECIPES = {
     "zero-dce": (
         "the official Zero-DCE code and weights are CC-BY-NC-4.0 for academic "
@@ -606,7 +610,43 @@ def _validate_download_response_uri(declared_uri: str, response_uri: str) -> Non
     mapped = _source_download_uri(declared_uri)
     if response_uri == mapped:
         return
+    if _is_pinned_hugging_face_redirect(declared_uri, response_uri):
+        return
     _validate_https_uri(response_uri, "redirected source URI")
+
+
+def _is_pinned_hugging_face_redirect(declared_uri: str, response_uri: str) -> bool:
+    """Accept only signed CDN redirects from an immutable public Hub revision."""
+    declared = urllib.parse.urlsplit(declared_uri)
+    response = urllib.parse.urlsplit(response_uri)
+    source_parts = declared.path.strip("/").split("/")
+    response_parts = response.path.strip("/").split("/")
+    pinned_source = (
+        declared.hostname == "huggingface.co"
+        and len(source_parts) >= 5
+        and source_parts[2] == "resolve"
+        and _PINNED_REVISION.fullmatch(source_parts[3]) is not None
+    )
+    safe_common = (
+        response.scheme == "https"
+        and response.hostname is not None
+        and response.username is None
+        and response.password is None
+        and bool(response.path.strip("/"))
+        and bool(response.query)
+        and not response.fragment
+    )
+    signed_cdn = (
+        response.hostname is not None
+        and _HUGGING_FACE_CDN.fullmatch(response.hostname) is not None
+    )
+    exact_cache = (
+        response.hostname == "huggingface.co"
+        and response_parts[:3] == ["api", "resolve-cache", "models"]
+        and response_parts[3:5] == source_parts[:2]
+        and response_parts[5:] == [source_parts[3], *source_parts[4:]]
+    )
+    return pinned_source and safe_common and (signed_cdn or exact_cache)
 
 
 def _fetch_one(source: ModelSource, destination: Path, transport: SourceTransport) -> None:

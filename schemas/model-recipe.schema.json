@@ -115,7 +115,7 @@
       "required": ["role", "uri", "revision", "filename", "sha256", "sizeBytes"],
       "properties": {
         "role": {
-          "enum": ["architecture", "config", "labels", "model", "tokenizer", "vocabulary"]
+          "enum": ["architecture", "config", "labels", "model", "tokenizer", "vocabulary", "weights"]
         },
         "uri": {
           "type": "string",

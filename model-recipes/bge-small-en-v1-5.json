@@ -29,6 +29,14 @@
       "filename": "config.json",
       "sha256": "094f8e891b932f2000c92cfc663bac4c62069f5d8af5b5278c4306aef3084750",
       "sizeBytes": 743
+    },
+    {
+      "role": "weights",
+      "uri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/model.safetensors",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "filename": "model.safetensors",
+      "sha256": "3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad",
+      "sizeBytes": 133466304
     }
   ],
   "license": {
@@ -99,10 +107,10 @@
       "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and NPU semantic/hardware parity have not been produced."
     },
     "gpu": {
-      "status": "planned",
+      "status": "convertible",
       "compiler": "pnnx",
       "fullyQuantized": false,
-      "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and GPU semantic/hardware parity have not been produced."
+      "reason": "The pinned safetensors reconstruct the reviewed BERT encoder for direct pnnx export. Installation still requires the bundled retrieval gate and named-Vulkan-device parity; conversion alone is not qualification."
     }
   }
 }

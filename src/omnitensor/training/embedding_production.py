@@ -187,9 +187,15 @@ class SentenceEmbeddingOnnxExporter:
             raise ModelRecipeError("producer-incompatible", "recipe is not a supported embedding")
         model = onnx.load(source.root / recipe.model_source.filename, load_external_data=False)
         default_opsets = [item.version for item in model.opset_import if not item.domain]
-        if not default_opsets or default_opsets[0] < 13:
+        minimum_opset = (
+            13
+            if recipe.producer["postprocessing"] == "attention-mask-mean-pool-l2"
+            else 11
+        )
+        if not default_opsets or default_opsets[0] < minimum_opset:
             raise ModelRecipeError(
-                "producer-incompatible", "embedding export requires ONNX opset 13+"
+                "producer-incompatible",
+                f"embedding export requires ONNX opset {minimum_opset}+",
             )
         _freeze_embedding_inputs(model, recipe.producer, recipe.tensor_contract)
         _append_embedding_wrapper(model, recipe.producer, TensorProto, helper)

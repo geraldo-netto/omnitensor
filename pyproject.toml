@@ -55,6 +55,20 @@ events = ["pymupdf>=1.24"]
 # Producer-only neural-model export. This is intentionally separate from the
 # service and from small deterministic numeric fitting.
 model-producers = ["onnx>=1.16", "numpy>=1.24", "torch>=2.2"]
+# Explicit one-shot Document Intelligence production. These dependencies are
+# never imported by the service; they reconstruct the pinned BGE encoder,
+# compile it to ncnn, and run source/native parity on a named Vulkan device.
+document-producers = [
+    "ncnn>=1.0.20260526",
+    "numpy>=1.24",
+    "onnx>=1.16",
+    "onnxruntime>=1.17",
+    "pnnx>=20260526",
+    "safetensors>=0.4",
+    "tokenizers>=0.22",
+    "torch>=2.2",
+    "transformers>=4.40",
+]
 # Producer-only adapters for pinned foundation forecasters. The family-specific
 # loader remains explicit because Chronos and TTM use distinct reviewed APIs;
 # neither dependency is imported by the service or permits CPU fallback there.
@@ -102,6 +116,7 @@ omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
 omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
 omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
 omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
+omnitensor-install-document-model = "omnitensor.training.document_model:main"
 omnitensor-configure-low-light = "omnitensor.lowlight:configure_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"

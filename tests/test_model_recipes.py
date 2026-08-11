@@ -162,7 +162,12 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
         assert recipe.producer is not None
         assert recipe.producer["outputShape"][0] == 1
         assert set(recipe.targets) == {"tpu", "npu", "gpu"}
-        assert {claim.status for claim in recipe.targets.values()} == {"planned"}
+        expected_statuses = (
+            {"planned", "convertible"}
+            if recipe.id == "bge-small-en-v1-5"
+            else {"planned"}
+        )
+        assert {claim.status for claim in recipe.targets.values()} == expected_statuses
         assert not any(claim.fully_quantized for claim in recipe.targets.values())
         assert all(source.revision in source.uri.split("/") for source in recipe.sources)
         assert len({source.role for source in recipe.sources}) == len(recipe.sources)
@@ -187,6 +192,14 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
             "postprocessing": postprocessing[recipe.id],
             "description": recipe.producer["description"],
         }
+
+    bge_weights = next(
+        source for source in by_id["bge-small-en-v1-5"].sources if source.role == "weights"
+    )
+    assert bge_weights.filename == "model.safetensors"
+    assert bge_weights.sha256 == (
+        "3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad"
+    )
 
     clip = by_id["clip-vit-b-32-image"]
     assert clip.source_format == "torchscript"
@@ -1252,6 +1265,63 @@ def test_google_drive_adapter_never_weakens_other_redirect_validation():
     )
 
 
+def test_hugging_face_transport_accepts_only_pinned_signed_cdn_redirects(monkeypatch):
+    revision = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+    source = f"https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/{revision}/onnx/model.onnx"
+    redirect = "https://us.aws.cdn.hf.co/xet-bridge-us/object?Policy=pinned&Signature=signed"
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_args, **_kwargs: FakeResponse(b"onnx", uri=redirect, length="4"),
+    )
+
+    assert b"".join(HttpsSourceTransport().chunks(source, 4)) == b"onnx"
+
+    cache = (
+        "https://huggingface.co/api/resolve-cache/models/BAAI/bge-small-en-v1.5/"
+        f"{revision}/onnx/model.onnx?etag=pinned"
+    )
+    _validate_download_response_uri(source, cache)
+
+
+@pytest.mark.parametrize(
+    "source,redirect",
+    [
+        (
+            "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx",
+            "https://us.aws.cdn.hf.co/object?Signature=signed",
+        ),
+        (
+            "https://models.example/0123456789abcdef0123456789abcdef01234567/model.onnx",
+            "https://us.aws.cdn.hf.co/object?Signature=signed",
+        ),
+        (
+            "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/0123456789abcdef0123456789abcdef01234567/model.onnx",
+            "https://cdn.example/object?Signature=signed",
+        ),
+        (
+            "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/0123456789abcdef0123456789abcdef01234567/model.onnx",
+            "http://us.aws.cdn.hf.co/object?Signature=signed",
+        ),
+        (
+            "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/0123456789abcdef0123456789abcdef01234567/model.onnx",
+            "https://user@us.aws.cdn.hf.co/object?Signature=signed",
+        ),
+        (
+            "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/0123456789abcdef0123456789abcdef01234567/model.onnx",
+            "https://huggingface.co/api/resolve-cache/models/BAAI/other/0123456789abcdef0123456789abcdef01234567/model.onnx?etag=pinned",
+        ),
+    ],
+)
+def test_hugging_face_transport_refuses_mutable_or_untrusted_redirects(source, redirect):
+    with pytest.raises(ModelRecipeError) as invalid:
+        _validate_download_response_uri(source, redirect)
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == (
+        "redirected source URI must be an HTTPS URL without credentials, query, or fragment"
+    )
+
+
 @pytest.mark.parametrize(
     "uri",
     [
@@ -1366,7 +1436,7 @@ def test_list_cli_reports_exact_catalog_and_failure(monkeypatch, capsys):
             "profileIds": ["document-intelligence"],
             "sourceFormat": "onnx",
             "license": "MIT",
-            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "convertible"},
         },
         {
             "id": "clip-vit-b-32-image",

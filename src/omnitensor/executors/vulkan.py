@@ -172,6 +172,13 @@ class VulkanGpuExecutor:
         def build():
             net = self._runtime.Net()
             net.opt.use_vulkan_compute = True
+            # Transformer attention is not semantically stable under ncnn's
+            # fp16 storage/arithmetic defaults on the Vulkan devices we
+            # qualify.  Artifacts can still store explicitly converted fp16
+            # weights, but runtime precision is kept at fp32 for every model.
+            net.opt.use_fp16_packed = False
+            net.opt.use_fp16_storage = False
+            net.opt.use_fp16_arithmetic = False
             net.set_vulkan_device(device)
             if net.load_param(str(param_path)) != 0:
                 raise RuntimeError(f"Could not load ncnn param: {param_path}")
@@ -218,7 +225,17 @@ class VulkanGpuExecutor:
             return self._owned(value)
         import numpy  # noqa: PLC0415 - shipped with the ncnn wheel
 
-        array = numpy.ascontiguousarray(value, dtype=numpy.float32)
+        observed = numpy.asarray(value)
+        if observed.dtype.kind in "iu" and observed.dtype.kind != "b":
+            limits = numpy.iinfo(numpy.int32)
+            if observed.size and (
+                observed.min() < limits.min or observed.max() > limits.max
+            ):
+                raise RuntimeError("ncnn integer input exceeds int32 range")
+            dtype = numpy.int32
+        else:
+            dtype = numpy.float32
+        array = numpy.ascontiguousarray(value, dtype=dtype)
         while array.ndim > 3 and array.shape[0] == 1:
             array = array[0]
         if array.ndim > 3:

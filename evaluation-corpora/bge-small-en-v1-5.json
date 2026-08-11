@@ -1,0 +1,25 @@
+{
+  "corpusVersion": 1,
+  "id": "bge-small-en-v1-5-retrieval-gate",
+  "license": "CC0-1.0",
+  "provenance": "Authored for OmniTensor as a deterministic public smoke corpus. It proves source/native parity and obvious-topic retrieval only; it is not a production-domain quality claim.",
+  "queries": [
+    "software package dependencies",
+    "renewable solar electricity"
+  ],
+  "documents": [
+    "Package managers install libraries and resolve software dependencies.",
+    "Solar panels convert sunlight into renewable electrical energy.",
+    "Database indexes accelerate lookup queries over structured records.",
+    "Bicycles use pedals, chains, and wheels for human-powered transport.",
+    "Bread dough combines flour, water, yeast, and salt before baking.",
+    "The Pacific Ocean is the largest and deepest ocean on Earth.",
+    "Photosynthesis lets plants turn light into stored chemical energy.",
+    "Encryption protects messages using cryptographic keys and algorithms.",
+    "Rain forms when atmospheric water vapor condenses into droplets.",
+    "Compilers translate source code into machine executable instructions.",
+    "Libraries lend books and other media to registered readers.",
+    "Sleep supports memory consolidation and physical recovery."
+  ],
+  "expectedTopDocument": [0, 1]
+}

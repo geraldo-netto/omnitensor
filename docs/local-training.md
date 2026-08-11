@@ -38,6 +38,7 @@ service environment.
 | OmniTensor base dependencies | Mandatory | Bounded recorder, fitting baseline, report and artifact contracts |
 | `[train]` (`onnx`) | Mandatory for export | Validate and write canonical ONNX |
 | `[model-producers]` (`torch`, `onnx`, `numpy`) | Optional | Export reviewed neural sources such as CLIP in an isolated producer environment |
+| `[document-producers]` (`torch`, `transformers`, `safetensors`, `tokenizers`, `onnx`, `onnxruntime`, `pnnx`, `ncnn`, `numpy`) | Required only for the BGE GPU installer | Reconstruct the pinned BGE-small encoder, compile its ncnn graph, and compare it with the portable reference on a named Vulkan device |
 | `[foundation-producers]` (`torch`, `onnx`, `numpy`, `safetensors`, `transformers`) | Optional | Export the pinned Chronos/TTM sources; a reviewed family-specific loader is also mandatory and remains an explicit producer input |
 | `[retinexformer-producers]` (`torch`, `onnx`, `numpy`, `einops`) | Optional | Reconstruct the verified Retinexformer architecture/checkpoint and export its clamped fixed graph |
 | `[convert]` (`pnnx`) | Optional | Build Vulkan/ncnn GPU artifact |
@@ -77,7 +78,7 @@ TRAIN=~/.local/share/omnitensor-training/venv/bin
 | Recipe | Intended profile | Upstream license | Current deliverable |
 | --- | --- | --- | --- |
 | `all-minilm-l6-v2` | `document-intelligence` | [Apache-2.0 model card and weights](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md) | Fixed mean-pooling/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
-| `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Fixed CLS/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
+| `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Fixed CLS/L2 portable reference plus an explicit ncnn/Vulkan producer with bundled smoke retrieval, source/native parity, immutable installation, and a restricted local binding; NPU/TPU remain unqualified |
 | `clip-vit-b-32-image` | `visual-library` | [MIT](https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE) | Fixed image-only ONNX/L2 producer, exact resize/normalization helpers, and source cosine/zero-shot gate; native lanes remain unqualified |
 | `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Fixed 512-value median-first-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
 | `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Fixed 512-value first-point-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
@@ -107,7 +108,47 @@ writes an atomic provenance report. The caller supplies source and portable
 runner factories plus a separately licensed `EmbeddingHoldout`; acceptance
 requires cosine parity, top-10 retrieval overlap, and finite 384-value output.
 The report contains corpus identity and counts, never query or document text.
-This producer does not compile, install, or claim GPU/NPU/TPU evidence.
+This general producer does not compile, install, or claim GPU/NPU/TPU
+evidence. BGE's narrower end-to-end GPU installer below adds those stages
+without changing that reusable boundary.
+
+### Install BGE-small for Document Intelligence on Vulkan
+
+Keep the large producer stack out of the service environment:
+
+```sh
+python3 -m venv ~/.local/share/omnitensor-document-producer/venv
+~/.local/share/omnitensor-document-producer/venv/bin/pip install \
+  '/path/to/omnitensor[document-producers]'
+~/.local/share/omnitensor-document-producer/venv/bin/omnitensor-install-document-model \
+  --accept-license MIT
+systemctl --user restart omnitensor.service
+```
+
+The command downloads only the revision-, size-, and digest-pinned MIT BGE
+files after explicit acknowledgement. It preserves upstream's ONNX opset 11
+graph as the portable reference. BGE's CLS selection needs no opset-13-only
+operators, while the independent MiniLM mean-pooling wrapper legitimately uses
+opset 13; both publish the same embedding output contract, so no second service
+API or forced graph upgrade is needed.
+
+The native path reconstructs the reviewed BERT encoder from the pinned
+safetensors and exports directly to ncnn with fixed `[1,128]` token, mask, and
+segment inputs. It refuses software Vulkan devices and CPU fallback. Before
+publishing, it requires finite 384-value output, cosine parity of at least
+`0.999`, top-10 overlap of at least `0.9`, maximum absolute error at most
+`0.001`, and every expected top result in the bundled CC0 smoke corpus. The
+report contains only corpus identity and aggregate metrics. It explicitly does
+not claim production-domain retrieval quality or named-device profile
+acceptance.
+
+The binding changes only `document-intelligence` model/routing fields and
+remains disabled by default. The other model-less profiles are untouched and
+gain no artifact or route. The ncnn service runtime uses integer token tensors
+and full-precision Vulkan arithmetic because fp16 attention on the qualified
+host did not preserve embedding semantics. NPU needs a separately gated
+OpenVINO artifact; TPU needs a representative int8 export, full compiler
+mapping, parity, and Coral evidence.
 
 `produce_clip_source` similarly rechecks the pinned OpenAI TorchScript bytes,
 exports only `encode_image` at `[1,3,224,224]`, and puts 512-value L2
@@ -203,7 +244,7 @@ for that profile.
 | Service executor | ncnn/Vulkan with `[gpu]` | OpenVINO with `[npu]` | TFLite with Edge TPU delegate using `[tpu]` |
 | `forecast-v1` local install | Implemented when `pnnx` is present | Implemented when `ovc` is present | Not implemented: the report currently contains ONNX, not calibrated fully-int8 TFLite |
 | Storage/network/build/hardware/desktop producers | Signed promotion boundary implemented; requires injected native parity evidence, then installs independently versioned ncnn artifacts | Same boundary for OpenVINO IR | Needs a separate representative int8 export; ONNX promotion refuses TPU |
-| Reviewed embedding/forecast/low-light catalog | Pinned source only; wrapper/export, conversion, profile integration, and acceptance remain | Same | Same, plus representative int8 calibration and full Edge TPU mapping |
+| Reviewed embedding/forecast/low-light catalog | BGE has an explicit locally gated ncnn producer; every other reviewed neural source remains source-only | BGE and every other reviewed neural source remain source-only | Same, plus representative int8 calibration and full Edge TPU mapping |
 | CPU fallback | Never | Never | Never |
 
 `promote_numeric_training` is the fail-closed producer API for storage,

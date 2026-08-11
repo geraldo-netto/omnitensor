@@ -14,11 +14,15 @@ separately from the OmniTensor code license:
 omnitensor-fetch-model-source bge-small-en-v1-5 --accept-license MIT
 ```
 
-MiniLM and BGE have a producer API in
+MiniLM and BGE have a portable producer API in
 `omnitensor.training.embedding_production`. It appends their exact fixed
 pooling/L2 graph and gates portable output against the verified source on
-operator-reviewed local text. Its report leaves GPU, NPU, and TPU unqualified;
-each still needs independent compiler, parity, and named-device evidence.
+operator-reviewed local text. BGE additionally has the explicit
+`omnitensor-install-document-model` producer: it reconstructs the same pinned
+encoder from safetensors, exports a precise ncnn graph, runs retrieval and
+portable/native parity on a named hardware Vulkan device, installs the
+digest-locked pair, and writes a restricted local binding. NPU and TPU remain
+unqualified, as does MiniLM on every native target.
 
 CLIP has the same fail-closed boundary in
 `omnitensor.training.clip_production`: exact cover-resize/normalization helpers,
@@ -40,7 +44,7 @@ The bundled catalog currently contains:
 
 | recipe | upstream portable source | intended output | target status |
 | --- | --- | --- | --- |
-| `bge-small-en-v1-5` | pinned official ONNX graph, tokenizer, and config | 384-value sentence embedding | TPU/NPU/GPU planned |
+| `bge-small-en-v1-5` | pinned official ONNX graph, tokenizer, config, and safetensors | 384-value sentence embedding | GPU one-shot producer; TPU/NPU planned |
 | `all-minilm-l6-v2` | pinned official ONNX graph, tokenizer, and config | 384-value sentence embedding | TPU/NPU/GPU planned |
 | `clip-vit-b-32-image` | pinned official OpenAI TorchScript checkpoint | 512-value image embedding | TPU/NPU/GPU planned |
 | `ibm-granite-ttm-r2` | pinned IBM Tiny Time Mixer R2 safetensors checkpoint | first-horizon point forecast | TPU/NPU/GPU planned |
@@ -78,8 +82,10 @@ limits its implementation and pretrained model to academic, non-commercial
 use under CC-BY-NC-4.0, which conflicts with this catalog's redistributable
 commercial-use policy. A third-party conversion cannot relicense those bytes.
 
-All target claims in this catalog remain `planned`: source portability is not target
-acceptance. NPU and GPU still require the producer export, conversion, parity,
-and named-device execution evidence. TPU additionally requires representative
-fully-int8 calibration, a compiler report with full Edge TPU mapping, semantic
-parity, and execution evidence on Coral hardware.
+Except for BGE's fail-closed local GPU producer, target claims in this catalog
+remain `planned`: source portability is not target acceptance. BGE is marked
+`convertible`, not prequalified; each invocation must still pass conversion,
+retrieval, parity, and named-device execution before it publishes a binding.
+NPU targets require their own compiler and device evidence. TPU additionally
+requires representative fully-int8 calibration, a compiler report with full
+Edge TPU mapping, semantic parity, and execution evidence on Coral hardware.
