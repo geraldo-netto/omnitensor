@@ -132,22 +132,28 @@ def test_recipe_loads_exact_source_license_contract_and_target_claims(tmp_path):
     assert len(recipe.document_sha256) == 64
 
 
-def test_bundled_embedding_catalog_pins_sources_semantics_and_target_truth():
+def test_bundled_catalog_pins_sources_semantics_and_target_truth():
     recipes = load_bundled_model_recipes()
+    by_id = {recipe.id: recipe for recipe in recipes}
 
     assert tuple(recipe.id for recipe in recipes) == (
         "all-minilm-l6-v2",
+        "amazon-chronos-bolt-tiny",
         "bge-small-en-v1-5",
         "clip-vit-b-32-image",
+        "ibm-granite-ttm-r2",
     )
     assert {recipe.id: recipe.model_source.sha256 for recipe in recipes} == {
         "all-minilm-l6-v2": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+        "amazon-chronos-bolt-tiny": (
+            "75068728d376d2bec670379eeef4bfb4d24c0cfe24d957451f8d19b447030a32"
+        ),
         "bge-small-en-v1-5": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
         "clip-vit-b-32-image": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
+        "ibm-granite-ttm-r2": "a706726a7eb01bbcb42994b7dcb3c06ea9557898dbae8d480eb04fe8ccb89710",
     }
     for recipe in recipes:
         assert recipe.producer is not None
-        assert recipe.output_contract == {"kind": "embedding"}
         assert recipe.producer["outputShape"][0] == 1
         assert set(recipe.targets) == {"tpu", "npu", "gpu"}
         assert {claim.status for claim in recipe.targets.values()} == {"planned"}
@@ -157,7 +163,7 @@ def test_bundled_embedding_catalog_pins_sources_semantics_and_target_truth():
         assert all(len(source.sha256) == 64 for source in recipe.sources)
         assert all(source.size_bytes > 0 for source in recipe.sources)
 
-    sentence_recipes = recipes[:2]
+    sentence_recipes = [by_id["all-minilm-l6-v2"], by_id["bge-small-en-v1-5"]]
     postprocessing = {
         "all-minilm-l6-v2": "attention-mask-mean-pool-l2",
         "bge-small-en-v1-5": "cls-token-l2",
@@ -176,7 +182,7 @@ def test_bundled_embedding_catalog_pins_sources_semantics_and_target_truth():
             "description": recipe.producer["description"],
         }
 
-    clip = recipes[2]
+    clip = by_id["clip-vit-b-32-image"]
     assert clip.source_format == "torchscript"
     assert clip.profile_ids == ("visual-library",)
     image = clip.tensor_contract["inputs"][0]
@@ -191,6 +197,39 @@ def test_bundled_embedding_catalog_pins_sources_semantics_and_target_truth():
         ],
         "resize": {"filter": "bicubic", "fit": "cover"},
     }
+
+    time_series = {
+        "ibm-granite-ttm-r2": (
+            "timeseries-point-forecast",
+            "prediction_outputs",
+            [1, 96, 1],
+            "first-horizon-point",
+        ),
+        "amazon-chronos-bolt-tiny": (
+            "timeseries-quantile-forecast",
+            "quantile_preds",
+            [1, 9, 64],
+            "first-horizon-median-quantile",
+        ),
+    }
+    for identifier, (kind, output_name, source_shape, postprocessing) in time_series.items():
+        recipe = by_id[identifier]
+        assert recipe.source_format == "safetensors"
+        assert recipe.profile_ids == ("resource-scheduler",)
+        assert recipe.output_contract == {"kind": "raw"}
+        assert recipe.tensor_contract == {
+            "inputs": [{"shape": [1, 512], "dtype": "float32", "layout": "NC"}]
+        }
+        assert recipe.producer == {
+            "kind": kind,
+            "version": 1,
+            "inputNames": ["context"],
+            "sourceOutputName": output_name,
+            "sourceOutputShape": source_shape,
+            "outputShape": [1, 1],
+            "postprocessing": postprocessing,
+            "description": recipe.producer["description"],
+        }
 
 
 def test_bundled_recipe_reference_resolves_id_path_and_refuses_unknown(tmp_path):
@@ -370,6 +409,118 @@ def test_sentence_embedding_producer_semantics_fail_closed(tmp_path, change, det
 )
 def test_clip_image_producer_semantics_fail_closed(tmp_path, change, detail):
     document = bundled_document("clip-vit-b-32-image")
+    change(document)
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    "identifier", ["bge-small-en-v1-5", "clip-vit-b-32-image"]
+)
+def test_every_embedding_producer_requires_its_declared_output_contract(
+    tmp_path, identifier
+):
+    document = bundled_document(identifier)
+    document["outputContract"] = {"kind": "raw"}
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == "embedding producers require an embedding output contract"
+
+
+@pytest.mark.parametrize(
+    "identifier", ["ibm-granite-ttm-r2", "amazon-chronos-bolt-tiny"]
+)
+def test_every_time_series_producer_requires_the_forecast_contract(
+    tmp_path, identifier
+):
+    document = bundled_document(identifier)
+    document["family"] = "ranking"
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == "time-series producers require a raw forecast output contract"
+
+
+@pytest.mark.parametrize(
+    ("identifier", "change", "detail"),
+    [
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item.update(family="ranking"),
+            "time-series producers require a raw forecast output contract",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item.update(outputContract={"kind": "embedding"}),
+            "time-series producers require a raw forecast output contract",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item.update(sourceFormat="onnx"),
+            "pretrained time-series source must be safetensors with context input",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["producer"].update(inputNames=["past_values"]),
+            "pretrained time-series source must be safetensors with context input",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["tensorContract"]["inputs"][0].update(shape=[1, 511]),
+            "time-series export must map one 512-value context to one scalar",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["producer"].update(outputShape=[1, 2]),
+            "time-series export must map one 512-value context to one scalar",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["producer"].update(sourceOutputName="forecast"),
+            "time-series source output or scalar selection disagrees",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["producer"].update(sourceOutputShape=[1, 95, 1]),
+            "time-series source output or scalar selection disagrees",
+        ),
+        (
+            "ibm-granite-ttm-r2",
+            lambda item: item["producer"].update(
+                postprocessing="first-horizon-median-quantile"
+            ),
+            "time-series source output or scalar selection disagrees",
+        ),
+        (
+            "amazon-chronos-bolt-tiny",
+            lambda item: item["producer"].update(sourceOutputName="predictions"),
+            "time-series source output or scalar selection disagrees",
+        ),
+        (
+            "amazon-chronos-bolt-tiny",
+            lambda item: item["producer"].update(sourceOutputShape=[1, 8, 64]),
+            "time-series source output or scalar selection disagrees",
+        ),
+        (
+            "amazon-chronos-bolt-tiny",
+            lambda item: item["producer"].update(postprocessing="first-horizon-point"),
+            "time-series source output or scalar selection disagrees",
+        ),
+    ],
+)
+def test_time_series_producer_semantics_fail_closed(
+    tmp_path, identifier, change, detail
+):
+    document = bundled_document(identifier)
     change(document)
 
     with pytest.raises(ModelRecipeError) as invalid:
@@ -1010,6 +1161,15 @@ def test_list_cli_reports_exact_catalog_and_failure(monkeypatch, capsys):
             "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
         },
         {
+            "id": "amazon-chronos-bolt-tiny",
+            "version": "1.0.0",
+            "family": "forecast",
+            "profileIds": ["resource-scheduler"],
+            "sourceFormat": "safetensors",
+            "license": "Apache-2.0",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+        {
             "id": "bge-small-en-v1-5",
             "version": "1.0.0",
             "family": "embedding",
@@ -1025,6 +1185,15 @@ def test_list_cli_reports_exact_catalog_and_failure(monkeypatch, capsys):
             "profileIds": ["visual-library"],
             "sourceFormat": "torchscript",
             "license": "MIT",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+        {
+            "id": "ibm-granite-ttm-r2",
+            "version": "1.0.0",
+            "family": "forecast",
+            "profileIds": ["resource-scheduler"],
+            "sourceFormat": "safetensors",
+            "license": "Apache-2.0",
             "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
         },
     ]

@@ -385,19 +385,32 @@ def _validate_producer(document: dict) -> None:
             "recipe-invalid", "producer inputNames must match tensorContract input order"
         )
     kind = producer["kind"]
-    if kind != "identity" and document["outputContract"]["kind"] != "embedding":
-        raise ModelRecipeError(
-            "recipe-invalid", "embedding producers require an embedding output contract"
-        )
+    _validate_producer_contract(document, kind)
     if producer["outputShape"][0] != 1:
         raise ModelRecipeError("recipe-invalid", "producer outputShape must have batch size 1")
     if kind == "sentence-embedding":
         _validate_sentence_embedding_producer(document, producer, inputs)
     elif kind == "clip-image-embedding":
         _validate_clip_image_producer(document, producer, inputs)
+    elif kind in {"timeseries-point-forecast", "timeseries-quantile-forecast"}:
+        _validate_timeseries_producer(document, producer, inputs)
     elif producer["sourceOutputShape"] != producer["outputShape"]:
         raise ModelRecipeError(
             "recipe-invalid", "identity producer cannot change the source output shape"
+        )
+
+
+def _validate_producer_contract(document: dict, kind: str) -> None:
+    if kind in {"sentence-embedding", "clip-image-embedding"}:
+        if document["outputContract"]["kind"] != "embedding":
+            raise ModelRecipeError(
+                "recipe-invalid", "embedding producers require an embedding output contract"
+            )
+    elif kind in {"timeseries-point-forecast", "timeseries-quantile-forecast"} and (
+        document["family"] != "forecast" or document["outputContract"]["kind"] != "raw"
+    ):
+        raise ModelRecipeError(
+            "recipe-invalid", "time-series producers require a raw forecast output contract"
         )
 
 
@@ -449,6 +462,34 @@ def _validate_clip_image_producer(document: dict, producer: dict, inputs: list) 
     ):
         raise ModelRecipeError(
             "recipe-invalid", "CLIP image output must preserve and L2-normalize encode_image"
+        )
+
+
+def _validate_timeseries_producer(document: dict, producer: dict, inputs: list) -> None:
+    if document["sourceFormat"] != "safetensors" or producer["inputNames"] != ["context"]:
+        raise ModelRecipeError(
+            "recipe-invalid", "pretrained time-series source must be safetensors with context input"
+        )
+    expected_input = {"shape": [1, 512], "dtype": "float32", "layout": "NC"}
+    if inputs != [expected_input] or producer["outputShape"] != [1, 1]:
+        raise ModelRecipeError(
+            "recipe-invalid", "time-series export must map one 512-value context to one scalar"
+        )
+    if producer["kind"] == "timeseries-point-forecast":
+        valid = (
+            producer["sourceOutputName"] == "prediction_outputs"
+            and producer["sourceOutputShape"] == [1, 96, 1]
+            and producer["postprocessing"] == "first-horizon-point"
+        )
+    else:
+        valid = (
+            producer["sourceOutputName"] == "quantile_preds"
+            and producer["sourceOutputShape"] == [1, 9, 64]
+            and producer["postprocessing"] == "first-horizon-median-quantile"
+        )
+    if not valid:
+        raise ModelRecipeError(
+            "recipe-invalid", "time-series source output or scalar selection disagrees"
         )
 
 

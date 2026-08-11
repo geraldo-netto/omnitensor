@@ -1,0 +1,98 @@
+{
+  "recipeVersion": 1,
+  "id": "ibm-granite-ttm-r2",
+  "version": "1.0.0",
+  "family": "forecast",
+  "profileIds": ["resource-scheduler"],
+  "sourceFormat": "safetensors",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/resolve/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/model.safetensors",
+      "revision": "d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f",
+      "filename": "model.safetensors",
+      "sha256": "a706726a7eb01bbcb42994b7dcb3c06ea9557898dbae8d480eb04fe8ccb89710",
+      "sizeBytes": 3240592
+    },
+    {
+      "role": "config",
+      "uri": "https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/resolve/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/config.json",
+      "revision": "d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f",
+      "filename": "config.json",
+      "sha256": "5e2367547c103e92cb8ebc63cbd5ad4d7bf83facad5a2a2ec261fa770ed659d5",
+      "sizeBytes": 1563
+    }
+  ],
+  "license": {
+    "spdx": "Apache-2.0",
+    "termsUri": "https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "IBM Granite Time Series team, Tiny Time Mixer R2 model and weights, Apache-2.0"
+  },
+  "tensorContract": {
+    "inputs": [
+      {"shape": [1, 512], "dtype": "float32", "layout": "NC"}
+    ]
+  },
+  "outputContract": {"kind": "raw"},
+  "preprocessing": {
+    "kind": "numeric-window",
+    "version": 1,
+    "description": "Exactly 512 finite observations in oldest-to-newest recording order. The exported graph preserves Tiny Time Mixer's native scaling; callers must not apply target-specific normalization.",
+    "artifacts": ["config"]
+  },
+  "producer": {
+    "kind": "timeseries-point-forecast",
+    "version": 1,
+    "inputNames": ["context"],
+    "sourceOutputName": "prediction_outputs",
+    "sourceOutputShape": [1, 96, 1],
+    "outputShape": [1, 1],
+    "postprocessing": "first-horizon-point",
+    "description": "Export a fixed univariate 512-value context and select only the first forecast horizon inside the portable graph. Native target variants must preserve that exact scalar meaning."
+  },
+  "evaluation": [
+    {
+      "metric": "repeat-last-skill",
+      "comparator": "at-least",
+      "target": 0.35,
+      "unit": "ratio",
+      "description": "Minimum held-out improvement over repeating the newest observation on the user's time-ordered telemetry."
+    },
+    {
+      "metric": "portable-export-max-error",
+      "comparator": "at-most",
+      "target": 0.0001,
+      "unit": "absolute-error",
+      "description": "Maximum scalar difference between pinned-source and portable-graph outputs on frozen finite contexts."
+    },
+    {
+      "metric": "nonfinite-output-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No NaN or infinite scalar forecast is accepted."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, representative fully-int8 calibration, full Edge TPU mapping, semantic parity and Coral execution evidence."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, OpenVINO conversion, semantic parity and execution evidence on the named NPU."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, ncnn conversion, semantic parity and execution evidence on the named GPU."
+    }
+  }
+}

@@ -3,11 +3,14 @@ from __future__ import annotations
 import math
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.forecasting import (
     MIN_TRAINING_ROWS,
     ForecastError,
     ForecastQuality,
+    evaluate_forecast_predictions,
     fit_forecaster,
 )
 from omnitensor.plugins.recorder import TelemetryRecorder, feature_matrix
@@ -61,6 +64,79 @@ def test_a_model_no_better_than_last_time_is_reported_as_not_useful():
 def test_skill_is_zero_when_the_baseline_is_perfect():
     assert ForecastQuality(4, 0.0, 0.0).skill == 0.0
     assert not ForecastQuality(4, 0.0, 0.0).useful
+
+
+def test_every_forecaster_uses_the_same_repeat_last_quality_boundary():
+    quality = evaluate_forecast_predictions(
+        targets=(3.0, 5.0),
+        predictions=(2.0, 7.0),
+        repeat_last=(1.0, 4.0),
+    )
+
+    assert quality == ForecastQuality(
+        samples=2,
+        mean_absolute_error=1.5,
+        baseline_error=1.5,
+    )
+
+
+@pytest.mark.parametrize(
+    ("targets", "predictions", "baselines", "code", "detail"),
+    [
+        ((), (), (), "evaluation-invalid", "equal nonzero length"),
+        ((1.0,), (), (1.0,), "evaluation-invalid", "equal nonzero length"),
+        ((1.0,), (1.0,), (), "evaluation-invalid", "equal nonzero length"),
+        ((float("nan"),), (1.0,), (1.0,), "training-invalid", "targets must be finite"),
+        ((1.0,), (float("inf"),), (1.0,), "training-invalid", "predictions must be finite"),
+        ((1.0,), (1.0,), (True,), "training-invalid", "baselines must be numbers"),
+    ],
+)
+def test_forecast_evaluation_refuses_ambiguous_or_nonfinite_rows(
+    targets, predictions, baselines, code, detail
+):
+    with pytest.raises(ForecastError) as invalid:
+        evaluate_forecast_predictions(targets, predictions, baselines)
+
+    assert invalid.value.code == code
+    assert detail in invalid.value.detail
+
+
+@given(
+    targets=st.lists(
+        st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=32,
+    ),
+    prediction_offset=st.floats(
+        min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False
+    ),
+    baseline_offset=st.floats(
+        min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False
+    ),
+)
+def test_forecast_evaluation_preserves_mean_absolute_error(
+    targets, prediction_offset, baseline_offset
+):
+    predictions = [value + prediction_offset for value in targets]
+    baselines = [value + baseline_offset for value in targets]
+
+    quality = evaluate_forecast_predictions(targets, predictions, baselines)
+
+    assert quality.samples == len(targets)
+    assert quality.mean_absolute_error == pytest.approx(
+        sum(
+            abs(prediction - target)
+            for prediction, target in zip(predictions, targets, strict=True)
+        )
+        / len(targets)
+    )
+    assert quality.baseline_error == pytest.approx(
+        sum(
+            abs(baseline - target)
+            for baseline, target in zip(baselines, targets, strict=True)
+        )
+        / len(targets)
+    )
 
 
 def test_the_holdout_is_split_by_time_not_at_random():

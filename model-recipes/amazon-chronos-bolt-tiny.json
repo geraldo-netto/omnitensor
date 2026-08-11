@@ -1,0 +1,98 @@
+{
+  "recipeVersion": 1,
+  "id": "amazon-chronos-bolt-tiny",
+  "version": "1.0.0",
+  "family": "forecast",
+  "profileIds": ["resource-scheduler"],
+  "sourceFormat": "safetensors",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://huggingface.co/amazon/chronos-bolt-tiny/resolve/a0e552de83495b5c28c14c71c374f3e33280b340/model.safetensors",
+      "revision": "a0e552de83495b5c28c14c71c374f3e33280b340",
+      "filename": "model.safetensors",
+      "sha256": "75068728d376d2bec670379eeef4bfb4d24c0cfe24d957451f8d19b447030a32",
+      "sizeBytes": 34622352
+    },
+    {
+      "role": "config",
+      "uri": "https://huggingface.co/amazon/chronos-bolt-tiny/resolve/a0e552de83495b5c28c14c71c374f3e33280b340/config.json",
+      "revision": "a0e552de83495b5c28c14c71c374f3e33280b340",
+      "filename": "config.json",
+      "sha256": "278f0086733031635fb1c861cb01c1bad6477420c7fcb19381a2993e335785e0",
+      "sizeBytes": 1120
+    }
+  ],
+  "license": {
+    "spdx": "Apache-2.0",
+    "termsUri": "https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "Amazon Chronos team, Chronos-Bolt-Tiny model and weights, Apache-2.0"
+  },
+  "tensorContract": {
+    "inputs": [
+      {"shape": [1, 512], "dtype": "float32", "layout": "NC"}
+    ]
+  },
+  "outputContract": {"kind": "raw"},
+  "preprocessing": {
+    "kind": "numeric-window",
+    "version": 1,
+    "description": "Exactly 512 finite observations in oldest-to-newest recording order. The exported graph preserves Chronos-Bolt's native scaling and missing-value handling; callers must not apply target-specific normalization.",
+    "artifacts": ["config"]
+  },
+  "producer": {
+    "kind": "timeseries-quantile-forecast",
+    "version": 1,
+    "inputNames": ["context"],
+    "sourceOutputName": "quantile_preds",
+    "sourceOutputShape": [1, 9, 64],
+    "outputShape": [1, 1],
+    "postprocessing": "first-horizon-median-quantile",
+    "description": "Export a fixed 512-value context and select only the 0.5 quantile at the first forecast horizon inside the portable graph. Native target variants must preserve that exact scalar meaning."
+  },
+  "evaluation": [
+    {
+      "metric": "repeat-last-skill",
+      "comparator": "at-least",
+      "target": 0.35,
+      "unit": "ratio",
+      "description": "Minimum held-out improvement over repeating the newest observation on the user's time-ordered telemetry."
+    },
+    {
+      "metric": "portable-export-max-error",
+      "comparator": "at-most",
+      "target": 0.0001,
+      "unit": "absolute-error",
+      "description": "Maximum scalar difference between pinned-source and portable-graph outputs on frozen finite contexts."
+    },
+    {
+      "metric": "nonfinite-output-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No NaN or infinite scalar forecast is accepted."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, representative fully-int8 calibration, full Edge TPU mapping, semantic parity and Coral execution evidence."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, OpenVINO conversion, semantic parity and execution evidence on the named NPU."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "Needs portable wrapper export, ncnn conversion, semantic parity and execution evidence on the named GPU."
+    }
+  }
+}

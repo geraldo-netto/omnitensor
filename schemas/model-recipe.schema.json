@@ -205,7 +205,9 @@
           "enum": [
             "identity",
             "sentence-embedding",
-            "clip-image-embedding"
+            "clip-image-embedding",
+            "timeseries-point-forecast",
+            "timeseries-quantile-forecast"
           ]
         },
         "version": {"type": "integer", "minimum": 1, "maximum": 65535},
@@ -234,7 +236,9 @@
             "identity",
             "attention-mask-mean-pool-l2",
             "cls-token-l2",
-            "l2-normalize"
+            "l2-normalize",
+            "first-horizon-point",
+            "first-horizon-median-quantile"
           ]
         },
         "description": {"type": "string", "minLength": 1, "maxLength": 500}

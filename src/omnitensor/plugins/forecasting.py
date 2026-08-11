@@ -246,14 +246,39 @@ def _score(
     feature_count: int,
 ) -> ForecastQuality:
     """Mean absolute error against held-out data, beside the naive baseline."""
-    error = 0.0
-    baseline = 0.0
-    for row, target in zip(inputs, targets, strict=True):
-        predicted = intercept + sum(
-            weight * float(value) for weight, value in zip(weights, row, strict=True)
+    predictions = []
+    baselines = []
+    for row in inputs:
+        predictions.append(
+            intercept
+            + sum(weight * float(value) for weight, value in zip(weights, row, strict=True))
         )
-        error += abs(predicted - float(target))
         # "The same as last time": the most recent value of the first feature,
         # which is the forecast anyone gets for free.
-        baseline += abs(float(row[-feature_count]) - float(target))
-    return ForecastQuality(len(inputs), error / len(inputs), baseline / len(inputs))
+        baselines.append(float(row[-feature_count]))
+    return evaluate_forecast_predictions(targets, predictions, baselines)
+
+
+def evaluate_forecast_predictions(
+    targets: Sequence[float],
+    predictions: Sequence[float],
+    repeat_last: Sequence[float],
+) -> ForecastQuality:
+    """Apply the same finite, held-out repeat-last gate to every model family."""
+    if not targets or len(targets) != len(predictions) or len(targets) != len(repeat_last):
+        raise ForecastError(
+            "evaluation-invalid",
+            "targets, predictions and baselines must have equal nonzero length",
+        )
+    _require_numbers(targets, "evaluation targets")
+    _require_numbers(predictions, "evaluation predictions")
+    _require_numbers(repeat_last, "evaluation baselines")
+    error = sum(
+        abs(float(predicted) - float(target))
+        for predicted, target in zip(predictions, targets, strict=True)
+    )
+    baseline = sum(
+        abs(float(previous) - float(target))
+        for previous, target in zip(repeat_last, targets, strict=True)
+    )
+    return ForecastQuality(len(targets), error / len(targets), baseline / len(targets))
