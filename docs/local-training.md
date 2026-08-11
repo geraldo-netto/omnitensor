@@ -51,10 +51,10 @@ python3 -m venv ~/.local/share/omnitensor-training/venv
   '/path/to/omnitensor[train,convert,convert-npu]'
 ```
 
-Installing `[train]` does not install PyTorch or TensorFlow. Current recipe is
-a deterministic ridge forecaster over numeric history and needs neither. A
-future image or embedding recipe may declare its own producer-only extra; it
-must not become a service dependency.
+Installing `[train]` does not install PyTorch or TensorFlow. The current
+numeric recipes use deterministic fitting implemented by OmniTensor and need
+neither. An image or embedding recipe may declare its own producer-only extra;
+it must not become a service dependency.
 
 ## Resource forecast recipe
 
@@ -65,10 +65,10 @@ The fit is time-split and refused unless held-out error beats repeating the
 latest observation.
 
 This recipe does not claim to train low-light, document, desktop, build,
-hardware-fault, storage-fault, or network-anomaly models. Those need distinct
-datasets, evaluation metrics, preprocessing, and host consumers. They can use
-the same portable report, native compilation, immutable installation, and
-model-binding path when their recipes exist.
+hardware-fault, storage-fault, or network-anomaly models. Those use distinct
+datasets, evaluation metrics, preprocessing, and host consumers. Portable
+sources now exist for storage risk and aggregate network anomaly detection,
+but neither is a resource forecast or an installed service pipeline.
 
 ## Storage risk portable-source recipe
 
@@ -105,6 +105,48 @@ still requires representative int8 calibration, a fully-int8 TFLite export,
 100% Edge TPU compiler mapping, semantic parity, and Coral execution evidence.
 No lane is silently replaced with CPU execution, and Backblaze fleet quality
 does not establish quality on an operator's drives.
+
+## Aggregate network anomaly portable-source recipe
+
+`aggregate-reconstruction-v1` is an opt-in, normal-only recipe over the
+existing consent-gated network collector. Prepare newline-delimited JSON where
+each line is one complete `network-manager-link-metadata` collector document,
+ordered by increasing `observedAtMs`. Audit that the interval contains normal
+operation, then run:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-train-network-model \
+  --replay /path/to/reviewed-normal-network-snapshots.jsonl \
+  --confirm-normal-only I-confirm-this-replay-is-normal
+```
+
+The explicit confirmation is enforced by the Python API as well as the CLI.
+It is not proof that the replay is representative. The loader accepts at most
+64 MiB and 200,000 closed-schema snapshots, refuses truncated/unhealthy data,
+counter regressions, duplicate or decreasing times, and never accepts packet
+payloads. Stable link IDs are used transiently to compute counter deltas, then
+discarded. The report retains only a digest of the exact replay bytes and
+identity-free aggregate features: rates, link counts, state/connectivity
+fractions, route/carrier/metered fractions, and mean signal.
+
+The fixed reconstruction ensemble is inspired by the small-autoencoder design
+in [Kitsune/KitNET](https://arxiv.org/abs/1802.09089); the
+[reference implementation](https://github.com/ymirsky/Kitsune-py) is MIT
+licensed. OmniTensor does not vendor that code, packet feature extractor, or
+weights. It fits a small bounded linear reconstruction block for each fixed
+aggregate feature group, selects a threshold from the training split, and
+refuses the source when held-out reviewed-normal false positives exceed the
+configured gate. With no labeled attacks it reports `anomalyRecall: null` and
+must not claim attack coverage or trigger autonomous network actions.
+
+Output is `model.onnx` plus `network-training-report.json`. The graph uses
+common arithmetic, `MatMul`, and `ReduceMean` operations with a `[1,14]`
+float32 contract. The same source semantics can be converted and tested for
+Vulkan/ncnn GPU and OpenVINO NPU lanes. A TPU release still needs a separate
+fully-int8 TFLite export with representative aggregate-feature calibration,
+100% Edge TPU compiler mapping, numerical parity, and Coral execution
+evidence. Until a lane passes its compiler and device gates, the report marks
+it `uncompiled`; runtime never substitutes CPU execution.
 
 ## 1. Record bounded numeric history
 

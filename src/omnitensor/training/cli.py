@@ -18,6 +18,11 @@ from ..preparation import PreparationError
 from .contracts import TrainingError, TrainingSpec
 from .forecast import ForecastTrainer
 from .installation import available_targets, install_training
+from .network import (
+    NORMAL_ONLY_CONFIRMATION,
+    NetworkAnomalyTrainer,
+    load_network_replay,
+)
 from .runner import (
     DbusForecastClient,
     ForecastRunError,
@@ -37,6 +42,7 @@ DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
+DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
 
 
 def record_main(argv: list[str] | None = None) -> int:
@@ -206,6 +212,49 @@ def storage_train_main(argv: list[str] | None = None) -> int:
                 "report": str(output / "storage-training-report.json"),
                 "portableModel": str(output / "model.onnx"),
                 "samples": report["samples"],
+                "quality": report["quality"],
+                "next": "compile and qualify this source separately for each target lane",
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def network_train_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-train-network-model",
+        description="Fit an identity-free network anomaly source from normal aggregate replay",
+    )
+    parser.add_argument("--replay", required=True)
+    parser.add_argument("--output-dir", default=DEFAULT_NETWORK_OUTPUT)
+    parser.add_argument(
+        "--confirm-normal-only",
+        required=True,
+        help=f"after reviewing the replay, pass exactly {NORMAL_ONLY_CONFIRMATION}",
+    )
+    parser.add_argument("--minimum-training-rows", default=64, type=int)
+    parser.add_argument("--minimum-holdout-rows", default=16, type=int)
+    parser.add_argument("--maximum-false-positive-rate", default=0.1, type=float)
+    arguments = parser.parse_args(argv)
+    output = Path(arguments.output_dir).expanduser()
+    try:
+        dataset = load_network_replay(Path(arguments.replay).expanduser())
+        report = NetworkAnomalyTrainer(
+            confirm_normal=arguments.confirm_normal_only,
+            minimum_training_rows=arguments.minimum_training_rows,
+            minimum_holdout_rows=arguments.minimum_holdout_rows,
+            maximum_false_positive_rate=arguments.maximum_false_positive_rate,
+        ).train(dataset, output)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"network training failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "report": str(output / "network-training-report.json"),
+                "portableModel": str(output / "model.onnx"),
+                "samples": report["split"],
                 "quality": report["quality"],
                 "next": "compile and qualify this source separately for each target lane",
             },
