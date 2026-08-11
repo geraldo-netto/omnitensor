@@ -7,15 +7,18 @@ import os
 from pathlib import Path
 
 import pytest
+from conftest import sample_manifest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from omnitensor.plugins.recorder import FeatureRow, TelemetryRecorder
 from omnitensor.preparation import file_digest
+from omnitensor.registry import Workload
 from omnitensor.training.cli import _feature_values, install_main, record_main, train_main
 from omnitensor.training.contracts import TrainingError, TrainingReport, TrainingSpec
 from omnitensor.training.forecast import ForecastTrainer, forecast_dataset
 from omnitensor.training.installation import (
+    _binding_manifest,
     _validated_targets,
     available_targets,
     install_training,
@@ -98,6 +101,22 @@ def test_dataset_refuses_too_little_history():
 
     assert captured.value.code == "insufficient-history"
     assert captured.value.detail == "at least 4 recorded rows are required, got 3"
+
+
+@pytest.mark.parametrize("timestamp", [0, 1])
+def test_dataset_refuses_duplicate_or_decreasing_observation_time(timestamp):
+    recorded = list(rows(4))
+    recorded[2] = FeatureRow(
+        "resource-scheduler",
+        timestamp,
+        {"load": 2.0, "queue": 2.0},
+    )
+
+    with pytest.raises(TrainingError) as captured:
+        forecast_dataset(spec(), tuple(recorded))
+
+    assert captured.value.code == "observations-unordered"
+    assert captured.value.detail == "recorded row timestamps must increase strictly"
 
 
 @pytest.mark.parametrize(
@@ -243,12 +262,21 @@ def fake_prepared_training(tmp_path, monkeypatch):
     compiled.parent.mkdir()
     compiled.write_bytes(b"graph")
     compiled.with_suffix(".bin").write_bytes(b"weights")
+    compiled_xml = tmp_path / "compiled/model.xml"
+    compiled_xml.write_bytes(b"graph")
 
     class Converted:
         param = compiled
 
+    class ConvertedNpu:
+        xml = compiled_xml
+
     monkeypatch.setattr(
         "omnitensor.training.installation.convert_to_ncnn", lambda *a, **k: Converted()
+    )
+    monkeypatch.setattr(
+        "omnitensor.training.installation.convert_to_openvino",
+        lambda *a, **k: ConvertedNpu(),
     )
     monkeypatch.setattr(
         "omnitensor.training.installation._tool", lambda name: Path(f"/tools/{name}")
@@ -272,8 +300,124 @@ def test_install_compiles_installs_and_binds_one_logical_model(tmp_path, monkeyp
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
     [bound] = manifest["requirements"]["models"]
     assert bound["format"] == "ncnn"
+    assert bound["fullyQuantized"] is False
+    assert bound["minimumCompilerVersion"] == "0.0.0"
+    assert bound["minimumRuntimeVersion"] == "0.0.0"
     assert bound["tensorContract"] == spec().tensor_contract
+    assert bound["featureContract"] == {
+        "version": 1,
+        "recipe": "forecast-v1",
+        "featureNames": ["load", "queue"],
+        "targetFeature": "load",
+        "window": 3,
+        "horizon": 1,
+        "observationOrder": "oldest-first",
+        "flattenOrder": "observations-then-features",
+    }
     assert (tmp_path / "artifacts/local-resource-forecast-gpu/1.0.0/model.param").is_file()
+
+
+def test_binding_refuses_unknown_profile_with_stable_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr("omnitensor.training.installation.load_workloads", lambda _root: {})
+    report = TrainingReport(spec(), 1, "0" * 64, "1" * 64, {})
+
+    with pytest.raises(TrainingError) as captured:
+        _binding_manifest(report, {"gpu": {}}, bundled_root=tmp_path)
+
+    assert captured.value.code == "profile-unknown"
+    assert captured.value.detail == "no bundled profile is named resource-scheduler"
+
+
+def test_binding_replaces_legacy_models_without_aliasing_inputs(tmp_path, monkeypatch):
+    legacy_model = {"id": "legacy"}
+    base = sample_manifest(
+        "resource-scheduler",
+        model=legacy_model,
+        models=[legacy_model],
+    )
+    monkeypatch.setattr(
+        "omnitensor.training.installation.load_workloads",
+        lambda _root: {"resource-scheduler": Workload("resource-scheduler", base)},
+    )
+    monkeypatch.setattr(
+        "omnitensor.training.installation.validate_workload_document", lambda _manifest: []
+    )
+    report = TrainingReport(spec(), 1, "0" * 64, "1" * 64, {})
+    variant = {"featureContract": {"featureNames": ["load", "queue"]}}
+
+    binding = _binding_manifest(report, {"gpu": variant}, bundled_root=tmp_path)
+    variant["featureContract"]["featureNames"].append("memory")
+    base["requirements"]["models"][0]["id"] = "changed"
+
+    assert base["requirements"]["model"] is legacy_model
+    assert "model" not in binding["requirements"]
+    assert binding["requirements"]["models"] == [
+        {"featureContract": {"featureNames": ["load", "queue"]}}
+    ]
+
+
+def test_binding_reports_every_semantic_violation(tmp_path, monkeypatch):
+    base = sample_manifest("resource-scheduler")
+    monkeypatch.setattr(
+        "omnitensor.training.installation.load_workloads",
+        lambda _root: {"resource-scheduler": Workload("resource-scheduler", base)},
+    )
+    monkeypatch.setattr(
+        "omnitensor.training.installation.validate_workload_document",
+        lambda _manifest: ["first violation", "second violation"],
+    )
+    report = TrainingReport(spec(), 1, "0" * 64, "1" * 64, {})
+
+    with pytest.raises(TrainingError) as captured:
+        _binding_manifest(report, {"gpu": {}}, bundled_root=tmp_path)
+
+    assert captured.value.code == "binding-invalid"
+    assert captured.value.detail == "first violation; second violation"
+
+
+def test_install_reloads_identical_feature_semantics_for_every_native_lane(
+    tmp_path, monkeypatch
+):
+    fake_prepared_training(tmp_path, monkeypatch)
+
+    installed = install_training(
+        tmp_path / "fit/training-report.json",
+        targets=("gpu", "npu"),
+        artifact_root=tmp_path / "artifacts",
+        bindings_root=tmp_path / "bindings",
+    )
+
+    from omnitensor.registry import load_workloads
+
+    reloaded = load_workloads(tmp_path / "bindings")["resource-scheduler"]
+    assert [variant.accelerator for variant in installed.variants] == ["npu", "gpu"]
+    assert [model["format"] for model in reloaded.models] == ["openvino", "ncnn"]
+    assert all(model["featureContract"] == spec().feature_contract for model in reloaded.models)
+
+
+@given(
+    feature_names=st.lists(
+        st.from_regex(r"[a-z][a-z0-9-]{0,15}", fullmatch=True),
+        min_size=1,
+        max_size=8,
+        unique=True,
+    ),
+    window=st.integers(min_value=1, max_value=16),
+    horizon=st.integers(min_value=1, max_value=128),
+)
+def test_feature_contract_preserves_bounded_declared_order(feature_names, window, horizon):
+    assume(len(feature_names) * window <= 512)
+    declared = spec(
+        feature_names=tuple(feature_names),
+        target_feature=feature_names[0],
+        window=window,
+        horizon=horizon,
+    ).feature_contract
+
+    assert declared["featureNames"] == feature_names
+    assert declared["targetFeature"] == feature_names[0]
+    assert declared["window"] == window
+    assert declared["horizon"] == horizon
 
 
 @pytest.mark.skipif(

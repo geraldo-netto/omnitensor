@@ -3,9 +3,11 @@ from __future__ import annotations
 import copy
 import json
 
+import pytest
 from conftest import sample_manifest, write_workload
 
 from omnitensor.registry import (
+    ManifestError,
     apply_model_bindings,
     bundled_workloads_path,
     load_workload_catalog,
@@ -136,3 +138,33 @@ def test_production_service_reads_the_configured_binding_root(tmp_path, monkeypa
     service = build_service_from_env()
 
     assert service._workloads["hardware-health"].model["id"] == "local-model-gpu"
+
+
+def test_a_binding_with_ambiguous_feature_semantics_is_rejected_or_skipped(tmp_path, caplog):
+    base = sample_manifest("resource-scheduler")
+    binding = bound_manifest(base)
+    binding["requirements"]["model"]["featureContract"] = {
+        "version": 1,
+        "recipe": "forecast-v1",
+        "featureNames": ["load", "queue", "memory"],
+        "targetFeature": "queue",
+        "window": 1,
+        "horizon": 1,
+        "observationOrder": "oldest-first",
+        "flattenOrder": "observations-then-features",
+    }
+    bundled = tmp_path / "bundled"
+    bindings = tmp_path / "bindings"
+    write_workload(bundled, base)
+    write_workload(bindings, binding)
+
+    with pytest.raises(ManifestError, match="targetFeature must be the first feature"):
+        load_workloads(bindings)
+
+    catalog = load_workload_catalog(
+        tmp_path / "users",
+        bundled_root=bundled,
+        model_bindings_root=bindings,
+    )
+    assert catalog["resource-scheduler"].model is None
+    assert "Skipping unloadable workload manifest" in caplog.text

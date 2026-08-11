@@ -90,6 +90,12 @@ def forecast_dataset(spec: TrainingSpec, rows: tuple[FeatureRow, ...]) -> Foreca
             "insufficient-history",
             f"at least {needed} recorded rows are required, got {len(rows)}",
         )
+    for previous, current in zip(rows, rows[1:], strict=False):
+        if current.observed_at_ms <= previous.observed_at_ms:
+            raise TrainingError(
+                "observations-unordered",
+                "recorded row timestamps must increase strictly",
+            )
     for row in rows:
         missing = [name for name in spec.feature_names if name not in row.features]
         if missing:

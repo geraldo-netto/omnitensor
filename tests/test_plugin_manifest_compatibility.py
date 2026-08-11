@@ -38,6 +38,39 @@ def resolved(manifest, source=PluginSource.EXTERNAL):
     )
 
 
+def forecast_manifest(plugin_id: str, *, version: int = 2) -> dict:
+    manifest = (
+        sample_plugin_manifest(plugin_id)
+        if version == 2
+        else sample_manifest(plugin_id)
+    )
+    manifest["requirements"]["accelerator"] = "gpu"
+    manifest["requirements"]["acceleratorPreference"] = ["gpu"]
+    manifest["requirements"]["model"] = {
+        "id": "local-forecast-gpu",
+        "version": "1.0.0",
+        "format": "ncnn",
+        "fullyQuantized": False,
+        "minimumCompilerVersion": "0.0.0",
+        "minimumRuntimeVersion": "0.0.0",
+        "tensorContract": {
+            "inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]
+        },
+        "featureContract": {
+            "version": 1,
+            "recipe": "forecast-v1",
+            "featureNames": ["load", "queue"],
+            "targetFeature": "load",
+            "window": 1,
+            "horizon": 1,
+            "observationOrder": "oldest-first",
+            "flattenOrder": "observations-then-features",
+        },
+        "outputContract": {"kind": "raw"},
+    }
+    return manifest
+
+
 def test_bundled_v1_adapter_is_schema_valid_fail_closed_and_non_mutating():
     original = sample_manifest("legacy-plugin")
     before = original.copy()
@@ -81,6 +114,25 @@ def test_gate_adapts_only_bundled_v1_and_preserves_policy_fields():
     assert external.compatible is False
     assert external.code is ManifestCompatibilityCode.MANIFEST_VERSION
     assert external.detail == "manifest v1 migration is limited to bundled plugins"
+
+
+def test_gate_preserves_valid_forecast_semantics_and_rejects_cross_field_drift():
+    legacy = forecast_manifest("legacy-forecast", version=1)
+    adapted = PluginManifestCompatibilityGate().check(
+        resolved(legacy, PluginSource.BUNDLED)
+    )
+    assert adapted.compatible is True
+    assert (
+        adapted.plugin.manifest["requirements"]["model"]["featureContract"]
+        == legacy["requirements"]["model"]["featureContract"]
+    )
+
+    ambiguous = forecast_manifest("ambiguous-forecast")
+    ambiguous["requirements"]["model"]["featureContract"]["targetFeature"] = "queue"
+    refused = PluginManifestCompatibilityGate().check(resolved(ambiguous))
+    assert refused.compatible is False
+    assert refused.code is ManifestCompatibilityCode.ADAPTER_INVALID
+    assert refused.detail == "effective manifest violates the runtime schema"
 
 
 def test_gate_negotiates_highest_protocol_and_capability_intersection():

@@ -6,7 +6,7 @@ import copy
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from ..registry import validate_document
+from ..registry import validate_workload_document
 from .discovery import PluginSource
 from .identity import (
     PluginCatalog,
@@ -87,7 +87,7 @@ class PluginManifestCompatibilityGate:
                 ManifestCompatibilityCode.RUNTIME_API,
                 f"runtime API {declared_api!r} is incompatible with {self._runtime_api}",
             )
-        if validate_document("workload-manifest.schema.json", effective):
+        if validate_workload_document(effective):
             return _rejected(
                 ManifestCompatibilityCode.ADAPTER_INVALID,
                 "effective manifest violates the runtime schema",

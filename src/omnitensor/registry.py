@@ -35,6 +35,7 @@ _VALIDATOR_CACHE: dict[str, tuple[tuple[str, int, int], jsonschema.Validator]] =
 
 MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
+MAX_FORECAST_INPUT_WIDTH = 512
 
 DEFAULT_PREFERENCE = tuple(BACKENDS)
 _MODEL_BINDING_FIELDS = frozenset({"accelerator", "acceleratorPreference", "model", "models"})
@@ -189,14 +190,11 @@ def _load_manifest(manifest_path: Path, directory_name: str) -> dict:
         raise ManifestError(f"{manifest_path}: unreadable manifest: {error}") from error
     except ValueError as error:
         raise ManifestError(f"{manifest_path}: invalid JSON: {error}") from error
-    violations = validate_document("workload-manifest.schema.json", manifest)
+    violations = validate_workload_document(manifest)
     if violations:
         raise ManifestError(f"{manifest_path}: {'; '.join(violations)}")
     if manifest["id"] != directory_name:
         raise ManifestError(f"{manifest_path}: id must match directory name")
-    disagreement = declared_models_error(manifest)
-    if disagreement is not None:
-        raise ManifestError(f"{manifest_path}: {disagreement}")
     return manifest
 
 
@@ -211,18 +209,58 @@ def declared_models_error(manifest: dict) -> str | None:
     consumer that read the contract before the lane was chosen would be reading
     whichever one happened to be first.
     """
-    declared = manifest.get("requirements", {}).get("models")
+    requirements = manifest.get("requirements", {})
+    declared = requirements.get("models")
+    if declared is None:
+        single = requirements.get("model")
+        declared = [] if single is None else [single]
     if not declared:
         return None
     formats = [model["format"] for model in declared]
     duplicated = sorted({name for name in formats if formats.count(name) > 1})
     if duplicated:
         return f"models declare {', '.join(duplicated)} more than once"
-    for field in ("tensorContract", "outputContract"):
+    for model in declared:
+        invalid = _feature_contract_error(model)
+        if invalid is not None:
+            return invalid
+    for field in ("featureContract", "tensorContract", "outputContract"):
         stated = [json.dumps(model.get(field), sort_keys=True) for model in declared]
         if len(set(stated)) > 1:
             return f"models disagree about {field}; they must describe one network"
     return None
+
+
+def _feature_contract_error(model: dict) -> str | None:
+    """Reject a sequence contract that disagrees with its enforced tensors."""
+    contract = model.get("featureContract")
+    if contract is None:
+        return None
+    feature_names = contract["featureNames"]
+    if contract["targetFeature"] != feature_names[0]:
+        return "featureContract targetFeature must be the first feature"
+    input_width = len(feature_names) * contract["window"]
+    if input_width > MAX_FORECAST_INPUT_WIDTH:
+        return f"featureContract exceeds {MAX_FORECAST_INPUT_WIDTH} input values"
+    expected_input = {
+        "shape": [1, input_width],
+        "dtype": "float32",
+        "layout": "NC",
+    }
+    if model.get("tensorContract") != {"inputs": [expected_input]}:
+        return "featureContract disagrees with tensorContract"
+    if model.get("outputContract") != {"kind": "raw"}:
+        return "forecast featureContract requires raw output"
+    return None
+
+
+def validate_workload_document(document: object) -> list[str]:
+    """Apply the canonical schema and cross-field model invariants together."""
+    violations = validate_document("workload-manifest.schema.json", document)
+    if violations or not isinstance(document, dict):
+        return violations
+    disagreement = declared_models_error(document)
+    return [] if disagreement is None else [f"requirements: {disagreement}"]
 
 
 def load_workloads(root: Path, *, strict: bool = True) -> dict[str, Workload]:

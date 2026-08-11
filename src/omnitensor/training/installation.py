@@ -15,9 +15,8 @@ from ..conversion import OvcConverter, PnnxConverter, convert_to_ncnn, convert_t
 from ..preparation import PreparedArtifact, install_prepared, prepare_artifact
 from ..registry import (
     bundled_workloads_path,
-    declared_models_error,
     load_workloads,
-    validate_document,
+    validate_workload_document,
 )
 from .contracts import TrainingError, TrainingReport
 
@@ -171,8 +170,9 @@ def _model_fragment(report: TrainingReport, artifact: PreparedArtifact) -> dict:
         "fullyQuantized": False,
         "minimumCompilerVersion": "0.0.0",
         "minimumRuntimeVersion": "0.0.0",
-        "tensorContract": copy.deepcopy(report.spec.tensor_contract),
-        "outputContract": copy.deepcopy(report.spec.output_contract),
+        "tensorContract": report.spec.tensor_contract,
+        "featureContract": report.spec.feature_contract,
+        "outputContract": report.spec.output_contract,
     }
 
 
@@ -192,15 +192,12 @@ def _binding_manifest(
     manifest = copy.deepcopy(workload.manifest)
     requirements = manifest["requirements"]
     requirements.pop("model", None)
-    requirements.pop("models", None)
     requirements["accelerator"] = lanes[0]
     requirements["acceleratorPreference"] = lanes
     requirements["models"] = [copy.deepcopy(variants[target]) for target in lanes]
-    violations = validate_document("workload-manifest.schema.json", manifest)
-    disagreement = declared_models_error(manifest)
-    if violations or disagreement:
-        detail = disagreement or "; ".join(violations)
-        raise TrainingError("binding-invalid", detail)
+    violations = validate_workload_document(manifest)
+    if violations:
+        raise TrainingError("binding-invalid", "; ".join(violations))
     return manifest
 
 

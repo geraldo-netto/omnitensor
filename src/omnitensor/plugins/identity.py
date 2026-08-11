@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from ..registry import MAX_MANIFEST_BYTES, validate_document
+from ..registry import MAX_MANIFEST_BYTES, validate_workload_document
 from .discovery import PluginMetadata, PluginSource
 
 _DISTRIBUTION_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
@@ -168,7 +168,7 @@ def _candidate_manifest(candidate: PluginMetadata) -> dict:
 
 
 def _validate_manifest_identity(candidate: PluginMetadata, manifest: dict) -> None:
-    if validate_document("workload-manifest.schema.json", manifest):
+    if validate_workload_document(manifest):
         raise _CandidateRejectedError(
             PluginRejectionCode.MANIFEST_INVALID,
             "manifest violates the workload schema",

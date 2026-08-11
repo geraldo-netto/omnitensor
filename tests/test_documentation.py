@@ -6,6 +6,7 @@ from omnitensor.registry import bundled_workloads_path, load_workloads
 
 ROOT = Path(__file__).resolve().parents[1]
 USE_CASES = ROOT / "docs/use-cases.md"
+LOCAL_TRAINING = ROOT / "docs/local-training.md"
 
 
 def test_use_case_guide_covers_every_bundled_profile():
@@ -49,6 +50,22 @@ def test_extension_guide_covers_the_publishing_lifecycle():
 def test_readme_links_the_extension_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "[extension guide](docs/extension-guide.md)" in readme
+
+
+def test_local_training_guide_names_every_installed_feature_semantic():
+    guide = LOCAL_TRAINING.read_text(encoding="utf-8")
+    for term in (
+        "`featureContract`",
+        "recipe",
+        "ordered feature names",
+        "target",
+        "window",
+        "observation-count horizon",
+        "oldest-first",
+        "observations-then-features",
+        "same-shaped inline tensor",
+    ):
+        assert term in guide
 
 
 def test_installation_guide_documents_every_verifier_check():

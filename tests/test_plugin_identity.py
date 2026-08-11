@@ -57,6 +57,35 @@ def bundled_candidate(tmp_path: Path, plugin_id: str = "bundled-plugin") -> Plug
     )
 
 
+def forecast_manifest(plugin_id: str) -> dict:
+    manifest = sample_plugin_manifest(plugin_id)
+    manifest["requirements"]["accelerator"] = "gpu"
+    manifest["requirements"]["acceleratorPreference"] = ["gpu"]
+    manifest["requirements"]["model"] = {
+        "id": "local-forecast-gpu",
+        "version": "1.0.0",
+        "format": "ncnn",
+        "fullyQuantized": False,
+        "minimumCompilerVersion": "0.0.0",
+        "minimumRuntimeVersion": "0.0.0",
+        "tensorContract": {
+            "inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]
+        },
+        "featureContract": {
+            "version": 1,
+            "recipe": "forecast-v1",
+            "featureNames": ["load", "queue"],
+            "targetFeature": "load",
+            "window": 1,
+            "horizon": 1,
+            "observationOrder": "oldest-first",
+            "flattenOrder": "observations-then-features",
+        },
+        "outputContract": {"kind": "raw"},
+    }
+    return manifest
+
+
 def test_resolves_bundled_v1_and_external_v2_identities(tmp_path):
     catalog = resolve_plugin_identities(
         (
@@ -174,6 +203,19 @@ def test_rejects_invalid_schema_and_external_v1_manifest(tmp_path):
             "external plugins require manifest version 2",
         ),
     ]
+
+
+def test_external_identity_rejects_schema_valid_but_ambiguous_feature_semantics(tmp_path):
+    manifest = forecast_manifest("ambiguous-forecast")
+    manifest["requirements"]["model"]["featureContract"]["targetFeature"] = "queue"
+
+    catalog = resolve_plugin_identities(
+        (external_candidate(tmp_path, "ambiguous-forecast", manifest=manifest),)
+    )
+
+    [rejection] = catalog.rejections
+    assert rejection.code is PluginRejectionCode.MANIFEST_INVALID
+    assert rejection.detail == "manifest violates the workload schema"
 
 
 def test_rejects_manifest_and_entry_point_identity_mismatches(tmp_path):

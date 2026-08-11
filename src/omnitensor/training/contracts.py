@@ -67,6 +67,20 @@ class TrainingSpec:
     def output_contract(self) -> dict:
         return {"kind": "raw"}
 
+    @property
+    def feature_contract(self) -> dict:
+        """Machine-readable ordering and meaning of the flattened input."""
+        return {
+            "version": 1,
+            "recipe": TRAINING_RECIPE,
+            "featureNames": list(self.feature_names),
+            "targetFeature": self.target_feature,
+            "window": self.window,
+            "horizon": self.horizon,
+            "observationOrder": "oldest-first",
+            "flattenOrder": "observations-then-features",
+        }
+
     def document(self) -> dict:
         return {
             "profileId": self.profile_id,

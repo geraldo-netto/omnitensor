@@ -20,9 +20,13 @@ shared. Executable files are necessarily hardware-specific:
 | fully-int8 TFLite | Edge-TPU-compiled `.tflite` | Coral TPU | Not produced; separate toolchain and hardware evidence required |
 
 Every installed variant repeats the exact same tensor and output contracts.
-The model binding is rejected if variants disagree. Routing selects the first
-available lane with a compatible installed artifact; it never falls back to
-CPU execution.
+It also repeats a bounded `featureContract`: recipe, ordered feature names,
+target, window, observation-count horizon, oldest-first observation order, and
+the observations-then-features flattening order. The model binding is rejected
+if variants disagree, if the target is not the first feature, or if these
+semantics disagree with the enforced `float32` `NC` tensor width and raw model
+output. Routing selects the first available lane with a compatible installed
+artifact; it never falls back to CPU execution.
 
 ## Mandatory and optional dependencies
 
@@ -115,6 +119,10 @@ Output defaults to
 
 Changing feature order, window, target, data, or model bytes requires a new
 artifact version. Installation rechecks the ONNX digest against the report.
+Bindings written by an older installer do not contain `featureContract` and
+must be reinstalled before the trusted forecast runner can use them. The
+generic job API cannot infer where caller-supplied numbers came from, so this
+metadata alone does not make an opaque same-shaped inline tensor safe.
 
 ## 3. Compile and install native variants
 

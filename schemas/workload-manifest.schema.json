@@ -697,6 +697,62 @@
             }
           }
         },
+        "featureContract": {
+          "description": "Ordered numeric sequence semantics for a locally trained forecast. This is separate from tensorContract because shape and dtype cannot distinguish two same-width inputs with different feature order, window direction, prediction target, or horizon.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "recipe",
+            "featureNames",
+            "targetFeature",
+            "window",
+            "horizon",
+            "observationOrder",
+            "flattenOrder"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "recipe": {
+              "const": "forecast-v1"
+            },
+            "featureNames": {
+              "description": "Inner-axis order for every observation in the flattened input.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 128,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "targetFeature": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "window": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "horizon": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "observationOrder": {
+              "const": "oldest-first"
+            },
+            "flattenOrder": {
+              "const": "observations-then-features"
+            }
+          }
+        },
         "outputContract": {
           "description": "What the model's output means. Absent means the raw tensors are returned unchanged, which is what every profile did before this field. A reduction belongs here rather than in whoever renders the result: the reduction is a property of the model, and a consumer that guessed it would relabel every result the day the artifact changed.",
           "type": "object",
