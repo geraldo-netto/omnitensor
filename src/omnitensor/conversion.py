@@ -234,7 +234,11 @@ class PnnxConverter:
                 f"{self._executable} is not installed; install the [convert] extra"
                 " to convert models",
             )
-        argv = [found, source.name, f"inputshape=[{','.join(str(d) for d in shape)}]"]
+        argv = [
+            found,
+            str(source.resolve()),
+            f"inputshape=[{','.join(str(d) for d in shape)}]",
+        ]
         return _run_converter(argv, workdir, timeout_seconds)
 
 
