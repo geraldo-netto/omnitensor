@@ -44,6 +44,10 @@ convert = ["pnnx>=20240101"]
 # Packaging-time only: converts ONNX into OpenVINO IR for the NPU lane. Kept
 # separate from [npu], which is the runtime installed with the service.
 convert-npu = ["openvino>=2024.0"]
+# Producer-only: writes the canonical portable graph fitted from local numeric
+# history. Training is never imported by or installed into the service unless
+# the operator explicitly selects this extra in a separate environment.
+train = ["onnx>=1.16"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
@@ -59,6 +63,9 @@ omnitensor-plugin-smoke = "omnitensor.sdk.smoke:main"
 omnitensor-verify-install = "omnitensor.acceptance:main"
 omnitensor-prepare-artifact = "omnitensor.preparation:main"
 omnitensor-convert-model = "omnitensor.conversion:main"
+omnitensor-record-training-sample = "omnitensor.training.cli:record_main"
+omnitensor-train-model = "omnitensor.training.cli:train_main"
+omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
 omnitensor-grant = "omnitensor.consent:main"
 
 [tool.hatch.build.targets.wheel]

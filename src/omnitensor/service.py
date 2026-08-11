@@ -14,6 +14,7 @@ Configuration comes from environment variables:
 ``OMNITENSOR_STATE_PATH`` (snapshot the applet reads),
 ``OMNITENSOR_POLICY_PATH`` (persisted policy + revision),
 ``OMNITENSOR_WORKLOADS`` (manifest directory),
+``OMNITENSOR_MODEL_BINDINGS`` (restricted local model overrides),
 ``OMNITENSOR_ARTIFACT_ROOT`` (verified model artifact store).
 """
 
@@ -96,6 +97,7 @@ DISCOVERY_INTERVAL_S = 10.0
 DEFAULT_STATE_PATH = "~/.local/state/tpu-workload-manager/state.json"
 DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
+DEFAULT_MODEL_BINDINGS_PATH = "~/.local/share/omnitensor/model-bindings"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_GRANTS_PATH = "~/.local/state/omnitensor/grants.json"
 
@@ -516,6 +518,7 @@ class OmniTensorService:
         plugin_runtime: PluginRuntime | None = None,
         job_dispatcher: JobDispatcher | None = None,
         artifact_root: Path | None = None,
+        model_bindings_path: Path | None = None,
         grants_path: Path | str = DEFAULT_GRANTS_PATH,
         grants: GrantLedger | None = None,
         result_summaries: ResultSummaryRegistry | None = None,
@@ -546,7 +549,10 @@ class OmniTensorService:
         )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
-        self._workloads = load_workload_catalog(workloads_path)
+        self._workloads = load_workload_catalog(
+            workloads_path,
+            model_bindings_root=model_bindings_path,
+        )
         defaults = {
             workload_id: workload.default_policy()
             for workload_id, workload in self._workloads.items()
@@ -1039,6 +1045,7 @@ def build_service_from_env() -> OmniTensorService:
         policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
         workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
         artifact_root=_env_path("OMNITENSOR_ARTIFACT_ROOT", DEFAULT_ARTIFACT_ROOT),
+        model_bindings_path=_env_path("OMNITENSOR_MODEL_BINDINGS", DEFAULT_MODEL_BINDINGS_PATH),
         grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH),
         input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS"),
     )

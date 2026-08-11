@@ -8,6 +8,7 @@ when omitted the global ``tpu > npu > gpu`` default applies.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ MAX_WORKLOADS = 128
 MAX_MANIFEST_BYTES = 64 * 1024
 
 DEFAULT_PREFERENCE = tuple(BACKENDS)
+_MODEL_BINDING_FIELDS = frozenset({"accelerator", "acceleratorPreference", "model", "models"})
 
 
 def _schema_path(name: str) -> Path:
@@ -273,10 +275,52 @@ def merge_workloads(
     return merged
 
 
+def apply_model_bindings(
+    bundled: dict[str, Workload],
+    bindings: dict[str, Workload],
+) -> dict[str, Workload]:
+    """Apply local model variants without letting them replace profile policy.
+
+    A trained artifact has a digest that cannot be known when the package is
+    built.  The local binding therefore repeats a bundled manifest with only
+    its routing and model fields changed.  Repeating the whole manifest makes
+    the existing canonical schema validate it, while this comparison keeps a
+    model installer from also changing permissions, defaults, UI, or pipeline
+    responsibilities under a trusted built-in identity.
+    """
+    merged = dict(bundled)
+    for profile_id, binding in sorted(bindings.items()):
+        base = bundled.get(profile_id)
+        if base is None:
+            LOGGER.warning("Skipping model binding for unknown profile %s", profile_id)
+            continue
+        if _binding_changes_profile(base.manifest, binding.manifest):
+            LOGGER.warning(
+                "Skipping model binding that changes non-model fields for %s", profile_id
+            )
+            continue
+        merged[profile_id] = binding
+    return merged
+
+
+def _binding_changes_profile(base: dict, binding: dict) -> bool:
+    """Whether ``binding`` changes anything outside its model/routing slot."""
+    normalized = copy.deepcopy(binding)
+    base_requirements = base["requirements"]
+    bound_requirements = normalized["requirements"]
+    for field in _MODEL_BINDING_FIELDS:
+        if field in base_requirements:
+            bound_requirements[field] = copy.deepcopy(base_requirements[field])
+        else:
+            bound_requirements.pop(field, None)
+    return normalized != base
+
+
 def load_workload_catalog(
     user_root: Path,
     *,
     bundled_root: Path | None = None,
+    model_bindings_root: Path | None = None,
 ) -> dict[str, Workload]:
     """Load built-in profiles plus user manifests; built-ins win ID collisions.
 
@@ -285,7 +329,10 @@ def load_workload_catalog(
     single bad one must not stop the service from starting.
     """
     resolved_bundled = bundled_root or bundled_workloads_path()
-    return merge_workloads(
-        load_workloads(resolved_bundled),
-        load_workloads(user_root, strict=False),
-    )
+    bundled = load_workloads(resolved_bundled)
+    if model_bindings_root is not None:
+        bundled = apply_model_bindings(
+            bundled,
+            load_workloads(model_bindings_root, strict=False),
+        )
+    return merge_workloads(bundled, load_workloads(user_root, strict=False))

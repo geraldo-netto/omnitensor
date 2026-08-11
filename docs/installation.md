@@ -111,6 +111,7 @@ deliberately rather than taking the default.
 | `[tpu]` | `tflite-runtime` | Coral Edge TPU |
 | `[convert]` | `pnnx` | packaging only: ONNX/TorchScript to ncnn |
 | `[convert-npu]` | `openvino`/`ovc` | packaging only: ONNX to OpenVINO IR |
+| `[train]` | `onnx` | producer only: validate and export a portable local fit |
 | `[dev]` | pytest, ruff, hypothesis, mutmut | tests and linting only |
 
 Do not install plain `onnxruntime`. That wheel ships `CPUExecutionProvider`
@@ -121,6 +122,13 @@ backend — so it can never satisfy the GPU lane no matter how it is configured.
 `tqdm`, and `portalocker` transitively. `numpy` is declared explicitly because
 the Vulkan executor imports it directly; relying on it arriving with `ncnn`
 would turn a future wheel change into an `ImportError` at inference time.
+
+Training dependencies are neither mandatory nor useful in the service
+environment. Install `[train]` in a separate producer venv, add `[convert]`
+for ncnn GPU artifacts and/or `[convert-npu]` for OpenVINO NPU artifacts, then
+install only the generated native files into the service artifact store. See
+[Local model training](local-training.md) for the complete record, fit,
+compile, binding, and restart workflow.
 
 ```sh
 # Install, or add an accelerator to an existing environment

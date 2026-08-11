@@ -17,6 +17,11 @@ Writing a plugin? Start with the [extension guide](docs/extension-guide.md),
 which walks packaging, discovery, schemas, permissions, artifacts, local
 testing, install, upgrade, rollback, and the compatibility policy in order.
 
+Training a host-specific model? [Local model training](docs/local-training.md)
+documents bounded numeric recording, reproducible portable ONNX fitting,
+GPU/NPU compilation, immutable installation, restricted model bindings, and
+mandatory versus optional producer dependencies.
+
 ## Backend hierarchy
 
 `tpu > npu > gpu` — no CPU backend by design: the CPU is the scarcest shared
@@ -67,6 +72,7 @@ model format is compatible; otherwise the profile reports `unavailable`.
 ```sh
 pip install .[dev]          # development
 pip install .[tpu,gpu,npu]  # runtime extras per available hardware
+pip install .[train,convert] # separate producer environment, GPU artifact
 ```
 
 `systemd/omnitensor.service` runs the service as a user unit.

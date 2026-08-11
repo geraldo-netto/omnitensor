@@ -97,6 +97,15 @@ The canonical manifest and runtime schemas remain under `schemas/`. Coordinate
 any incompatible catalog or contract change with `cinnamon-tpuwlm` before
 release.
 
+Locally trained model digests cannot be known when a built-in manifest is
+packaged. [Local model training](local-training.md) therefore installs a
+separate restricted binding: it may replace only model and routing fields for
+an existing built-in identity. Profile defaults, permissions, UI, capabilities,
+and host responsibilities remain immutable. One portable ONNX fit can produce
+matching ncnn GPU and OpenVINO NPU variants; no executable model file itself is
+hardware-agnostic, and Edge TPU production still needs a separate fully-int8
+TFLite and compiler path.
+
 Detailed bounded collector contracts for the `network-peripherals` profile are
 documented in [Network and peripheral collection](network-peripherals.md).
 
