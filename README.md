@@ -76,3 +76,29 @@ pip install .[train,convert] # separate producer environment, GPU artifact
 ```
 
 `systemd/omnitensor.service` runs the service as a user unit.
+
+## Quality gates
+
+Development requires unit, integration, regression, Hypothesis property/fuzz,
+and changed-function mutation tests. Enforce the 80% floor on every function,
+not only on aggregate or module totals:
+
+```sh
+.venv/bin/pytest --cov=omnitensor --cov-report=term
+.venv/bin/coverage json -o /tmp/omnitensor-coverage.json
+.venv/bin/python -m omnitensor.quality /tmp/omnitensor-coverage.json
+```
+
+Mutation runs must remain limited to changed callables. Use mutmut's quoted
+glob selector for each changed callable, then gate those same exact selectors:
+
+```sh
+.venv/bin/mutmut run 'omnitensor.module.x_changed_callable__mutmut_*'
+.venv/bin/mutmut results --all true > /tmp/omnitensor-mutmut.txt
+.venv/bin/python -m omnitensor.mutation_quality /tmp/omnitensor-mutmut.txt \
+  --selector omnitensor.module.x_changed_callable
+```
+
+`mutmut` cannot instrument properties, decorated dataclass hooks, or functions
+with no mutation points. Keep their regression and per-function statement
+coverage in the first gate; do not broaden mutation scope to compensate.

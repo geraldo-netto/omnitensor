@@ -55,6 +55,7 @@ dev = [
     "ruff>=0.4",
     "hypothesis>=6.100",
     "mutmut>=3.2",
+    "onnx>=1.16",
 ]
 
 [project.scripts]
@@ -66,6 +67,8 @@ omnitensor-convert-model = "omnitensor.conversion:main"
 omnitensor-record-training-sample = "omnitensor.training.cli:record_main"
 omnitensor-train-model = "omnitensor.training.cli:train_main"
 omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
+omnitensor-check-function-coverage = "omnitensor.quality:main"
+omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
 omnitensor-grant = "omnitensor.consent:main"
 
 [tool.hatch.build.targets.wheel]
