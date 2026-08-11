@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import sample_manifest
@@ -15,6 +16,12 @@ from omnitensor.plugins.recorder import FeatureRow, TelemetryRecorder
 from omnitensor.preparation import file_digest
 from omnitensor.registry import Workload
 from omnitensor.training.cli import _feature_values, install_main, record_main, train_main
+from omnitensor.training.compilers import (
+    CompilationRequest,
+    CompiledTarget,
+    CompilerCapability,
+    CompilerError,
+)
 from omnitensor.training.contracts import TrainingError, TrainingReport, TrainingSpec
 from omnitensor.training.forecast import ForecastTrainer, forecast_dataset
 from omnitensor.training.installation import (
@@ -126,10 +133,6 @@ def test_dataset_refuses_duplicate_or_decreasing_observation_time(timestamp):
         ("gpu", "at least one target is required"),
         (b"gpu", "at least one target is required"),
         (("gpu", "gpu"), "targets must be unique"),
-        (
-            ("tpu",),
-            "TPU export needs a matching fully-int8 TFLite graph and Edge TPU compiler",
-        ),
         (("cpu", "remote"), "unsupported target: cpu"),
     ],
 )
@@ -142,7 +145,7 @@ def test_target_validation_has_stable_failures(targets, detail):
 
 
 def test_target_validation_returns_canonical_lane_order():
-    assert _validated_targets(("gpu", "npu")) == ("npu", "gpu")
+    assert _validated_targets(("gpu", "tpu", "npu")) == ("tpu", "npu", "gpu")
 
 
 @given(
@@ -258,34 +261,38 @@ def test_real_onnx_export_is_valid_and_reproducible(tmp_path):
 def fake_prepared_training(tmp_path, monkeypatch):
     record_history(tmp_path / "records")
     report = ForecastTrainer(FakeExporter()).train(spec(), tmp_path / "records", tmp_path / "fit")
-    compiled = tmp_path / "compiled/model.param"
-    compiled.parent.mkdir()
-    compiled.write_bytes(b"graph")
-    compiled.with_suffix(".bin").write_bytes(b"weights")
-    compiled_xml = tmp_path / "compiled/model.xml"
-    compiled_xml.write_bytes(b"graph")
 
-    class Converted:
-        param = compiled
+    class FakeCompiler:
+        def __init__(self, accelerator):
+            self.accelerator = accelerator
+            self.observed = []
 
-    class ConvertedNpu:
-        xml = compiled_xml
+        def capability(self):
+            return CompilerCapability(self.accelerator, True, "test compiler")
 
+        def incompatibility(self, _source_format, _fully_quantized):
+            return None
+
+        def compile(self, _request, output_dir):
+            self.observed.append((_request, output_dir))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            suffix = ".param" if self.accelerator == "gpu" else ".xml"
+            primary = output_dir / f"model{suffix}"
+            primary.write_bytes(b"graph")
+            primary.with_suffix(".bin").write_bytes(b"weights")
+            model_format = "ncnn" if self.accelerator == "gpu" else "openvino"
+            return CompiledTarget(self.accelerator, primary, model_format, False)
+
+    compilers = (FakeCompiler("npu"), FakeCompiler("gpu"))
     monkeypatch.setattr(
-        "omnitensor.training.installation.convert_to_ncnn", lambda *a, **k: Converted()
+        "omnitensor.training.installation.default_target_compilers",
+        lambda _resolve: compilers,
     )
-    monkeypatch.setattr(
-        "omnitensor.training.installation.convert_to_openvino",
-        lambda *a, **k: ConvertedNpu(),
-    )
-    monkeypatch.setattr(
-        "omnitensor.training.installation._tool", lambda name: Path(f"/tools/{name}")
-    )
-    return report
+    return report, compilers
 
 
 def test_install_compiles_installs_and_binds_one_logical_model(tmp_path, monkeypatch):
-    fake_prepared_training(tmp_path, monkeypatch)
+    _report, compilers = fake_prepared_training(tmp_path, monkeypatch)
 
     installed = install_training(
         tmp_path / "fit/training-report.json",
@@ -315,6 +322,13 @@ def test_install_compiles_installs_and_binds_one_logical_model(tmp_path, monkeyp
         "flattenOrder": "observations-then-features",
     }
     assert (tmp_path / "artifacts/local-resource-forecast-gpu/1.0.0/model.param").is_file()
+    assert compilers[0].observed == []
+    assert compilers[1].observed == [
+        (
+            CompilationRequest(tmp_path / "fit/model.onnx", "onnx", (1, 6), False),
+            tmp_path / "fit/compiled/gpu",
+        )
+    ]
 
 
 def test_binding_refuses_unknown_profile_with_stable_failure(tmp_path, monkeypatch):
@@ -375,9 +389,7 @@ def test_binding_reports_every_semantic_violation(tmp_path, monkeypatch):
     assert captured.value.detail == "first violation; second violation"
 
 
-def test_install_reloads_identical_feature_semantics_for_every_native_lane(
-    tmp_path, monkeypatch
-):
+def test_install_reloads_identical_feature_semantics_for_every_native_lane(tmp_path, monkeypatch):
     fake_prepared_training(tmp_path, monkeypatch)
 
     installed = install_training(
@@ -393,6 +405,146 @@ def test_install_reloads_identical_feature_semantics_for_every_native_lane(
     assert [variant.accelerator for variant in installed.variants] == ["npu", "gpu"]
     assert [model["format"] for model in reloaded.models] == ["openvino", "ncnn"]
     assert all(model["featureContract"] == spec().feature_contract for model in reloaded.models)
+
+
+def test_install_translates_compiler_catalog_and_compilation_failures(tmp_path):
+    record_history(tmp_path / "records")
+    ForecastTrainer(FakeExporter()).train(spec(), tmp_path / "records", tmp_path / "fit")
+
+    class Compiler:
+        accelerator = "gpu"
+
+        def capability(self):
+            return CompilerCapability("gpu", True, "available")
+
+        def incompatibility(self, _source_format, _fully_quantized):
+            return None
+
+        def compile(self, _request, _output):
+            raise CompilerError("compilation-failed", "compiler diagnostic")
+
+    with pytest.raises(TrainingError) as duplicate:
+        install_training(
+            tmp_path / "fit/training-report.json",
+            targets=("gpu",),
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            compilers=(Compiler(), Compiler()),
+        )
+    assert duplicate.value.code == "compiler-invalid"
+    assert duplicate.value.detail == "duplicate compiler target: gpu"
+
+    with pytest.raises(TrainingError) as failed:
+        install_training(
+            tmp_path / "fit/training-report.json",
+            targets=("gpu",),
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            compilers=(Compiler(),),
+        )
+    assert failed.value.code == "compilation-failed"
+    assert failed.value.detail == "compiler diagnostic"
+
+
+def test_install_refuses_a_catalog_missing_the_requested_provider(tmp_path):
+    record_history(tmp_path / "records")
+    ForecastTrainer(FakeExporter()).train(spec(), tmp_path / "records", tmp_path / "fit")
+
+    with pytest.raises(TrainingError) as captured:
+        install_training(
+            tmp_path / "fit/training-report.json",
+            targets=("gpu",),
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            compilers=(),
+        )
+
+    assert captured.value.code == "compiler-missing"
+    assert captured.value.detail == "no compiler provider for gpu"
+
+
+def test_install_wires_explicit_roots_and_variant_identity_exactly(tmp_path, monkeypatch):
+    record_history(tmp_path / "records")
+    ForecastTrainer(FakeExporter()).train(spec(), tmp_path / "records", tmp_path / "fit")
+    compiler = SimpleNamespace(accelerator="gpu")
+    artifact = SimpleNamespace(reference=SimpleNamespace(id="compiled-id", format="ncnn"))
+    compiled = CompiledTarget("gpu", tmp_path / "native/model.param", "ncnn", False)
+    observed = []
+
+    def compile_and_prepare(report, request, provider, output):
+        observed.append(("compile", report, request, provider, output))
+        return compiled, artifact
+
+    def install(artifact_value, root):
+        observed.append(("install", artifact_value, root))
+        return tmp_path / "landed/model.param"
+
+    def fragment(report, artifact_value, fully_quantized):
+        observed.append(("fragment", report, artifact_value, fully_quantized))
+        return {"native": True}
+
+    def binding(report, variants, *, bundled_root):
+        observed.append(("binding", report, variants, bundled_root))
+        return {"binding": True}
+
+    def write(path, document, *, prefix):
+        observed.append(("write", path, document, prefix))
+
+    monkeypatch.setattr(
+        "omnitensor.training.installation._compile_and_prepare", compile_and_prepare
+    )
+    monkeypatch.setattr("omnitensor.training.installation.install_prepared", install)
+    monkeypatch.setattr("omnitensor.training.installation._model_fragment", fragment)
+    monkeypatch.setattr("omnitensor.training.installation._binding_manifest", binding)
+    monkeypatch.setattr("omnitensor.training.installation.write_json_atomic", write)
+
+    installed = install_training(
+        tmp_path / "fit/training-report.json",
+        targets=("gpu",),
+        artifact_root=tmp_path / "artifact-root",
+        bindings_root=tmp_path / "binding-root",
+        build_root=tmp_path / "build-root",
+        bundled_root=tmp_path / "bundled-root",
+        compilers=(compiler,),
+    )
+
+    report = TrainingReport.load(tmp_path / "fit/training-report.json")
+    assert observed == [
+        (
+            "compile",
+            report,
+            CompilationRequest(tmp_path / "fit/model.onnx", "onnx", (1, 6), False),
+            compiler,
+            tmp_path / "build-root",
+        ),
+        ("install", artifact, tmp_path / "artifact-root"),
+        ("fragment", report, artifact, False),
+        (
+            "binding",
+            report,
+            {"gpu": {"native": True}},
+            tmp_path / "bundled-root",
+        ),
+        (
+            "write",
+            tmp_path / "binding-root/resource-scheduler/manifest.json",
+            {"binding": True},
+            ".model-binding-",
+        ),
+    ]
+    assert installed == type(installed)(
+        "resource-scheduler",
+        tmp_path / "binding-root/resource-scheduler/manifest.json",
+        (
+            type(installed.variants[0])(
+                "gpu",
+                "compiled-id",
+                "ncnn",
+                tmp_path / "landed/model.param",
+                {"native": True},
+            ),
+        ),
+    )
 
 
 @given(

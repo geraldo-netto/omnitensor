@@ -300,9 +300,7 @@ def test_dbus_result_method_delegates_to_runtime():
 def test_service_progress_and_plugin_artifact_lookup_use_runtime_ports():
     progress = []
     service = object.__new__(OmniTensorService)
-    service.jobs = SimpleNamespace(
-        note_progress=lambda *arguments: progress.append(arguments)
-    )
+    service.jobs = SimpleNamespace(note_progress=lambda *arguments: progress.append(arguments))
     service._workloads = {}
     entry = {
         "id": "plugin-model",
@@ -327,11 +325,7 @@ def test_service_artifact_lookup_continues_after_nonmatching_workload():
     expected = ArtifactReference("wanted", "1.0.0", "ncnn", "b" * 64)
     service = object.__new__(OmniTensorService)
     service._workloads = {
-        "first": SimpleNamespace(
-            models=(
-                {"id": "other", "version": "1.0.0", "format": "ncnn"},
-            )
-        ),
+        "first": SimpleNamespace(models=({"id": "other", "version": "1.0.0", "format": "ncnn"},)),
         "second": SimpleNamespace(
             models=(
                 {
@@ -639,8 +633,8 @@ def test_install_cli_refuses_auto_when_no_compiler_exists(monkeypatch, tmp_path,
     monkeypatch.setattr("omnitensor.training.cli.available_targets", lambda: ())
     assert install_main([str(tmp_path / "training-report.json")]) == 1
     assert capsys.readouterr().err == (
-        "installation failed: compiler-missing: no native compiler found; "
-        "install [convert] or [convert-npu]\n"
+        "installation failed: compiler-missing: no compatible native compiler found; "
+        "install the producer tool for a target lane\n"
     )
 
 
@@ -650,8 +644,8 @@ def test_install_cli_help_is_an_operator_contract(capsys):
     output = capsys.readouterr().out
     assert "usage: omnitensor-install-trained-model" in output
     assert "Compile and install a trained model for local accelerator lanes" in output
-    assert "auto or comma-separated npu,gpu; TPU needs separate" in output
-    assert "int8 export tooling" in output
+    assert "auto or comma-separated tpu,npu,gpu" in output
+    assert "compatible source and compiler" in output
 
 
 def test_training_cli_rejects_empty_feature_and_target_lists():

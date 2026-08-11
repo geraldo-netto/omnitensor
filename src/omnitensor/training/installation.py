@@ -11,17 +11,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..atomicio import write_json_atomic
-from ..conversion import OvcConverter, PnnxConverter, convert_to_ncnn, convert_to_openvino
 from ..preparation import PreparedArtifact, install_prepared, prepare_artifact
 from ..registry import (
     bundled_workloads_path,
     load_workloads,
     validate_workload_document,
 )
+from .compilers import (
+    TARGET_ORDER,
+    CompilationRequest,
+    CompiledTarget,
+    CompilerError,
+    TargetCompiler,
+    compatible_available_targets,
+    compiler_catalog,
+    default_target_compilers,
+)
 from .contracts import TrainingError, TrainingReport
 
-SUPPORTED_TARGETS = ("npu", "gpu")
-TARGET_ORDER = ("tpu", "npu", "gpu")
+SUPPORTED_TARGETS = TARGET_ORDER
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,14 +64,18 @@ class InstalledTraining:
         }
 
 
-def available_targets() -> tuple[str, ...]:
-    """Native lanes whose offline compiler exists in this producer environment."""
-    found = []
-    if _tool("ovc") is not None:
-        found.append("npu")
-    if _tool("pnnx") is not None:
-        found.append("gpu")
-    return tuple(found)
+def available_targets(
+    *,
+    source_format: str = "onnx",
+    fully_quantized: bool = False,
+    compilers: Sequence[TargetCompiler] | None = None,
+) -> tuple[str, ...]:
+    """Available native lanes compatible with the stated portable source."""
+    providers = tuple(compilers) if compilers is not None else default_target_compilers(_tool)
+    try:
+        return compatible_available_targets(source_format, fully_quantized, providers)
+    except CompilerError as error:
+        raise TrainingError(error.code, error.detail) from error
 
 
 def install_training(
@@ -74,24 +86,33 @@ def install_training(
     bindings_root: Path | str,
     build_root: Path | str | None = None,
     bundled_root: Path | None = None,
+    compilers: Sequence[TargetCompiler] | None = None,
 ) -> InstalledTraining:
     """Compile, digest-install, then atomically publish a restricted binding."""
     report_file = Path(report_path)
     report = TrainingReport.load(report_file)
     selected = _validated_targets(targets)
+    providers = tuple(compilers) if compilers is not None else default_target_compilers(_tool)
+    try:
+        catalog = compiler_catalog(providers)
+    except CompilerError as error:
+        raise TrainingError(error.code, error.detail) from error
     output = Path(build_root) if build_root is not None else report_file.parent / "compiled"
-    output.mkdir(parents=True, exist_ok=True)
-    prepared = [
-        _compile_and_prepare(report, report_file.parent / "model.onnx", target, output)
-        for target in selected
-    ]
+    portable = report_file.parent / "model.onnx"
+    request = CompilationRequest(portable, "onnx", (1, report.spec.input_width), False)
+    prepared = []
+    for target in selected:
+        compiler = catalog.get(target)
+        if compiler is None:
+            raise TrainingError("compiler-missing", f"no compiler provider for {target}")
+        prepared.append(_compile_and_prepare(report, request, compiler, output))
     installed = []
-    for target, artifact in prepared:
+    for compiled, artifact in prepared:
         landed = install_prepared(artifact, artifact_root)
-        fragment = _model_fragment(report, artifact)
+        fragment = _model_fragment(report, artifact, compiled.fully_quantized)
         installed.append(
             InstalledVariant(
-                target,
+                compiled.accelerator,
                 artifact.reference.id,
                 artifact.reference.format,
                 landed,
@@ -116,58 +137,37 @@ def _validated_targets(targets: Sequence[str]) -> tuple[str, ...]:
         raise TrainingError("targets-invalid", "targets must be unique")
     unsupported = [target for target in selected if target not in SUPPORTED_TARGETS]
     if unsupported:
-        detail = (
-            "TPU export needs a matching fully-int8 TFLite graph and Edge TPU compiler"
-            if unsupported[0] == "tpu"
-            else f"unsupported target: {unsupported[0]}"
-        )
+        detail = f"unsupported target: {unsupported[0]}"
         raise TrainingError("targets-invalid", detail)
     return tuple(target for target in TARGET_ORDER if target in selected)
 
 
 def _compile_and_prepare(
     report: TrainingReport,
-    portable: Path,
-    target: str,
+    request: CompilationRequest,
+    compiler: TargetCompiler,
     output: Path,
-) -> tuple[str, PreparedArtifact]:
-    shape = f"[1,{report.spec.input_width}]"
-    destination = output / target
-    if target == "gpu":
-        executable = _tool("pnnx")
-        if executable is None:
-            raise TrainingError("compiler-missing", "pnnx is required for the GPU target")
-        converted = convert_to_ncnn(
-            portable,
-            shape,
-            output_dir=destination,
-            converter=PnnxConverter(str(executable)),
-        )
-        primary, model_format = converted.param, "ncnn"
-    else:
-        executable = _tool("ovc")
-        if executable is None:
-            raise TrainingError("compiler-missing", "ovc is required for the NPU target")
-        converted = convert_to_openvino(
-            portable,
-            shape,
-            output_dir=destination,
-            converter=OvcConverter(str(executable)),
-        )
-        primary, model_format = converted.xml, "openvino"
+) -> tuple[CompiledTarget, PreparedArtifact]:
+    destination = output / compiler.accelerator
+    try:
+        compiled = compiler.compile(request, destination)
+    except CompilerError as error:
+        raise TrainingError(error.code, error.detail) from error
     artifact = prepare_artifact(
-        primary,
-        artifact_id=f"{report.spec.artifact_id}-{target}",
+        compiled.primary,
+        artifact_id=f"{report.spec.artifact_id}-{compiled.accelerator}",
         version=report.spec.artifact_version,
-        model_format=model_format,
+        model_format=compiled.model_format,
     )
-    return target, artifact
+    return compiled, artifact
 
 
-def _model_fragment(report: TrainingReport, artifact: PreparedArtifact) -> dict:
+def _model_fragment(
+    report: TrainingReport, artifact: PreparedArtifact, fully_quantized: bool
+) -> dict:
     return {
         **artifact.manifest_fragment(),
-        "fullyQuantized": False,
+        "fullyQuantized": fully_quantized,
         "minimumCompilerVersion": "0.0.0",
         "minimumRuntimeVersion": "0.0.0",
         "tensorContract": report.spec.tensor_contract,

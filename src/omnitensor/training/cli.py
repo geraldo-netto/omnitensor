@@ -174,7 +174,9 @@ def install_main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--targets",
         default="auto",
-        help="auto or comma-separated npu,gpu; TPU needs separate int8 export tooling",
+        help=(
+            "auto or comma-separated tpu,npu,gpu; each lane needs a compatible source and compiler"
+        ),
     )
     parser.add_argument("--artifact-root", default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--bindings-root", default=DEFAULT_BINDINGS_ROOT)
@@ -186,7 +188,8 @@ def install_main(argv: list[str] | None = None) -> int:
         )
         if not targets:
             raise TrainingError(
-                "compiler-missing", "no native compiler found; install [convert] or [convert-npu]"
+                "compiler-missing",
+                "no compatible native compiler found; install the producer tool for a target lane",
             )
         installed = install_training(
             Path(arguments.report).expanduser(),
