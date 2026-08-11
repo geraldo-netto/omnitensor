@@ -11,6 +11,7 @@ from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins import ArtifactInstaller, ArtifactReference, ArtifactResolution
+from omnitensor.plugins.kernel_telemetry import parse_aggregate
 from omnitensor.registry import _schema_path, validate_document
 from omnitensor.scheduler import select_backend
 from omnitensor.service import (
@@ -34,6 +35,19 @@ def build_service(fake_nodes, tmp_path, manifests=()):
     )
 
 
+class ReadyKernelTelemetry:
+    def read(self):
+        return parse_aggregate({
+            "version": 1,
+            "collectedAtMs": 1_700_000_000_000,
+            "histograms": [
+                {"name": "runq_latency_us", "unit": "us", "buckets": [1, 2]},
+                {"name": "block_latency_us", "unit": "us", "buckets": [3, 4]},
+            ],
+            "counters": [],
+        })
+
+
 def test_publish_once_emits_contract_valid_snapshot(fake_nodes, tmp_path):
     async def scenario():
         add_pcie_tpu(fake_nodes)
@@ -49,6 +63,27 @@ def test_publish_once_emits_contract_valid_snapshot(fake_nodes, tmp_path):
     assert [device["backend"] for device in snapshot["devices"]] == ["tpu", "npu"]
     written = json.loads((tmp_path / "state/runtime-snapshot.json").read_text())
     assert written == snapshot
+
+
+def test_publish_once_reads_kernel_telemetry_into_the_applet_contract(fake_nodes, tmp_path):
+    add_pcie_tpu(fake_nodes)
+    workloads_root = tmp_path / "workloads"
+    workloads_root.mkdir()
+    service = OmniTensorService(
+        snapshot_path=tmp_path / "state/runtime-snapshot.json",
+        policy_path=tmp_path / "state/policy.json",
+        workloads_path=workloads_root,
+        discovery_paths=fake_nodes,
+        kernel_telemetry_source=ReadyKernelTelemetry(),
+    )
+
+    snapshot = service.publish_once()
+
+    assert snapshot["kernelTelemetry"]["state"] == "ready"
+    assert [item["name"] for item in snapshot["kernelTelemetry"]["histograms"]] == [
+        "runq_latency_us",
+        "block_latency_us",
+    ]
 
 
 def test_profile_statuses_report_backend_or_reason(fake_nodes, tmp_path):

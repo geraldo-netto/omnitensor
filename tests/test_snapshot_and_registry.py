@@ -77,6 +77,32 @@ def test_snapshot_without_plugin_telemetry_keeps_the_version_one_shape(fake_node
     assert "pluginTelemetry" not in snapshot
 
 
+def test_snapshot_optionally_publishes_bounded_kernel_telemetry(fake_nodes):
+    add_pcie_tpu(fake_nodes)
+    kernel = {
+        "version": 1,
+        "state": "ready",
+        "detail": "",
+        "collectedAtMs": 1_700_000_000_000,
+        "histograms": [
+            {"name": "runq_latency_us", "unit": "us", "buckets": [3, 9, 1]},
+            {"name": "block_latency_us", "unit": "us", "buckets": [2, 0, 1]},
+        ],
+        "counters": [],
+    }
+
+    snapshot = build_snapshot(
+        devices=detect_devices(fake_nodes),
+        metrics={},
+        profiles={},
+        generated_at_ms=1,
+        kernel_telemetry=kernel,
+    )
+
+    assert snapshot["kernelTelemetry"] == kernel
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+
+
 def test_plugin_telemetry_schema_rejects_excess_cardinality(fake_nodes):
     add_pcie_tpu(fake_nodes)
     document = {

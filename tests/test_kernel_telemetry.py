@@ -8,10 +8,13 @@ import threading
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.kernel_telemetry import (
     FORBIDDEN_FIELDS,
     AbsentAggregateSource,
+    KernelAggregate,
     KernelTelemetryError,
     KernelTelemetryState,
     UnixSocketAggregateSource,
@@ -110,6 +113,32 @@ def test_a_malformed_aggregate_is_refused(changes):
 def test_a_non_object_aggregate_is_refused():
     with pytest.raises(KernelTelemetryError, match="aggregate-invalid"):
         parse_aggregate(["not", "an", "object"])
+
+
+def test_aggregate_bounds_accept_their_exact_safe_limits():
+    histograms = [
+        {"name": f"h-{index}", "unit": "us", "buckets": []}
+        for index in range(64)
+    ]
+    histograms[0]["buckets"] = [0] * 63 + [2**53 - 1]
+    counters = [{"name": f"c-{index}", "value": 0} for index in range(64)]
+    counters[-1]["value"] = 2**53 - 1
+
+    aggregate = parse_aggregate(document(histograms=histograms, counters=counters))
+
+    assert len(aggregate.histograms) == 64
+    assert len(aggregate.histograms[0].buckets) == 64
+    assert aggregate.histograms[0].buckets[-1] == 2**53 - 1
+    assert len(aggregate.counters) == 64
+    assert aggregate.counters[0].value == 0
+    assert aggregate.counters[-1].value == 2**53 - 1
+
+
+def test_an_omitted_histogram_unit_has_the_declared_nanosecond_default():
+    aggregate = parse_aggregate(
+        document(histograms=[{"name": "latency", "buckets": [1]}])
+    )
+    assert aggregate.histograms[0].unit == "ns"
 
 
 def test_an_absent_helper_says_so_rather_than_reporting_zero(tmp_path):
@@ -274,6 +303,47 @@ def test_an_aggregate_describes_itself_for_the_snapshot():
     ]
     assert described["counters"] == [{"name": "block_rq_completed", "value": 42}]
     assert described["state"] == "ready"
+
+
+def test_scheduler_features_summarize_both_latency_histograms_without_identity():
+    aggregate = parse_aggregate(
+        document(
+            histograms=[
+                {"name": "runq_latency_us", "unit": "us", "buckets": [1, 1, 8]},
+                {"name": "block_latency_us", "unit": "us", "buckets": [5, 5]},
+            ]
+        )
+    )
+
+    assert aggregate.scheduler_features() == {
+        "kernelRunQueueSamples": 10.0,
+        "kernelRunQueueP50UpperUs": 8.0,
+        "kernelRunQueueP95UpperUs": 8.0,
+        "kernelBlockIoSamples": 10.0,
+        "kernelBlockIoP50UpperUs": 2.0,
+        "kernelBlockIoP95UpperUs": 4.0,
+    }
+
+
+@given(st.lists(st.integers(min_value=0, max_value=10_000), max_size=64))
+def test_scheduler_percentiles_are_bounded_for_every_valid_histogram(buckets):
+    aggregate = parse_aggregate(
+        document(histograms=[{"name": "runq_latency_us", "unit": "us", "buckets": buckets}])
+    )
+
+    features = aggregate.scheduler_features()
+
+    assert len(features) == 3
+    assert all(0 <= value <= 2**53 - 1 for value in features.values())
+
+
+def test_unusable_telemetry_never_invents_scheduler_features():
+    assert AbsentAggregateSource().read().scheduler_features() == {}
+
+
+def test_snapshot_detail_is_bounded_even_when_an_os_error_is_not():
+    aggregate = KernelAggregate(KernelTelemetryState.HELPER_UNREACHABLE, "x" * 500)
+    assert len(aggregate.document()["detail"]) == 240
 
 
 def test_identity_nested_in_a_plain_mapping_is_refused():

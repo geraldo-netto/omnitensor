@@ -11,6 +11,7 @@ asked about are named up front.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -20,6 +21,8 @@ from .collection import (
     SourceSnapshot,
     bounded_number,
 )
+from .kernel_telemetry import UnixSocketAggregateSource
+from .pipeline import CollectedOutput
 
 RESOURCE_PLUGIN_ID = "resource-scheduler"
 RESOURCE_METADATA_PERMISSION = "read:resource-metadata"
@@ -109,8 +112,24 @@ class ResourceSchedulerCollector(BoundedCollector[ResourceSample]):
     label = "resource metadata"
     source_name = "cgroup-systemd-pressure"
 
-    def __init__(self, *args, max_items: int = DEFAULT_MAX_UNITS, **changes) -> None:
+    def __init__(
+        self,
+        *args,
+        max_items: int = DEFAULT_MAX_UNITS,
+        kernel_source=None,
+        **changes,
+    ) -> None:
         super().__init__(*args, max_items=max_items, **changes)
+        self._kernel_source = kernel_source or UnixSocketAggregateSource()
+
+    async def collect(self, trigger) -> CollectedOutput:
+        """Add aggregate run-queue and block-I/O features to PSI observations."""
+        collected = await super().collect(trigger)
+        aggregate = await asyncio.to_thread(self._kernel_source.read)
+        payload = dict(collected.payload)
+        payload["kernelTelemetry"] = aggregate.document()
+        payload["kernelFeatures"] = aggregate.scheduler_features()
+        return CollectedOutput(payload)
 
     def identity_of(self, item: ResourceSample) -> str:
         return item.stable_id

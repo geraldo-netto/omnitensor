@@ -59,6 +59,7 @@ from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution, artifact_filename
 from .plugins.cancellation import JobCancellationRegistry
 from .plugins.grants import GrantLedger
+from .plugins.kernel_telemetry import UnixSocketAggregateSource
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.orchestration import (
     RunnerBackedDispatcher,
@@ -520,6 +521,7 @@ class OmniTensorService:
         result_summaries: ResultSummaryRegistry | None = None,
         job_results: JobResultStore | None = None,
         plugin_telemetry: PluginTelemetryRegistry | None = None,
+        kernel_telemetry_source=None,
         transport: ControlTransport | None = None,
         cancellation_journal_path: Path | None = None,
         input_roots: Sequence[Path | str] = (),
@@ -529,6 +531,7 @@ class OmniTensorService:
         self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
         self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
         self._input_roots = tuple(input_roots)
+        self._kernel_telemetry_source = kernel_telemetry_source or UnixSocketAggregateSource()
         self._callers = CallerIdentityResolver()
         self._transport = transport or DbusControlTransport(callers=self._callers)
         # Consent has a home now.  The ledger was written, tested, and never
@@ -931,6 +934,7 @@ class OmniTensorService:
             # a capability, and a consumer that cached them would keep offering
             # a directory this service has stopped reading.
             inputs=input_roots_document(self._input_roots),
+            kernel_telemetry=self._kernel_telemetry_source.read().document(),
         )
 
     def publish_once(self) -> dict:

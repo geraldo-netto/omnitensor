@@ -38,6 +38,25 @@ consumer outcome. The applet regression
 `runtime-schema-validation-regression.test.js` proves the combined live shape
 (`pluginTelemetry` plus `resultRef`) as well as the original shape.
 
+## Kernel telemetry (`kernelTelemetry`)
+
+The optional version-one block publishes only aggregate run-queue and block-I/O
+latency histograms plus monotonic counters. Series, bucket counts, names,
+timestamps, details, and integer magnitudes are all bounded. Process, user,
+cgroup, path, and payload identity is rejected by the helper reader before a
+document can reach this contract.
+
+`state` distinguishes a ready sample from an absent, unreachable, or invalid
+helper. Those states carry empty measurements rather than invented zeroes: an
+idle kernel and an unavailable probe are not the same observation. The
+Cinnamon applet validates this optional block and safely ignores it until a
+view needs it, so either producer shape remains usable.
+
+The `resource-scheduler` collector consumes the same aggregate. It exposes
+sample counts plus P50 and P95 log2-bucket upper bounds for the declared
+run-queue and block-I/O histograms. This keeps model features fixed and bounded
+while deterministic scheduling enforcement remains outside accelerator code.
+
 ## Input roots (`inputs`)
 
 The optional `inputs` block states where a caller may stage a referenced input

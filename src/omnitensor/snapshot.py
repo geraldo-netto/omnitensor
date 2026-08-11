@@ -77,6 +77,7 @@ def build_snapshot(
     plugin_telemetry: list[dict] | None = None,
     generated_at_ms: int | None = None,
     inputs: dict | None = None,
+    kernel_telemetry: dict | None = None,
 ) -> dict:
     """Build a contract-valid snapshot document.
 
@@ -101,6 +102,8 @@ def build_snapshot(
             "version": PLUGIN_TELEMETRY_VERSION,
             "plugins": plugin_telemetry,
         }
+    if kernel_telemetry is not None:
+        snapshot["kernelTelemetry"] = kernel_telemetry
     violations = validate_document("runtime-snapshot.schema.json", snapshot)
     if violations:
         raise ValueError(f"snapshot violates contract: {'; '.join(violations)}")

@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from omnitensor.plugins.collection import CollectionError, ReplaySource, SourceSnapshot
+from omnitensor.plugins.kernel_telemetry import parse_aggregate
 from omnitensor.plugins.resource_collection import (
     RESOURCE_METADATA_PERMISSION,
     PressureStall,
@@ -56,6 +57,19 @@ def collector(*snapshots, allowed=(UNIT,), granted=(UNIT,), **changes):
     return ResourceSchedulerCollector(source, permissions(*granted), allowed, **changes)
 
 
+class KernelSource:
+    def read(self):
+        return parse_aggregate({
+            "version": 1,
+            "collectedAtMs": 11,
+            "histograms": [
+                {"name": "runq_latency_us", "unit": "us", "buckets": [1, 3]},
+                {"name": "block_latency_us", "unit": "us", "buckets": [2]},
+            ],
+            "counters": [],
+        })
+
+
 def trigger():
     return Trigger("resource-scheduler", "resource-1", TriggerKind.PERIODIC, {}, 1)
 
@@ -81,6 +95,20 @@ def test_pressure_is_carried_because_utilisation_alone_hides_thrashing():
     assert payload["items"][0]["cpuPressure"] == {
         "someMilliPercent": 9_000,
         "fullMilliPercent": 4_000,
+    }
+
+
+def test_kernel_histograms_become_bounded_scheduler_features():
+    payload = collect(collector(kernel_source=KernelSource()))
+
+    assert payload["kernelTelemetry"]["state"] == "ready"
+    assert payload["kernelFeatures"] == {
+        "kernelRunQueueSamples": 4.0,
+        "kernelRunQueueP50UpperUs": 4.0,
+        "kernelRunQueueP95UpperUs": 4.0,
+        "kernelBlockIoSamples": 2.0,
+        "kernelBlockIoP50UpperUs": 2.0,
+        "kernelBlockIoP95UpperUs": 2.0,
     }
 
 

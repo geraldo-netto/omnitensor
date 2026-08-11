@@ -247,6 +247,95 @@
         }
       }
     },
+    "kernelTelemetry": {
+      "description": "Bounded aggregate-only kernel latency telemetry. No process, user, cgroup, path, or payload identity is permitted in this block.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "state",
+        "detail",
+        "collectedAtMs",
+        "histograms",
+        "counters"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "helper-absent",
+            "helper-unreachable",
+            "helper-invalid"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "collectedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "histograms": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "unit",
+              "buckets"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "buckets": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "$ref": "#/$defs/kernelCount"
+                }
+              }
+            }
+          }
+        },
+        "counters": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "value": {
+                "$ref": "#/$defs/kernelCount"
+              }
+            }
+          }
+        }
+      }
+    },
     "pluginTelemetry": {
       "type": "object",
       "additionalProperties": false,
@@ -383,6 +472,11 @@
     }
   },
   "$defs": {
+    "kernelCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "telemetryCounter": {
       "type": "integer",
       "minimum": 0,

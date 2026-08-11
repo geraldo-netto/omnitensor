@@ -39,6 +39,8 @@ AGGREGATE_VERSION = 1
 MAX_SERIES = 64
 MAX_BUCKETS = 64
 MAX_NAME_LENGTH = 64
+MAX_DETAIL_LENGTH = 240
+MAX_COUNT = 2**53 - 1
 
 # Anything that could identify a process, a user, or a file. eBPF can read all
 # of it, so the reader refuses it rather than trusting the helper not to send it.
@@ -129,11 +131,34 @@ class KernelAggregate:
         return {
             "version": AGGREGATE_VERSION,
             "state": str(self.state),
-            "detail": self.detail,
+            "detail": self.detail[:MAX_DETAIL_LENGTH],
             "collectedAtMs": self.collected_at_ms,
             "histograms": [item.document() for item in self.histograms],
             "counters": [item.document() for item in self.counters],
         }
+
+    def scheduler_features(self) -> dict[str, float]:
+        """Bounded, aggregate-only latency features for resource scheduling."""
+        return scheduler_features(self)
+
+
+def scheduler_features(aggregate: KernelAggregate) -> dict[str, float]:
+    """Summarize the two declared log2 histograms into stable model inputs."""
+    if not aggregate.usable:
+        return {}
+    histograms = {item.name: item for item in aggregate.histograms}
+    features: dict[str, float] = {}
+    for name, prefix in (
+        ("runq_latency_us", "kernelRunQueue"),
+        ("block_latency_us", "kernelBlockIo"),
+    ):
+        histogram = histograms.get(name)
+        if histogram is None:
+            continue
+        features[f"{prefix}Samples"] = float(min(histogram.total, MAX_COUNT))
+        features[f"{prefix}P50UpperUs"] = float(_percentile_upper(histogram, 50))
+        features[f"{prefix}P95UpperUs"] = float(_percentile_upper(histogram, 95))
+    return features
 
 
 def _bounded_name(value: object) -> str:
@@ -206,7 +231,11 @@ def _histograms(raw: object) -> tuple[LatencyHistogram, ...]:
         if not isinstance(buckets, list) or len(buckets) > MAX_BUCKETS:
             raise KernelTelemetryError("aggregate-invalid", "histogram buckets are invalid")
         for count in buckets:
-            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            if (
+                isinstance(count, bool)
+                or not isinstance(count, int)
+                or not 0 <= count <= MAX_COUNT
+            ):
                 raise KernelTelemetryError("aggregate-invalid", "bucket counts must be counts")
         parsed.append(
             LatencyHistogram(
@@ -226,10 +255,28 @@ def _counters(raw: object) -> tuple[KernelCounter, ...]:
         if not isinstance(item, Mapping):
             raise KernelTelemetryError("aggregate-invalid", "counter must be an object")
         value = item.get("value")
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= MAX_COUNT
+        ):
             raise KernelTelemetryError("aggregate-invalid", "counter value must be a count")
         parsed.append(KernelCounter(_bounded_name(item.get("name")), value))
     return tuple(parsed)
+
+
+def _percentile_upper(histogram: LatencyHistogram, percentile: int) -> int:
+    """Exclusive upper bound of one log2 bucket percentile, in histogram units."""
+    total = histogram.total
+    if total < 1:
+        return 0
+    threshold = (total * percentile + 99) // 100
+    cumulative = 0
+    for index, count in enumerate(histogram.buckets):
+        cumulative += count
+        if cumulative >= threshold:
+            return min(1 << (index + 1), MAX_COUNT)
+    return 0
 
 
 class UnixSocketAggregateSource:
