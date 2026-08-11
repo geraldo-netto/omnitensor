@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -15,8 +16,10 @@ from ..preparation import PreparationError
 from .contracts import TrainingError, TrainingSpec
 from .forecast import ForecastTrainer
 from .installation import available_targets, install_training
+from .snapshot_recording import load_runtime_snapshot, record_runtime_snapshot
 
 DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
+DEFAULT_SNAPSHOT_PATH = "~/.local/state/tpu-workload-manager/state.json"
 DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
@@ -47,6 +50,54 @@ def record_main(argv: list[str] | None = None) -> int:
         print(f"recording failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(row.document(), indent=2))
+    return 0
+
+
+def snapshot_record_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-record-runtime-snapshot",
+        description="Append allowlisted aggregate runtime measurements to local training history",
+    )
+    parser.add_argument("--profile", required=True)
+    parser.add_argument(
+        "--selector",
+        required=True,
+        action="append",
+        help=(
+            "queueDepth or runningProfiles; repeat to preserve the desired feature order"
+        ),
+    )
+    parser.add_argument(
+        "--snapshot", default=os.environ.get("OMNITENSOR_STATE_PATH", DEFAULT_SNAPSHOT_PATH)
+    )
+    parser.add_argument("--records-root", default=DEFAULT_RECORDS_ROOT)
+    arguments = parser.parse_args(argv)
+    try:
+        document = load_runtime_snapshot(Path(arguments.snapshot).expanduser())
+        row = record_runtime_snapshot(
+            document,
+            profile_id=arguments.profile,
+            selectors=arguments.selector,
+            recorder=TelemetryRecorder(Path(arguments.records_root).expanduser()),
+        )
+    except (RecorderError, OSError, ValueError) as error:
+        print(f"snapshot recording failed: {error}", file=sys.stderr)
+        return 1
+    if row is None:
+        print(
+            json.dumps(
+                {
+                    "status": "duplicate",
+                    "profileId": arguments.profile,
+                    "observedAtMs": document["generatedAt"],
+                },
+                indent=2,
+            )
+        )
+        return 0
+    output = row.document()
+    output["status"] = "recorded"
+    print(json.dumps(output, indent=2))
     return 0
 
 

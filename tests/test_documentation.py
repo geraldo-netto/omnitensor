@@ -68,6 +68,20 @@ def test_local_training_guide_names_every_installed_feature_semantic():
         assert term in guide
 
 
+def test_local_training_guide_keeps_snapshot_collection_explicit_and_bounded():
+    guide = LOCAL_TRAINING.read_text(encoding="utf-8")
+
+    assert "omnitensor-record-runtime-snapshot" in guide
+    assert "queueDepth" in guide
+    assert "runningProfiles" in guide
+    assert "Persistent=false" in guide
+    assert "No timer is installed or enabled" in guide
+    assert "1 MiB" in guide
+    assert "record-runtime-snapshot" not in (ROOT / "systemd/omnitensor.service").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_installation_guide_documents_every_verifier_check():
     """The guide must explain what each automated check failing means."""
     from omnitensor.acceptance import REQUIRED_SCHEMAS

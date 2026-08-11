@@ -90,6 +90,59 @@ names. Storage rotates in bounded segments under
 `~/.local/state/omnitensor/telemetry` by default. Training refuses missing
 features instead of silently replacing them with zero.
 
+For measurements the running service already publishes, prefer the snapshot
+recorder. It validates the complete snapshot contract, reads at most 1 MiB,
+and accepts only the required device-agnostic aggregate numeric selectors
+`queueDepth` and `runningProfiles`. It never records device identities, loads,
+paths, profile text, alerts, or plug-in payloads. Repeating the same snapshot
+timestamp is a no-op; an older timestamp is refused.
+
+```sh
+"$TRAIN/omnitensor-record-runtime-snapshot" \
+  --profile resource-scheduler \
+  --selector queueDepth \
+  --selector runningProfiles
+```
+
+Collection is opt-in. To sample every minute, create these user units (change
+the producer virtual-environment path or `--snapshot` if your installation
+uses different locations):
+
+```ini
+# ~/.config/systemd/user/omnitensor-training-recorder.service
+[Unit]
+Description=Record one bounded OmniTensor training sample
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/omnitensor-training/venv/bin/omnitensor-record-runtime-snapshot --profile resource-scheduler --selector queueDepth --selector runningProfiles
+```
+
+```ini
+# ~/.config/systemd/user/omnitensor-training-recorder.timer
+[Unit]
+Description=Opt-in OmniTensor training history sampler
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it only after reviewing the selectors and retention location:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now omnitensor-training-recorder.timer
+systemctl --user list-timers omnitensor-training-recorder.timer
+```
+
+No timer is installed or enabled by OmniTensor. `Persistent=false` prevents a
+login from replaying missed intervals as fake history.
+
 The number of required observations depends on `window` and `horizon`; the fit
 also requires at least eight resulting windows. Real evaluation needs enough
 history to span the machine's normal idle, interactive, and busy periods.

@@ -179,6 +179,25 @@ def test_a_profile_id_that_cannot_name_a_directory_is_refused(tmp_path, profile)
         recorder(tmp_path).record(profile, {"cpu": 0.1})
 
 
+@pytest.mark.parametrize("profile", ["", "x" * 65, 7])
+def test_row_profile_contract_has_exact_bounds_and_failure(tmp_path, profile):
+    subject = recorder(tmp_path)
+
+    with pytest.raises(RecorderError) as captured:
+        subject._validated_row(profile, {"cpu": 0.1}, 1)
+
+    assert captured.value.code == "profile-invalid"
+    assert captured.value.detail == "profile id must be a bounded string"
+
+
+def test_row_profile_contract_accepts_exact_name_boundaries(tmp_path):
+    subject = recorder(tmp_path)
+
+    assert subject._validated_row("x", {"cpu": 0.1}, 1).profile_id == "x"
+    longest = "x" * 64
+    assert subject._validated_row(longest, {"cpu": 0.1}, 1).profile_id == longest
+
+
 @pytest.mark.parametrize("timestamp", [-1, True, "now"])
 def test_an_impossible_timestamp_is_refused(tmp_path, timestamp):
     with pytest.raises(RecorderError, match="timestamp-invalid"):

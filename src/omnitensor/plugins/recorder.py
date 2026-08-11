@@ -34,6 +34,8 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..storelock import store_lock
+
 RECORD_VERSION = 1
 DEFAULT_MAX_SEGMENT_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_SEGMENTS = 8
@@ -120,16 +122,43 @@ class TelemetryRecorder:
         self, profile_id: str, features: Mapping[str, float], observed_at_ms: int | None = None
     ) -> FeatureRow:
         """Append one observation, rotating and pruning as needed."""
+        row = self._validated_row(profile_id, features, observed_at_ms)
+        self._append_row(row)
+        return row
+
+    def record_unique(
+        self, profile_id: str, features: Mapping[str, float], observed_at_ms: int
+    ) -> FeatureRow | None:
+        """Append once per retained profile timestamp across cooperating processes."""
+        row = self._validated_row(profile_id, features, observed_at_ms)
+        with store_lock(self._root, ".telemetry.lock"):
+            existing = self.rows(profile_id)
+            if any(item.observed_at_ms == row.observed_at_ms for item in existing):
+                return None
+            if existing and row.observed_at_ms < max(item.observed_at_ms for item in existing):
+                raise RecorderError(
+                    "timestamp-unordered", "timestamp is older than recorded history"
+                )
+            self._append_row(row)
+        return row
+
+    def _validated_row(
+        self,
+        profile_id: str,
+        features: Mapping[str, float],
+        observed_at_ms: int | None,
+    ) -> FeatureRow:
         if not isinstance(profile_id, str) or not 1 <= len(profile_id) <= MAX_PROFILE_LENGTH:
             raise RecorderError("profile-invalid", "profile id must be a bounded string")
-        row = FeatureRow(
+        return FeatureRow(
             profile_id,
             self._timestamp(observed_at_ms),
             validated_features(features),
         )
+
+    def _append_row(self, row: FeatureRow) -> None:
         line = json.dumps(row.document(), separators=(",", ":")) + "\n"
-        self._append(profile_id, line.encode("utf-8"))
-        return row
+        self._append(row.profile_id, line.encode("utf-8"))
 
     def rows(self, profile_id: str) -> tuple[FeatureRow, ...]:
         """Every recorded row for one profile, oldest first, fragments skipped."""
