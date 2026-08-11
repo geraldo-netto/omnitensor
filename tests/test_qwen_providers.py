@@ -15,6 +15,7 @@ import omnitensor.plugins.qwen as qwen_module
 from omnitensor.plugins.cancellation import CancellationReason, JobCancellationToken
 from omnitensor.plugins.generation import (
     GenerationRequest,
+    GenerationRouter,
     GenerationTask,
     ProviderGenerationError,
     parse_provider_descriptor,
@@ -586,6 +587,17 @@ def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path)
         "model-load-failed",
         "primary model artifact is absent or changed",
     )
+
+    ready_primary, ready_digest = artifact(tmp_path, "ready.gguf", b"ready")
+    runtime = NativeRuntime(None)
+    ready = LlamaCppVulkanQwenWorker(
+        descriptor(digest=ready_digest), runtime, (ready_primary,)
+    )
+    GenerationRouter((ready,)).require_ready()
+    assert runtime.loads == []
+    with pytest.raises(ProviderGenerationError) as unavailable:
+        GenerationRouter((worker,)).require_ready()
+    assert unavailable.value.code == "model-load-failed"
 
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     companion, companion_digest = artifact(tmp_path, "projector.gguf", b"projector")

@@ -22,6 +22,11 @@ Adding a structured text or vision model? The
 tasks, private-content isolation, structured output, accelerator routing, and
 the killable worker boundary without coupling workloads to one model runtime.
 
+Importing calendar events from explicitly selected local files? The
+[event extraction guide](docs/event-extraction.md) covers optional PDF/OCR
+dependencies, private grounded previews, model verification, and confirmed
+no-overwrite ICS export.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and

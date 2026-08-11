@@ -21,7 +21,7 @@ DEFAULT_PROTOCOL_MINIMUM = 1
 DEFAULT_PROTOCOL_MAXIMUM = 1
 MAX_PROTOCOL_CAPABILITIES = 32
 MAX_PROTOCOL_CAPABILITY_CHARS = 64
-DEFAULT_PROTOCOL_CAPABILITIES = frozenset({"cancel", "health"})
+DEFAULT_PROTOCOL_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
 
 
 class ManifestCompatibilityCode(StrEnum):

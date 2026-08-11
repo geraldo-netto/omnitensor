@@ -50,6 +50,29 @@ def test_undeclared_or_ungranted_paths_never_enter_the_policy(tmp_path):
         FilesystemSandbox.from_permissions({allowed}, {other})
 
 
+def test_selected_files_permission_mounts_only_the_private_broker_root(tmp_path):
+    broker = tmp_path / "broker"
+    original = tmp_path / "original.txt"
+    broker.mkdir()
+    original.write_text("private", encoding="utf-8")
+    permission = "files:read-selected"
+
+    sandbox = FilesystemSandbox.from_permissions(
+        {permission},
+        {permission},
+        selected_files_root=broker,
+    )
+
+    assert sandbox.read_paths == (str(broker.resolve()),)
+    assert str(original) not in sandbox.wrap(("/usr/bin/python3",))
+    with pytest.raises(SandboxPolicyError, match="brokered input root"):
+        FilesystemSandbox.from_permissions({permission}, {permission})
+    denied = FilesystemSandbox.from_permissions(
+        {permission}, set(), selected_files_root=broker
+    )
+    assert denied.read_paths == ()
+
+
 @pytest.mark.parametrize(
     "permission, message",
     [

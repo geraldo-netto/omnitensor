@@ -28,6 +28,7 @@ import os
 import secrets
 import time
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 
 from dbus_fast import BusType, RequestNameReply
@@ -109,6 +110,51 @@ def _no_inventory() -> str:
         {"version": PLUGIN_INVENTORY_VERSION, "generatedAt": 1, "plugins": []},
         separators=(",", ":"),
     )
+
+
+def _admit_plugin_job(
+    inference: JobDispatcher,
+    plugins: PluginRuntime,
+    plugin_ids_provider: Callable[[], frozenset[str]],
+    workload_id: str,
+    payload: dict,
+) -> None:
+    plugin_ids = plugin_ids_provider()
+    installed_plugin = workload_id in plugin_ids
+    if installed_plugin:
+        admit = getattr(plugins, "admit", None)
+        if not callable(admit):
+            raise RuntimeError("plugin runtime does not implement admission")
+        admit(workload_id, payload)
+        return
+    if isinstance(inference, JobAdmission):
+        inference.admit(workload_id, payload)
+
+
+class _PluginAwareDispatcher:
+    """Route installed plugin IDs to workers and model profiles to inference."""
+
+    def __init__(self, inference: JobDispatcher, plugins: PluginRuntime) -> None:
+        self._inference = inference
+        self._plugins = plugins
+        self.admit = partial(
+            _admit_plugin_job,
+            self._inference,
+            self._plugins,
+            self._plugin_ids,
+        )
+
+    def _plugin_ids(self) -> frozenset[str]:
+        provider = getattr(self._plugins, "plugin_ids", None)
+        return frozenset(provider()) if callable(provider) else frozenset()
+
+    def dispatch(self, job_id: str, workload_id: str, payload: dict):
+        if workload_id in self._plugin_ids():
+            dispatch = getattr(self._plugins, "dispatch", None)
+            if not callable(dispatch):
+                raise RuntimeError("plugin runtime does not implement dispatch")
+            return dispatch(job_id, workload_id, payload)
+        return self._inference.dispatch(job_id, workload_id, payload)
 
 
 class RuntimeAPI:
@@ -547,6 +593,13 @@ class OmniTensorService:
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
+            selected_files_root=snapshot_path.parent / "plugin-inputs",
+            progress_sink=lambda progress: self._note_job_progress(
+                progress.job_id,
+                progress.stage,
+                progress.fraction,
+                progress.detail,
+            ),
         )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
@@ -564,7 +617,9 @@ class OmniTensorService:
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
         self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
-        self._job_dispatcher = job_dispatcher or self._default_dispatcher()
+        self._job_dispatcher = _PluginAwareDispatcher(
+            job_dispatcher or self._default_dispatcher(), self._plugin_runtime
+        )
         # Constructed here because submission answers with an acceptance: if no
         # store outlives the call, the outcome has nowhere to be kept and a
         # caller can never learn what happened to the job it submitted.
@@ -626,7 +681,9 @@ class OmniTensorService:
         return policy is None or policy.enabled
 
     def _job_authorized(self, action: str, workload_id: str) -> bool:
-        if workload_id not in self._workloads:
+        plugin_ids = getattr(self._plugin_runtime, "plugin_ids", lambda: ())()
+        known_workload = workload_id in self._workloads or workload_id in plugin_ids
+        if not known_workload:
             return False
         return action == "cancel" or self._admits(workload_id)
 
@@ -1017,10 +1074,14 @@ class OmniTensorService:
                 self._scheduler.update_executors(self._executors)
 
     async def run(self) -> None:
-        await self._transport.start(self.runtime_api)
         try:
+            plugin_snapshot = await self._plugin_runtime.start()
+            plugin_catalog = getattr(plugin_snapshot, "catalog", None)
+            plugins = getattr(plugin_catalog, "plugins", ())
+            for plugin in plugins:
+                self.plugin_telemetry.register(plugin.plugin_id)
+            await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
-            await self._plugin_runtime.start()
             self._scheduler.start()
             loop = asyncio.get_running_loop()
             tasks = [

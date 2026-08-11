@@ -14,15 +14,25 @@ from omnitensor.plugins import (
     HandshakeOffer,
     IPCFrame,
     IPCProtocolError,
+    PluginProgress,
+    PluginRequest,
+    PluginResult,
+    PluginResultStatus,
     WorkerMessageType,
     decode_frame,
     encode_frame,
+    execute_frame,
     handshake_frame,
     negotiate_handshake,
+    parse_execute,
     parse_handshake,
+    parse_progress,
+    parse_result,
     perform_service_handshake,
     perform_worker_handshake,
+    progress_frame,
     read_frame,
+    result_frame,
     write_frame,
 )
 
@@ -326,6 +336,192 @@ def test_async_writer_emits_one_decodable_frame_and_drains():
         assert await read_frame(reader) == frame
 
     asyncio.run(scenario())
+
+
+def test_execute_progress_and_result_frames_round_trip_exact_domain_values():
+    request = PluginRequest(
+        "job-1",
+        "event-extraction",
+        "manual",
+        {"sources": ["/private/event.txt"]},
+        10,
+        20,
+    )
+    progress = PluginProgress("job-1", "extract", 0.5, "", 12)
+    result = PluginResult(
+        "job-1",
+        PluginResultStatus.SUCCEEDED,
+        {"events": []},
+        "done",
+        15,
+    )
+
+    assert parse_execute(decode_frame(encode_frame(execute_frame(request)))) == request
+    assert parse_progress(decode_frame(encode_frame(progress_frame(progress)))) == progress
+    assert parse_result(decode_frame(encode_frame(result_frame(result)))) == result
+
+
+@pytest.mark.parametrize(
+    ("frame", "parser", "code"),
+    [
+        (IPCFrame(1, WorkerMessageType.HEALTH, "job", {}), parse_execute, "invalid-execute"),
+        (IPCFrame(1, WorkerMessageType.EXECUTE, None, {}), parse_execute, "invalid-execute"),
+        (IPCFrame(1, WorkerMessageType.HEALTH, "job", {}), parse_progress, "invalid-progress"),
+        (IPCFrame(1, WorkerMessageType.PROGRESS, None, {}), parse_progress, "invalid-progress"),
+        (IPCFrame(1, WorkerMessageType.HEALTH, "job", {}), parse_result, "invalid-result"),
+        (IPCFrame(1, WorkerMessageType.RESULT, None, {}), parse_result, "invalid-result"),
+    ],
+)
+def test_execution_frame_parsers_require_correlated_message_types(frame, parser, code):
+    with pytest.raises(IPCProtocolError) as error:
+        parser(frame)
+    assert error.value.code == code
+    assert error.value.detail == f"expected a correlated {code.removeprefix('invalid-')} frame"
+
+
+@pytest.mark.parametrize(
+    ("invalid_request", "detail"),
+    [
+        (object(), "request must be a PluginRequest"),
+        (
+            PluginRequest("", "event-extraction", "manual", {}, 1, None),
+            "request job id is invalid",
+        ),
+        (
+            PluginRequest("job", "Bad", "manual", {}, 1, None),
+            "request plugin id is invalid",
+        ),
+        (
+            PluginRequest("job", "event-extraction", "", {}, 1, None),
+            "request trigger is invalid",
+        ),
+        (
+            PluginRequest("job", "event-extraction", "manual", [], 1, None),
+            "request payload must be an object",
+        ),
+        (
+            PluginRequest("job", "event-extraction", "manual", {}, True, None),
+            "request timestamp is invalid",
+        ),
+        (
+            PluginRequest("job", "event-extraction", "manual", {}, 2, 1),
+            "request deadline is invalid",
+        ),
+    ],
+)
+def test_execute_frame_rejects_invalid_request_boundaries(invalid_request, detail):
+    with pytest.raises(IPCProtocolError) as error:
+        execute_frame(invalid_request)
+    assert (error.value.code, error.value.detail) == ("invalid-execute", detail)
+
+
+@pytest.mark.parametrize("job_id", ["j", "j" * 128])
+@pytest.mark.parametrize("trigger", ["m", "m" * 80])
+def test_execute_frame_accepts_exact_request_boundaries(job_id, trigger):
+    request = PluginRequest(job_id, "event-extraction", trigger, {}, 1, 1)
+    assert parse_execute(execute_frame(request)) == request
+
+
+@pytest.mark.parametrize(
+    ("progress", "detail"),
+    [
+        (object(), "progress must be PluginProgress"),
+        (PluginProgress("", "stage", 0.5, "", 1), "progress job id is invalid"),
+        (PluginProgress("job", "", 0.5, "", 1), "progress fields are invalid"),
+        (PluginProgress("job", "stage", True, "", 1), "progress fields are invalid"),
+        (
+            PluginProgress("job", "stage", float("nan"), "", 1),
+            "progress fields are invalid",
+        ),
+        (PluginProgress("job", "stage", 1.1, "", 1), "progress fields are invalid"),
+        (
+            PluginProgress("job", "stage", 0.5, "x" * 1025, 1),
+            "progress fields are invalid",
+        ),
+        (PluginProgress("job", "stage", 0.5, "", True), "progress fields are invalid"),
+    ],
+)
+def test_progress_frame_rejects_invalid_boundaries(progress, detail):
+    with pytest.raises(IPCProtocolError) as error:
+        progress_frame(progress)
+    assert (error.value.code, error.value.detail) == ("invalid-progress", detail)
+
+
+@pytest.mark.parametrize("fraction", [0, 1])
+@pytest.mark.parametrize("stage", ["s", "s" * 80])
+def test_progress_frame_accepts_exact_boundaries(fraction, stage):
+    progress = PluginProgress("j" * 128, stage, fraction, "x" * 1024, 1)
+    assert parse_progress(progress_frame(progress)) == progress
+
+
+@pytest.mark.parametrize(
+    ("result", "detail"),
+    [
+        (object(), "result must be PluginResult"),
+        (
+            PluginResult("", PluginResultStatus.SUCCEEDED, {}, "", 1),
+            "result job id is invalid",
+        ),
+        (PluginResult("job", "succeeded", {}, "", 1), "result fields are invalid"),
+        (
+            PluginResult("job", PluginResultStatus.SUCCEEDED, [], "", 1),
+            "result fields are invalid",
+        ),
+        (
+            PluginResult("job", PluginResultStatus.SUCCEEDED, {}, "x" * 2049, 1),
+            "result fields are invalid",
+        ),
+        (
+            PluginResult("job", PluginResultStatus.SUCCEEDED, {}, "", True),
+            "result fields are invalid",
+        ),
+    ],
+)
+def test_result_frame_rejects_invalid_boundaries(result, detail):
+    with pytest.raises(IPCProtocolError) as error:
+        result_frame(result)
+    assert (error.value.code, error.value.detail) == ("invalid-result", detail)
+
+
+@pytest.mark.parametrize("job_id", ["j", "j" * 128])
+def test_result_frame_accepts_exact_boundaries(job_id):
+    result = PluginResult(
+        job_id, PluginResultStatus.SUCCEEDED, {}, "x" * 2048, 1
+    )
+    assert parse_result(result_frame(result)) == result
+
+
+def test_execution_parsers_reject_wrong_field_sets_and_status():
+    with pytest.raises(IPCProtocolError, match="execute fields") as execute:
+        parse_execute(IPCFrame(1, WorkerMessageType.EXECUTE, "job", {}))
+    assert (execute.value.code, execute.value.detail) == (
+        "invalid-execute",
+        "execute fields do not match the contract",
+    )
+    with pytest.raises(IPCProtocolError, match="progress fields") as progress:
+        parse_progress(IPCFrame(1, WorkerMessageType.PROGRESS, "job", {}))
+    assert (progress.value.code, progress.value.detail) == (
+        "invalid-progress",
+        "progress fields do not match the contract",
+    )
+    malformed = IPCFrame(
+        1,
+        WorkerMessageType.RESULT,
+        "job",
+        {"status": "unknown", "output": {}, "detail": "", "completedAt": 1},
+    )
+    with pytest.raises(IPCProtocolError, match="result status") as status:
+        parse_result(malformed)
+    assert (status.value.code, status.value.detail) == (
+        "invalid-result",
+        "result status is invalid",
+    )
+    with pytest.raises(IPCProtocolError) as fields:
+        parse_result(IPCFrame(1, WorkerMessageType.RESULT, "job", {}))
+    assert (fields.value.code, fields.value.detail) == (
+        "invalid-result",
+        "result fields do not match the contract",
+    )
 
 
 json_scalars = (

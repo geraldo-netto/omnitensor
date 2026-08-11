@@ -128,6 +128,45 @@ def test_generation_errors_preserve_the_machine_contract():
     assert provider_error.generation_started is False
 
 
+def test_router_readiness_preflights_preferred_providers_and_preserves_failure():
+    calls = []
+
+    class ReadyWorker(FakeWorker):
+        def __init__(self, accelerator, failure=None):
+            super().__init__(parse_provider_descriptor(provider_document(accelerator)))
+            self.failure = failure
+
+        def preflight(self):
+            calls.append(self.descriptor.accelerator)
+            if self.failure is not None:
+                raise self.failure
+
+    npu_failure = ProviderGenerationError(
+        "model-load-failed", "npu artifact changed", generation_started=False
+    )
+    router = GenerationRouter(
+        (ReadyWorker("npu", npu_failure), ReadyWorker("gpu")),
+        accelerator_preference=("npu", "gpu"),
+    )
+
+    router.require_ready()
+
+    assert calls == ["npu", "gpu"]
+    gpu_failure = ProviderGenerationError(
+        "model-load-failed", "gpu artifact changed", generation_started=False
+    )
+    failed = GenerationRouter((ReadyWorker("gpu", gpu_failure),))
+    with pytest.raises(ProviderGenerationError) as propagated:
+        failed.require_ready()
+    assert propagated.value is gpu_failure
+    with pytest.raises(GenerationError) as absent:
+        GenerationRouter(()).require_ready()
+    assert (absent.value.code, absent.value.detail) == (
+        "provider-unavailable",
+        "no qualified provider is available",
+    )
+
+
 def test_task_contract_preserves_versioned_prompt_schema_and_limits():
     parsed = task()
 

@@ -189,6 +189,10 @@ class _QwenWorker:
     def descriptor(self) -> GenerationProviderDescriptor:
         return self._descriptor
 
+    def preflight(self) -> None:
+        """Verify pinned local model bytes without loading a native runtime."""
+        self._verify_artifacts()
+
     async def generate(
         self,
         task: GenerationTask,

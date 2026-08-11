@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import struct
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .protocol import JsonObject
+from .protocol import (
+    JsonObject,
+    PluginProgress,
+    PluginRequest,
+    PluginResult,
+    PluginResultStatus,
+)
 
 FRAME_FORMAT_VERSION = 1
 DEFAULT_MAX_FRAME_BYTES = 1024 * 1024
@@ -18,6 +25,9 @@ _PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_REQUEST_ID_CHARS = 128
 _MAX_CAPABILITIES = 32
 _MAX_CAPABILITY_CHARS = 64
+_MAX_STAGE_CHARS = 80
+_MAX_PROGRESS_DETAIL_CHARS = 1024
+_MAX_RESULT_DETAIL_CHARS = 2048
 
 
 class WorkerMessageType(StrEnum):
@@ -36,6 +46,7 @@ class WorkerMessageType(StrEnum):
     ERROR = "error"
     CANCEL = "cancel"
     HEALTH = "health"
+    EXECUTE = "execute"
 
 
 class IPCProtocolError(ValueError):
@@ -213,6 +224,111 @@ def ready_frame(plugin_id: str) -> IPCFrame:
     return IPCFrame(FRAME_FORMAT_VERSION, WorkerMessageType.READY, None, {"pluginId": plugin_id})
 
 
+def execute_frame(request: PluginRequest) -> IPCFrame:
+    """Encode one manual plugin request without placing content outside payload."""
+    _validate_request(request)
+    return IPCFrame(
+        FRAME_FORMAT_VERSION,
+        WorkerMessageType.EXECUTE,
+        request.job_id,
+        {
+            "pluginId": request.plugin_id,
+            "trigger": request.trigger,
+            "payload": dict(request.payload),
+            "submittedAt": request.submitted_at_ms,
+            "deadlineAt": request.deadline_at_ms,
+        },
+    )
+
+
+def parse_execute(frame: IPCFrame) -> PluginRequest:
+    """Parse the exact service-to-worker execution request contract."""
+    if frame.type is not WorkerMessageType.EXECUTE or frame.request_id is None:
+        raise IPCProtocolError("invalid-execute", "expected a correlated execute frame")
+    if set(frame.payload) != {"pluginId", "trigger", "payload", "submittedAt", "deadlineAt"}:
+        raise IPCProtocolError("invalid-execute", "execute fields do not match the contract")
+    request = PluginRequest(
+        frame.request_id,
+        frame.payload["pluginId"],
+        frame.payload["trigger"],
+        frame.payload["payload"],
+        frame.payload["submittedAt"],
+        frame.payload["deadlineAt"],
+    )
+    _validate_request(request)
+    return request
+
+
+def progress_frame(progress: PluginProgress) -> IPCFrame:
+    """Encode one bounded worker progress update."""
+    _validate_progress(progress)
+    return IPCFrame(
+        FRAME_FORMAT_VERSION,
+        WorkerMessageType.PROGRESS,
+        progress.job_id,
+        {
+            "stage": progress.stage,
+            "fraction": float(progress.fraction),
+            "detail": progress.detail,
+            "observedAt": progress.observed_at_ms,
+        },
+    )
+
+
+def parse_progress(frame: IPCFrame) -> PluginProgress:
+    """Parse a bounded progress update from one worker."""
+    if frame.type is not WorkerMessageType.PROGRESS or frame.request_id is None:
+        raise IPCProtocolError("invalid-progress", "expected a correlated progress frame")
+    if set(frame.payload) != {"stage", "fraction", "detail", "observedAt"}:
+        raise IPCProtocolError("invalid-progress", "progress fields do not match the contract")
+    progress = PluginProgress(
+        frame.request_id,
+        frame.payload["stage"],
+        frame.payload["fraction"],
+        frame.payload["detail"],
+        frame.payload["observedAt"],
+    )
+    _validate_progress(progress)
+    return progress
+
+
+def result_frame(result: PluginResult) -> IPCFrame:
+    """Encode exactly one terminal worker result."""
+    _validate_result(result)
+    return IPCFrame(
+        FRAME_FORMAT_VERSION,
+        WorkerMessageType.RESULT,
+        result.job_id,
+        {
+            "status": str(result.status),
+            "output": dict(result.output),
+            "detail": result.detail,
+            "completedAt": result.completed_at_ms,
+        },
+    )
+
+
+def parse_result(frame: IPCFrame) -> PluginResult:
+    """Parse exactly one terminal result from a worker."""
+    if frame.type is not WorkerMessageType.RESULT or frame.request_id is None:
+        raise IPCProtocolError("invalid-result", "expected a correlated result frame")
+    if set(frame.payload) != {"status", "output", "detail", "completedAt"}:
+        raise IPCProtocolError("invalid-result", "result fields do not match the contract")
+    try:
+        status = PluginResultStatus(frame.payload["status"])
+    except (TypeError, ValueError) as error:
+        raise IPCProtocolError("invalid-result", "result status is invalid") from error
+    result = PluginResult(
+        frame.request_id,
+        status,
+        frame.payload["output"],
+        frame.payload["detail"],
+        frame.payload["completedAt"],
+    )
+    _validate_result(result)
+    return result
+
+
 def parse_ready(frame: IPCFrame, plugin_id: str) -> None:
     """Accept a strict ready frame for ``plugin_id`` or reject the worker."""
     if frame.version != FRAME_FORMAT_VERSION:
@@ -343,6 +459,74 @@ def _validate_frame(frame: IPCFrame) -> None:
         )
     if not isinstance(frame.payload, dict):
         raise IPCProtocolError("invalid-payload", "payload must be a JSON object")
+
+
+def _validate_request(request: PluginRequest) -> None:
+    if not isinstance(request, PluginRequest):
+        raise IPCProtocolError("invalid-execute", "request must be a PluginRequest")
+    if not isinstance(request.job_id, str) or not 1 <= len(request.job_id) <= _MAX_REQUEST_ID_CHARS:
+        raise IPCProtocolError("invalid-execute", "request job id is invalid")
+    if not isinstance(request.plugin_id, str) or _PLUGIN_ID.fullmatch(request.plugin_id) is None:
+        raise IPCProtocolError("invalid-execute", "request plugin id is invalid")
+    if not isinstance(request.trigger, str) or not 1 <= len(request.trigger) <= 80:
+        raise IPCProtocolError("invalid-execute", "request trigger is invalid")
+    if not isinstance(request.payload, dict):
+        raise IPCProtocolError("invalid-execute", "request payload must be an object")
+    if (
+        isinstance(request.submitted_at_ms, bool)
+        or not isinstance(request.submitted_at_ms, int)
+        or request.submitted_at_ms < 1
+    ):
+        raise IPCProtocolError("invalid-execute", "request timestamp is invalid")
+    deadline = request.deadline_at_ms
+    if deadline is not None and (
+        isinstance(deadline, bool)
+        or not isinstance(deadline, int)
+        or deadline < request.submitted_at_ms
+    ):
+        raise IPCProtocolError("invalid-execute", "request deadline is invalid")
+
+
+def _validate_progress(progress: PluginProgress) -> None:
+    if not isinstance(progress, PluginProgress):
+        raise IPCProtocolError("invalid-progress", "progress must be PluginProgress")
+    fraction = progress.fraction
+    if (
+        not isinstance(progress.stage, str)
+        or not 1 <= len(progress.stage) <= _MAX_STAGE_CHARS
+        or isinstance(fraction, bool)
+        or not isinstance(fraction, (int, float))
+        or not math.isfinite(fraction)
+        or not 0 <= fraction <= 1
+        or not isinstance(progress.detail, str)
+        or len(progress.detail) > _MAX_PROGRESS_DETAIL_CHARS
+        or isinstance(progress.observed_at_ms, bool)
+        or not isinstance(progress.observed_at_ms, int)
+        or progress.observed_at_ms < 1
+    ):
+        raise IPCProtocolError("invalid-progress", "progress fields are invalid")
+    _validate_request_id(progress.job_id, "progress")
+
+
+def _validate_result(result: PluginResult) -> None:
+    if not isinstance(result, PluginResult):
+        raise IPCProtocolError("invalid-result", "result must be PluginResult")
+    if (
+        not isinstance(result.status, PluginResultStatus)
+        or not isinstance(result.output, dict)
+        or not isinstance(result.detail, str)
+        or len(result.detail) > _MAX_RESULT_DETAIL_CHARS
+        or isinstance(result.completed_at_ms, bool)
+        or not isinstance(result.completed_at_ms, int)
+        or result.completed_at_ms < 1
+    ):
+        raise IPCProtocolError("invalid-result", "result fields are invalid")
+    _validate_request_id(result.job_id, "result")
+
+
+def _validate_request_id(value: object, label: str) -> None:
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_REQUEST_ID_CHARS:
+        raise IPCProtocolError(f"invalid-{label}", f"{label} job id is invalid")
 
 
 def _validate_offer(offer: HandshakeOffer) -> None:

@@ -23,6 +23,7 @@ NETWORK_ACTION = "network"
 NETWORK_LOCALHOST = "localhost"
 NETWORK_OUTBOUND = "outbound"
 _NETWORK_SCOPES = frozenset({NETWORK_LOCALHOST, NETWORK_OUTBOUND})
+SELECTED_FILES_PERMISSION = "files:read-selected"
 _DEVICE_PATH = re.compile(
     r"^/dev/(?:apex_[0-9]+|accel/accel[0-9]+|dri/renderD[0-9]+)$"
 )
@@ -65,6 +66,7 @@ class FilesystemSandbox:
         *,
         runtime_paths: Sequence[str | Path] = (),
         python_path: str | Path | None = None,
+        selected_files_root: str | Path | None = None,
     ) -> FilesystemSandbox:
         declared_set = frozenset(declared)
         granted_set = frozenset(granted)
@@ -92,6 +94,13 @@ class FilesystemSandbox:
             if action == "read" and value not in writes
         }
         devices = {value for action, value in filesystem if action == "device"}
+        selected_root = _selected_files_path(granted_set, selected_files_root)
+        if selected_root is not None:
+            reads.add(selected_root)
+        if len(reads) + len(writes) + len(devices) > MAX_SANDBOX_PATHS:
+            raise SandboxPolicyError(
+                f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
+            )
         trusted = tuple(sorted({_runtime_path(path) for path in runtime_paths}))
         trusted_python = _trusted_python_path(python_path, trusted)
         return cls(
@@ -168,6 +177,18 @@ class FilesystemSandbox:
             command.extend(("--dev-bind-try", path, path))
         command.extend(("--", *argv))
         return tuple(command)
+
+
+def _selected_files_path(
+    granted: Collection[str], root: str | Path | None
+) -> str | None:
+    if SELECTED_FILES_PERMISSION not in granted:
+        return None
+    if root is None:
+        raise SandboxPolicyError(
+            "selected-file permission requires a brokered input root"
+        )
+    return _runtime_path(root)
 
 
 def _network_granted(granted: Collection[str]) -> bool:

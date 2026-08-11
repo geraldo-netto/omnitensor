@@ -48,6 +48,10 @@ convert-npu = ["openvino>=2024.0"]
 # history. Training is never imported by or installed into the service unless
 # the operator explicitly selects this extra in a separate environment.
 train = ["onnx>=1.16"]
+# Optional document/image parsing inside the isolated event workload. PyMuPDF
+# can use its Tesseract integration for OCR; neither package is imported by the
+# long-running service process.
+events = ["pymupdf>=1.24"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
@@ -81,6 +85,7 @@ omnitensor-configure-low-light = "omnitensor.lowlight:configure_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
 omnitensor-grant = "omnitensor.consent:main"
+omnitensor-import-events = "omnitensor.event_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnitensor"]
@@ -91,6 +96,7 @@ packages = ["src/omnitensor"]
 "model-recipes" = "omnitensor/model-recipes"
 "generation-models" = "omnitensor/generation-models"
 "evaluation-corpora" = "omnitensor/evaluation-corpora"
+"plugin-manifests" = "omnitensor/plugin-manifests"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
@@ -106,6 +112,7 @@ also_copy = [
     "model-recipes/",
     "generation-models/",
     "evaluation-corpora/",
+    "plugin-manifests/",
     "README.md",
 ]
 

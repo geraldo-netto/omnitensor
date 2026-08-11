@@ -6,7 +6,7 @@ import asyncio
 import math
 from collections.abc import Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
@@ -18,10 +18,15 @@ from .ipc import (
     IPCProtocolError,
     WorkerMessageType,
     await_worker_ready,
+    execute_frame,
     handshake_frame,
+    parse_progress,
+    parse_result,
     perform_service_handshake,
+    read_frame,
     write_frame,
 )
+from .protocol import PluginRequest, PluginResult, ProgressReporter
 from .sandbox import FilesystemSandbox
 
 MAX_SUPERVISED_WORKERS = 128
@@ -58,6 +63,15 @@ class WorkerDiagnosticCode(StrEnum):
     EXHAUSTED = "restart-budget-exhausted"
     STOP_FAILED = "worker-stop-failed"
     STARTUP_TIMEOUT = "worker-startup-timeout"
+
+
+class PluginWorkerError(RuntimeError):
+    """Stable executable-worker refusal safe to surface as a job failure."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +227,7 @@ class _WorkerSlot:
     process: WorkerProcess
     agreement: HandshakeAgreement
     monitor: asyncio.Task | None = None
+    request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class _WorkerStartError(Exception):
@@ -266,6 +281,83 @@ class PluginWorkerSupervisor:
 
     def diagnostics(self, plugin_id: str) -> tuple[WorkerDiagnostic, ...]:
         return tuple(self._diagnostics.get(plugin_id, ()))
+
+    async def execute(
+        self,
+        request: PluginRequest,
+        progress: ProgressReporter | None = None,
+    ) -> PluginResult:
+        """Execute one request over its authenticated worker channel."""
+        slot = self._slots.get(request.plugin_id)
+        status = self._statuses.get(request.plugin_id)
+        if slot is None or status is None or status.state is not WorkerState.READY:
+            raise PluginWorkerError("worker-unavailable", "plugin worker is not ready")
+        if "execute" not in slot.agreement.capabilities:
+            raise PluginWorkerError("worker-incompatible", "plugin worker cannot execute jobs")
+        async with slot.request_lock:
+            try:
+                await write_frame(
+                    slot.process.writer,
+                    _with_protocol(execute_frame(request), slot.agreement.protocol_version),
+                )
+                return await self._read_result(slot, request.job_id, progress)
+            except asyncio.CancelledError:
+                await asyncio.shield(self._cancel_request(slot, request.job_id))
+                raise
+            except PluginWorkerError:
+                raise
+            except Exception as error:
+                raise PluginWorkerError(
+                    "worker-protocol-failed", f"worker channel failed: {type(error).__name__}"
+                ) from error
+
+    async def _read_result(
+        self,
+        slot: _WorkerSlot,
+        request_id: str,
+        progress: ProgressReporter | None,
+    ) -> PluginResult:
+        while True:
+            frame = await read_frame(slot.process.reader)
+            if frame.request_id != request_id:
+                raise PluginWorkerError(
+                    "worker-protocol-failed", "worker response names another request"
+                )
+            if frame.type is WorkerMessageType.PROGRESS:
+                observed = parse_progress(frame)
+                if progress is not None:
+                    await progress.report(observed)
+                continue
+            if frame.type is WorkerMessageType.RESULT:
+                return parse_result(frame)
+            if frame.type is WorkerMessageType.ERROR:
+                code = frame.payload.get("code")
+                detail = frame.payload.get("detail")
+                if not isinstance(code, str) or not code or not isinstance(detail, str):
+                    raise PluginWorkerError(
+                        "worker-protocol-failed", "worker error response is invalid"
+                    )
+                raise PluginWorkerError(code, detail)
+            raise PluginWorkerError(
+                "worker-protocol-failed", f"unexpected worker message: {frame.type}"
+            )
+
+    async def _cancel_request(self, slot: _WorkerSlot, request_id: str) -> None:
+        try:
+            await write_frame(
+                slot.process.writer,
+                IPCFrame(
+                    slot.agreement.protocol_version,
+                    WorkerMessageType.CANCEL,
+                    request_id,
+                    {"reason": "job cancelled"},
+                ),
+            )
+            await asyncio.wait_for(
+                self._read_result(slot, request_id, None), timeout=self._stop_timeout
+            )
+        except (Exception, asyncio.CancelledError):
+            await _force_stop(slot.process, self._stop_timeout)
 
     async def start(self, specs: Sequence[WorkerSpec]) -> tuple[WorkerStatus, ...]:
         """Launch and authenticate active plugins in stable identity order."""
@@ -643,6 +735,10 @@ def _validate_specs(specs: Sequence[WorkerSpec]) -> tuple[WorkerSpec, ...]:
             raise ValueError("worker argv contains an invalid argument")
         handshake_frame(spec.offer())
     return ordered
+
+
+def _with_protocol(frame: IPCFrame, protocol_version: int) -> IPCFrame:
+    return IPCFrame(protocol_version, frame.type, frame.request_id, frame.payload)
 
 
 def _validate_timeout(name: str, value: float) -> None:

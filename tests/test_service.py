@@ -315,7 +315,7 @@ def test_no_profile_serves_where_the_dispatcher_refuses_every_job(fake_nodes, tm
         fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
     )
 
-    assert isinstance(service._job_dispatcher, UnavailableJobDispatcher)
+    assert isinstance(service._job_dispatcher._inference, UnavailableJobDispatcher)
     assert _serving_profiles(service) == set()
 
 

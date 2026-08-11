@@ -77,3 +77,7 @@ confirmation and calendar effects.
 The first concrete model catalog and lane-specific acceptance policy is the
 [Qwen event provider guide](qwen-event-providers.md). Qwen remains one
 replaceable implementation of this boundary, not part of its definition.
+
+The complete explicit-file workflow, optional parser dependency, model check,
+preview/export boundary, and legacy transition are documented in the
+[event extraction workload guide](event-extraction.md).

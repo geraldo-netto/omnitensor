@@ -26,6 +26,8 @@ from omnitensor.service import (
     OmniTensorInterface,
     OmniTensorService,
     SysfsDeviceDiscovery,
+    _admit_plugin_job,
+    _PluginAwareDispatcher,
 )
 
 
@@ -35,6 +37,107 @@ def tpu_device() -> Device:
 
 def npu_device() -> Device:
     return Device(id="npu-accel0", backend="npu", name="Intel NPU", kind="accel")
+
+
+def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runtime():
+    class Inference:
+        def __init__(self):
+            self.admissions = []
+            self.dispatches = []
+
+        def admit(self, workload_id, payload):
+            self.admissions.append((workload_id, payload))
+
+        def dispatch(self, job_id, workload_id, payload):
+            self.dispatches.append((job_id, workload_id, payload))
+            return job_id, workload_id, payload
+
+    class Plugins:
+        def __init__(self):
+            self.admissions = []
+            self.dispatches = []
+
+        def plugin_ids(self):
+            return frozenset({"events"})
+
+        def admit(self, workload_id, payload):
+            self.admissions.append((workload_id, payload))
+
+        def dispatch(self, job_id, workload_id, payload):
+            self.dispatches.append((job_id, workload_id, payload))
+            return {"events": []}
+
+    inference = Inference()
+    plugins = Plugins()
+    dispatcher = _PluginAwareDispatcher(inference, plugins)
+
+    dispatcher.admit("events", {"sources": ["selected"]})
+    dispatcher.admit("profile", {"value": 1})
+    assert plugins.admissions == [("events", {"sources": ["selected"]})]
+    assert inference.admissions == [("profile", {"value": 1})]
+    assert dispatcher.dispatch("event-job", "events", {"sources": []}) == {
+        "events": []
+    }
+    assert plugins.dispatches == [("event-job", "events", {"sources": []})]
+
+    assert dispatcher.dispatch("job", "profile", {"value": 1}) == (
+        "job",
+        "profile",
+        {"value": 1},
+    )
+    assert inference.dispatches == [("job", "profile", {"value": 1})]
+
+    incomplete_plugins = type(
+        "Plugins", (), {"plugin_ids": lambda _self: {"events"}}
+    )()
+    incomplete = _PluginAwareDispatcher(inference, incomplete_plugins)
+    with pytest.raises(RuntimeError) as missing_admission:
+        incomplete.admit("events", {})
+    assert str(missing_admission.value) == "plugin runtime does not implement admission"
+    with pytest.raises(RuntimeError) as missing_dispatch:
+        incomplete.dispatch("job", "events", {})
+    assert str(missing_dispatch.value) == "plugin runtime does not implement dispatch"
+
+    no_inventory = _PluginAwareDispatcher(inference, object())
+    assert no_inventory._plugin_ids() == frozenset()
+
+
+def test_plugin_admission_helper_routes_exact_ports_directly():
+    class Inference:
+        def __init__(self):
+            self.calls = []
+
+        def admit(self, workload_id, payload):
+            self.calls.append((workload_id, payload))
+
+        def dispatch(self, *_arguments):
+            raise AssertionError("admission must not dispatch")
+
+    class Plugins:
+        def __init__(self):
+            self.calls = []
+
+        def admit(self, workload_id, payload):
+            self.calls.append((workload_id, payload))
+
+    inference = Inference()
+    plugins = Plugins()
+    provider_calls = []
+
+    def plugin_ids():
+        provider_calls.append(True)
+        return frozenset({"events"})
+
+    _admit_plugin_job(inference, plugins, plugin_ids, "events", {"source": 1})
+    _admit_plugin_job(inference, plugins, plugin_ids, "profile", {"value": 2})
+
+    assert provider_calls == [True, True]
+    assert plugins.calls == [("events", {"source": 1})]
+    assert inference.calls == [("profile", {"value": 2})]
+
+    with pytest.raises(RuntimeError) as incomplete:
+        _admit_plugin_job(inference, object(), plugin_ids, "events", {})
+    assert str(incomplete.value) == "plugin runtime does not implement admission"
 
 
 class FakeDiscovery:
@@ -128,6 +231,78 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     assert backends == {"tpu", "npu"}
     assert service._executors["tpu"] is original_tpu
     assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
+
+
+def test_service_authorizes_installed_plugins_without_weakening_profile_policy(tmp_path):
+    service = build_service(
+        tmp_path,
+        [sample_manifest()],
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    service._plugin_runtime = type(
+        "Plugins", (), {"plugin_ids": lambda _self: frozenset({"events"})}
+    )()
+
+    assert service._job_authorized("submit", "events") is True
+    assert service._job_authorized("cancel", "events") is True
+    assert service._job_authorized("submit", "missing") is False
+    assert service._job_authorized("cancel", "missing") is False
+    assert service._job_authorized("submit", "sample-workload") is True
+    service._admits = lambda _workload_id: False
+    assert service._job_authorized("submit", "sample-workload") is False
+    assert service._job_authorized("cancel", "sample-workload") is True
+    assert service._job_authorized("submit", "events") is False
+    assert service._job_authorized("cancel", "events") is True
+
+    service._plugin_runtime = object()
+    assert service._job_authorized("submit", "missing") is False
+
+
+def test_run_registers_external_worker_identity_before_serving(tmp_path):
+    from types import SimpleNamespace
+
+    plugin = SimpleNamespace(plugin_id="external-worker")
+    snapshot = SimpleNamespace(
+        catalog=SimpleNamespace(plugins=(plugin,)),
+        workers=(),
+    )
+
+    class Plugins:
+        def __init__(self):
+            self.started = 0
+            self.stopped = 0
+
+        def plugin_ids(self):
+            return frozenset({"external-worker"})
+
+        async def start(self):
+            self.started += 1
+            return snapshot
+
+        async def stop(self):
+            self.stopped += 1
+            return ()
+
+    plugins = Plugins()
+    transport = FakeTransport()
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=transport,
+        plugin_runtime=plugins,
+    )
+
+    service._stopping.set()
+    asyncio.run(service.run())
+
+    assert plugins.started == plugins.stopped == 1
+    assert transport.started == transport.stopped == 1
+    assert "external-worker" in {
+        item["id"] for item in service.plugin_telemetry.documents()
+    }
 
 
 def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
@@ -1131,7 +1306,9 @@ def test_without_an_artifact_store_inference_stays_fail_closed(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    assert isinstance(service.jobs._dispatcher.fallback, UnavailableJobDispatcher)
+    assert isinstance(
+        service.jobs._dispatcher.fallback._inference, UnavailableJobDispatcher
+    )
 
 
 def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
@@ -1144,7 +1321,7 @@ def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
         transport=FakeTransport(),
         artifact_root=tmp_path / "artifacts",
     )
-    assert isinstance(service.jobs._dispatcher.fallback, InferenceJobDispatcher)
+    assert isinstance(service.jobs._dispatcher.fallback._inference, InferenceJobDispatcher)
 
 
 def test_the_artifact_root_is_configurable_from_the_environment(monkeypatch, tmp_path):
@@ -1159,7 +1336,7 @@ def test_the_artifact_root_is_configurable_from_the_environment(monkeypatch, tmp
 
     service = build_service_from_env()
 
-    assert isinstance(service.jobs._dispatcher.fallback, InferenceJobDispatcher)
+    assert isinstance(service.jobs._dispatcher.fallback._inference, InferenceJobDispatcher)
     assert service._artifact_store is not None
 
 

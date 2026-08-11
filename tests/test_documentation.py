@@ -1,6 +1,7 @@
 """Executable documentation inventory for the bundled Cinnamon use cases."""
 
 import json
+import tomllib
 from pathlib import Path
 
 from omnitensor.registry import bundled_workloads_path, load_workloads
@@ -133,6 +134,35 @@ def test_qwen_guide_requires_pinned_artifacts_and_real_accelerator_evidence():
         "does not mutate or bless",
     ):
         assert contract in prose
+
+
+def test_event_workload_guide_covers_dependencies_privacy_and_legacy_transition():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    generation = (ROOT / "docs/generation-providers.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/event-extraction.md").read_text(encoding="utf-8")
+    prose = " ".join(guide.split())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "[event extraction guide](docs/event-extraction.md)" in readme
+    assert "[event extraction workload guide](event-extraction.md)" in generation
+    assert project["project"]["optional-dependencies"]["events"] == ["pymupdf>=1.24"]
+    assert project["project"]["scripts"]["omnitensor-import-events"] == (
+        "omnitensor.event_cli:main"
+    )
+    for boundary in (
+        "never watches or scans",
+        "pip install 'omnitensor[events]'",
+        "needs Tesseract language data",
+        "There is no CPU lane",
+        "1–32 absolute paths",
+        "packaging template, not a bundled live profile",
+        "workerState: \"ready\"",
+        "per-request broker directory",
+        "never writes, moves, renames, or deletes",
+        "must be a new absolute path",
+        "`lostutils/import_events.py` compatibility",
+    ):
+        assert boundary in prose
 
 
 def test_local_training_guide_names_every_installed_feature_semantic():

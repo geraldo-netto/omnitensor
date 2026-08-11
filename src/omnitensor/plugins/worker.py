@@ -6,10 +6,12 @@ import argparse
 import asyncio
 import os
 import sys
+import time
 from collections.abc import Callable, Iterable, Sequence
 from importlib import metadata
 from typing import BinaryIO
 
+from ..sdk import CancellationController, cancelled_result
 from .discovery import PLUGIN_ENTRY_POINT_GROUP
 from .ipc import (
     DEFAULT_MAX_FRAME_BYTES,
@@ -22,13 +24,16 @@ from .ipc import (
     encode_frame,
     handshake_frame,
     negotiate_handshake,
+    parse_execute,
     parse_handshake,
+    progress_frame,
     ready_frame,
+    result_frame,
 )
-from .protocol import PluginContext, WorkloadPlugin
+from .protocol import PluginContext, PluginProgress, PluginRequest, WorkloadPlugin
 from .seccomp import confinement_error, install_filter
 
-WORKER_CAPABILITIES = frozenset({"cancel", "health"})
+WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
 
 
 class ExternalPluginLoadError(RuntimeError):
@@ -127,6 +132,159 @@ def serve_worker(
     return agreement
 
 
+async def serve_worker_requests(
+    plugin: WorkloadPlugin,
+    reader: BinaryIO,
+    writer: BinaryIO,
+    *,
+    minimum_protocol: int = 1,
+    maximum_protocol: int = 1,
+    permissions: frozenset[str] = frozenset(),
+) -> HandshakeAgreement:
+    """Serve executable requests while continuing to receive cancellation."""
+    offer = HandshakeOffer(
+        plugin.plugin_id,
+        minimum_protocol,
+        maximum_protocol,
+        WORKER_CAPABILITIES,
+    )
+    service = parse_handshake(await asyncio.to_thread(_read_frame, reader))
+    agreement = negotiate_handshake(service, offer)
+    _write_frame(writer, handshake_frame(offer))
+    await plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
+    _write_frame(writer, ready_frame(plugin.plugin_id))
+    active: dict[str, tuple[asyncio.Task, CancellationController]] = {}
+    try:
+        while True:
+            try:
+                frame = await asyncio.to_thread(_read_frame, reader)
+            except EOFError:
+                break
+            if not await _handle_request_frame(
+                plugin,
+                frame,
+                writer,
+                agreement.protocol_version,
+                active,
+            ):
+                break
+    finally:
+        for _task, token in active.values():
+            token.cancel("worker shutting down")
+        if active:
+            await asyncio.gather(
+                *(task for task, _token in active.values()), return_exceptions=True
+            )
+        await plugin.stop()
+    return agreement
+
+
+async def _handle_request_frame(
+    plugin: WorkloadPlugin,
+    frame: IPCFrame,
+    writer: BinaryIO,
+    protocol_version: int,
+    active: dict[str, tuple[asyncio.Task, CancellationController]],
+) -> bool:
+    if frame.type is WorkerMessageType.CANCEL and frame.request_id is None:
+        return False
+    if frame.type is WorkerMessageType.EXECUTE:
+        try:
+            request = parse_execute(frame)
+            if request.plugin_id != plugin.plugin_id:
+                raise IPCProtocolError(
+                    "plugin-identity-mismatch", "execute request names another plugin"
+                )
+            if request.job_id in active:
+                raise IPCProtocolError("duplicate-request", "request is already active")
+        except IPCProtocolError as error:
+            _write_error(writer, protocol_version, frame.request_id, error.code)
+            return True
+        token = CancellationController()
+        task = asyncio.create_task(
+            _execute_request(plugin, request, token, writer, protocol_version),
+            name=f"omnitensor-plugin-request-{request.job_id}",
+        )
+        active[request.job_id] = (task, token)
+        task.add_done_callback(
+            lambda _task, request_id=request.job_id: active.pop(request_id, None)
+        )
+        await asyncio.sleep(0)
+        return True
+    if frame.type is WorkerMessageType.CANCEL and frame.request_id is not None:
+        current = active.get(frame.request_id)
+        if current is not None:
+            current[1].cancel("cancelled by service")
+        return True
+    _write_error(writer, protocol_version, frame.request_id, "unsupported-message")
+    return True
+
+
+class _WorkerProgress:
+    def __init__(self, request_id: str, writer: BinaryIO, protocol_version: int) -> None:
+        self._request_id = request_id
+        self._writer = writer
+        self._protocol_version = protocol_version
+
+    async def report(self, progress: PluginProgress) -> None:
+        if progress.job_id != self._request_id:
+            raise IPCProtocolError("invalid-progress", "progress names another request")
+        frame = progress_frame(progress)
+        _write_frame(
+            self._writer,
+            IPCFrame(self._protocol_version, frame.type, frame.request_id, frame.payload),
+        )
+
+
+async def _execute_request(
+    plugin: WorkloadPlugin,
+    request: PluginRequest,
+    token: CancellationController,
+    writer: BinaryIO,
+    protocol_version: int,
+) -> None:
+    try:
+        result = await plugin.execute(
+            request,
+            token,
+            _WorkerProgress(request.job_id, writer, protocol_version),
+        )
+        if result.job_id != request.job_id:
+            raise IPCProtocolError("invalid-result", "result names another request")
+        frame = result_frame(result)
+    except asyncio.CancelledError:
+        result = cancelled_result(
+            request,
+            "plugin request cancelled",
+            completed_at_ms=max(1, time.time_ns() // 1_000_000),
+        )
+        frame = result_frame(result)
+    except Exception:
+        _write_error(writer, protocol_version, request.job_id, "plugin-execution-failed")
+        return
+    _write_frame(
+        writer,
+        IPCFrame(protocol_version, frame.type, frame.request_id, frame.payload),
+    )
+
+
+def _write_error(
+    writer: BinaryIO,
+    protocol_version: int,
+    request_id: str | None,
+    code: str,
+) -> None:
+    _write_frame(
+        writer,
+        IPCFrame(
+            protocol_version,
+            WorkerMessageType.ERROR,
+            request_id,
+            {"code": code, "detail": "worker refused the message"},
+        ),
+    )
+
+
 def _read_frame(reader: BinaryIO) -> IPCFrame:
     header = _read_exact(reader, 4)
     declared = int.from_bytes(header, "big")
@@ -217,11 +375,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         arguments.target,
         arguments.distribution,
     )
-    serve_worker(
-        plugin,
-        sys.stdin.buffer,
-        channel,
-        permissions=frozenset(arguments.permission),
+    asyncio.run(
+        serve_worker_requests(
+            plugin,
+            sys.stdin.buffer,
+            channel,
+            permissions=frozenset(arguments.permission),
+        )
     )
 
 

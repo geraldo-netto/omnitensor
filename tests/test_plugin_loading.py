@@ -18,19 +18,31 @@ from omnitensor.plugins import (
     MAX_WORKER_IMPORT_PATHS,
     HandshakeOffer,
     InstalledPluginRuntime,
+    InstalledPluginSnapshot,
+    IPCFrame,
     IPCProtocolError,
+    PluginCatalog,
+    PluginProgress,
+    PluginRequest,
+    PluginResult,
+    PluginResultStatus,
     PluginSource,
+    PluginWorkerError,
     ResolvedPlugin,
     WorkerMessageType,
     WorkerState,
+    WorkerStatus,
     decode_frame,
     encode_frame,
     entry_points_from_distributions,
+    execute_frame,
     external_worker_specs,
     handshake_frame,
 )
+from omnitensor.plugins import loading as loading_module
 from omnitensor.plugins import worker as worker_module
 from omnitensor.plugins.protocol import (
+    PluginContext,
     PluginHealth,
     PluginHealthStatus,
     WorkloadPlugin,
@@ -41,7 +53,9 @@ from omnitensor.plugins.worker import (
     _read_frame,
     load_external_plugin,
     serve_worker,
+    serve_worker_requests,
 )
+from omnitensor.sdk import CancellationController, cancelled_result, succeeded_result
 from omnitensor.service import OmniTensorService
 
 
@@ -94,7 +108,7 @@ def _resolved(source=PluginSource.EXTERNAL, tmp_path=Path("/tmp")):
     manifest["plugin"]["protocol"] = {
         "minimum": 2,
         "maximum": 4,
-        "capabilities": ["cancel", "health", "progress"],
+        "capabilities": ["cancel", "execute", "health", "progress"],
     }
     return ResolvedPlugin(
         "external-example",
@@ -137,7 +151,7 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
     assert spec.plugin_id == "external-example"
     assert spec.minimum_protocol == 2
     assert spec.maximum_protocol == 4
-    assert spec.capabilities == frozenset({"cancel", "health"})
+    assert spec.capabilities == frozenset({"cancel", "execute", "health", "progress"})
     assert spec.sandbox is not None
     assert spec.sandbox.python_path == str(
         Path(__file__).resolve().parents[1] / "src"
@@ -186,6 +200,846 @@ def test_external_worker_specs_fail_closed_on_undeclared_grant(tmp_path):
             (plugin,),
             granted_permissions={plugin.plugin_id: {f"read:{tmp_path}"}},
         )
+
+
+def test_installed_runtime_admits_dispatches_and_forwards_worker_progress(tmp_path):
+    class Supervisor:
+        def __init__(self):
+            self.requests = []
+
+        def statuses(self):
+            return (WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),)
+
+        async def execute(self, request, progress):
+            self.requests.append(request)
+            await progress.report(PluginProgress(request.job_id, "extract", 0.5, "", 11))
+            return PluginResult(
+                request.job_id,
+                PluginResultStatus.SUCCEEDED,
+                {"events": []},
+                "done",
+                12,
+            )
+
+    supervisor = Supervisor()
+    observed = []
+    runtime = InstalledPluginRuntime(
+        tmp_path,
+        supervisor=supervisor,
+        progress_sink=observed.append,
+        clock_ms=lambda: 10,
+    )
+    plugin = _resolved(tmp_path=tmp_path)
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), supervisor.statuses())
+    runtime._granted = {"external-example": frozenset()}
+
+    runtime.admit("external-example", {})
+    output = asyncio.run(runtime.dispatch("job-1", "external-example", {}))
+
+    assert runtime.plugin_ids() == frozenset({"external-example"})
+    assert output == {"events": []}
+    assert supervisor.requests == [
+        PluginRequest("job-1", "external-example", "manual", {}, 10, None)
+    ]
+    assert observed == [PluginProgress("job-1", "extract", 0.5, "", 11)]
+
+
+def test_selected_sources_are_brokered_into_worker_sandbox_and_removed(tmp_path):
+    source = tmp_path / "private.txt"
+    source.write_text("private event", encoding="utf-8")
+    broker = tmp_path / "broker"
+
+    class Supervisor:
+        requests = []
+
+        def statuses(self):
+            return (
+                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
+            )
+
+        async def execute(self, request, _progress):
+            self.requests.append(request)
+            [staged] = request.payload["sources"]
+            assert Path(staged).is_relative_to(broker)
+            assert Path(staged) != source
+            assert Path(staged).read_text(encoding="utf-8") == "private event"
+            return PluginResult(
+                request.job_id,
+                PluginResultStatus.SUCCEEDED,
+                {"events": []},
+                "done",
+                12,
+            )
+
+    supervisor = Supervisor()
+    runtime = InstalledPluginRuntime(
+        tmp_path,
+        supervisor=supervisor,
+        selected_files_root=broker,
+        clock_ms=lambda: 10,
+    )
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    plugin.manifest["plugin"]["schemas"]["input"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["sources"],
+        "properties": {"sources": {"type": "array", "minItems": 1}},
+    }
+    runtime._snapshot = InstalledPluginSnapshot(
+        PluginCatalog((plugin,), ()), supervisor.statuses()
+    )
+    runtime._granted = {
+        "external-example": frozenset({"files:read-selected"})
+    }
+
+    output = asyncio.run(
+        runtime.dispatch(
+            "job-1", "external-example", {"sources": [str(source)]}
+        )
+    )
+
+    assert output == {"events": []}
+    assert source.read_text(encoding="utf-8") == "private event"
+    assert list((broker / "external-example").iterdir()) == []
+
+
+def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_path):
+    source = tmp_path / "private.txt"
+    source.write_text("private event", encoding="utf-8")
+    alias = tmp_path / "alias.txt"
+    alias.symlink_to(source)
+
+    class Supervisor:
+        def statuses(self):
+            return (
+                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
+            )
+
+        async def execute(self, _request, _progress):
+            raise AssertionError("invalid selected files must not reach the worker")
+
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    plugin.manifest["plugin"]["schemas"]["input"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["sources"],
+        "properties": {"sources": {"type": "array", "minItems": 1}},
+    }
+
+    def runtime(root):
+        subject = InstalledPluginRuntime(
+            tmp_path,
+            supervisor=Supervisor(),
+            selected_files_root=root,
+        )
+        subject._snapshot = InstalledPluginSnapshot(
+            PluginCatalog((plugin,), ()), subject._supervisor.statuses()
+        )
+        subject._granted = {
+            "external-example": frozenset({"files:read-selected"})
+        }
+        return subject
+
+    for sources, code in (
+        ([str(alias)], "selected-file-invalid"),
+        ([str(source), str(source)], "selected-file-invalid"),
+    ):
+        with pytest.raises(PluginWorkerError) as error:
+            asyncio.run(
+                runtime(tmp_path / "broker").dispatch(
+                    "job-1", "external-example", {"sources": sources}
+                )
+            )
+        assert error.value.code == code
+
+    with pytest.raises(PluginWorkerError) as unavailable:
+        asyncio.run(
+            runtime(None).dispatch(
+                "job-1", "external-example", {"sources": [str(source)]}
+            )
+        )
+    assert unavailable.value.code == "selected-files-unavailable"
+
+
+def test_selected_source_broker_refuses_missing_empty_and_unopenable_files(
+    tmp_path, monkeypatch
+):
+    missing = tmp_path / "missing.txt"
+    with pytest.raises(PluginWorkerError) as absent:
+        loading_module._canonical_selected_source(missing)
+    assert absent.value.code == "selected-file-unavailable"
+
+    empty = tmp_path / "empty.txt"
+    empty.touch()
+    descriptor = loading_module._open_selected_source(empty)
+    try:
+        with pytest.raises(PluginWorkerError) as invalid:
+            loading_module._validate_selected_source_stat(os.fstat(descriptor))
+        assert invalid.value.code == "selected-file-invalid"
+    finally:
+        os.close(descriptor)
+
+    monkeypatch.setattr(loading_module.os, "open", lambda *_args: (_ for _ in ()).throw(OSError()))
+    with pytest.raises(PluginWorkerError) as unavailable:
+        loading_module._open_selected_source(empty)
+    assert unavailable.value.code == "selected-file-unavailable"
+
+
+def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
+    async def scenario():
+        plugin = TrackingPlugin()
+        writer = io.BytesIO()
+        active = {}
+        assert (
+            await worker_module._handle_request_frame(
+                plugin,
+                IPCFrame(1, WorkerMessageType.CANCEL, None, {"reason": "shutdown"}),
+                writer,
+                1,
+                active,
+            )
+            is False
+        )
+        wrong = execute_frame(
+            PluginRequest("wrong-job", "other-plugin", "manual", {}, 1, None)
+        )
+        assert await worker_module._handle_request_frame(
+            plugin, wrong, writer, 1, active
+        )
+        token = CancellationController()
+        active["duplicate"] = (asyncio.current_task(), token)
+        duplicate = execute_frame(
+            PluginRequest("duplicate", "external-example", "manual", {}, 1, None)
+        )
+        assert await worker_module._handle_request_frame(
+            plugin, duplicate, writer, 1, active
+        )
+        assert await worker_module._handle_request_frame(
+            plugin,
+            IPCFrame(1, WorkerMessageType.CANCEL, "duplicate", {"reason": "cancel"}),
+            writer,
+            1,
+            active,
+        )
+        assert token.cancelled is True
+        assert token.reason == "cancelled by service"
+        assert await worker_module._handle_request_frame(
+            plugin,
+            IPCFrame(1, WorkerMessageType.HEALTH, "health", {}),
+            writer,
+            1,
+            active,
+        )
+        return writer
+
+    output = _frames(asyncio.run(scenario()).getvalue())
+    assert [frame.payload["code"] for frame in output] == [
+        "plugin-identity-mismatch",
+        "duplicate-request",
+        "unsupported-message",
+    ]
+    assert [frame.request_id for frame in output] == [
+        "wrong-job",
+        "duplicate",
+        "health",
+    ]
+
+
+def test_worker_progress_and_terminal_failures_stay_correlated():
+    request = PluginRequest("job-1", "external-example", "manual", {}, 1, None)
+
+    async def scenario():
+        with pytest.raises(IPCProtocolError) as mismatch:
+            await worker_module._WorkerProgress("job-1", io.BytesIO(), 1).report(
+                PluginProgress("other-job", "extract", 0.5, "", 2)
+            )
+        assert mismatch.value.code == "invalid-progress"
+
+        class WrongResult:
+            async def execute(self, *_arguments):
+                return PluginResult(
+                    "other-job", PluginResultStatus.SUCCEEDED, {}, "", 2
+                )
+
+        class Cancelled:
+            async def execute(self, *_arguments):
+                raise asyncio.CancelledError
+
+        class Broken:
+            async def execute(self, *_arguments):
+                raise ValueError("private")
+
+        outputs = []
+        for plugin in (WrongResult(), Cancelled(), Broken()):
+            writer = io.BytesIO()
+            await worker_module._execute_request(
+                plugin, request, CancellationController(), writer, 1
+            )
+            outputs.append(_frames(writer.getvalue()))
+        return outputs
+
+    wrong, cancelled, broken = asyncio.run(scenario())
+    assert wrong[0].payload["code"] == "plugin-execution-failed"
+    assert cancelled[0].type is WorkerMessageType.RESULT
+    assert cancelled[0].payload["status"] == "cancelled"
+    assert cancelled[0].payload["detail"] == "plugin request cancelled"
+    assert broken[0].payload == {
+        "code": "plugin-execution-failed",
+        "detail": "worker refused the message",
+    }
+
+
+def test_installed_runtime_admission_is_fail_closed(tmp_path):
+    class Supervisor:
+        def __init__(self, state):
+            self.state = state
+
+        def statuses(self):
+            return (WorkerStatus("external-example", self.state, None, 1, "state"),)
+
+    from omnitensor.jobs import JobDispatchError
+
+    supervisor = Supervisor(WorkerState.FAILED)
+    runtime = InstalledPluginRuntime(tmp_path, supervisor=supervisor)
+    plugin = _resolved(tmp_path=tmp_path)
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), supervisor.statuses())
+    runtime._granted = {"external-example": frozenset()}
+
+    with pytest.raises(JobDispatchError) as unavailable:
+        runtime.admit("external-example", {})
+    assert unavailable.value.code == "worker-unavailable"
+
+    supervisor.state = WorkerState.READY
+    plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    with pytest.raises(JobDispatchError) as consent:
+        runtime.admit("external-example", {})
+    assert consent.value.code == "consent-missing"
+    runtime._granted = {"external-example": frozenset({"files:read-selected"})}
+    plugin.manifest["plugin"]["schemas"]["input"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["sources"],
+        "properties": {"sources": {"type": "array", "minItems": 1}},
+    }
+    with pytest.raises(JobDispatchError) as payload:
+        runtime.admit("external-example", {})
+    assert payload.value.code == "payload-invalid"
+    plugin.manifest["plugin"]["schemas"]["input"] = {"type": "not-a-json-type"}
+    with pytest.raises(JobDispatchError) as contract:
+        runtime.admit("external-example", {"sources": ["/private.txt"]})
+    assert contract.value.code == "plugin-contract-invalid"
+
+
+def test_installed_runtime_admission_errors_are_stable_contracts(tmp_path):
+    from omnitensor.jobs import JobDispatchError
+
+    class Supervisor:
+        statuses_value = ()
+
+        def statuses(self):
+            return self.statuses_value
+
+    supervisor = Supervisor()
+    runtime = InstalledPluginRuntime(tmp_path, supervisor=supervisor)
+
+    def refused(plugin_id, payload, code, message):
+        with pytest.raises(JobDispatchError) as error:
+            runtime.admit(plugin_id, payload)
+        assert (error.value.code, error.value.message) == (code, message)
+
+    refused("missing", {}, "workload-unknown", "No installed plugin: missing")
+
+    plugin = _resolved(tmp_path=tmp_path)
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+    refused(
+        "external-example", {}, "worker-unavailable", "Plugin worker is not ready"
+    )
+
+    supervisor.statuses_value = (
+        WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
+    )
+    plugin.manifest["plugin"]["protocol"]["capabilities"] = []
+    refused(
+        "external-example",
+        {},
+        "worker-incompatible",
+        "Plugin does not declare execution",
+    )
+
+    plugin.manifest["plugin"]["protocol"]["capabilities"] = ["execute"]
+    plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    refused(
+        "external-example", {}, "consent-missing", "Plugin permissions are not granted"
+    )
+
+    runtime._granted = {
+        "external-example": frozenset({"files:read-selected"})
+    }
+    refused(
+        "external-example",
+        [],
+        "payload-invalid",
+        "Plugin payload must be an object",
+    )
+
+    plugin.manifest["plugin"]["schemas"]["input"] = {"type": "invalid"}
+    refused(
+        "external-example",
+        {},
+        "plugin-contract-invalid",
+        "Plugin input schema is invalid",
+    )
+
+    plugin.manifest["plugin"]["schemas"]["input"] = {
+        "type": "object",
+        "required": ["sources"],
+    }
+    refused(
+        "external-example",
+        {},
+        "payload-invalid",
+        "Payload violates the plugin input contract",
+    )
+
+
+def test_installed_runtime_ignores_bundled_identity_when_dispatching(tmp_path):
+    bundled = _resolved(PluginSource.BUNDLED, tmp_path)
+    runtime = InstalledPluginRuntime(tmp_path)
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((bundled,), ()), ())
+
+    assert runtime._plugin("external-example") is None
+
+
+def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
+    tmp_path, monkeypatch
+):
+    bundled = _resolved(PluginSource.BUNDLED, tmp_path)
+    external = _resolved(tmp_path=tmp_path)
+    external.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    candidates = (object(),)
+    identified = object()
+    catalog = PluginCatalog((bundled, external), ())
+    workers = (
+        WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
+    )
+    observed = []
+
+    class Grants:
+        def active_permissions(self, plugin_id, declared):
+            observed.append(("grant", plugin_id, declared))
+            return frozenset(declared)
+
+    class Supervisor:
+        def statuses(self):
+            return workers
+
+        async def start(self, specs):
+            observed.append(("start", specs, runtime._snapshot))
+            return workers
+
+    def discover(**options):
+        observed.append(("discover", options))
+        return candidates
+
+    def resolve_identities(value):
+        observed.append(("identity", value))
+        return identified
+
+    def resolve_compatibility(value):
+        observed.append(("compatibility", value))
+        return catalog
+
+    expected_specs = (object(),)
+
+    def specs(plugins, **options):
+        observed.append(("specs", plugins, options))
+        return expected_specs
+
+    monkeypatch.setattr(loading_module, "discover_plugin_metadata", discover)
+    monkeypatch.setattr(loading_module, "resolve_plugin_identities", resolve_identities)
+    monkeypatch.setattr(
+        loading_module, "resolve_plugin_compatibility", resolve_compatibility
+    )
+    monkeypatch.setattr(loading_module, "external_worker_specs", specs)
+    broker = tmp_path / "nested" / "broker"
+    runtime = InstalledPluginRuntime(
+        tmp_path / "bundled",
+        supervisor=Supervisor(),
+        entry_points_provider=lambda: (),
+        python_executable="/usr/bin/python3",
+        worker_import_paths=(tmp_path,),
+        grant_source=Grants(),
+        selected_files_root=broker,
+    )
+
+    snapshot = asyncio.run(runtime.start())
+
+    assert snapshot == InstalledPluginSnapshot(catalog, workers)
+    assert observed == [
+        (
+            "discover",
+            {
+                "bundled_root": tmp_path / "bundled",
+                "entry_points_provider": runtime._entry_points_provider,
+            },
+        ),
+        ("identity", candidates),
+        ("compatibility", identified),
+        ("grant", "external-example", {"files:read-selected"}),
+        (
+            "specs",
+            catalog.plugins,
+            {
+                "python_executable": "/usr/bin/python3",
+                "worker_import_paths": (str(tmp_path),),
+                "granted_permissions": {
+                    "external-example": frozenset({"files:read-selected"})
+                },
+                "selected_files_root": broker.resolve(),
+            },
+        ),
+        (
+            "start",
+            expected_specs,
+            InstalledPluginSnapshot(catalog, ()),
+        ),
+    ]
+    assert runtime._granted == {
+        "external-example": frozenset({"files:read-selected"})
+    }
+
+
+def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "source.txt"
+    source.write_text("event", encoding="utf-8")
+    broker = tmp_path / "broker"
+    removed = []
+    real_rmtree = loading_module.shutil.rmtree
+
+    def remove(path, ignore_errors):
+        removed.append((path, ignore_errors))
+        real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(loading_module.shutil, "rmtree", remove)
+
+    class Supervisor:
+        result = PluginResult(
+            "job-1", PluginResultStatus.FAILED, {}, "provider refused", 12
+        )
+
+        def statuses(self):
+            return (
+                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
+            )
+
+        async def execute(self, _request, _progress):
+            return self.result
+
+    supervisor = Supervisor()
+    runtime = InstalledPluginRuntime(
+        tmp_path,
+        supervisor=supervisor,
+        selected_files_root=broker,
+    )
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
+    plugin.manifest["plugin"]["schemas"]["input"] = {"type": "object"}
+    runtime._snapshot = InstalledPluginSnapshot(
+        PluginCatalog((plugin,), ()), supervisor.statuses()
+    )
+    runtime._granted = {
+        "external-example": frozenset({"files:read-selected"})
+    }
+
+    with pytest.raises(PluginWorkerError) as failed:
+        asyncio.run(
+            runtime.dispatch(
+                "job-1", "external-example", {"sources": [str(source)]}
+            )
+        )
+    assert (failed.value.code, failed.value.detail) == (
+        "plugin-failed",
+        "provider refused",
+    )
+    assert len(removed) == 1
+    assert removed[0][0].parent == broker / "external-example"
+    assert removed[0][1] is True
+
+    supervisor.result = PluginResult(
+        "job-1", PluginResultStatus.FAILED, {}, "", 12
+    )
+    with pytest.raises(PluginWorkerError) as defaulted:
+        asyncio.run(
+            runtime.dispatch(
+                "job-1", "external-example", {"sources": [str(source)]}
+            )
+        )
+    assert (defaulted.value.code, defaulted.value.detail) == (
+        "plugin-failed",
+        "plugin request failed",
+    )
+
+    supervisor.result = PluginResult(
+        "job-1", PluginResultStatus.CANCELLED, {}, "user", 12
+    )
+    with pytest.raises(asyncio.CancelledError, match="user"):
+        asyncio.run(
+            runtime.dispatch(
+                "job-1", "external-example", {"sources": [str(source)]}
+            )
+        )
+
+
+def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypatch):
+    broker = tmp_path / "nested" / "broker"
+    prepared = loading_module._prepare_selected_files_root(broker)
+    assert prepared == broker.resolve()
+    assert prepared.stat().st_mode & 0o777 == 0o700
+    with pytest.raises(ValueError) as relative:
+        loading_module._prepare_selected_files_root(Path("relative"))
+    assert str(relative.value) == "selected_files_root must be absolute"
+
+    for sources in (None, (), [], [""], [1], ["x"] * 33):
+        with pytest.raises(PluginWorkerError) as invalid:
+            loading_module._stage_selected_sources(
+                prepared, "external-example", "job-1", {"sources": sources}
+            )
+        assert (invalid.value.code, invalid.value.detail) == (
+            "selected-files-invalid",
+            "sources must name 1-32 selected files",
+        )
+
+    source = tmp_path / "event.TXT"
+    source.write_text("event", encoding="utf-8")
+    for plugin_id, job_id in (("../plugin", "job-1"), ("plugin", "job/1")):
+        with pytest.raises(PluginWorkerError) as invalid:
+            loading_module._stage_selected_sources(
+                prepared, plugin_id, job_id, {"sources": [str(source)]}
+            )
+        assert (invalid.value.code, invalid.value.detail) == (
+            "selected-files-invalid",
+            "request identity is invalid",
+        )
+
+    rewritten, staged = loading_module._stage_selected_sources(
+        prepared,
+        "external-example",
+        "job-1",
+        {"sources": [str(source)], "locale": "en"},
+    )
+    assert staged.name.startswith("job-1-")
+    assert staged.parent == prepared / "external-example"
+    assert staged.parent.stat().st_mode & 0o777 == 0o700
+    assert rewritten == {
+        "sources": [str(staged / "00.txt")],
+        "locale": "en",
+    }
+    assert (staged / "00.txt").read_text(encoding="utf-8") == "event"
+    loading_module.shutil.rmtree(staged)
+
+    copied = []
+
+    def fake_copy(path, destination, index, observed):
+        copied.append((path, destination, index, observed))
+        return destination / f"{index:02d}.txt"
+
+    monkeypatch.setattr(loading_module, "_copy_selected_source", fake_copy)
+    rewritten, staged = loading_module._stage_selected_sources(
+        prepared,
+        "external-example",
+        "job-32",
+        {"sources": [f"/source-{index}" for index in range(32)]},
+    )
+    assert len(rewritten["sources"]) == 32
+    assert [call[2] for call in copied] == list(range(32))
+    assert all(call[1] == staged for call in copied)
+    assert all(call[3] is copied[0][3] for call in copied)
+    loading_module.shutil.rmtree(staged)
+
+    def fail_copy(*_arguments):
+        raise RuntimeError("copy failed")
+
+    monkeypatch.setattr(loading_module, "_copy_selected_source", fail_copy)
+    with pytest.raises(RuntimeError, match="copy failed"):
+        loading_module._stage_selected_sources(
+            prepared, "external-example", "job-fail", {"sources": [str(source)]}
+        )
+    assert list((prepared / "external-example").iterdir()) == []
+
+
+def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    first = tmp_path / "FIRST.TXT"
+    second = tmp_path / "second.bad-suffix-long"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    observed = set()
+    copy_calls = []
+    real_copy = loading_module.shutil.copyfileobj
+
+    def copy(reader, writer, length):
+        copy_calls.append(length)
+        real_copy(reader, writer, length=length)
+
+    monkeypatch.setattr(loading_module.shutil, "copyfileobj", copy)
+    first_copy = loading_module._copy_selected_source(first, staged, 0, observed)
+    second_copy = loading_module._copy_selected_source(second, staged, 1, observed)
+    assert first_copy == staged / "00.txt"
+    assert second_copy == staged / "01.bin"
+    assert first_copy.read_text(encoding="utf-8") == "first"
+    assert second_copy.read_text(encoding="utf-8") == "second"
+    assert copy_calls == [1024 * 1024, 1024 * 1024]
+    assert len(observed) == 2
+
+    with pytest.raises(PluginWorkerError) as duplicate:
+        loading_module._copy_selected_source(first, staged, 2, observed)
+    assert (duplicate.value.code, duplicate.value.detail) == (
+        "selected-file-invalid",
+        "the same selected file appears more than once",
+    )
+
+
+def test_selected_file_helpers_reject_exact_race_and_file_boundaries(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "source.txt"
+    source.write_text("event", encoding="utf-8")
+    alias = tmp_path / "alias.txt"
+    alias.symlink_to(source)
+
+    for candidate, code, detail in (
+        (
+            Path("relative"),
+            "selected-file-unavailable",
+            "selected source cannot be opened",
+        ),
+        (
+            alias,
+            "selected-file-invalid",
+            "selected source must be a canonical absolute path",
+        ),
+    ):
+        with pytest.raises(PluginWorkerError) as error:
+            loading_module._canonical_selected_source(candidate)
+        assert (error.value.code, error.value.detail) == (code, detail)
+
+    opened = []
+
+    def open_file(path, flags):
+        opened.append((path, flags))
+        raise OSError("denied")
+
+    monkeypatch.setattr(loading_module.os, "open", open_file)
+    with pytest.raises(PluginWorkerError) as unavailable:
+        loading_module._open_selected_source(source)
+    assert (unavailable.value.code, unavailable.value.detail) == (
+        "selected-file-unavailable",
+        "selected source cannot be opened",
+    )
+    assert opened == [
+        (
+            source,
+            loading_module.os.O_RDONLY
+            | loading_module.os.O_CLOEXEC
+            | loading_module.os.O_NOFOLLOW,
+        )
+    ]
+
+    regular = source.stat()
+    loading_module._validate_selected_source_stat(
+        os.stat_result(
+            (
+                regular.st_mode,
+                regular.st_ino,
+                regular.st_dev,
+                regular.st_nlink,
+                regular.st_uid,
+                regular.st_gid,
+                loading_module.MAX_SELECTED_SOURCE_BYTES,
+                regular.st_atime,
+                regular.st_mtime,
+                regular.st_ctime,
+            )
+        )
+    )
+    for status in (
+        os.stat_result((regular.st_mode, 1, 1, 1, 1, 1, 0, 1, 1, 1)),
+        os.stat_result(
+            (
+                regular.st_mode,
+                1,
+                1,
+                1,
+                1,
+                1,
+                loading_module.MAX_SELECTED_SOURCE_BYTES + 1,
+                1,
+                1,
+                1,
+            )
+        ),
+        tmp_path.stat(),
+    ):
+        with pytest.raises(PluginWorkerError) as invalid:
+            loading_module._validate_selected_source_stat(status)
+        assert (invalid.value.code, invalid.value.detail) == (
+            "selected-file-invalid",
+            "selected source must be a bounded regular file",
+        )
+
+    destination = tmp_path / "destination"
+    destination.write_text("event", encoding="utf-8")
+    assert not loading_module._selected_source_changed(regular, regular, destination)
+    changed = list(regular)
+    changed[1] += 1
+    assert loading_module._selected_source_changed(
+        regular, os.stat_result(changed), destination
+    )
+    changed = list(regular)
+    changed[6] += 1
+    assert loading_module._selected_source_changed(
+        regular, os.stat_result(changed), destination
+    )
+    changed = list(regular)
+    changed[8] += 1
+    assert loading_module._selected_source_changed(
+        regular, os.stat_result(changed), destination
+    )
+    destination.write_text("different", encoding="utf-8")
+    assert loading_module._selected_source_changed(regular, regular, destination)
+
+
+def test_selected_file_copy_contains_race_and_copy_errors(tmp_path, monkeypatch):
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    source = tmp_path / "source.txt"
+    source.write_text("event", encoding="utf-8")
+
+    monkeypatch.setattr(loading_module, "_selected_source_changed", lambda *_args: True)
+    with pytest.raises(PluginWorkerError) as changed:
+        loading_module._copy_selected_source(source, staged, 0, set())
+    assert (changed.value.code, changed.value.detail) == (
+        "selected-file-changed",
+        "selected source changed while it was copied",
+    )
+
+    monkeypatch.setattr(loading_module, "_selected_source_changed", lambda *_args: False)
+    monkeypatch.setattr(
+        loading_module.shutil,
+        "copyfileobj",
+        lambda *_args, **_options: (_ for _ in ()).throw(OSError("disk")),
+    )
+    with pytest.raises(PluginWorkerError) as unavailable:
+        loading_module._copy_selected_source(source, staged, 1, set())
+    assert (unavailable.value.code, unavailable.value.detail) == (
+        "selected-file-unavailable",
+        "selected source cannot be copied",
+    )
 
 
 def test_worker_spec_inputs_are_bounded(tmp_path):
@@ -314,7 +1168,7 @@ def test_worker_acknowledges_the_handshake_before_starting_the_plugin():
     )
 
     assert agreement.protocol_version == 3
-    assert agreement.capabilities == frozenset({"cancel"})
+    assert agreement.capabilities == frozenset({"cancel", "progress"})
     assert [event[0] for event in plugin.events] == ["start", "stop"]
     assert plugin.events[0][1].protocol_version == 3
     assert plugin.events[0][1].plugin_id == "external-example"
@@ -370,6 +1224,92 @@ def test_worker_default_protocol_and_eof_shutdown():
     ]
 
 
+def test_executable_worker_streams_progress_and_one_terminal_result():
+    class ExecutablePlugin(TrackingPlugin):
+        async def execute(self, request, cancellation, progress):
+            cancellation.raise_if_cancelled()
+            await progress.report(PluginProgress(request.job_id, "extract", 0.5, "", 12))
+            return succeeded_result(request, {"events": []}, completed_at_ms=15)
+
+    service_offer = HandshakeOffer(
+        "external-example",
+        1,
+        1,
+        frozenset({"cancel", "execute", "health", "progress"}),
+    )
+    request = PluginRequest(
+        "job-1",
+        "external-example",
+        "manual",
+        {"sources": ["/private/event.txt"]},
+        10,
+        None,
+    )
+    reader = io.BytesIO(
+        encode_frame(handshake_frame(service_offer)) + encode_frame(execute_frame(request))
+    )
+    writer = io.BytesIO()
+    plugin = ExecutablePlugin()
+
+    agreement = asyncio.run(serve_worker_requests(plugin, reader, writer))
+
+    assert agreement.capabilities == service_offer.capabilities
+    frames = _frames(writer.getvalue())
+    assert [frame.type for frame in frames] == [
+        WorkerMessageType.HELLO,
+        WorkerMessageType.READY,
+        WorkerMessageType.PROGRESS,
+        WorkerMessageType.RESULT,
+    ]
+    assert frames[2].payload == {
+        "detail": "",
+        "fraction": 0.5,
+        "observedAt": 12,
+        "stage": "extract",
+    }
+    assert frames[3].payload["status"] == "succeeded"
+    assert frames[3].payload["output"] == {"events": []}
+    assert [event[0] for event in plugin.events] == ["start", "stop"]
+    context = plugin.events[0][1]
+    assert context == PluginContext(
+        "external-example",
+        1,
+        {},
+        frozenset(),
+    )
+    assert frames[1].payload == {"pluginId": "external-example"}
+
+
+def test_executable_worker_receives_cancel_while_request_is_running():
+    class WaitingPlugin(TrackingPlugin):
+        async def execute(self, request, cancellation, progress):
+            await cancellation.wait()
+            return cancelled_result(request, "cancelled", completed_at_ms=20)
+
+    service_offer = HandshakeOffer(
+        "external-example", 1, 1, frozenset({"cancel", "execute"})
+    )
+    request = PluginRequest("job-1", "external-example", "manual", {}, 10, None)
+    cancel = encode_frame(
+        handshake_frame(service_offer).__class__(
+            1, WorkerMessageType.CANCEL, "job-1", {"reason": "user"}
+        )
+    )
+    reader = io.BytesIO(
+        encode_frame(handshake_frame(service_offer))
+        + encode_frame(execute_frame(request))
+        + cancel
+    )
+    writer = io.BytesIO()
+
+    asyncio.run(serve_worker_requests(WaitingPlugin(), reader, writer))
+
+    terminal = _frames(writer.getvalue())[-1]
+    assert terminal.type is WorkerMessageType.RESULT
+    assert terminal.request_id == "job-1"
+    assert terminal.payload["status"] == "cancelled"
+
+
 class _ChunkedReader:
     def __init__(self, chunks):
         self._chunks = iter(chunks)
@@ -414,14 +1354,14 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
         loaded.append(identity)
         return plugin
 
-    def serve(candidate, reader, writer, **options):
+    async def serve(candidate, reader, writer, **options):
         served.append((candidate, reader, writer, options))
 
     stdin = type("Input", (), {"buffer": io.BytesIO()})()
     channel = io.BytesIO()
     claims = []
     monkeypatch.setattr(worker_module, "load_external_plugin", load)
-    monkeypatch.setattr(worker_module, "serve_worker", serve)
+    monkeypatch.setattr(worker_module, "serve_worker_requests", serve)
     monkeypatch.setattr(
         worker_module,
         "claim_frame_channel",
@@ -464,14 +1404,28 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
 def _write_external_wheel(path: Path) -> None:
     manifest = sample_plugin_manifest("third-party-plugin")
     manifest["version"] = "1.0.0"
+    manifest["plugin"]["protocol"]["capabilities"] = [
+        "cancel",
+        "execute",
+        "health",
+        "progress",
+    ]
+    manifest["plugin"]["schemas"]["output"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ok"],
+        "properties": {"ok": {"const": True}},
+    }
     package = """\
-from omnitensor.sdk import ManagedPlugin, cancelled_result
+from omnitensor.sdk import ManagedPlugin, succeeded_result
 
 class ThirdPartyPlugin(ManagedPlugin):
     plugin_id = "third-party-plugin"
 
     async def execute(self, request, cancellation, progress):
-        return cancelled_result(request, "fixture")
+        return succeeded_result(
+            request, {"ok": True}, completed_at_ms=1, detail="fixture"
+        )
 """
     dist_info = "third_party_omnitensor-1.0.0.dist-info"
     files = {
@@ -570,11 +1524,44 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
         runner = asyncio.create_task(service.run())
         try:
             for _ in range(200):
-                if runtime.snapshot.workers:
+                if any(
+                    worker.state is WorkerState.READY
+                    for worker in runtime.snapshot.workers
+                ):
                     break
                 await asyncio.sleep(0.005)
             started = runtime.snapshot
             assert started.workers
+            accepted = json.loads(
+                await service.jobs.submit_job_text(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "requestId": f"execute-{index}",
+                            "workloadId": "third-party-plugin",
+                            "payload": {},
+                        }
+                    )
+                )
+            )
+            assert accepted["status"] == "accepted"
+            for attempt in range(200):
+                result = json.loads(
+                    await service.jobs.job_result_text(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "requestId": f"result-{index}-{attempt}",
+                                "jobId": accepted["jobId"],
+                            }
+                        )
+                    )
+                )
+                if result["state"] != "running":
+                    break
+                await asyncio.sleep(0.005)
+            assert result["state"] == "succeeded", json.dumps(result, sort_keys=True)
+            assert result["output"] == {"ok": True}
         finally:
             service._stopping.set()
             await asyncio.wait_for(runner, timeout=2)
@@ -590,7 +1577,9 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
             for plugin in started.catalog.plugins
             if plugin.source is PluginSource.EXTERNAL
         ]
-        assert [plugin.plugin_id for plugin in external] == ["third-party-plugin"]
+        assert [plugin.plugin_id for plugin in external] == [
+            "third-party-plugin"
+        ], started.catalog.rejections
         assert started.catalog.rejections == ()
         assert len(started.workers) == 1
         assert started.workers[0].state is WorkerState.READY
@@ -744,7 +1733,10 @@ def test_the_worker_confines_itself_before_it_imports_the_plugin(monkeypatch, tm
 
     monkeypatch.setattr(worker_module, "install_filter", install)
     monkeypatch.setattr(worker_module, "load_external_plugin", load)
-    monkeypatch.setattr(worker_module, "serve_worker", lambda *a, **k: order.append("serve"))
+    async def serve(*_args, **_options):
+        order.append("serve")
+
+    monkeypatch.setattr(worker_module, "serve_worker_requests", serve)
     monkeypatch.setattr(
         worker_module, "claim_frame_channel", lambda: io.BytesIO()
     )
@@ -773,7 +1765,10 @@ def test_a_worker_told_not_to_confine_itself_does_not(monkeypatch):
     installed = []
     monkeypatch.setattr(worker_module, "install_filter", lambda: installed.append(1))
     monkeypatch.setattr(worker_module, "load_external_plugin", lambda *a: TrackingPlugin())
-    monkeypatch.setattr(worker_module, "serve_worker", lambda *a, **k: None)
+    async def serve(*_args, **_options):
+        return None
+
+    monkeypatch.setattr(worker_module, "serve_worker_requests", serve)
     monkeypatch.setattr(worker_module, "claim_frame_channel", lambda: io.BytesIO())
     monkeypatch.setattr(
         worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})()

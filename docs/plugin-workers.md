@@ -18,12 +18,27 @@ kernel debug/tracing/BPF namespaces, and undeclared grants fail worker startup.
 Free-form plugin permissions do not imply filesystem access. The same active
 permission set is passed into the worker's `PluginContext`.
 
+`files:read-selected` is implemented by a broker, not by mounting a caller's
+directory. The service copies only the explicitly submitted, canonical regular
+files into a private per-request directory already mounted read-only in that
+worker. Originals and sibling files stay outside the namespace, and the staged
+copies are removed at the terminal boundary.
+
 Each active plugin runs in one child process launched without a shell, without
 inheritable file descriptors, and in a separate process session. The service
 starts workers in plugin-ID order and accepts a worker only after the bounded
 IPC handshake confirms its plugin identity and protocol range. A failed or
 incompatible worker becomes an isolated status record and does not prevent
 later plugins from starting.
+
+Executable workers negotiate `execute`, `progress`, and `cancel` explicitly.
+`SubmitJob` sends one schema-validated request over the authenticated worker
+channel, relays bounded redacted progress, and accepts exactly one correlated
+terminal result. Cancellation remains readable while plugin code is running;
+if a worker does not return a terminal cancellation result within the bound,
+the supervisor stops it before releasing the channel. An installed identity
+without a ready worker or negotiated `execute` capability remains visible for
+diagnosis but cannot receive a job.
 
 Handshake and startup are separate phases with separate deadlines. The worker
 answers the `hello` as soon as the protocol is settled, then runs the plugin's

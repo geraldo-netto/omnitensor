@@ -278,6 +278,26 @@ class GenerationRouter:
         self._workers = by_accelerator
         self._preference = preference
 
+    def require_ready(self) -> None:
+        """Require one qualified provider whose local artifacts pass preflight."""
+        failure: GenerationError | None = None
+        for accelerator in self._preference:
+            worker = self._workers.get(accelerator)
+            if worker is None:
+                continue
+            preflight = getattr(worker, "preflight", None)
+            if not callable(preflight):
+                return
+            try:
+                preflight()
+            except GenerationError as error:
+                failure = error
+                continue
+            return
+        if failure is not None:
+            raise failure
+        raise GenerationError("provider-unavailable", "no qualified provider is available")
+
     async def run(
         self,
         task: GenerationTask,

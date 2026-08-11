@@ -1,0 +1,58 @@
+{
+  "manifestVersion": 2,
+  "id": "event-extraction",
+  "version": "1.0.0",
+  "capabilities": ["grounded-event-extraction", "explicit-file-selection"],
+  "plugin": {
+    "entryPoint": "event-extraction",
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": ["cancel", "execute", "health", "progress"]
+    },
+    "schemas": {
+      "configuration": {"type": "object", "additionalProperties": false},
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources"],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+          }
+        }
+      },
+      "output": {"$ref": "event-extraction-result.schema.json"}
+    },
+    "triggers": ["manual"],
+    "artifacts": [],
+    "permissions": ["files:read-selected"]
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": ["gpu"],
+    "minimumDevices": 1,
+    "model": null
+  },
+  "ui": {
+    "title": "Import events",
+    "group": "Local workflows",
+    "description": "Selected files · evidence-backed preview · confirmed export",
+    "icon": "x-office-calendar-symbolic",
+    "order": 90
+  },
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Run parser, OCR, and generation adapters in the isolated worker",
+      "Keep source fragments and grounded results out of the public snapshot",
+      "Require explicit user confirmation before calendar or ICS writes"
+    ]
+  },
+  "acceptance": []
+}
