@@ -25,12 +25,18 @@ from .runner import (
     load_forecast_binding,
 )
 from .snapshot_recording import load_runtime_snapshot, record_runtime_snapshot
+from .storage import (
+    BACKBLAZE_TERMS,
+    BackblazeDatasetBuilder,
+    StorageTrainer,
+)
 
 DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
 DEFAULT_SNAPSHOT_PATH = "~/.local/state/xpu-workload-manager/state.json"
 DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
+DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
 
 
 def record_main(argv: list[str] | None = None) -> int:
@@ -158,6 +164,50 @@ def train_main(argv: list[str] | None = None) -> int:
                 "quality": report.quality,
                 "next": "omnitensor-install-trained-model "
                 f"{output / 'training-report.json'} --targets auto",
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def storage_train_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-train-storage-model",
+        description="Fit a portable storage risk source from official Backblaze daily CSVs",
+    )
+    parser.add_argument("--csv-root", required=True)
+    parser.add_argument("--output-dir", default=DEFAULT_STORAGE_OUTPUT)
+    parser.add_argument(
+        "--accept-dataset-terms",
+        required=True,
+        help=f"after reviewing the source terms, pass exactly {BACKBLAZE_TERMS}",
+    )
+    parser.add_argument("--negative-keep-modulus", default=64, type=int)
+    parser.add_argument("--minimum-positive-examples", default=25, type=int)
+    parser.add_argument("--minimum-auc", default=0.6, type=float)
+    arguments = parser.parse_args(argv)
+    output = Path(arguments.output_dir).expanduser()
+    try:
+        dataset = BackblazeDatasetBuilder(
+            accept_terms=arguments.accept_dataset_terms,
+            negative_keep_modulus=arguments.negative_keep_modulus,
+        ).build(Path(arguments.csv_root).expanduser())
+        report = StorageTrainer(
+            minimum_positive_examples=arguments.minimum_positive_examples,
+            minimum_auc=arguments.minimum_auc,
+        ).train(dataset, output)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"storage training failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "report": str(output / "storage-training-report.json"),
+                "portableModel": str(output / "model.onnx"),
+                "samples": report["samples"],
+                "quality": report["quality"],
+                "next": "compile and qualify this source separately for each target lane",
             },
             indent=2,
         )

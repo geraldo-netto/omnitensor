@@ -56,7 +56,7 @@ a deterministic ridge forecaster over numeric history and needs neither. A
 future image or embedding recipe may declare its own producer-only extra; it
 must not become a service dependency.
 
-## Current recipe
+## Resource forecast recipe
 
 `forecast-v1` predicts one future numeric feature from a fixed window. It is
 currently intended for `resource-scheduler`. It is self-supervised: later
@@ -69,6 +69,42 @@ hardware-fault, storage-fault, or network-anomaly models. Those need distinct
 datasets, evaluation metrics, preprocessing, and host consumers. They can use
 the same portable report, native compilation, immutable installation, and
 model-binding path when their recipes exist.
+
+## Storage risk portable-source recipe
+
+`backblaze-smart-risk-v1` is a separate, offline recipe for a device-neutral
+failure-risk source. Download and extract official daily Drive Stats CSVs from
+the [Backblaze Drive Stats data page](https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data),
+review its current citation and data-use terms, then run:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-train-storage-model \
+  --csv-root /path/to/extracted/daily-csvs \
+  --accept-dataset-terms Backblaze-Drive-Stats
+```
+
+The acknowledgement token does not replace reviewing the terms. In
+particular, do not redistribute the raw dataset through OmniTensor. The report
+retains the official source, citation, acknowledgement, schema digest, and a
+deidentified corpus digest.
+
+Intake is bounded and streaming. It accepts canonical daily CSV filenames,
+refuses missing required headers and duplicate drive rows, tolerates unrelated
+new columns while recording schema drift, and never emits serial number, model,
+or capacity as a feature. The six ordered inputs are raw SMART 5, 9, 187, 188,
+197, and 198 values. A row becomes positive only when a later row reports that
+drive failed within seven days; the failure-day row is not an input. Training
+uses a purged chronological holdout, deterministic negative downsampling, an
+explicit class-balance floor, and a held-out ROC-AUC gate.
+
+Output is `model.onnx` plus `storage-training-report.json`. The graph is the
+portable source of truth, not an installed service model. It uses only
+`MatMul`, `Add`, and `Sigmoid`, so the same semantics and `[1,6]` contract can
+be compiled and tested for Vulkan/ncnn and OpenVINO NPU lanes. A TPU release
+still requires representative int8 calibration, a fully-int8 TFLite export,
+100% Edge TPU compiler mapping, semantic parity, and Coral execution evidence.
+No lane is silently replaced with CPU execution, and Backblaze fleet quality
+does not establish quality on an operator's drives.
 
 ## 1. Record bounded numeric history
 
