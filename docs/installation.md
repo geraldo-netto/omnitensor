@@ -173,6 +173,96 @@ sudo apt install bubblewrap mesa-vulkan-drivers        # runtime
 sudo apt install clang bpftool libbpf-dev              # eBPF helper build only
 ```
 
+### Optional privileged eBPF telemetry helper
+
+The helper is optional. Without it, OmniTensor reports kernel telemetry as
+absent and continues to serve other collectors. Installing it adds aggregate
+run-queue and block-I/O latency histograms; it never exports process, user,
+path, cgroup, or payload identity.
+
+Build the CO-RE object as an unprivileged user, then copy only the resulting
+object, helper, and unit into root-owned locations. Never run the privileged
+unit from a checkout, virtual environment, or other user-writable path.
+
+```sh
+test -r /sys/kernel/btf/vmlinux
+mountpoint -q /sys/fs/bpf
+
+bpf_build_dir="$(mktemp -d)"
+helpers/bpf/build.sh "$bpf_build_dir"
+
+sudo install -d -o root -g root -m 0755 /usr/lib/omnitensor/bpf
+sudo install -o root -g root -m 0644 \
+  "$bpf_build_dir/runq_latency.bpf.o" \
+  /usr/lib/omnitensor/bpf/runq_latency.bpf.o
+sudo install -o root -g root -m 0755 \
+  helpers/bpf/omnitensor-bpf-helper.py \
+  /usr/lib/omnitensor/bpf/omnitensor-bpf-helper.py
+sudo install -o root -g root -m 0644 \
+  helpers/bpf/omnitensor-bpf.service \
+  /etc/systemd/system/omnitensor-bpf.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now omnitensor-bpf.service
+```
+
+The unit receives only `CAP_BPF` and `CAP_PERFMON`. It loads the object with
+`bpftool ... loadall ... autoattach`, pins three maps and three links below
+`/sys/fs/bpf/omnitensor`, verifies every pin, and fails rather than serving an
+empty result after a partial load.
+
+Verify the privileged boundary before trusting its measurements:
+
+```sh
+sudo systemctl is-active omnitensor-bpf.service
+
+for map in runq_latency_us block_latency_us wakeup_at; do
+  sudo bpftool map show pinned "/sys/fs/bpf/omnitensor/$map"
+done
+for link in on_wakeup on_switch on_block_complete; do
+  sudo bpftool link show pinned "/sys/fs/bpf/omnitensor/$link"
+done
+
+sudo /usr/lib/omnitensor/bpf/omnitensor-bpf-helper.py --print-once
+python3 - <<'PY'
+import json
+import socket
+
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    client.connect("/run/omnitensor/bpf-aggregate.sock")
+    document = json.loads(client.recv(256 * 1024))
+assert document["version"] == 1
+assert {item["name"] for item in document["histograms"]} == {
+    "runq_latency_us",
+    "block_latency_us",
+}
+print(json.dumps(document, indent=2))
+PY
+```
+
+Restart the user service with
+`systemctl --user restart omnitensor.service`; its runtime snapshot should report
+`kernelTelemetry.state` as `ready`. Stop here if any map, link, socket, or
+snapshot check fails; do not interpret missing samples as an idle kernel.
+These commands are the reproducible deployment and verification procedure,
+not evidence that a particular host passed it. Live privileged acceptance is
+tracked separately in `TODO.md` under OMNI-0184.
+
+To roll back a helper upgrade, stop the service, remove its pins, install the
+previous root-owned object and helper at the same paths, and start it again:
+
+```sh
+sudo systemctl stop omnitensor-bpf.service
+sudo rm -rf /sys/fs/bpf/omnitensor
+sudo install -o root -g root -m 0644 \
+  /path/to/previous/runq_latency.bpf.o \
+  /usr/lib/omnitensor/bpf/runq_latency.bpf.o
+sudo install -o root -g root -m 0755 \
+  /path/to/previous/omnitensor-bpf-helper.py \
+  /usr/lib/omnitensor/bpf/omnitensor-bpf-helper.py
+sudo systemctl start omnitensor-bpf.service
+```
+
 ### Producing accelerator artifacts
 
 Conversion and execution are separate claims. A producer host can build ncnn
