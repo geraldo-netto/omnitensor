@@ -1816,6 +1816,100 @@ def test_a_label_is_preferred_over_an_index_when_the_model_supplies_one(tmp_path
     assert service.result_summaries.documents()[0]["title"] == "golden retriever"
 
 
+def test_a_forecast_becomes_an_advisory_without_invented_semantics(tmp_path, monkeypatch):
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+    monkeypatch.setattr("omnitensor.service.time.time", lambda: 1.234)
+
+    service._deliver_job_output(
+        "forecast-1",
+        {
+            "profileId": "resource-scheduler",
+            "outputs": [[[0.625]]],
+            "reading": {
+                "kind": "forecast",
+                "targetFeature": "queueDepth",
+                "horizon": 3,
+                "value": 0.625,
+            },
+        },
+    )
+
+    [alert] = service.result_summaries.documents()
+    assert alert["profileId"] == "resource-scheduler"
+    assert alert["title"] == "queueDepth forecast"
+    assert alert["summary"] == "3 observations ahead: 0.625"
+    assert alert["severity"] == "advisory"
+    assert alert["timestamp"] == 1234
+    assert alert["confidence"] is None
+    assert alert["riskScore"] is None
+    assert alert["resultRef"] == "result-forecast-1"
+    snapshot = service.publish_once()
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+    assert snapshot["alerts"][0]["title"] == "queueDepth forecast"
+
+
+def test_a_malformed_forecast_publishes_no_summary(tmp_path):
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    for reading in (
+        {"kind": "forecast", "targetFeature": "load", "horizon": 1},
+        {
+            "kind": "forecast",
+            "targetFeature": "load",
+            "horizon": 1,
+            "value": float("inf"),
+        },
+    ):
+        service._deliver_job_output(
+            "forecast-invalid", {"profileId": "resource-scheduler", "reading": reading}
+        )
+
+    assert service.result_summaries.documents() == []
+
+
+def test_a_refused_forecast_summary_is_logged_without_failing_delivery(
+    tmp_path, monkeypatch, caplog
+):
+    from omnitensor.plugins.summaries import SummaryError
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    def refuse(**_fields):
+        raise SummaryError("summary-refused", "controlled refusal")
+
+    monkeypatch.setattr(service.result_summaries, "publish", refuse)
+    with caplog.at_level("DEBUG", logger="omnitensor.service"):
+        service._publish_forecast_summary(
+            "forecast-logging",
+            "resource-scheduler",
+            {
+                "kind": "forecast",
+                "targetFeature": "load",
+                "horizon": 1,
+                "value": 0.5,
+            },
+        )
+
+    assert caplog.messages == [
+        "forecast summary not published for forecast-logging: summary-refused: controlled refusal"
+    ]
+
+
 def test_a_result_with_nothing_to_say_publishes_nothing(tmp_path):
     """A thousand raw scores have no sentence in them, and a row per job
     carrying no information is worse than no row."""

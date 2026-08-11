@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ..forecastresult import forecast_reading
 from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
 from .artifacts import ArtifactReference
@@ -264,7 +265,10 @@ def _postprocess_stage(workload: Workload, read_labels: Callable[[], tuple]) -> 
 
     async def postprocess(inferred: InferenceOutput) -> PostprocessedOutput:
         output = {"profileId": workload.id, **dict(inferred.tensors)}
-        reading = reduce_output(spec, output.get("outputs") or (), read_labels())
+        tensors = output.get("outputs") or ()
+        reading = forecast_reading(workload.model, tensors)
+        if reading is None:
+            reading = reduce_output(spec, tensors, read_labels())
         if reading is not None:
             # Added beside the tensors, never in place of them: a consumer that
             # wants the raw scores must not lose them to a reduction, and a

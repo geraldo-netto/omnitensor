@@ -47,6 +47,7 @@ from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
 from .executors.vulkan import VulkanGpuExecutor
+from .forecastresult import parse_forecast_reading
 from .guard import BusGuard, GuardRefusedError, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
 from .jobs import (
@@ -737,6 +738,10 @@ class OmniTensorService:
         profile_id = output.get("profileId") if isinstance(output, dict) else None
         if not isinstance(reading, dict) or not isinstance(profile_id, str):
             return
+        forecast = parse_forecast_reading(reading)
+        if forecast is not None:
+            self._publish_forecast_summary(job_id, profile_id, forecast)
+            return
         top = reading.get("top") or []
         if not top:
             return
@@ -761,6 +766,22 @@ class OmniTensorService:
             )
         except (SummaryError, TypeError, ValueError) as error:
             LOGGER.debug("result summary not published for %s: %s", job_id, error)
+
+    def _publish_forecast_summary(self, job_id: str, profile_id: str, reading: dict) -> None:
+        """Publish an advisory reading without inventing units or certainty."""
+        try:
+            self.result_summaries.publish(
+                plugin_id=profile_id,
+                title=f"{reading['targetFeature']} forecast",
+                summary=f"{reading['horizon']} observations ahead: {reading['value']:g}",
+                timestamp_ms=max(1, int(time.time() * 1000)),
+                confidence=None,
+                risk_score=None,
+                result_reference=f"result-{job_id}",
+                redactor=SecretRedactor(()),
+            )
+        except (SummaryError, TypeError, ValueError) as error:
+            LOGGER.debug("forecast summary not published for %s: %s", job_id, error)
 
     def reconcile_interrupted_jobs(self) -> RunnerSet:
         """Report the jobs a previous process left in flight, once, at startup.

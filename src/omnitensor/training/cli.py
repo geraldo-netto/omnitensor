@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ..conversion import ConversionError
+from ..forecastresult import parse_forecast_reading
 from ..plugins.artifact_installation import ArtifactInstallationError
 from ..plugins.forecasting import ForecastError
 from ..plugins.recorder import RecorderError, TelemetryRecorder
@@ -241,10 +242,15 @@ def forecast_main(argv: list[str] | None = None) -> int:
 
     try:
         output = asyncio.run(execute())
+        reading = parse_forecast_reading(output.get("reading"))
+        if reading is None:
+            raise ForecastRunError(
+                "runtime-response-invalid", "runtime returned no valid forecast reading"
+            )
     except (ForecastRunError, OSError, ValueError) as error:
         print(f"forecast failed: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(output, indent=2, allow_nan=False))
+    print(json.dumps(reading, indent=2, allow_nan=False))
     return 0
 
 

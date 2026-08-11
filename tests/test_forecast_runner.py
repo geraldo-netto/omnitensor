@@ -132,6 +132,15 @@ def _ack(request_id, *, status="accepted", job_id="job-1", code="job-accepted"):
 
 
 def _result(request_id, *, state="succeeded", job_id="job-1", output=_UNSET, code=None):
+    default_output = {
+        "outputs": [[[0.75]]],
+        "reading": {
+            "kind": "forecast",
+            "targetFeature": "load",
+            "horizon": 1,
+            "value": 0.75,
+        },
+    }
     return json.dumps(
         {
             "version": 1,
@@ -142,7 +151,7 @@ def _result(request_id, *, state="succeeded", job_id="job-1", output=_UNSET, cod
             "message": "result detail",
             "timestamp": 2,
             "progress": None,
-            "output": {"outputs": [[[0.75]]]} if output is _UNSET else output,
+            "output": default_output if output is _UNSET else output,
         }
     )
 
@@ -441,7 +450,15 @@ async def test_runner_handshakes_submits_exact_tensor_and_polls_to_success(tmp_p
 
     output = await runner.run()
 
-    assert output == {"outputs": [[[0.75]]]}
+    assert output == {
+        "outputs": [[[0.75]]],
+        "reading": {
+            "kind": "forecast",
+            "targetFeature": "load",
+            "horizon": 1,
+            "value": 0.75,
+        },
+    }
     assert client.submissions == [
         {
             "version": 1,
@@ -780,7 +797,12 @@ def test_forecast_cli_runs_without_accepting_inline_features(tmp_path, monkeypat
     )
 
     assert code == 0
-    assert json.loads(capsys.readouterr().out) == {"outputs": [[[0.75]]]}
+    assert json.loads(capsys.readouterr().out) == {
+        "kind": "forecast",
+        "targetFeature": "load",
+        "horizon": 1,
+        "value": 0.75,
+    }
     assert client.closed is True
     with pytest.raises(SystemExit):
         forecast_main(["--profile", PROFILE, "--feature", "load=1"])
@@ -794,6 +816,34 @@ def test_forecast_cli_reports_stable_failure(monkeypatch, capsys):
 
     assert forecast_main(["--profile", PROFILE]) == 1
     assert capsys.readouterr().err == "forecast failed: binding-unavailable: missing\n"
+
+
+def test_forecast_cli_refuses_runtime_output_without_canonical_reading(monkeypatch, capsys):
+    client = FakeClient()
+
+    class ClientFactory:
+        @staticmethod
+        async def connect():
+            return client
+
+    class Runner:
+        def __init__(self, *_args, **_options):
+            pass
+
+        async def run(self):
+            return {"outputs": [[[0.75]]]}
+
+    monkeypatch.setattr(
+        "omnitensor.training.cli.load_forecast_binding", lambda *a, **k: _workload()
+    )
+    monkeypatch.setattr("omnitensor.training.cli.DbusForecastClient", ClientFactory)
+    monkeypatch.setattr("omnitensor.training.cli.TrustedForecastRunner", Runner)
+
+    assert forecast_main(["--profile", PROFILE]) == 1
+    assert capsys.readouterr().err == (
+        "forecast failed: runtime-response-invalid: runtime returned no valid forecast reading\n"
+    )
+    assert client.closed is True
 
 
 def test_forecast_cli_default_contract_and_exact_help(monkeypatch, capsys):
@@ -814,7 +864,14 @@ def test_forecast_cli_default_contract_and_exact_help(monkeypatch, capsys):
             captured["runner"] = (workload, recorder.root, selected_client, options)
 
         async def run(self):
-            return {"value": 1}
+            return {
+                "reading": {
+                    "kind": "forecast",
+                    "targetFeature": "load",
+                    "horizon": 1,
+                    "value": 1,
+                }
+            }
 
     monkeypatch.setattr("omnitensor.training.cli.load_forecast_binding", load)
     monkeypatch.setattr("omnitensor.training.cli.DbusForecastClient", ClientFactory)
@@ -822,7 +879,9 @@ def test_forecast_cli_default_contract_and_exact_help(monkeypatch, capsys):
 
     assert forecast_main(["--profile", PROFILE]) == 0
     output = capsys.readouterr().out
-    assert output == '{\n  "value": 1\n}\n'
+    assert output == (
+        '{\n  "kind": "forecast",\n  "targetFeature": "load",\n  "horizon": 1,\n  "value": 1.0\n}\n'
+    )
     assert captured["binding"] == (
         PROFILE,
         Path("~/.local/share/omnitensor/model-bindings").expanduser(),

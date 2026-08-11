@@ -234,9 +234,12 @@ older complete row and silently changes the forecast time.
 
 Use `--records-root` and `--bindings-root` only when the recorder, installer,
 service, and runner are configured for the same absolute locations. The
-service must be restarted after installing a new binding. Output is the
-bounded job result produced by the selected native artifact; interpretation
-as a target/horizon reading is handled by the forecast result contract.
+service must be restarted after installing a new binding. Output is an exact
+bounded document containing `kind`, `targetFeature`, observation-count
+`horizon`, and the finite predicted `value`. It states no unit, confidence,
+risk, or automatic scheduling action. Raw tensors remain in the owner-scoped
+runtime job result for debugging, while the public snapshot receives only an
+advisory summary.
 
 ## What installation proves
 
