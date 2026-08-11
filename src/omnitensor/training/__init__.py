@@ -5,6 +5,16 @@ local history, and compiler toolchains stay in a separate producer process;
 the service receives only immutable artifacts and a schema-valid binding.
 """
 
+from .clip_production import (
+    ClipGateEvidence,
+    ClipHoldout,
+    ProducedClipSource,
+    TorchScriptClipOnnxExporter,
+    clip_resize_geometry,
+    evaluate_clip_gate,
+    normalize_clip_rgb,
+    produce_clip_source,
+)
 from .compilers import (
     CompilationRequest,
     CompiledTarget,
@@ -37,6 +47,8 @@ from .numeric_promotion import (
 __all__ = [
     "ForecastTrainer",
     "CompilationRequest",
+    "ClipGateEvidence",
+    "ClipHoldout",
     "CompiledTarget",
     "CompilerCapability",
     "CompilerError",
@@ -48,16 +60,22 @@ __all__ = [
     "NativeParityEvidence",
     "NumericTrainingReport",
     "OpenVinoTargetCompiler",
+    "ProducedClipSource",
     "ProducedEmbeddingSource",
     "SentenceEmbeddingOnnxExporter",
     "TargetCompiler",
+    "TorchScriptClipOnnxExporter",
     "TrainingError",
     "TrainingReport",
     "TrainingSpec",
     "default_target_compilers",
+    "clip_resize_geometry",
+    "evaluate_clip_gate",
     "evaluate_embedding_gate",
     "install_training",
+    "normalize_clip_rgb",
     "pool_sentence_embedding",
     "promote_numeric_training",
+    "produce_clip_source",
     "produce_sentence_embedding",
 ]

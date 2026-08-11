@@ -20,6 +20,12 @@ pooling/L2 graph and gates portable output against the verified source on
 operator-reviewed local text. Its report leaves GPU, NPU, and TPU unqualified;
 each still needs independent compiler, parity, and named-device evidence.
 
+CLIP has the same fail-closed boundary in
+`omnitensor.training.clip_production`: exact cover-resize/normalization helpers,
+an image-only ONNX exporter with in-graph L2 normalization, and local
+cosine/zero-shot source parity. It does not export the text encoder or qualify
+an accelerator.
+
 The bundled catalog currently contains:
 
 | recipe | upstream portable source | intended output | target status |
