@@ -79,6 +79,23 @@ def test_readme_links_the_extension_guide():
     assert "[extension guide](docs/extension-guide.md)" in readme
 
 
+def test_generation_guide_keeps_models_and_transports_replaceable():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/generation-providers.md").read_text(encoding="utf-8")
+
+    assert "[generation provider contract](docs/generation-providers.md)" in readme
+    for boundary in (
+        "task- and provider-neutral",
+        "only opaque, bounded content references",
+        "must not enter the public runtime snapshot, D-Bus payloads, logs",
+        "outside the core service process",
+        "default preference is exactly `gpu`",
+        "only when NPU admission or model loading fails before generation",
+        "CPU providers are rejected",
+    ):
+        assert boundary in guide
+
+
 def test_local_training_guide_names_every_installed_feature_semantic():
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     for term in (

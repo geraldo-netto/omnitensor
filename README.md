@@ -17,6 +17,11 @@ Writing a plugin? Start with the [extension guide](docs/extension-guide.md),
 which walks packaging, discovery, schemas, permissions, artifacts, local
 testing, install, upgrade, rollback, and the compatibility policy in order.
 
+Adding a structured text or vision model? The
+[generation provider contract](docs/generation-providers.md) defines versioned
+tasks, private-content isolation, structured output, accelerator routing, and
+the killable worker boundary without coupling workloads to one model runtime.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and
