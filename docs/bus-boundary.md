@@ -8,6 +8,20 @@ as an alternative.
 Read it before relying on the boundary for anything, and before adding a
 method that returns one caller's data to another.
 
+## Refusals are transport replies
+
+A guarded method returns a version-one `runtime-refusal` document when the
+call is over quota, oversized, asserts an identity, exceeds concurrency, or
+names an unknown method. That reply is deliberately not a job acknowledgement.
+Consumers must try the refusal contract before parsing the method's success
+contract; treating every text reply as an acknowledgement hides actionable
+policy failures behind a generic parse error.
+
+The Cinnamon applet follows that order in `runtime-control-gateway.js` and
+maps every published refusal code to deterministic recovery text. Its
+`guard-refusal-regression.test.js` drives all codes through the real gateway
+and manager boundary. Unknown or malformed envelopes still fail closed.
+
 ## The guarantee
 
 A caller's owner token is `uid:<n>`, resolved from the bus daemon's
