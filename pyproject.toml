@@ -89,6 +89,8 @@ packages = ["src/omnitensor"]
 "schemas" = "omnitensor/schemas"
 "workloads" = "omnitensor/workloads"
 "model-recipes" = "omnitensor/model-recipes"
+"generation-models" = "omnitensor/generation-models"
+"evaluation-corpora" = "omnitensor/evaluation-corpora"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
@@ -102,6 +104,8 @@ also_copy = [
     "examples/omnitensor-plugin-template/",
     "helpers/bpf/",
     "model-recipes/",
+    "generation-models/",
+    "evaluation-corpora/",
     "README.md",
 ]
 

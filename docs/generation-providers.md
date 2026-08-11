@@ -73,3 +73,7 @@ does not qualify any particular model or accelerator.
 The first task-specific consumer is the [grounded event result
 contract](event-results.md), which keeps model proposals separate from human
 confirmation and calendar effects.
+
+The first concrete model catalog and lane-specific acceptance policy is the
+[Qwen event provider guide](qwen-event-providers.md). Qwen remains one
+replaceable implementation of this boundary, not part of its definition.

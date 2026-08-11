@@ -114,6 +114,27 @@ def test_event_result_guide_keeps_evidence_private_and_writes_confirmed():
         assert boundary in prose
 
 
+def test_qwen_guide_requires_pinned_artifacts_and_real_accelerator_evidence():
+    generation = (ROOT / "docs/generation-providers.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/qwen-event-providers.md").read_text(encoding="utf-8")
+    prose = " ".join(guide.split())
+
+    assert "[Qwen event provider guide](qwen-event-providers.md)" in generation
+    for contract in (
+        "Vulkan",
+        "partial offload is a",
+        "Detecting an NPU does not enable",
+        "no CPU fallback",
+        "precision and recall are each at least 0.90",
+        "prompt-injection probe",
+        "p95 generation latency",
+        "cancellation completes within 2 seconds",
+        "token streams need not be byte-identical",
+        "does not mutate or bless",
+    ):
+        assert contract in prose
+
+
 def test_local_training_guide_names_every_installed_feature_semantic():
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     for term in (
