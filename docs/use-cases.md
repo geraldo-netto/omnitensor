@@ -47,6 +47,12 @@ selected executor supports.
 | `desktop-context` | disabled, weight 1 | Context prediction and window-layout suggestions | No bundled model. An opt-in content-free producer scores allowlisted suggestions from explicit confirmations, but native binding, stale-session consumer, and acceptance remain. Every window action still requires user confirmation. |
 | `document-intelligence` | disabled, weight 2 | Private semantic retrieval and grounded answers over explicitly selected documents | No large weights are bundled. BGE has an explicit one-shot producer that fetches pinned MIT sources, builds and gates a digest-locked ncnn embedding artifact on a named Vulkan GPU, and installs a disabled local binding. MiniLM and BGE remain reviewed portable sources. The external `ask-selected-files` workload builds an ephemeral page/span index and requires exact citations from qualified BGE and Qwen providers; NPU/TPU BGE ports and full acceptance remain. Exact duplicates use hashing. |
 
+Related external workflows remain manual and disabled until their complete
+providers advertise readiness. `selected-text-tools` processes only the text
+captured by an explicit action; it never monitors clipboard changes or stores
+selection history. Its five operations share the generation-provider contract
+and return reviewable output plus a digest/span evidence record.
+
 ## Low-light acceptance gates
 
 The named low-light model stays disabled by default. Enabling it for production

@@ -81,3 +81,8 @@ replaceable implementation of this boundary, not part of its definition.
 The complete explicit-file workflow, optional parser dependency, model check,
 preview/export boundary, and legacy transition are documented in the
 [event extraction workload guide](event-extraction.md).
+
+The [selected-text workload guide](selected-text-tools.md) applies the same
+provider-neutral boundary to one explicitly captured clipboard selection. It
+adds no clipboard watcher or CPU path and discards its private fragments after
+success, refusal, or cancellation.

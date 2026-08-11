@@ -31,6 +31,10 @@ Asking questions over explicitly chosen documents? [Ask selected files](docs/doc
 documents the ephemeral BGE span index, grounded Qwen answer contract, exact
 file/page/span citations, and GPU-first provider boundary.
 
+Using an explicit clipboard selection? [Selected-text tools](docs/selected-text-tools.md)
+documents the one-shot explain, summarize, rewrite, translate, and task-extraction
+contract, its private fragment boundary, and its mandatory provider dependencies.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and

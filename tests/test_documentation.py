@@ -306,6 +306,27 @@ def test_use_case_guide_records_source_only_profile_boundaries():
         assert "remain" in row
 
 
+def test_selected_text_guide_keeps_capture_private_manual_and_accelerated():
+    guide = (ROOT / "docs/selected-text-tools.md").read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+    for boundary in (
+        "explicit user action",
+        "never monitors the clipboard",
+        "clipboard:read-once",
+        "explain",
+        "summarize",
+        "rewrite",
+        "translate",
+        "extract-tasks",
+        "GPU",
+        "NPU",
+        "No CPU",
+        "No additional base dependency",
+        "selectionSha256",
+    ):
+        assert boundary in normalized
+
+
 def test_installation_guide_documents_every_verifier_check():
     """The guide must explain what each automated check failing means."""
     from omnitensor.acceptance import REQUIRED_SCHEMAS

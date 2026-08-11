@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/selected-text-result.schema.json",
+  "title": "Public selected-text result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "operation", "result", "tasks", "providerId", "accelerator", "evidence"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "operation": {"enum": ["explain", "summarize", "rewrite", "translate", "extract-tasks"]},
+    "result": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "tasks": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "accelerator": {"enum": ["gpu", "npu"]},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selectionSha256", "span", "textSha256"],
+      "properties": {
+        "selectionSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "span": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": {"const": 0},
+            "end": {"type": "integer", "minimum": 1, "maximum": 32768}
+          }
+        },
+        "textSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

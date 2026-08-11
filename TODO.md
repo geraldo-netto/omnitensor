@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0121 | open | high | m | OMNI-0082, OMNI-0118 | `document-intelligence` acceptance: cover malicious/mutated documents, grant revocation, stale-version suppression, index recovery, retrieval/grounding quality, citation integrity, cancellation, privacy, latency, and named-GPU execution before operational readiness. |
-| OMNI-0241 | open | high | l | OMNI-0234 | Selected-text tools: accept only an explicit one-shot bounded selection and requested explain/summarize/rewrite/translate/task-extraction operation, use schema-bound generation, retain no clipboard watcher or history, and return grounded reviewable output. |
 | OMNI-0242 | open | high | l | OMNI-0118, OMNI-0241 | File organizer: inspect only explicitly selected files, suggest bounded tags/names/folders/duplicate groups with source evidence, and emit a review-only plan that has no move, rename, overwrite, delete, or arbitrary-command capability. |
 
 ## Blocked

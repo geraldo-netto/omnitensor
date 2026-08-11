@@ -60,6 +60,8 @@ REQUIRED_SCHEMAS = (
     "event-extraction-result.schema.json",
     "document-question-answer.schema.json",
     "document-question-result.schema.json",
+    "selected-text-answer.schema.json",
+    "selected-text-result.schema.json",
 )
 DEFAULT_SNAPSHOT_MAX_AGE_MS = 30_000
 # Publisher and verifier clocks are the same clock here, but they are read a

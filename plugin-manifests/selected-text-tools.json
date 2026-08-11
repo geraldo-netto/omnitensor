@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 2,
+  "id": "selected-text-tools",
+  "version": "1.0.0",
+  "capabilities": ["explicit-selection", "selected-text-transformation"],
+  "plugin": {
+    "entryPoint": "selected-text-tools",
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": ["cancel", "execute", "health", "progress"]
+    },
+    "schemas": {
+      "configuration": {"type": "object", "additionalProperties": false},
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["selection", "operation"],
+        "properties": {
+          "selection": {"type": "string", "minLength": 1, "maxLength": 32768},
+          "operation": {"enum": ["explain", "summarize", "rewrite", "translate", "extract-tasks"]},
+          "language": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z -]*$"}
+        }
+      },
+      "output": {"$ref": "selected-text-result.schema.json"}
+    },
+    "triggers": ["manual"],
+    "artifacts": [],
+    "permissions": ["clipboard:read-once"]
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": ["gpu"],
+    "minimumDevices": 1,
+    "model": null
+  },
+  "ui": {
+    "title": "Selected-text tools",
+    "group": "Local workflows",
+    "description": "Explain · summarize · rewrite · translate · extract tasks",
+    "icon": "edit-copy-symbolic",
+    "order": 93
+  },
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Read clipboard text only after an explicit user action",
+      "Discard the one-shot selection after the request",
+      "Expose results for review without applying edits or tasks"
+    ]
+  },
+  "acceptance": []
+}
