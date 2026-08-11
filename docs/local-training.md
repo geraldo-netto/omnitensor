@@ -211,6 +211,33 @@ systemctl --user restart omnitensor.service
 `OMNITENSOR_MODEL_BINDINGS` changes the binding root. The service reads it;
 training tools write it. Keep both configured to the same absolute directory.
 
+## 4. Run a forecast from measured history
+
+The trusted runner accepts a profile name and storage roots only. It does not
+accept feature values, a tensor, or an input file: those would let a correctly
+shaped but semantically reordered payload bypass the reason the feature
+contract exists. It loads the installed binding as a restricted overlay of the
+bundled profile, requires every artifact digest and feature contract, then
+takes exactly the newest complete window from bounded recorder history.
+
+```sh
+"$TRAIN/omnitensor-run-forecast" --profile resource-scheduler
+```
+
+The base OmniTensor dependency set includes the local D-Bus client used by the
+runner; no training or accelerator extra is needed to submit. The running
+service still needs the runtime extra for the selected native lane. The runner
+checks `DescribeContract` before submission, uses the declared oldest-first
+observation and feature order, and polls at most 40 times by default. A missing
+feature in any newest row is a refusal; it never searches backward for an
+older complete row and silently changes the forecast time.
+
+Use `--records-root` and `--bindings-root` only when the recorder, installer,
+service, and runner are configured for the same absolute locations. The
+service must be restarted after installing a new binding. Output is the
+bounded job result produced by the selected native artifact; interpretation
+as a target/horizon reading is handled by the forecast result contract.
+
 ## What installation proves
 
 Successful installation proves reproducible fitting, portable graph validity,

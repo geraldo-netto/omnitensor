@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -16,6 +17,12 @@ from ..preparation import PreparationError
 from .contracts import TrainingError, TrainingSpec
 from .forecast import ForecastTrainer
 from .installation import available_targets, install_training
+from .runner import (
+    DbusForecastClient,
+    ForecastRunError,
+    TrustedForecastRunner,
+    load_forecast_binding,
+)
 from .snapshot_recording import load_runtime_snapshot, record_runtime_snapshot
 
 DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
@@ -63,9 +70,7 @@ def snapshot_record_main(argv: list[str] | None = None) -> int:
         "--selector",
         required=True,
         action="append",
-        help=(
-            "queueDepth or runningProfiles; repeat to preserve the desired feature order"
-        ),
+        help=("queueDepth or runningProfiles; repeat to preserve the desired feature order"),
     )
     parser.add_argument(
         "--snapshot", default=os.environ.get("OMNITENSOR_STATE_PATH", DEFAULT_SNAPSHOT_PATH)
@@ -203,6 +208,43 @@ def install_main(argv: list[str] | None = None) -> int:
     document = installed.document()
     document["next"] = "systemctl --user restart omnitensor.service"
     print(json.dumps(document, indent=2))
+    return 0
+
+
+def forecast_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-run-forecast",
+        description="Submit one forecast assembled only from trusted local history",
+    )
+    parser.add_argument("--profile", required=True)
+    parser.add_argument("--records-root", default=DEFAULT_RECORDS_ROOT)
+    parser.add_argument("--bindings-root", default=DEFAULT_BINDINGS_ROOT)
+    parser.add_argument("--attempts", default=40, type=int)
+    parser.add_argument("--poll-interval", default=0.1, type=float)
+    arguments = parser.parse_args(argv)
+
+    async def execute() -> dict:
+        workload = load_forecast_binding(
+            arguments.profile, Path(arguments.bindings_root).expanduser()
+        )
+        client = await DbusForecastClient.connect()
+        try:
+            return await TrustedForecastRunner(
+                workload,
+                TelemetryRecorder(Path(arguments.records_root).expanduser()),
+                client,
+                attempts=arguments.attempts,
+                poll_interval=arguments.poll_interval,
+            ).run()
+        finally:
+            client.close()
+
+    try:
+        output = asyncio.run(execute())
+    except (ForecastRunError, OSError, ValueError) as error:
+        print(f"forecast failed: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(output, indent=2, allow_nan=False))
     return 0
 
 
