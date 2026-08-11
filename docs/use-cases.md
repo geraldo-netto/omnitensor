@@ -71,6 +71,33 @@ binding, consumer, signing, dataset, and named-device acceptance blockers.
 `visual-library` ships a runnable classifier. Neither path satisfies or
 weakens these low-light gates.
 
+### Configure the low-light folders safely
+
+Folder configuration is available independently of the still-blocked model and
+image pipeline. Create two separate folders, then persist their canonical paths:
+
+```bash
+mkdir -p "$HOME/Pictures/Low Light Input" "$HOME/Pictures/Low Light Output"
+omnitensor-configure-low-light \
+  --input-folder "$HOME/Pictures/Low Light Input" \
+  --output-folder "$HOME/Pictures/Low Light Output"
+```
+
+Both folders must already exist. The input must be readable, the output must be
+writable, and the two roots must be disjoint: they cannot be equal or nested in
+either direction. This stronger rule prevents a future watcher from ingesting
+its own results. The versioned configuration is stored under
+`~/.config/omnitensor/workload-settings/` by default; `--settings-root` selects
+another user-owned store.
+
+The delivery boundary creates a new, fully written output atomically in the
+output folder. It refuses an existing filename, including a symlink, and never
+renames, overwrites, or deletes the source image. Only its own unpublished
+temporary file is cleaned after a failure. The base OmniTensor installation is
+sufficient for configuration; image/model dependencies remain subject to the
+acceptance gates above. This command configures the workspace—it does not claim
+that the currently missing low-light model and pipeline can process images.
+
 ## Catalog locations and extension
 
 Built-ins live under `workloads/<id>/manifest.json` in a source checkout and

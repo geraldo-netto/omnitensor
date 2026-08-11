@@ -27,10 +27,12 @@
   "defaults": {"enabled": false, "weight": 2},
   "pipeline": {
     "hostResponsibilities": [
+      "Read images only from the configured input folder without modifying originals",
       "Decode and validate bounded image inputs",
       "Resize, normalize, and quantize the model tensor",
       "Apply the predicted tonal curve to the full-resolution image",
-      "Denoise, color-manage, encode, display, and route results"
+      "Denoise, color-manage, encode, display, and route results",
+      "Publish new files without overwrite only in a disjoint configured output folder"
     ]
   },
   "acceptance": [
