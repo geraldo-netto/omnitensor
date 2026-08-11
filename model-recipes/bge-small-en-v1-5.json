@@ -1,0 +1,108 @@
+{
+  "recipeVersion": 1,
+  "id": "bge-small-en-v1-5",
+  "version": "1.0.0",
+  "family": "embedding",
+  "profileIds": ["document-intelligence"],
+  "sourceFormat": "onnx",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "filename": "model.onnx",
+      "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+      "sizeBytes": 133093490
+    },
+    {
+      "role": "tokenizer",
+      "uri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/tokenizer.json",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "filename": "tokenizer.json",
+      "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+      "sizeBytes": 711396
+    },
+    {
+      "role": "config",
+      "uri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/config.json",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "filename": "config.json",
+      "sha256": "094f8e891b932f2000c92cfc663bac4c62069f5d8af5b5278c4306aef3084750",
+      "sizeBytes": 743
+    }
+  ],
+  "license": {
+    "spdx": "MIT",
+    "termsUri": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "Beijing Academy of Artificial Intelligence, BGE-small-en-v1.5 model card and weights, MIT"
+  },
+  "tensorContract": {
+    "inputs": [
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"}
+    ]
+  },
+  "outputContract": {"kind": "embedding"},
+  "preprocessing": {
+    "kind": "text",
+    "version": 1,
+    "description": "UTF-8 extracted text; use the pinned tokenizer, right padding and truncation to 128 tokens. Inputs are input_ids, attention_mask, token_type_ids in that order. Documents are unprefixed; retrieval queries use the model-card search instruction. No document bytes leave the producer.",
+    "artifacts": ["tokenizer", "config"]
+  },
+  "producer": {
+    "kind": "sentence-embedding",
+    "version": 1,
+    "inputNames": ["input_ids", "attention_mask", "token_type_ids"],
+    "sourceOutputName": "last_hidden_state",
+    "sourceOutputShape": [1, 128, 384],
+    "outputShape": [1, 384],
+    "postprocessing": "cls-token-l2",
+    "description": "Specialize the dynamic ONNX graph to sequence length 128, select the first-token [CLS] state and L2-normalize it in the exported graph, as required by the pinned model card. Native variants must preserve this single embedding output."
+  },
+  "evaluation": [
+    {
+      "metric": "embedding-cosine-parity",
+      "comparator": "at-least",
+      "target": 0.999,
+      "unit": "cosine-similarity",
+      "description": "Minimum native-versus-portable cosine similarity on frozen English query and document vectors."
+    },
+    {
+      "metric": "retrieval-top-10-overlap",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Minimum overlap with portable-source top-10 results on the privacy-reviewed in-domain holdout."
+    },
+    {
+      "metric": "nonfinite-output-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No NaN or infinite embedding component is accepted."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs the fixed pooling graph exported as representative-calibrated fully-int8 TFLite, full Edge TPU mapping, semantic parity and Coral execution evidence."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and NPU semantic/hardware parity have not been produced."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and GPU semantic/hardware parity have not been produced."
+    }
+  }
+}

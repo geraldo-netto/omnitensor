@@ -90,6 +90,7 @@
         }
       }
     },
+    "producer": {"$ref": "#/$defs/producer"},
     "evaluation": {
       "type": "array",
       "minItems": 1,
@@ -184,6 +185,66 @@
         "unit": {"type": "string", "minLength": 1, "maxLength": 40},
         "description": {"type": "string", "minLength": 1, "maxLength": 240}
       }
+    },
+    "producer": {
+      "description": "The deterministic graph boundary that turns the pinned source into the contract compiled for each target. A recipe is not deployable until this boundary and its evaluation gates pass.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "inputNames",
+        "sourceOutputName",
+        "sourceOutputShape",
+        "outputShape",
+        "postprocessing",
+        "description"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "identity",
+            "sentence-embedding",
+            "clip-image-embedding"
+          ]
+        },
+        "version": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "inputNames": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "sourceOutputName": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sourceOutputShape": {"$ref": "#/$defs/shape"},
+        "outputShape": {"$ref": "#/$defs/shape"},
+        "postprocessing": {
+          "enum": [
+            "identity",
+            "attention-mask-mean-pool-l2",
+            "cls-token-l2",
+            "l2-normalize"
+          ]
+        },
+        "description": {"type": "string", "minLength": 1, "maxLength": 500}
+      }
+    },
+    "shape": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": {"type": "integer", "minimum": 1, "maximum": 65536}
     },
     "target": {
       "type": "object",

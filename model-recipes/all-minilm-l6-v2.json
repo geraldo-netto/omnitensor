@@ -1,0 +1,108 @@
+{
+  "recipeVersion": 1,
+  "id": "all-minilm-l6-v2",
+  "version": "1.0.0",
+  "family": "embedding",
+  "profileIds": ["document-intelligence"],
+  "sourceFormat": "onnx",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/onnx/model.onnx",
+      "revision": "5641a7880f40ebf4035d05e60c5f9b7a9c272c84",
+      "filename": "model.onnx",
+      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+      "sizeBytes": 90405214
+    },
+    {
+      "role": "tokenizer",
+      "uri": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/tokenizer.json",
+      "revision": "5641a7880f40ebf4035d05e60c5f9b7a9c272c84",
+      "filename": "tokenizer.json",
+      "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037",
+      "sizeBytes": 466247
+    },
+    {
+      "role": "config",
+      "uri": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/config.json",
+      "revision": "5641a7880f40ebf4035d05e60c5f9b7a9c272c84",
+      "filename": "config.json",
+      "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41",
+      "sizeBytes": 612
+    }
+  ],
+  "license": {
+    "spdx": "Apache-2.0",
+    "termsUri": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "Sentence-Transformers authors, all-MiniLM-L6-v2 model card and weights, Apache-2.0"
+  },
+  "tensorContract": {
+    "inputs": [
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "int64", "layout": "NC"}
+    ]
+  },
+  "outputContract": {"kind": "embedding"},
+  "preprocessing": {
+    "kind": "text",
+    "version": 1,
+    "description": "UTF-8 extracted text; use the pinned tokenizer, right padding and truncation to 128 tokens. Inputs are input_ids, attention_mask, token_type_ids in that order. Text is unprefixed and content remains local.",
+    "artifacts": ["tokenizer", "config"]
+  },
+  "producer": {
+    "kind": "sentence-embedding",
+    "version": 1,
+    "inputNames": ["input_ids", "attention_mask", "token_type_ids"],
+    "sourceOutputName": "last_hidden_state",
+    "sourceOutputShape": [1, 128, 384],
+    "outputShape": [1, 384],
+    "postprocessing": "attention-mask-mean-pool-l2",
+    "description": "Specialize the dynamic ONNX graph to sequence length 128, mask padded token states, mean-pool valid states and L2-normalize in the exported graph. Native variants must preserve this single embedding output."
+  },
+  "evaluation": [
+    {
+      "metric": "embedding-cosine-parity",
+      "comparator": "at-least",
+      "target": 0.999,
+      "unit": "cosine-similarity",
+      "description": "Minimum native-versus-portable cosine similarity on frozen English sentence vectors."
+    },
+    {
+      "metric": "retrieval-top-10-overlap",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Minimum overlap with portable-source top-10 results on the privacy-reviewed in-domain holdout."
+    },
+    {
+      "metric": "nonfinite-output-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No NaN or infinite embedding component is accepted."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs the fixed pooling graph exported as representative-calibrated fully-int8 TFLite, full Edge TPU mapping, semantic parity and Coral execution evidence."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and NPU semantic/hardware parity have not been produced."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "The pinned ONNX source is portable, but the fixed pooling wrapper and GPU semantic/hardware parity have not been produced."
+    }
+  }
+}

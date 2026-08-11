@@ -70,6 +70,7 @@ omnitensor-train-model = "omnitensor.training.cli:train_main"
 omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
 omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
 omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
+omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
 omnitensor-grant = "omnitensor.consent:main"
@@ -93,6 +94,7 @@ also_copy = [
     "docs/",
     "examples/omnitensor-plugin-template/",
     "helpers/bpf/",
+    "model-recipes/",
     "README.md",
 ]
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import tempfile
 import urllib.error
@@ -28,6 +29,8 @@ MAX_TOTAL_SOURCE_BYTES = 4 * 1024 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 RECEIPT_FILENAME = "source-receipt.json"
+MAX_BUNDLED_RECIPES = 128
+_RECIPE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class ModelRecipeError(ValueError):
@@ -85,6 +88,7 @@ class ModelRecipe:
     tensor_contract: dict
     output_contract: dict
     preprocessing: dict | None
+    producer: dict | None
     evaluation: tuple[dict, ...]
     targets: dict[str, TargetClaim]
     document: dict
@@ -205,11 +209,58 @@ def load_model_recipe(path: Path | str) -> ModelRecipe:
         document["tensorContract"],
         document["outputContract"],
         document.get("preprocessing"),
+        document.get("producer"),
         tuple(document["evaluation"]),
         targets,
         document,
         hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
+
+
+def bundled_model_recipe_root() -> Path:
+    """Return the source-checkout or installed-wheel recipe catalog."""
+    package_root = Path(__file__).resolve().parents[1]
+    for candidate in (package_root / "model-recipes", package_root.parents[1] / "model-recipes"):
+        if candidate.is_dir():
+            return candidate
+    raise ModelRecipeError("recipe-catalog-missing", "bundled model recipe catalog is absent")
+
+
+def load_bundled_model_recipes() -> tuple[ModelRecipe, ...]:
+    """Load the complete bounded catalog and reject ambiguous package contents."""
+    root = bundled_model_recipe_root()
+    paths = sorted(root.glob("*.json"))
+    if not paths:
+        raise ModelRecipeError("recipe-catalog-invalid", "bundled model recipe catalog is empty")
+    if len(paths) > MAX_BUNDLED_RECIPES:
+        raise ModelRecipeError(
+            "recipe-catalog-invalid", "bundled model recipe catalog is too large"
+        )
+    recipes: list[ModelRecipe] = []
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise ModelRecipeError("recipe-catalog-invalid", f"unsafe recipe entry: {path.name}")
+        recipe = load_model_recipe(path)
+        if path.name != f"{recipe.id}.json":
+            raise ModelRecipeError(
+                "recipe-catalog-invalid", f"recipe filename does not match id: {path.name}"
+            )
+        recipes.append(recipe)
+    return tuple(recipes)
+
+
+def resolve_model_recipe_path(reference: str | Path) -> Path:
+    """Resolve an explicit path or one traversal-safe bundled recipe id."""
+    path = Path(reference).expanduser()
+    if path.is_file():
+        return path
+    text = str(reference)
+    if not _RECIPE_ID.fullmatch(text):
+        return path
+    bundled = bundled_model_recipe_root() / f"{text}.json"
+    if not bundled.is_file() or bundled.is_symlink():
+        raise ModelRecipeError("recipe-not-found", f"no bundled model recipe is named {text}")
+    return bundled
 
 
 def fetch_model_sources(
@@ -272,6 +323,7 @@ def _validate_recipe_semantics(document: dict) -> None:
     _validate_https_uri(document["license"]["termsUri"], "license terms URI")
     _validate_preprocessing_sources(document, roles)
     _validate_contracts(document)
+    _validate_producer(document)
     if not _finite_json(document["evaluation"]):
         raise ModelRecipeError("recipe-invalid", "evaluation metrics must be finite")
     tpu = document["targets"]["tpu"]
@@ -321,6 +373,83 @@ def _validate_contracts(document: dict) -> None:
             raise ModelRecipeError(
                 "recipe-invalid", f"model contract is invalid at {field}: {detail}"
             )
+
+
+def _validate_producer(document: dict) -> None:
+    producer = document.get("producer")
+    if producer is None:
+        return
+    inputs = document["tensorContract"]["inputs"]
+    if len(producer["inputNames"]) != len(inputs):
+        raise ModelRecipeError(
+            "recipe-invalid", "producer inputNames must match tensorContract input order"
+        )
+    kind = producer["kind"]
+    if kind != "identity" and document["outputContract"]["kind"] != "embedding":
+        raise ModelRecipeError(
+            "recipe-invalid", "embedding producers require an embedding output contract"
+        )
+    if producer["outputShape"][0] != 1:
+        raise ModelRecipeError("recipe-invalid", "producer outputShape must have batch size 1")
+    if kind == "sentence-embedding":
+        _validate_sentence_embedding_producer(document, producer, inputs)
+    elif kind == "clip-image-embedding":
+        _validate_clip_image_producer(document, producer, inputs)
+    elif producer["sourceOutputShape"] != producer["outputShape"]:
+        raise ModelRecipeError(
+            "recipe-invalid", "identity producer cannot change the source output shape"
+        )
+
+
+def _validate_sentence_embedding_producer(document: dict, producer: dict, inputs: list) -> None:
+    expected_names = ["input_ids", "attention_mask", "token_type_ids"]
+    if document["sourceFormat"] != "onnx" or producer["inputNames"] != expected_names:
+        raise ModelRecipeError(
+            "recipe-invalid", "sentence embedding source must be ONNX with canonical input order"
+        )
+    if producer["sourceOutputName"] != "last_hidden_state":
+        raise ModelRecipeError(
+            "recipe-invalid", "sentence embedding source output must be last_hidden_state"
+        )
+    shapes = [item["shape"] for item in inputs]
+    if len(inputs) != 3 or len({tuple(shape) for shape in shapes}) != 1:
+        raise ModelRecipeError(
+            "recipe-invalid", "sentence embedding inputs must share one fixed token shape"
+        )
+    if any(item["dtype"] != "int64" for item in inputs):
+        raise ModelRecipeError("recipe-invalid", "sentence embedding inputs must be int64")
+    batch, sequence = shapes[0]
+    source_shape = producer["sourceOutputShape"]
+    output_shape = producer["outputShape"]
+    if (
+        producer["postprocessing"]
+        not in {"attention-mask-mean-pool-l2", "cls-token-l2"}
+        or source_shape[:2] != [batch, sequence]
+        or len(source_shape) != 3
+        or output_shape != [batch, source_shape[2]]
+    ):
+        raise ModelRecipeError(
+            "recipe-invalid", "sentence embedding pooling shapes or postprocessing disagree"
+        )
+
+
+def _validate_clip_image_producer(document: dict, producer: dict, inputs: list) -> None:
+    if document["sourceFormat"] != "torchscript" or producer["inputNames"] != ["image"]:
+        raise ModelRecipeError(
+            "recipe-invalid", "CLIP image embedding source must be TorchScript with image input"
+        )
+    if len(inputs) != 1 or inputs[0]["shape"] != [1, 3, 224, 224]:
+        raise ModelRecipeError(
+            "recipe-invalid", "CLIP image embedding input must be fixed NCHW 224x224"
+        )
+    if (
+        producer["sourceOutputName"] != "encode_image"
+        or producer["postprocessing"] != "l2-normalize"
+        or producer["sourceOutputShape"] != producer["outputShape"]
+    ):
+        raise ModelRecipeError(
+            "recipe-invalid", "CLIP image output must preserve and L2-normalize encode_image"
+        )
 
 
 def _validate_https_uri(uri: str, label: str) -> None:

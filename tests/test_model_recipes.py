@@ -13,15 +13,18 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from omnitensor.training.recipe_cli import fetch_main
+from omnitensor.training.recipe_cli import fetch_main, list_main
 from omnitensor.training.recipes import (
     HttpsSourceTransport,
     ModelRecipeError,
     ModelSource,
     _source_file_matches,
     _validate_https_uri,
+    bundled_model_recipe_root,
     fetch_model_sources,
+    load_bundled_model_recipes,
     load_model_recipe,
+    resolve_model_recipe_path,
 )
 
 
@@ -98,6 +101,11 @@ def write_recipe(tmp_path: Path, document: dict) -> Path:
     return path
 
 
+def bundled_document(identifier: str) -> dict:
+    recipes = {recipe.id: recipe.document for recipe in load_bundled_model_recipes()}
+    return copy.deepcopy(recipes[identifier])
+
+
 class FakeTransport:
     def __init__(self, payloads: dict[str, tuple[bytes, ...]]):
         self.payloads = payloads
@@ -122,6 +130,276 @@ def test_recipe_loads_exact_source_license_contract_and_target_claims(tmp_path):
     assert recipe.targets["tpu"].status == "planned"
     assert recipe.targets["npu"].compiler == "ovc"
     assert len(recipe.document_sha256) == 64
+
+
+def test_bundled_embedding_catalog_pins_sources_semantics_and_target_truth():
+    recipes = load_bundled_model_recipes()
+
+    assert tuple(recipe.id for recipe in recipes) == (
+        "all-minilm-l6-v2",
+        "bge-small-en-v1-5",
+        "clip-vit-b-32-image",
+    )
+    assert {recipe.id: recipe.model_source.sha256 for recipe in recipes} == {
+        "all-minilm-l6-v2": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+        "bge-small-en-v1-5": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+        "clip-vit-b-32-image": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
+    }
+    for recipe in recipes:
+        assert recipe.producer is not None
+        assert recipe.output_contract == {"kind": "embedding"}
+        assert recipe.producer["outputShape"][0] == 1
+        assert set(recipe.targets) == {"tpu", "npu", "gpu"}
+        assert {claim.status for claim in recipe.targets.values()} == {"planned"}
+        assert not any(claim.fully_quantized for claim in recipe.targets.values())
+        assert all(source.revision in source.uri.split("/") for source in recipe.sources)
+        assert len({source.role for source in recipe.sources}) == len(recipe.sources)
+        assert all(len(source.sha256) == 64 for source in recipe.sources)
+        assert all(source.size_bytes > 0 for source in recipe.sources)
+
+    sentence_recipes = recipes[:2]
+    postprocessing = {
+        "all-minilm-l6-v2": "attention-mask-mean-pool-l2",
+        "bge-small-en-v1-5": "cls-token-l2",
+    }
+    for recipe in sentence_recipes:
+        assert recipe.source_format == "onnx"
+        assert recipe.profile_ids == ("document-intelligence",)
+        assert recipe.producer == {
+            "kind": "sentence-embedding",
+            "version": 1,
+            "inputNames": ["input_ids", "attention_mask", "token_type_ids"],
+            "sourceOutputName": "last_hidden_state",
+            "sourceOutputShape": [1, 128, 384],
+            "outputShape": [1, 384],
+            "postprocessing": postprocessing[recipe.id],
+            "description": recipe.producer["description"],
+        }
+
+    clip = recipes[2]
+    assert clip.source_format == "torchscript"
+    assert clip.profile_ids == ("visual-library",)
+    image = clip.tensor_contract["inputs"][0]
+    assert image["shape"] == [1, 3, 224, 224]
+    assert image["preprocess"] == {
+        "channelOrder": "RGB",
+        "mean": [122.7709383, 116.7460125, 104.09373615],
+        "scale": [
+            0.01459842661924292,
+            0.015007768493717056,
+            0.014220065717024088,
+        ],
+        "resize": {"filter": "bicubic", "fit": "cover"},
+    }
+
+
+def test_bundled_recipe_reference_resolves_id_path_and_refuses_unknown(tmp_path):
+    bundled = resolve_model_recipe_path("bge-small-en-v1-5")
+    explicit = tmp_path / "custom.json"
+    explicit.touch()
+
+    assert bundled == bundled_model_recipe_root() / "bge-small-en-v1-5.json"
+    assert resolve_model_recipe_path(explicit) == explicit
+    assert resolve_model_recipe_path("nested/recipe.json") == Path("nested/recipe.json")
+    with pytest.raises(ModelRecipeError) as missing:
+        resolve_model_recipe_path("not-a-recipe")
+    assert missing.value.code == "recipe-not-found"
+    assert missing.value.detail == "no bundled model recipe is named not-a-recipe"
+
+
+def test_bundled_recipe_root_reports_missing_catalog(tmp_path, monkeypatch):
+    pretend_module = tmp_path / "site/omnitensor/training/recipes.py"
+    pretend_module.parent.mkdir(parents=True)
+    monkeypatch.setattr("omnitensor.training.recipes.__file__", str(pretend_module))
+
+    with pytest.raises(ModelRecipeError) as missing:
+        bundled_model_recipe_root()
+
+    assert missing.value.code == "recipe-catalog-missing"
+    assert missing.value.detail == "bundled model recipe catalog is absent"
+
+
+def test_bundled_recipe_root_prefers_installed_then_uses_source_layout(tmp_path, monkeypatch):
+    pretend_module = tmp_path / "site/omnitensor/training/recipes.py"
+    pretend_module.parent.mkdir(parents=True)
+    package_root = pretend_module.resolve().parents[1]
+    installed = package_root / "model-recipes"
+    source = package_root.parents[1] / "model-recipes"
+    installed.mkdir()
+    source.mkdir()
+    monkeypatch.setattr("omnitensor.training.recipes.__file__", str(pretend_module))
+
+    assert bundled_model_recipe_root() == installed
+
+    installed.rmdir()
+    assert bundled_model_recipe_root() == source
+
+
+def test_bundled_catalog_rejects_empty_oversize_symlink_and_misnamed_entry(
+    tmp_path, monkeypatch
+):
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    monkeypatch.setattr("omnitensor.training.recipes.bundled_model_recipe_root", lambda: catalog)
+
+    with pytest.raises(ModelRecipeError) as empty:
+        load_bundled_model_recipes()
+    assert empty.value.code == "recipe-catalog-invalid"
+    assert empty.value.detail == "bundled model recipe catalog is empty"
+
+    valid = Path(__file__).parents[1] / "model-recipes"
+    source = valid / "bge-small-en-v1-5.json"
+    link = catalog / "linked.json"
+    link.symlink_to(source)
+    with pytest.raises(ModelRecipeError) as unsafe:
+        load_bundled_model_recipes()
+    assert unsafe.value.code == "recipe-catalog-invalid"
+    assert unsafe.value.detail == "unsafe recipe entry: linked.json"
+
+    link.unlink()
+    wrong = catalog / "wrong.json"
+    wrong.write_bytes(source.read_bytes())
+    with pytest.raises(ModelRecipeError) as mismatched:
+        load_bundled_model_recipes()
+    assert mismatched.value.code == "recipe-catalog-invalid"
+    assert mismatched.value.detail == "recipe filename does not match id: wrong.json"
+
+    wrong.rename(catalog / "bge-small-en-v1-5.json")
+    monkeypatch.setattr("omnitensor.training.recipes.MAX_BUNDLED_RECIPES", 1)
+    assert [recipe.id for recipe in load_bundled_model_recipes()] == ["bge-small-en-v1-5"]
+
+    monkeypatch.setattr("omnitensor.training.recipes.MAX_BUNDLED_RECIPES", 0)
+    with pytest.raises(ModelRecipeError) as oversized:
+        load_bundled_model_recipes()
+    assert oversized.value.code == "recipe-catalog-invalid"
+    assert oversized.value.detail == "bundled model recipe catalog is too large"
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        (
+            lambda item: item["producer"].update(inputNames=["input_ids"]),
+            "producer inputNames must match tensorContract input order",
+        ),
+        (
+            lambda item: item.update(outputContract={"kind": "raw"}),
+            "embedding producers require an embedding output contract",
+        ),
+        (
+            lambda item: item["producer"].update(outputShape=[2, 384]),
+            "producer outputShape must have batch size 1",
+        ),
+        (
+            lambda item: item.update(sourceFormat="torchscript"),
+            "sentence embedding source must be ONNX with canonical input order",
+        ),
+        (
+            lambda item: item["producer"].update(
+                inputNames=["attention_mask", "input_ids", "token_type_ids"]
+            ),
+            "sentence embedding source must be ONNX with canonical input order",
+        ),
+        (
+            lambda item: item["producer"].update(sourceOutputName="pooler_output"),
+            "sentence embedding source output must be last_hidden_state",
+        ),
+        (
+            lambda item: item["tensorContract"]["inputs"][2].update(shape=[1, 64]),
+            "sentence embedding inputs must share one fixed token shape",
+        ),
+        (
+            lambda item: item["tensorContract"]["inputs"][1].update(dtype="int32"),
+            "sentence embedding inputs must be int64",
+        ),
+        (
+            lambda item: item["producer"].update(sourceOutputShape=[1, 64, 384]),
+            "sentence embedding pooling shapes or postprocessing disagree",
+        ),
+        (
+            lambda item: item["producer"].update(outputShape=[1, 768]),
+            "sentence embedding pooling shapes or postprocessing disagree",
+        ),
+        (
+            lambda item: item["producer"].update(postprocessing="identity"),
+            "sentence embedding pooling shapes or postprocessing disagree",
+        ),
+    ],
+)
+def test_sentence_embedding_producer_semantics_fail_closed(tmp_path, change, detail):
+    document = bundled_document("bge-small-en-v1-5")
+    change(document)
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        (
+            lambda item: item.update(sourceFormat="onnx"),
+            "CLIP image embedding source must be TorchScript with image input",
+        ),
+        (
+            lambda item: item["producer"].update(inputNames=["pixels"]),
+            "CLIP image embedding source must be TorchScript with image input",
+        ),
+        (
+            lambda item: item["tensorContract"]["inputs"][0].update(
+                shape=[1, 3, 256, 256]
+            ),
+            "CLIP image embedding input must be fixed NCHW 224x224",
+        ),
+        (
+            lambda item: item["producer"].update(sourceOutputName="forward"),
+            "CLIP image output must preserve and L2-normalize encode_image",
+        ),
+        (
+            lambda item: item["producer"].update(postprocessing="identity"),
+            "CLIP image output must preserve and L2-normalize encode_image",
+        ),
+        (
+            lambda item: item["producer"].update(outputShape=[1, 256]),
+            "CLIP image output must preserve and L2-normalize encode_image",
+        ),
+    ],
+)
+def test_clip_image_producer_semantics_fail_closed(tmp_path, change, detail):
+    document = bundled_document("clip-vit-b-32-image")
+    change(document)
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == detail
+
+
+def test_identity_producer_cannot_relabel_an_output_shape(tmp_path):
+    document = recipe_document()
+    document["producer"] = {
+        "kind": "identity",
+        "version": 1,
+        "inputNames": ["input"],
+        "sourceOutputName": "output",
+        "sourceOutputShape": [1, 384],
+        "outputShape": [1, 385],
+        "postprocessing": "identity",
+        "description": "Preserve the portable output without a semantic transform.",
+    }
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == "identity producer cannot change the source output shape"
+
+    document["producer"]["outputShape"] = [1, 384]
+    assert load_model_recipe(write_recipe(tmp_path, document)).producer == document["producer"]
 
 
 @pytest.mark.parametrize(
@@ -707,13 +985,70 @@ def test_fetch_cli_help_is_an_exact_operator_contract(capsys):
         "Fetch and verify a pinned portable model recipe outside the service\n"
         "\n"
         "positional arguments:\n"
-        "  recipe                path to a model-recipe JSON document\n"
+        "  recipe                bundled recipe id or path to a model-recipe JSON\n"
+        "                        document\n"
         "\n"
         "options:\n"
         "  -h, --help            show this help message and exit\n"
         "  --accept-license ACCEPT_LICENSE\n"
         "                        exact SPDX identifier shown in the reviewed recipe\n"
         "  --source-root SOURCE_ROOT\n"
+    )
+
+
+def test_list_cli_reports_exact_catalog_and_failure(monkeypatch, capsys):
+    assert list_main([]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed == [
+        {
+            "id": "all-minilm-l6-v2",
+            "version": "1.0.0",
+            "family": "embedding",
+            "profileIds": ["document-intelligence"],
+            "sourceFormat": "onnx",
+            "license": "Apache-2.0",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+        {
+            "id": "bge-small-en-v1-5",
+            "version": "1.0.0",
+            "family": "embedding",
+            "profileIds": ["document-intelligence"],
+            "sourceFormat": "onnx",
+            "license": "MIT",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+        {
+            "id": "clip-vit-b-32-image",
+            "version": "1.0.0",
+            "family": "embedding",
+            "profileIds": ["visual-library"],
+            "sourceFormat": "torchscript",
+            "license": "MIT",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+    ]
+
+    monkeypatch.setattr(
+        "omnitensor.training.recipe_cli.load_bundled_model_recipes",
+        lambda: (_ for _ in ()).throw(ModelRecipeError("catalog", "broken")),
+    )
+    assert list_main([]) == 1
+    assert capsys.readouterr().err == "model recipe catalog failed: catalog: broken\n"
+
+
+def test_list_cli_help_is_an_exact_operator_contract(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        list_main(["--help"])
+
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == (
+        "usage: omnitensor-list-model-recipes [-h]\n"
+        "\n"
+        "List reviewed portable source recipes and honest target status\n"
+        "\n"
+        "options:\n"
+        "  -h, --help  show this help message and exit\n"
     )
 
 

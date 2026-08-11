@@ -1,0 +1,100 @@
+{
+  "recipeVersion": 1,
+  "id": "clip-vit-b-32-image",
+  "version": "1.0.0",
+  "family": "embedding",
+  "profileIds": ["visual-library"],
+  "sourceFormat": "torchscript",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt",
+      "revision": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
+      "filename": "ViT-B-32.pt",
+      "sha256": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
+      "sizeBytes": 353976522
+    }
+  ],
+  "license": {
+    "spdx": "MIT",
+    "termsUri": "https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "OpenAI CLIP authors, ViT-B/32 checkpoint, MIT"
+  },
+  "tensorContract": {
+    "inputs": [
+      {
+        "shape": [1, 3, 224, 224],
+        "dtype": "float32",
+        "layout": "NCHW",
+        "preprocess": {
+          "channelOrder": "RGB",
+          "mean": [122.7709383, 116.7460125, 104.09373615],
+          "scale": [0.01459842661924292, 0.015007768493717056, 0.014220065717024088],
+          "resize": {"filter": "bicubic", "fit": "cover"}
+        }
+      }
+    ]
+  },
+  "outputContract": {"kind": "embedding"},
+  "preprocessing": {
+    "kind": "image",
+    "version": 1,
+    "description": "Decode to RGB, bicubic-resize the shorter edge to 224, center-crop 224x224, then apply (raw_pixel - mean) * scale per channel using the tensor contract constants. Metadata is not an input.",
+    "artifacts": []
+  },
+  "producer": {
+    "kind": "clip-image-embedding",
+    "version": 1,
+    "inputNames": ["image"],
+    "sourceOutputName": "encode_image",
+    "sourceOutputShape": [1, 512],
+    "outputShape": [1, 512],
+    "postprocessing": "l2-normalize",
+    "description": "Export only the ViT-B/32 image encoder at fixed batch and resolution, then L2-normalize its 512-component output inside the graph. Text prompts and zero-shot label policy remain outside the model artifact."
+  },
+  "evaluation": [
+    {
+      "metric": "embedding-cosine-parity",
+      "comparator": "at-least",
+      "target": 0.999,
+      "unit": "cosine-similarity",
+      "description": "Minimum native-versus-portable cosine similarity on the frozen image holdout."
+    },
+    {
+      "metric": "zero-shot-top-1-agreement",
+      "comparator": "at-least",
+      "target": 0.99,
+      "unit": "ratio",
+      "description": "Minimum native-versus-portable agreement for the same frozen, reviewed prompt set."
+    },
+    {
+      "metric": "nonfinite-output-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No NaN or infinite embedding component is accepted."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs image-encoder export, representative fully-int8 calibration, full Edge TPU mapping, semantic parity and Coral execution evidence."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "Needs a fixed image-only ONNX export plus semantic parity and execution evidence on the selected OpenVINO NPU."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "Needs a fixed image-only TorchScript export plus semantic parity and execution evidence through ncnn/Vulkan."
+    }
+  }
+}
