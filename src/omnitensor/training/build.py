@@ -516,7 +516,7 @@ def _require_check_classes(
 def _normalization(
     examples: Sequence[BuildExample],
 ) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    width = len(BUILD_FEATURES)
+    width = len(examples[0].features)
     means = tuple(
         sum(item.features[index] for item in examples) / len(examples)
         for index in range(width)
@@ -544,7 +544,7 @@ def _fit_output(
     positives = sum(labels)
     positive_weight = (len(labels) - positives) / positives
     total_weight = 2 * (len(labels) - positives)
-    weights = [0.0] * len(BUILD_FEATURES)
+    weights = [0.0] * len(means)
     intercept = 0.0
     for step in range(240):
         gradients = [0.0] * len(weights)
@@ -573,7 +573,7 @@ def _fit_output(
 def _normalized_features(
     features: Sequence[float], means: Sequence[float], scales: Sequence[float]
 ) -> tuple[float, ...]:
-    if len(features) != len(BUILD_FEATURES):
+    if len(features) != len(means) or len(scales) != len(means):
         raise TrainingError("features-invalid", "build feature width disagrees")
     values = []
     for value, mean, scale in zip(features, means, scales, strict=True):

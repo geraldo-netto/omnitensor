@@ -191,6 +191,52 @@ Edge TPU mapping, parity, and Coral evidence. All lanes remain `uncompiled`
 until those target-specific gates pass; local history quality does not prove
 portability or usefulness on another repository.
 
+## Hardware-health portable-source recipe
+
+`labelled-sensor-window-v1` fits a private anomaly-risk source from reviewed
+outputs of the bounded `hwmon-edac-power-service` collector. An authorized
+integration must export one closed JSON object per line in increasing time
+order:
+
+```json
+{"label":"baseline","labelSource":"observed","snapshot":{"schemaVersion":1,"source":"hwmon-edac-power-service","sourceHealth":"ready","observedAtMs":1000,"items":[],"churn":{"added":[],"removed":[],"changed":[]},"truncatedItems":0}}
+```
+
+The example shows the wrapper, not a trainable empty sensor set. Every real
+line must contain the exact same complete collector sensor set. `label` is
+`baseline` or `fault`; `labelSource` is `observed` or `injected`, and only a
+fault may be marked injected. Review label provenance before training. The
+tool does not create faults, infer labels, or automatically read privileged
+host telemetry.
+
+Assign stable collector identities to redacted semantic roles on the command
+line. Identities are used during intake and omitted from the report:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-train-hardware-model \
+  --history /path/to/reviewed-hardware-snapshots.jsonl \
+  --sensor cpu-temperature=cpu-package-0 \
+  --sensor ecc=dimm-0 \
+  --confirm-labels I-confirm-hardware-labels-are-reviewed
+```
+
+Intake is bounded, rejects truncated/unhealthy snapshots, sensor-set or
+kind/unit drift, duplicate/decreasing timestamps, unknown fields, and
+unreviewed labels. Per role it encodes the log-scaled numeric value plus exact
+degraded, critical, and missing indicators over an oldest-first window. The
+chronological holdout must meet configured ROC-AUC, fault recall, baseline
+false-positive, and class-count gates. Output is `model.onnx` plus
+`hardware-training-report.json`; neither contains sensor identities or labels.
+
+The portable graph uses common arithmetic, `MatMul`, and `Sigmoid` with one
+bounded float32 input and one risk output. The report defines bounded role-only
+evidence, explicitly gives the model no safety actions, and leaves firmware,
+shutdown, repair, and policy decisions deterministic. GPU and NPU production
+still require native compilation, numerical parity, and device acceptance.
+TPU production additionally requires representative int8 calibration,
+fully-int8 TFLite export, complete Edge TPU mapping, and Coral evidence. Until
+those independent gates pass, every target is reported as `uncompiled`.
+
 ## 1. Record bounded numeric history
 
 Samples contain only finite numbers. Paths, titles, document text, device

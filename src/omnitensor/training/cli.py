@@ -22,6 +22,12 @@ from .build import (
 )
 from .contracts import TrainingError, TrainingSpec
 from .forecast import ForecastTrainer
+from .hardware import (
+    HARDWARE_LABEL_CONFIRMATION,
+    HardwareHealthTrainer,
+    load_hardware_history,
+    parse_sensor_bindings,
+)
 from .installation import available_targets, install_training
 from .network import (
     NORMAL_ONLY_CONFIRMATION,
@@ -49,6 +55,7 @@ DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
 DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
 DEFAULT_BUILD_OUTPUT = "~/.local/share/omnitensor/training/build-advisor/local"
+DEFAULT_HARDWARE_OUTPUT = "~/.local/share/omnitensor/training/hardware-health/local"
 
 
 def record_main(argv: list[str] | None = None) -> int:
@@ -310,6 +317,58 @@ def build_train_main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "report": str(output / "build-training-report.json"),
+                "portableModel": str(output / "model.onnx"),
+                "samples": report["split"],
+                "quality": report["quality"],
+                "next": "compile and qualify this source separately for each target lane",
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def hardware_train_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-train-hardware-model",
+        description="Fit a portable hardware-health risk source from reviewed labels",
+    )
+    parser.add_argument("--history", required=True)
+    parser.add_argument("--sensor", required=True, action="append", help="ROLE=STABLE_ID")
+    parser.add_argument("--output-dir", default=DEFAULT_HARDWARE_OUTPUT)
+    parser.add_argument(
+        "--confirm-labels",
+        required=True,
+        help=f"after reviewing baseline/fault labels, pass exactly {HARDWARE_LABEL_CONFIRMATION}",
+    )
+    parser.add_argument("--window", default=8, type=int)
+    parser.add_argument("--minimum-class-examples", default=8, type=int)
+    parser.add_argument("--minimum-auc", default=0.6, type=float)
+    parser.add_argument("--minimum-recall", default=0.5, type=float)
+    parser.add_argument("--maximum-false-positive-rate", default=0.1, type=float)
+    arguments = parser.parse_args(argv)
+    output = Path(arguments.output_dir).expanduser()
+    try:
+        bindings = parse_sensor_bindings(arguments.sensor)
+        dataset = load_hardware_history(
+            Path(arguments.history).expanduser(),
+            bindings=bindings,
+            confirm_labels=arguments.confirm_labels,
+        )
+        report = HardwareHealthTrainer(
+            window=arguments.window,
+            minimum_class_examples=arguments.minimum_class_examples,
+            minimum_auc=arguments.minimum_auc,
+            minimum_recall=arguments.minimum_recall,
+            maximum_false_positive_rate=arguments.maximum_false_positive_rate,
+        ).train(dataset, output)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"hardware training failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "report": str(output / "hardware-training-report.json"),
                 "portableModel": str(output / "model.onnx"),
                 "samples": report["split"],
                 "quality": report["quality"],
