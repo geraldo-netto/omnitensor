@@ -148,6 +148,49 @@ fully-int8 TFLite export with representative aggregate-feature calibration,
 evidence. Until a lane passes its compiler and device gates, the report marks
 it `uncompiled`; runtime never substitutes CPU execution.
 
+## Build risk and optional-check ranking portable-source recipe
+
+`metadata-risk-ranking-v1` fits only from an operator-approved JSONL export of
+bounded build metadata. Each line is a closed object with `schemaVersion: 1`,
+`buildId`, `outcome`, `durationMs`, `startedAtMs`, relative `changedPaths`,
+`executedChecks`, and `failedChecks`. It accepts no logs, source contents,
+absolute/traversing paths, duplicate fields, or failed checks that were not
+executed. Review the export and its retention policy before running:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-train-build-model \
+  --history /path/to/approved-build-history.jsonl \
+  --mandatory-check security \
+  --optional-check lint \
+  --optional-check integration \
+  --accept-provenance I-confirm-build-metadata-is-approved
+```
+
+Every completed build must contain every declared mandatory check. Unknown
+executed checks are refused instead of silently omitted from the catalog.
+Cancelled and unknown outcomes are counted but not labelled. Feature extraction
+uses only fixed path-shape/category counts and fractions; build IDs and path
+strings exist transiently during intake but are never persisted in the model or
+report.
+
+The chronological fit produces one build-failure probability and one risk
+score per explicit optional check. It gates held-out build-risk ROC-AUC and
+mean reciprocal rank for actually failed optional checks. Every optional check
+must have enough executed pass and fail examples in the training split. The
+model has no output for mandatory checks: their exact catalog is deterministic
+report metadata with `mandatoryOmissionAllowed: false`. A future consumer may
+use scores to reorder optional checks, but must always include mandatory checks
+and must not treat a score as permission to skip policy.
+
+Output is `model.onnx` plus `build-training-report.json`, with an exact
+`[1,12]` float32 input contract and `[1,1+optional-check-count]` result
+contract. The common arithmetic/`MatMul`/`Sigmoid` graph is a portable source
+for Vulkan/ncnn GPU and OpenVINO NPU compilation. TPU production separately
+requires representative metadata calibration, fully-int8 TFLite export, full
+Edge TPU mapping, parity, and Coral evidence. All lanes remain `uncompiled`
+until those target-specific gates pass; local history quality does not prove
+portability or usefulness on another repository.
+
 ## 1. Record bounded numeric history
 
 Samples contain only finite numbers. Paths, titles, document text, device

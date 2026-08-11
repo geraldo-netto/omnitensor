@@ -15,6 +15,11 @@ from ..plugins.artifact_installation import ArtifactInstallationError
 from ..plugins.forecasting import ForecastError
 from ..plugins.recorder import RecorderError, TelemetryRecorder
 from ..preparation import PreparationError
+from .build import (
+    BUILD_PROVENANCE_CONFIRMATION,
+    BuildAdvisorTrainer,
+    load_build_history,
+)
 from .contracts import TrainingError, TrainingSpec
 from .forecast import ForecastTrainer
 from .installation import available_targets, install_training
@@ -43,6 +48,7 @@ DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
 DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
+DEFAULT_BUILD_OUTPUT = "~/.local/share/omnitensor/training/build-advisor/local"
 
 
 def record_main(argv: list[str] | None = None) -> int:
@@ -253,6 +259,57 @@ def network_train_main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "report": str(output / "network-training-report.json"),
+                "portableModel": str(output / "model.onnx"),
+                "samples": report["split"],
+                "quality": report["quality"],
+                "next": "compile and qualify this source separately for each target lane",
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def build_train_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-train-build-model",
+        description="Fit portable build-risk and optional-check ranking scores",
+    )
+    parser.add_argument("--history", required=True)
+    parser.add_argument("--output-dir", default=DEFAULT_BUILD_OUTPUT)
+    parser.add_argument("--mandatory-check", required=True, action="append")
+    parser.add_argument("--optional-check", required=True, action="append")
+    parser.add_argument(
+        "--accept-provenance",
+        required=True,
+        help=f"after auditing the metadata export, pass exactly {BUILD_PROVENANCE_CONFIRMATION}",
+    )
+    parser.add_argument("--minimum-class-examples", default=8, type=int)
+    parser.add_argument("--minimum-check-class-examples", default=4, type=int)
+    parser.add_argument("--minimum-risk-auc", default=0.55, type=float)
+    parser.add_argument("--minimum-ranking-mrr", default=0.25, type=float)
+    arguments = parser.parse_args(argv)
+    output = Path(arguments.output_dir).expanduser()
+    try:
+        dataset = load_build_history(
+            Path(arguments.history).expanduser(),
+            accept_provenance=arguments.accept_provenance,
+        )
+        report = BuildAdvisorTrainer(
+            mandatory_checks=arguments.mandatory_check,
+            optional_checks=arguments.optional_check,
+            minimum_class_examples=arguments.minimum_class_examples,
+            minimum_check_class_examples=arguments.minimum_check_class_examples,
+            minimum_risk_auc=arguments.minimum_risk_auc,
+            minimum_ranking_mrr=arguments.minimum_ranking_mrr,
+        ).train(dataset, output)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"build training failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "report": str(output / "build-training-report.json"),
                 "portableModel": str(output / "model.onnx"),
                 "samples": report["split"],
                 "quality": report["quality"],
