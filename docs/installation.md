@@ -109,6 +109,8 @@ deliberately rather than taking the default.
 | `[gpu-onnx-rocm]` | `onnxruntime-rocm` | GPU inference on AMD via ROCm, instead of Vulkan |
 | `[npu]` | `openvino` | Intel NPU |
 | `[tpu]` | `tflite-runtime` | Coral Edge TPU |
+| `[convert]` | `pnnx` | packaging only: ONNX/TorchScript to ncnn |
+| `[convert-npu]` | `openvino`/`ovc` | packaging only: ONNX to OpenVINO IR |
 | `[dev]` | pytest, ruff, hypothesis, mutmut | tests and linting only |
 
 Do not install plain `onnxruntime`. That wheel ships `CPUExecutionProvider`
@@ -162,6 +164,43 @@ CO-RE cannot be built without it.
 sudo apt install bubblewrap mesa-vulkan-drivers        # runtime
 sudo apt install clang bpftool libbpf-dev              # eBPF helper build only
 ```
+
+### Producing accelerator artifacts
+
+Conversion and execution are separate claims. A producer host can build ncnn
+or OpenVINO files without owning the target accelerator; that proves only that
+the output was produced, parsed, digested, and installed. It does not prove
+inference correctness or target-hardware operation.
+
+| Lane | Output | Accepted source | Producer-host requirement | Status |
+| --- | --- | --- | --- | --- |
+| GPU | ncnn `.param` + `.bin` | ONNX `.onnx` or TorchScript `.pt` | a host where the `pnnx` binary from `[convert]` runs; no target GPU needed to convert | supported by `omnitensor-convert-model` |
+| NPU | OpenVINO IR `.xml` + `.bin` | ONNX `.onnx` | a host where `ovc` from `[convert-npu]` runs; no target NPU needed to convert | produced, parsed, digested, and installed in the automated smoke test; NPU execution still needs Intel NPU hardware |
+| TPU | compiled Edge TPU `.tflite` | fully-int8 TFLite `.tflite` | a host or container supported by Google's separately distributed `edgetpu_compiler` | not produced by OmniTensor; no pip extra or `ModelConverter` adapter exists |
+
+Keep converter toolchains outside the service environment. They prepare files
+for review and publication; the service installs only the runtime extra for
+the lane it will execute.
+
+```sh
+# GPU packaging environment
+python3 -m venv /tmp/omnitensor-gpu-converter
+/tmp/omnitensor-gpu-converter/bin/pip install '/path/to/omnitensor[convert]'
+/tmp/omnitensor-gpu-converter/bin/omnitensor-convert-model model.onnx \
+    --format ncnn --input-shape '[1,3,224,224]' --output-dir ./ncnn-artifact
+
+# NPU packaging environment
+python3 -m venv /tmp/omnitensor-npu-converter
+/tmp/omnitensor-npu-converter/bin/pip install '/path/to/omnitensor[convert-npu]'
+/tmp/omnitensor-npu-converter/bin/omnitensor-convert-model model.onnx \
+    --format openvino --input-shape '[1,3,224,224]' --output-dir ./openvino-artifact
+```
+
+Each command prints the exact `omnitensor-prepare-artifact` command for its
+primary file. Preparation discovers the `.bin`, digests both files, and can
+install the pair atomically. TPU production stays explicit and external until
+the project chooses and tests a reproducible Edge TPU compiler distribution;
+having a `.tflite` source alone does not mean it is compiled for the device.
 
 ### Installing a model
 

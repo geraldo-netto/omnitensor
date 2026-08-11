@@ -70,3 +70,20 @@ def test_installation_guide_documents_every_verifier_check():
         assert f"`{check}`" in guide, f"the guide must explain the {check} check"
     assert "omnitensor-verify-install" in guide
     assert REQUIRED_SCHEMAS  # the verifier checks a non-empty schema set
+
+
+def test_installation_guide_states_conversion_parity_and_evidence_limits():
+    guide = (ROOT / "docs/installation.md").read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+
+    for term in (
+        "### Producing accelerator artifacts",
+        "[convert]",
+        "[convert-npu]",
+        "--format ncnn",
+        "--format openvino",
+        "edgetpu_compiler",
+        "does not prove inference correctness",
+        "no target NPU needed to convert",
+    ):
+        assert term in normalized
