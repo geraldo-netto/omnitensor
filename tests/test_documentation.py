@@ -1,5 +1,6 @@
 """Executable documentation inventory for the bundled Cinnamon use cases."""
 
+import json
 from pathlib import Path
 
 from omnitensor.registry import bundled_workloads_path, load_workloads
@@ -115,6 +116,57 @@ def test_local_training_examples_share_snapshot_feature_names():
     assert "--target queueDepth" in guide
     assert "--feature queueDepth=3" in guide
     assert "--feature runningProfiles=1" in guide
+
+
+def test_model_tooling_guide_covers_every_reviewed_license_and_target_stage():
+    guide = LOCAL_TRAINING.read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+    recipes = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / "model-recipes").glob("*.json"))
+    ]
+
+    assert recipes
+    for recipe in recipes:
+        assert f"`{recipe['id']}`" in guide
+        assert recipe["license"]["spdx"] in guide
+        assert recipe["license"]["termsUri"] in guide
+    for command in (
+        "omnitensor-list-model-recipes",
+        "omnitensor-fetch-model-source",
+        "available_targets",
+        "omnitensor-verify-install",
+        "omnitensor-install-trained-model",
+    ):
+        assert command in guide
+    for boundary in (
+        "Compiler availability is not device availability",
+        "Vulkan GPU",
+        "Intel NPU",
+        "Coral TPU",
+        "CPU fallback",
+        "100% Edge TPU operation mapping",
+        "specific to `forecast-v1`",
+        "Do not publish an operator's raw corpus",
+    ):
+        assert boundary in normalized
+
+
+def test_use_case_guide_records_source_only_profile_boundaries():
+    guide = USE_CASES.read_text(encoding="utf-8")
+    expected = {
+        "hardware-health": "labelled sensor windows",
+        "storage-intelligence": "Backblaze Drive Stats",
+        "build-advisor": "approved-metadata producer",
+        "network-peripherals": "normal-only aggregate producer",
+        "desktop-context": "content-free producer",
+        "document-intelligence": "MiniLM and BGE",
+        "low-light-enhancement": "Retinexformer",
+    }
+    for profile_id, boundary in expected.items():
+        row = next(line for line in guide.splitlines() if f"`{profile_id}`" in line)
+        assert boundary in row
+        assert "remain" in row
 
 
 def test_installation_guide_documents_every_verifier_check():

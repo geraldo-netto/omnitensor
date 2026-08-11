@@ -56,6 +56,123 @@ numeric recipes use deterministic fitting implemented by OmniTensor and need
 neither. An image or embedding recipe may declare its own producer-only extra;
 it must not become a service dependency.
 
+## Reviewed open-source source catalog
+
+The bundled recipe catalog pins every remote byte by revision, filename, size,
+and SHA-256 digest. It also records the upstream license, preprocessing,
+tensor/output contract, evaluation gates, and an honest status for each target.
+Inspect it before downloading anything:
+
+```sh
+TRAIN=~/.local/share/omnitensor-training/venv/bin
+"$TRAIN/omnitensor-list-model-recipes"
+```
+
+| Recipe | Intended profile | Upstream license | Current deliverable |
+| --- | --- | --- | --- |
+| `all-minilm-l6-v2` | `document-intelligence` | [Apache-2.0 model card and weights](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md) | Pinned ONNX encoder, tokenizer, and config; pooling wrapper and profile integration remain unproduced |
+| `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Pinned ONNX encoder, tokenizer, and config; pooling wrapper and profile integration remain unproduced |
+| `clip-vit-b-32-image` | `visual-library` | [MIT](https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE) | Pinned TorchScript source and preprocessing contract; image-only export and embedding consumer remain unproduced |
+| `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
+| `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
+| `retinexformer-lol-v1` | `low-light-enhancement` | [MIT](https://github.com/caiyuanhao1998/Retinexformer/blob/1e9a0efce4b306b6701b824768370ff26066c32a/LICENSE.txt) | Pinned architecture/checkpoint source contract; portable export, paired-data evaluation, and profile integration remain unproduced |
+
+Downloading is explicit and fail-closed. The exact SPDX identifier shown by
+the catalog must be acknowledged; redirects, byte limits, sizes, and digests
+are rechecked before an atomic receipt is written:
+
+```sh
+"$TRAIN/omnitensor-fetch-model-source" all-minilm-l6-v2 \
+  --accept-license Apache-2.0
+"$TRAIN/omnitensor-fetch-model-source" clip-vit-b-32-image \
+  --accept-license MIT
+```
+
+License acknowledgement is not legal advice and does not prove compatibility,
+quality, or permission for a particular downstream dataset. Fetching also does
+not execute an upstream architecture, create the missing wrapper, compile a
+native artifact, install a binding, or make a profile operational. Those are
+separate review and acceptance stages.
+
+## Dataset ownership and redistribution
+
+| Producer | Dataset/license boundary |
+| --- | --- |
+| Resource forecast | Operator-owned bounded telemetry; no public dataset and no raw history redistribution |
+| Storage risk | Official Backblaze Drive Stats; review the linked current data-use and citation terms before each intake; the CLI acknowledgement is not a license |
+| Network anomaly | Operator-approved normal-only aggregate replay; the KitNET paper inspires the design and its MIT reference implementation is not vendored |
+| Build risk/ranking | Operator-approved repository metadata; no logs, source contents, or paths are placed in the report/model |
+| Hardware health | Operator-reviewed observed/injected labels; sensor identities and raw labels stay out of the report/model |
+| Desktop suggestions | Explicit user-confirmed, content-free local examples; raw personalized history is revocable and must not be redistributed |
+| Low-light evaluation | No paired dataset is bundled; acquire and review a separately licensed train/holdout corpus before claiming fidelity |
+| Document/visual embeddings | No private documents or images are bundled; each deployment owns consent, retention, and evaluation-corpus licensing |
+
+## Inspect producer and runtime capabilities
+
+Compiler availability is not device availability. Inspect the producer tools
+for each compatible portable format without downloading or compiling a model:
+
+```sh
+"$TRAIN/python" - <<'PY'
+from omnitensor.training.installation import available_targets
+
+print("ONNX compilers:", available_targets(source_format="onnx"))
+print("fully-int8 TFLite compilers:",
+      available_targets(source_format="tflite", fully_quantized=True))
+PY
+command -v pnnx || true
+command -v ovc || true
+command -v edgetpu_compiler || true
+```
+
+`available_targets` checks only source compatibility and whether the compiler
+executable exists. It does not probe a GPU, NPU, or TPU. Inspect the installed
+runtime separately:
+
+```sh
+omnitensor-verify-install
+python - <<'PY'
+from pathlib import Path
+import json
+
+state = Path.home() / ".local/state/xpu-workload-manager/state.json"
+snapshot = json.loads(state.read_text(encoding="utf-8"))
+print(json.dumps({"devices": snapshot["devices"], "profiles": snapshot["profiles"]}, indent=2))
+PY
+```
+
+An imported runtime, listed device, successful conversion, or installed
+artifact is still not profile acceptance. Acceptance requires the named-device
+quality, parity, latency, privacy, recovery, and end-to-end evidence declared
+for that profile.
+
+## Portability and accelerator support matrix
+
+| Stage | Vulkan GPU | Intel NPU | Coral TPU |
+| --- | --- | --- | --- |
+| Shared model semantics | Device-neutral source plus exact preprocessing, tensor, output, and evaluation contracts | Same | Same |
+| Native compiler port | `pnnx`: ONNX or TorchScript to ncnn | `ovc`: ONNX to OpenVINO IR | `edgetpu_compiler`: fully-int8 TFLite to Edge-TPU TFLite, accepted only with 100% Edge TPU operation mapping |
+| Service executor | ncnn/Vulkan with `[gpu]` | OpenVINO with `[npu]` | TFLite with Edge TPU delegate using `[tpu]` |
+| `forecast-v1` local install | Implemented when `pnnx` is present | Implemented when `ovc` is present | Not implemented: the report currently contains ONNX, not calibrated fully-int8 TFLite |
+| Storage/network/build/hardware/desktop producers | Portable ONNX source and evaluation report implemented; native binding, consumer, and hardware acceptance remain | Same | Needs a separate representative int8 export in addition to the missing binding/consumer/acceptance work |
+| Reviewed embedding/forecast/low-light catalog | Pinned source only; wrapper/export, conversion, profile integration, and acceptance remain | Same | Same, plus representative int8 calibration and full Edge TPU mapping |
+| CPU fallback | Never | Never | Never |
+
+The current compiler abstraction is shareable across recipes, but the current
+`omnitensor-install-trained-model` report/binding contract is intentionally
+specific to `forecast-v1`. Do not pass a storage, network, build, hardware, or
+desktop report to it. To graduate one of those sources, implement and test its
+profile-specific preprocessing/result contract and restricted binding adapter,
+then compile each native lane, compare it numerically with the portable source,
+sign and digest-install immutable artifacts, and record named-device acceptance.
+Do not rename an ONNX file to TFLite or treat compiler success as parity.
+
+For sharing, publish the canonical recipe/report, preprocessing and result
+contracts, source license/attribution, portable model digest, and evaluation
+evidence. Publish each native artifact as a separate target/version with all
+companion digests and compiler/runtime provenance. Do not publish an
+operator's raw corpus or reuse one lane's hardware evidence for another lane.
+
 ## Resource forecast recipe
 
 `forecast-v1` predicts one future numeric feature from a fixed window. It is
