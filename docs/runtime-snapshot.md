@@ -17,6 +17,27 @@ plugin manifest. Consumers must inspect `pluginTelemetry.version` before using
 its entries and ignore the optional extension when they only implement the
 original snapshot view.
 
+## Cinnamon compatibility
+
+Snapshot evolution is exercised from both ends. OmniTensor validates every
+published document against `schemas/runtime-snapshot.schema.json`; the Cinnamon
+applet's `tests/helpers/runtime-snapshot-fixtures.js` supplies the corresponding
+old and extended documents to both its generated schema validator and its
+runtime gateway regression tests.
+
+| Producer document | Cinnamon result |
+| --- | --- |
+| Version-one fields only | Accepted and rendered |
+| Optional `pluginTelemetry` version 1 | Validated, then safely ignored by the current view |
+| Alert with optional `resultRef` | Accepted without claiming the referenced result was fetched |
+| Unknown extension version or malformed reference | Rejected as a contract failure |
+
+This compatibility matrix is additive: an old snapshot stays usable, while a
+new field is never silently accepted without a schema and a deterministic
+consumer outcome. The applet regression
+`runtime-schema-validation-regression.test.js` proves the combined live shape
+(`pluginTelemetry` plus `resultRef`) as well as the original shape.
+
 ## Input roots (`inputs`)
 
 The optional `inputs` block states where a caller may stage a referenced input
