@@ -57,7 +57,6 @@
 
 
 
-| OMNI-0218 | open | low | s | — | A fresh full-test mutmut stats run cannot complete in its isolated tree: first `helpers/bpf/omnitensor-bpf-helper.py` is absent, and after copying that tree the installed-wheel restart test launches its worker against the editable checkout outside the sandbox and dies with `worker handshake rejected: truncated-frame`. Make the isolated worker bootstrap use the copied source before relying on mutmut's default full-test selection; changed-code runs can select their relevant tests meanwhile. |
 
 ## Rejected / Won't fix
 

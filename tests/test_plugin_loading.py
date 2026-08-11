@@ -139,6 +139,9 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
     assert spec.maximum_protocol == 4
     assert spec.capabilities == frozenset({"cancel", "health"})
     assert spec.sandbox is not None
+    assert spec.sandbox.python_path == str(
+        Path(__file__).resolve().parents[1] / "src"
+    )
     assert spec.argv == (
         "/usr/bin/python3",
         "-m",

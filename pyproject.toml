@@ -75,6 +75,7 @@ also_copy = [
     ".github/workflows/",
     "docs/",
     "examples/omnitensor-plugin-template/",
+    "helpers/bpf/",
     "README.md",
 ]
 

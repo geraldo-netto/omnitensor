@@ -119,6 +119,7 @@ def external_worker_specs(
     """Build deterministic argv without importing plugin code in the service."""
     executable = _executable(python_executable)
     import_paths = _import_paths(worker_import_paths)
+    package_root = Path(__file__).resolve().parents[2]
     permissions_by_plugin = granted_permissions or {}
     specs = []
     for plugin in plugins:
@@ -157,6 +158,7 @@ def external_worker_specs(
                     declared,
                     granted,
                     runtime_paths=_trusted_runtime_paths(import_paths),
+                    python_path=package_root,
                 ),
             )
         )

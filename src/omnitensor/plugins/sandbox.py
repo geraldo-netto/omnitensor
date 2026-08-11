@@ -55,6 +55,7 @@ class FilesystemSandbox:
     device_paths: tuple[str, ...]
     runtime_paths: tuple[str, ...]
     network: bool = False
+    python_path: str | None = None
 
     @classmethod
     def from_permissions(
@@ -63,6 +64,7 @@ class FilesystemSandbox:
         granted: Collection[str],
         *,
         runtime_paths: Sequence[str | Path] = (),
+        python_path: str | Path | None = None,
     ) -> FilesystemSandbox:
         declared_set = frozenset(declared)
         granted_set = frozenset(granted)
@@ -91,12 +93,14 @@ class FilesystemSandbox:
         }
         devices = {value for action, value in filesystem if action == "device"}
         trusted = tuple(sorted({_runtime_path(path) for path in runtime_paths}))
+        trusted_python = _trusted_python_path(python_path, trusted)
         return cls(
             tuple(sorted(reads)),
             tuple(sorted(writes)),
             tuple(sorted(devices)),
             trusted,
             _network_granted(granted_set),
+            trusted_python,
         )
 
     def wrap(self, argv: Sequence[str]) -> tuple[str, ...]:
@@ -135,6 +139,7 @@ class FilesystemSandbox:
             "PYTHONNOUSERSITE",
             "1",
         ]
+        command.extend(_python_environment(self.python_path))
         # A worker with no declared network grant gets its own empty network
         # namespace, so a plugin cannot reach a socket, a name server, or the
         # local bus regardless of what its code attempts.
@@ -185,6 +190,29 @@ def _network_granted(granted: Collection[str]) -> bool:
             )
         enabled = enabled or value == NETWORK_OUTBOUND
     return enabled
+
+
+def _trusted_python_path(
+    value: str | Path | None,
+    runtime_paths: Collection[str],
+) -> str | None:
+    if value is None:
+        return None
+    trusted = _runtime_path(value)
+    if trusted not in runtime_paths:
+        raise SandboxPolicyError("sandbox Python path must be a declared runtime path")
+    return trusted
+
+
+def _python_environment(python_path: str | None) -> tuple[str, ...]:
+    """Bootstrap only trusted OmniTensor code before worker argument parsing."""
+    if python_path is None:
+        return ()
+    # The supervisor and worker must import the same OmniTensor code. This is
+    # explicit because --clearenv removes a caller PYTHONPATH, and an editable
+    # or relocated install otherwise points outside the mount namespace before
+    # the worker can parse --import-path.
+    return "--setenv", "PYTHONPATH", python_path
 
 
 def _permission_path(action: str, value: str) -> str:

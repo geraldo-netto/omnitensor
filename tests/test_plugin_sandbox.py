@@ -97,6 +97,33 @@ def test_path_count_and_runtime_roots_are_bounded_and_canonical(tmp_path):
             FilesystemSandbox.from_permissions(
                 set(), set(), runtime_paths=(runtime_path,)
             )
+    with pytest.raises(SandboxPolicyError, match="declared runtime path"):
+        FilesystemSandbox.from_permissions(
+            set(),
+            set(),
+            runtime_paths=(tmp_path,),
+            python_path=tmp_path.parent,
+        )
+
+
+def test_worker_bootstrap_uses_only_its_trusted_package_root(tmp_path):
+    package_root = tmp_path / "source"
+    plugin_site = tmp_path / "plugin"
+    package_root.mkdir()
+    plugin_site.mkdir()
+    sandbox = FilesystemSandbox.from_permissions(
+        set(),
+        set(),
+        runtime_paths=(package_root, plugin_site),
+        python_path=package_root,
+    )
+
+    command = sandbox.wrap(("/usr/bin/python3", "-m", "omnitensor.plugins.worker"))
+
+    index = command.index("PYTHONPATH")
+    assert command[index - 1] == "--setenv"
+    assert command[index + 1] == str(package_root)
+    assert str(plugin_site) not in command[index + 1]
 
 
 def test_write_grant_dominates_same_path_read_grant(tmp_path):
