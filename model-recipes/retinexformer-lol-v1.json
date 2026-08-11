@@ -1,0 +1,116 @@
+{
+  "recipeVersion": 1,
+  "id": "retinexformer-lol-v1",
+  "version": "1.0.0",
+  "family": "low-light",
+  "profileIds": ["low-light-enhancement"],
+  "sourceFormat": "pytorch-state-dict",
+  "sources": [
+    {
+      "role": "model",
+      "uri": "https://drive.google.com/file/d/1xDwQtTCj3tlAVCTJgYrzonBGVwqeOhKu/view",
+      "revision": "1xDwQtTCj3tlAVCTJgYrzonBGVwqeOhKu",
+      "filename": "LOL_v1.pth",
+      "sha256": "9b4810dc51322fab70be8658ee0ad1df64a54aa814497b7849767baa2ff32cd1",
+      "sizeBytes": 6475021
+    },
+    {
+      "role": "architecture",
+      "uri": "https://raw.githubusercontent.com/caiyuanhao1998/Retinexformer/1e9a0efce4b306b6701b824768370ff26066c32a/basicsr/models/archs/RetinexFormer_arch.py",
+      "revision": "1e9a0efce4b306b6701b824768370ff26066c32a",
+      "filename": "RetinexFormer_arch.py",
+      "sha256": "1567c89d55285a3c1a4d4ca33f288b1fd98dc6b6bbdf971eda02d745f9087631",
+      "sizeBytes": 12312
+    },
+    {
+      "role": "config",
+      "uri": "https://raw.githubusercontent.com/caiyuanhao1998/Retinexformer/1e9a0efce4b306b6701b824768370ff26066c32a/Options/RetinexFormer_LOL_v1.yml",
+      "revision": "1e9a0efce4b306b6701b824768370ff26066c32a",
+      "filename": "RetinexFormer_LOL_v1.yml",
+      "sha256": "a79b14dee5907708a1e81d4832b68c39adb12f0ca9f958e13c58590c5d9c46da",
+      "sizeBytes": 2752
+    }
+  ],
+  "license": {
+    "spdx": "MIT",
+    "termsUri": "https://github.com/caiyuanhao1998/Retinexformer/blob/1e9a0efce4b306b6701b824768370ff26066c32a/LICENSE.txt",
+    "redistributionAllowed": true,
+    "commercialUseAllowed": true,
+    "attribution": "Yuanhao Cai and Retinexformer authors, official LOL-v1 checkpoint and architecture, MIT"
+  },
+  "tensorContract": {
+    "inputs": [
+      {
+        "shape": [1, 3, 256, 256],
+        "dtype": "float32",
+        "layout": "NCHW",
+        "preprocess": {
+          "channelOrder": "RGB",
+          "mean": [0, 0, 0],
+          "scale": [0.00392156862745098, 0.00392156862745098, 0.00392156862745098],
+          "resize": {"filter": "bicubic", "fit": "exact"}
+        }
+      }
+    ]
+  },
+  "outputContract": {"kind": "raw"},
+  "preprocessing": {
+    "kind": "image",
+    "version": 1,
+    "description": "Decode a bounded image to RGB, reject malformed or oversized inputs, bicubic-resize exactly to 256x256, convert to NCHW, and divide each byte channel by 255. Metadata and original full-resolution pixels never enter the model.",
+    "artifacts": ["architecture", "config"]
+  },
+  "producer": {
+    "kind": "retinexformer-image-enhancement",
+    "version": 1,
+    "inputNames": ["image"],
+    "sourceOutputName": "enhanced",
+    "sourceOutputShape": [1, 3, 256, 256],
+    "outputShape": [1, 3, 256, 256],
+    "postprocessing": "clamp-unit-range",
+    "description": "Instantiate the pinned one-stage 40-feature LOL-v1 architecture, load the official state dict strictly, export a fixed 256x256 graph, name its image output enhanced, and clamp it to [0,1] inside the portable graph."
+  },
+  "evaluation": [
+    {
+      "metric": "portable-export-ssim",
+      "comparator": "at-least",
+      "target": 0.999,
+      "unit": "ratio",
+      "description": "Minimum portable-versus-native SSIM on frozen, license-reviewed low-light inputs."
+    },
+    {
+      "metric": "paired-holdout-ssim",
+      "comparator": "at-least",
+      "target": 0.8,
+      "unit": "ratio",
+      "description": "Minimum enhancement SSIM on a separately licensed paired holdout; no repository dataset is bundled."
+    },
+    {
+      "metric": "output-range-violation-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No portable output component may fall outside [0,1] or be non-finite."
+    }
+  ],
+  "targets": {
+    "tpu": {
+      "status": "planned",
+      "compiler": "edgetpu_compiler",
+      "fullyQuantized": false,
+      "reason": "Needs a representative fully-int8 TFLite export, full Edge TPU mapping, fidelity parity and execution evidence on Coral; none exists here."
+    },
+    "npu": {
+      "status": "planned",
+      "compiler": "ovc",
+      "fullyQuantized": false,
+      "reason": "Needs portable ONNX export, OpenVINO conversion, fidelity parity and execution evidence on the named NPU."
+    },
+    "gpu": {
+      "status": "planned",
+      "compiler": "pnnx",
+      "fullyQuantized": false,
+      "reason": "Needs fixed TorchScript export, ncnn conversion, fidelity parity and execution evidence on the named GPU."
+    }
+  }
+}

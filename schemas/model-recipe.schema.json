@@ -55,7 +55,7 @@
       }
     },
     "sourceFormat": {
-      "enum": ["onnx", "safetensors", "tflite", "torchscript"]
+      "enum": ["onnx", "pytorch-state-dict", "safetensors", "tflite", "torchscript"]
     },
     "sources": {
       "type": "array",
@@ -85,7 +85,7 @@
           "maxItems": 15,
           "uniqueItems": true,
           "items": {
-            "enum": ["config", "labels", "tokenizer", "vocabulary"]
+            "enum": ["architecture", "config", "labels", "tokenizer", "vocabulary"]
           }
         }
       }
@@ -115,7 +115,7 @@
       "required": ["role", "uri", "revision", "filename", "sha256", "sizeBytes"],
       "properties": {
         "role": {
-          "enum": ["config", "labels", "model", "tokenizer", "vocabulary"]
+          "enum": ["architecture", "config", "labels", "model", "tokenizer", "vocabulary"]
         },
         "uri": {
           "type": "string",
@@ -206,6 +206,7 @@
             "identity",
             "sentence-embedding",
             "clip-image-embedding",
+            "retinexformer-image-enhancement",
             "timeseries-point-forecast",
             "timeseries-quantile-forecast"
           ]
@@ -237,6 +238,7 @@
             "attention-mask-mean-pool-l2",
             "cls-token-l2",
             "l2-normalize",
+            "clamp-unit-range",
             "first-horizon-point",
             "first-horizon-median-quantile"
           ]

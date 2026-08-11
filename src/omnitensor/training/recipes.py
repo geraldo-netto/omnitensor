@@ -31,6 +31,13 @@ DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 RECEIPT_FILENAME = "source-receipt.json"
 MAX_BUNDLED_RECIPES = 128
 _RECIPE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_GOOGLE_DRIVE_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{20,100}$")
+REFUSED_BUNDLED_RECIPES = {
+    "zero-dce": (
+        "the official Zero-DCE code and weights are CC-BY-NC-4.0 for academic "
+        "research only; OmniTensor accepts only redistributable commercial-use sources"
+    )
+}
 
 
 class ModelRecipeError(ValueError):
@@ -133,12 +140,15 @@ class HttpsSourceTransport:
         self._timeout_seconds = timeout_seconds
 
     def chunks(self, uri: str, maximum_bytes: int) -> Iterable[bytes]:
+        download_uri = _source_download_uri(uri)
         try:
-            response = urllib.request.urlopen(uri, timeout=self._timeout_seconds)  # noqa: S310
+            response = urllib.request.urlopen(  # noqa: S310
+                download_uri, timeout=self._timeout_seconds
+            )
         except (OSError, urllib.error.URLError) as error:
             raise ModelRecipeError("source-unavailable", f"cannot fetch source: {error}") from error
         with response:
-            _validate_https_uri(response.geturl(), "redirected source URI")
+            _validate_download_response_uri(uri, response.geturl())
             declared = response.headers.get("Content-Length")
             if declared is not None:
                 try:
@@ -257,6 +267,8 @@ def resolve_model_recipe_path(reference: str | Path) -> Path:
     text = str(reference)
     if not _RECIPE_ID.fullmatch(text):
         return path
+    if text in REFUSED_BUNDLED_RECIPES:
+        raise ModelRecipeError("recipe-refused", REFUSED_BUNDLED_RECIPES[text])
     bundled = bundled_model_recipe_root() / f"{text}.json"
     if not bundled.is_file() or bundled.is_symlink():
         raise ModelRecipeError("recipe-not-found", f"no bundled model recipe is named {text}")
@@ -388,10 +400,18 @@ def _validate_producer(document: dict) -> None:
     _validate_producer_contract(document, kind)
     if producer["outputShape"][0] != 1:
         raise ModelRecipeError("recipe-invalid", "producer outputShape must have batch size 1")
+    _validate_specialized_producer(document, producer, inputs, kind)
+
+
+def _validate_specialized_producer(
+    document: dict, producer: dict, inputs: list, kind: str
+) -> None:
     if kind == "sentence-embedding":
         _validate_sentence_embedding_producer(document, producer, inputs)
     elif kind == "clip-image-embedding":
         _validate_clip_image_producer(document, producer, inputs)
+    elif kind == "retinexformer-image-enhancement":
+        _validate_retinexformer_producer(document, producer, inputs)
     elif kind in {"timeseries-point-forecast", "timeseries-quantile-forecast"}:
         _validate_timeseries_producer(document, producer, inputs)
     elif producer["sourceOutputShape"] != producer["outputShape"]:
@@ -406,6 +426,12 @@ def _validate_producer_contract(document: dict, kind: str) -> None:
             raise ModelRecipeError(
                 "recipe-invalid", "embedding producers require an embedding output contract"
             )
+    elif kind == "retinexformer-image-enhancement" and (
+        document["family"] != "low-light" or document["outputContract"]["kind"] != "raw"
+    ):
+        raise ModelRecipeError(
+            "recipe-invalid", "image enhancement producers require a raw low-light contract"
+        )
     elif kind in {"timeseries-point-forecast", "timeseries-quantile-forecast"} and (
         document["family"] != "forecast" or document["outputContract"]["kind"] != "raw"
     ):
@@ -465,6 +491,43 @@ def _validate_clip_image_producer(document: dict, producer: dict, inputs: list) 
         )
 
 
+def _validate_retinexformer_producer(document: dict, producer: dict, inputs: list) -> None:
+    roles = {source["role"] for source in document["sources"]}
+    if document["sourceFormat"] != "pytorch-state-dict" or not {
+        "architecture",
+        "config",
+    }.issubset(roles):
+        raise ModelRecipeError(
+            "recipe-invalid",
+            "Retinexformer requires a state dict plus pinned architecture and config",
+        )
+    expected_input = {
+        "shape": [1, 3, 256, 256],
+        "dtype": "float32",
+        "layout": "NCHW",
+        "preprocess": {
+            "channelOrder": "RGB",
+            "mean": [0, 0, 0],
+            "scale": [1 / 255, 1 / 255, 1 / 255],
+            "resize": {"filter": "bicubic", "fit": "exact"},
+        },
+    }
+    if producer["inputNames"] != ["image"] or inputs != [expected_input]:
+        raise ModelRecipeError(
+            "recipe-invalid", "Retinexformer input must be fixed RGB NCHW 256x256"
+        )
+    expected_shape = [1, 3, 256, 256]
+    if (
+        producer["sourceOutputName"] != "enhanced"
+        or producer["sourceOutputShape"] != expected_shape
+        or producer["outputShape"] != expected_shape
+        or producer["postprocessing"] != "clamp-unit-range"
+    ):
+        raise ModelRecipeError(
+            "recipe-invalid", "Retinexformer export must clamp its fixed enhanced image"
+        )
+
+
 def _validate_timeseries_producer(document: dict, producer: dict, inputs: list) -> None:
     if document["sourceFormat"] != "safetensors" or producer["inputNames"] != ["context"]:
         raise ModelRecipeError(
@@ -507,6 +570,28 @@ def _validate_https_uri(uri: str, label: str) -> None:
             "recipe-invalid",
             f"{label} must be an HTTPS URL without credentials, query, or fragment",
         )
+
+
+def _source_download_uri(uri: str) -> str:
+    """Map one immutable official Drive share path to its byte-download endpoint."""
+    parsed = urllib.parse.urlsplit(uri)
+    parts = parsed.path.strip("/").split("/")
+    if parsed.hostname != "drive.google.com" or len(parts) != 4 or parts[:2] != ["file", "d"]:
+        return uri
+    file_id = parts[2]
+    if parts[3] != "view" or not _GOOGLE_DRIVE_FILE_ID.fullmatch(file_id):
+        raise ModelRecipeError("source-invalid", "Google Drive source path is invalid")
+    query = urllib.parse.urlencode({"id": file_id, "export": "download", "confirm": "t"})
+    return urllib.parse.urlunsplit(
+        ("https", "drive.usercontent.google.com", "/download", query, "")
+    )
+
+
+def _validate_download_response_uri(declared_uri: str, response_uri: str) -> None:
+    mapped = _source_download_uri(declared_uri)
+    if response_uri == mapped:
+        return
+    _validate_https_uri(response_uri, "redirected source URI")
 
 
 def _fetch_one(source: ModelSource, destination: Path, transport: SourceTransport) -> None:

@@ -23,6 +23,7 @@ The bundled catalog currently contains:
 | `clip-vit-b-32-image` | pinned official OpenAI TorchScript checkpoint | 512-value image embedding | TPU/NPU/GPU planned |
 | `ibm-granite-ttm-r2` | pinned IBM Tiny Time Mixer R2 safetensors checkpoint | first-horizon point forecast | TPU/NPU/GPU planned |
 | `amazon-chronos-bolt-tiny` | pinned Amazon Chronos-Bolt-Tiny safetensors checkpoint | first-horizon median forecast | TPU/NPU/GPU planned |
+| `retinexformer-lol-v1` | official LOL-v1 state dict plus pinned architecture and config | clamped 256x256 enhanced RGB image | TPU/NPU/GPU planned |
 
 Each `producer` section states the graph boundary between upstream bytes and a
 deployable artifact. BGE uses first-token (`[CLS]`) selection plus L2 normalization; MiniLM uses
@@ -38,6 +39,19 @@ boundary accepts one finite 512-observation window and emits one first-horizon
 scalar; both use the same repeat-last quality gate. TTM selects its first point
 forecast, while Chronos-Bolt selects the first-horizon 0.5 quantile. Keeping
 that selection inside the portable graph makes target variants comparable.
+
+Retinexformer uses the authors' official MIT-licensed LOL-v1 checkpoint. Its
+immutable Drive file id, digest, byte size, architecture, and training config
+are all part of the recipe. The producer boundary fixes RGB preprocessing and
+resolution, loads the state dict strictly, and clamps the enhanced image inside
+the exported graph. It is not the profile's existing tonal-curve artifact and
+cannot be installed in its place until a target artifact and matching consumer
+pass their fidelity and device gates.
+
+`zero-dce` is deliberately refused by the fetch command. The official project
+limits its implementation and pretrained model to academic, non-commercial
+use under CC-BY-NC-4.0, which conflicts with this catalog's redistributable
+commercial-use policy. A third-party conversion cannot relicense those bytes.
 
 All target claims in this catalog remain `planned`: source portability is not target
 acceptance. NPU and GPU still require the producer export, conversion, parity,

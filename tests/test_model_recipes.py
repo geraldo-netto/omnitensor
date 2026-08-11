@@ -18,7 +18,9 @@ from omnitensor.training.recipes import (
     HttpsSourceTransport,
     ModelRecipeError,
     ModelSource,
+    _source_download_uri,
     _source_file_matches,
+    _validate_download_response_uri,
     _validate_https_uri,
     bundled_model_recipe_root,
     fetch_model_sources,
@@ -142,6 +144,7 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
         "bge-small-en-v1-5",
         "clip-vit-b-32-image",
         "ibm-granite-ttm-r2",
+        "retinexformer-lol-v1",
     )
     assert {recipe.id: recipe.model_source.sha256 for recipe in recipes} == {
         "all-minilm-l6-v2": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
@@ -151,6 +154,9 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
         "bge-small-en-v1-5": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
         "clip-vit-b-32-image": "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af",
         "ibm-granite-ttm-r2": "a706726a7eb01bbcb42994b7dcb3c06ea9557898dbae8d480eb04fe8ccb89710",
+        "retinexformer-lol-v1": (
+            "9b4810dc51322fab70be8658ee0ad1df64a54aa814497b7849767baa2ff32cd1"
+        ),
     }
     for recipe in recipes:
         assert recipe.producer is not None
@@ -230,6 +236,26 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
             "postprocessing": postprocessing,
             "description": recipe.producer["description"],
         }
+
+    retinex = by_id["retinexformer-lol-v1"]
+    assert retinex.source_format == "pytorch-state-dict"
+    assert retinex.profile_ids == ("low-light-enhancement",)
+    assert retinex.output_contract == {"kind": "raw"}
+    assert {source.role for source in retinex.sources} == {
+        "model",
+        "architecture",
+        "config",
+    }
+    assert retinex.producer == {
+        "kind": "retinexformer-image-enhancement",
+        "version": 1,
+        "inputNames": ["image"],
+        "sourceOutputName": "enhanced",
+        "sourceOutputShape": [1, 3, 256, 256],
+        "outputShape": [1, 3, 256, 256],
+        "postprocessing": "clamp-unit-range",
+        "description": retinex.producer["description"],
+    }
 
 
 def test_bundled_recipe_reference_resolves_id_path_and_refuses_unknown(tmp_path):
@@ -530,6 +556,90 @@ def test_time_series_producer_semantics_fail_closed(
     assert invalid.value.detail == detail
 
 
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        (
+            lambda item: item.update(family="classification"),
+            "image enhancement producers require a raw low-light contract",
+        ),
+        (
+            lambda item: item.update(outputContract={"kind": "embedding"}),
+            "image enhancement producers require a raw low-light contract",
+        ),
+        (
+            lambda item: item.update(sourceFormat="onnx"),
+            "Retinexformer requires a state dict plus pinned architecture and config",
+        ),
+        (
+            lambda item: (
+                item.update(
+                    sources=[
+                        source
+                        for source in item["sources"]
+                        if source["role"] != "architecture"
+                    ]
+                ),
+                item["preprocessing"].update(artifacts=["config"]),
+            ),
+            "Retinexformer requires a state dict plus pinned architecture and config",
+        ),
+        (
+            lambda item: item["producer"].update(inputNames=["pixels"]),
+            "Retinexformer input must be fixed RGB NCHW 256x256",
+        ),
+        (
+            lambda item: item["tensorContract"]["inputs"][0].update(
+                shape=[1, 3, 224, 224]
+            ),
+            "Retinexformer input must be fixed RGB NCHW 256x256",
+        ),
+        (
+            lambda item: item["tensorContract"]["inputs"][0]["preprocess"].update(
+                scale=[1.0, 1.0, 1.0]
+            ),
+            "Retinexformer input must be fixed RGB NCHW 256x256",
+        ),
+        (
+            lambda item: item["producer"].update(sourceOutputName="output"),
+            "Retinexformer export must clamp its fixed enhanced image",
+        ),
+        (
+            lambda item: item["producer"].update(sourceOutputShape=[1, 3, 128, 128]),
+            "Retinexformer export must clamp its fixed enhanced image",
+        ),
+        (
+            lambda item: item["producer"].update(outputShape=[1, 3, 128, 128]),
+            "Retinexformer export must clamp its fixed enhanced image",
+        ),
+        (
+            lambda item: item["producer"].update(postprocessing="identity"),
+            "Retinexformer export must clamp its fixed enhanced image",
+        ),
+    ],
+)
+def test_retinexformer_producer_semantics_fail_closed(tmp_path, change, detail):
+    document = bundled_document("retinexformer-lol-v1")
+    change(document)
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        load_model_recipe(write_recipe(tmp_path, document))
+
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == detail
+
+
+def test_noncommercial_zero_dce_is_explicitly_refused():
+    with pytest.raises(ModelRecipeError) as refused:
+        resolve_model_recipe_path("zero-dce")
+
+    assert refused.value.code == "recipe-refused"
+    assert refused.value.detail == (
+        "the official Zero-DCE code and weights are CC-BY-NC-4.0 for academic "
+        "research only; OmniTensor accepts only redistributable commercial-use sources"
+    )
+
+
 def test_identity_producer_cannot_relabel_an_output_shape(tmp_path):
     document = recipe_document()
     document["producer"] = {
@@ -551,6 +661,35 @@ def test_identity_producer_cannot_relabel_an_output_shape(tmp_path):
 
     document["producer"]["outputShape"] = [1, 384]
     assert load_model_recipe(write_recipe(tmp_path, document)).producer == document["producer"]
+
+
+def test_specialized_producer_dispatch_preserves_clip_and_identity_checks(tmp_path):
+    clip = bundled_document("clip-vit-b-32-image")
+    clip["sourceFormat"] = "onnx"
+    with pytest.raises(ModelRecipeError) as wrong_clip:
+        load_model_recipe(write_recipe(tmp_path, clip))
+    assert wrong_clip.value.code == "recipe-invalid"
+    assert wrong_clip.value.detail == (
+        "CLIP image embedding source must be TorchScript with image input"
+    )
+
+    identity = recipe_document()
+    identity["producer"] = {
+        "kind": "identity",
+        "version": 1,
+        "inputNames": ["input"],
+        "sourceOutputName": "output",
+        "sourceOutputShape": [1, 384],
+        "outputShape": [1, 385],
+        "postprocessing": "identity",
+        "description": "Preserve the portable output without a semantic transform.",
+    }
+    with pytest.raises(ModelRecipeError) as changed_identity:
+        load_model_recipe(write_recipe(tmp_path, identity))
+    assert changed_identity.value.code == "recipe-invalid"
+    assert changed_identity.value.detail == (
+        "identity producer cannot change the source output shape"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1062,6 +1201,57 @@ def test_https_transport_passes_exact_uri_timeout_and_accumulates_chunks(monkeyp
     assert oversized.value.detail == "source exceeds its declared bound"
 
 
+def test_https_transport_maps_only_an_immutable_google_drive_file(monkeypatch):
+    file_id = "1xDwQtTCj3tlAVCTJgYrzonBGVwqeOhKu"
+    share_uri = f"https://drive.google.com/file/d/{file_id}/view"
+    download_uri = (
+        "https://drive.usercontent.google.com/download?"
+        f"id={file_id}&export=download&confirm=t"
+    )
+    called = []
+
+    def open_source(uri, **kwargs):
+        called.append((uri, kwargs))
+        return FakeResponse(b"pth", uri=download_uri, length="3")
+
+    monkeypatch.setattr("urllib.request.urlopen", open_source)
+
+    assert _source_download_uri(share_uri) == download_uri
+    assert b"".join(HttpsSourceTransport(2.0).chunks(share_uri, 3)) == b"pth"
+    assert called == [(download_uri, {"timeout": 2.0})]
+    _validate_download_response_uri(share_uri, download_uri)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://drive.google.com/file/d/short/view",
+        "https://drive.google.com/file/d/1xDwQtTCj3tlAVCTJgYrzonBGVwqeOhKu/download",
+    ],
+)
+def test_google_drive_adapter_refuses_ambiguous_paths(uri):
+    with pytest.raises(ModelRecipeError) as invalid:
+        _source_download_uri(uri)
+
+    assert invalid.value.code == "source-invalid"
+    assert invalid.value.detail == "Google Drive source path is invalid"
+
+
+def test_google_drive_adapter_never_weakens_other_redirect_validation():
+    ordinary = "https://models.example/releases/1234567/model.onnx"
+    assert _source_download_uri(ordinary) == ordinary
+    _validate_download_response_uri(ordinary, ordinary)
+
+    with pytest.raises(ModelRecipeError) as invalid:
+        _validate_download_response_uri(
+            ordinary, "https://models.example/model.onnx?token=secret"
+        )
+    assert invalid.value.code == "recipe-invalid"
+    assert invalid.value.detail == (
+        "redirected source URI must be an HTTPS URL without credentials, query, or fragment"
+    )
+
+
 @pytest.mark.parametrize(
     "uri",
     [
@@ -1194,6 +1384,15 @@ def test_list_cli_reports_exact_catalog_and_failure(monkeypatch, capsys):
             "profileIds": ["resource-scheduler"],
             "sourceFormat": "safetensors",
             "license": "Apache-2.0",
+            "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
+        },
+        {
+            "id": "retinexformer-lol-v1",
+            "version": "1.0.0",
+            "family": "low-light",
+            "profileIds": ["low-light-enhancement"],
+            "sourceFormat": "pytorch-state-dict",
+            "license": "MIT",
             "targets": {"tpu": "planned", "npu": "planned", "gpu": "planned"},
         },
     ]
