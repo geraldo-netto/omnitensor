@@ -27,6 +27,10 @@ Importing calendar events from explicitly selected local files? The
 dependencies, private grounded previews, model verification, and confirmed
 no-overwrite ICS export.
 
+Asking questions over explicitly chosen documents? [Ask selected files](docs/document-questions.md)
+documents the ephemeral BGE span index, grounded Qwen answer contract, exact
+file/page/span citations, and GPU-first provider boundary.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and

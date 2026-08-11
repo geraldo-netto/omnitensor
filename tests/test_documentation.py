@@ -165,6 +165,28 @@ def test_event_workload_guide_covers_dependencies_privacy_and_legacy_transition(
         assert boundary in prose
 
 
+def test_document_question_guide_freezes_manual_privacy_and_model_boundaries():
+    guide = " ".join(
+        (ROOT / "docs/document-questions.md").read_text(encoding="utf-8").split()
+    )
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for required in (
+        "1–16",
+        "opset 11",
+        "opset 13",
+        "There is no CPU lane",
+        "files:read-selected",
+        "at most 512 spans",
+        "at most 2,048 characters",
+        "selected-file-N",
+        "file name, page, and character span",
+        "OMNI-0121",
+    ):
+        assert required in guide
+    assert "[Ask selected files](docs/document-questions.md)" in readme
+
+
 def test_local_training_guide_names_every_installed_feature_semantic():
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     for term in (

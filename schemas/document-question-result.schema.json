@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/document-question-result.schema.json",
+  "title": "Public grounded selected-file answer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "answer", "providerId", "accelerator", "citations"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "answer": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "accelerator": {"enum": ["gpu", "npu"]},
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/citation"}
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileId", "fileName", "sourceSha256", "page", "span", "textSha256"],
+      "properties": {
+        "fileId": {"type": "string", "pattern": "^selected-file-[1-9][0-9]*$"},
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "sourceSha256": {"$ref": "#/$defs/digest"},
+        "page": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "span": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": {"type": "integer", "minimum": 0, "maximum": 5000000},
+            "end": {"type": "integer", "minimum": 1, "maximum": 5000000}
+          }
+        },
+        "textSha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}
