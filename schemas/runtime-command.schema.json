@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://local.invalid/tpu-workload-manager/runtime-command.schema.json",
-  "title": "TPU Workload Manager runtime command",
+  "$id": "https://local.invalid/xpu-workload-manager/runtime-command.schema.json",
+  "title": "XPU Workload Manager runtime command",
   "type": "object",
   "additionalProperties": false,
   "required": [

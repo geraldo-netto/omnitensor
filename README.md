@@ -3,7 +3,7 @@
 Unified local inference service for heterogeneous accelerators. OmniTensor owns
 device discovery, per-backend model execution, weighted workload scheduling,
 runtime snapshot publishing, and the D-Bus control surface consumed by the
-[cinnamon-tpuwlm](../cinnamon-tpuwlm) panel applet.
+[cinnamon-xpuwlm](../cinnamon-xpuwlm) panel applet.
 
 See [Cinnamon workload use cases](docs/use-cases.md) for the nine shared
 profiles, delivered runtime behavior, model and host-pipeline boundaries, and
@@ -49,7 +49,7 @@ The JSON Schemas under [schemas/](schemas/) are canonical; the applet ships
 mirror copies. OmniTensor:
 
 - writes the runtime snapshot atomically (temp file + rename) to the
-  applet's default `~/.local/state/tpu-workload-manager/state.json` path
+  applet's default `~/.local/state/xpu-workload-manager/state.json` path
   (overridable with `OMNITENSOR_STATE_PATH`), validated against
   `runtime-snapshot.schema.json` before every write;
 - publishes bounded, independently versioned plugin telemetry as an optional

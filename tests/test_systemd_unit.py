@@ -49,7 +49,7 @@ def test_unit_creates_its_state_directories_instead_of_assuming_them():
     assert "ReadWritePaths" not in service
     assert set(service.get("StateDirectory", raw=True).split()) == {
         "omnitensor",
-        "tpu-workload-manager",
+        "xpu-workload-manager",
     }
 
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://local.invalid/tpu-workload-manager/runtime-acknowledgement.schema.json",
-  "title": "TPU Workload Manager runtime acknowledgement",
+  "$id": "https://local.invalid/xpu-workload-manager/runtime-acknowledgement.schema.json",
+  "title": "XPU Workload Manager runtime acknowledgement",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "commandId", "status", "revision", "appliedAt", "message", "portfolio"],

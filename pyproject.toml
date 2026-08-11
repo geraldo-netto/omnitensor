@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "omnitensor"
 version = "0.1.0"
-description = "Unified local inference service for TPU, NPU, and GPU accelerators, publishing the runtime contract consumed by the cinnamon-tpuwlm applet."
+description = "Unified local inference service for TPU, NPU, and GPU accelerators, publishing the runtime contract consumed by the cinnamon-xpuwlm applet."
 readme = "README.md"
 requires-python = ">=3.11"
 # Plugin workers are confined with a seccomp filter built from a per-ABI

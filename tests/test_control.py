@@ -27,7 +27,7 @@ def control(tmp_path):
     return build_control_service(tmp_path / "policy.json", defaults)
 
 
-def command(operation, profile_id, value, revision=0, command_id="tpuwm-1"):
+def command(operation, profile_id, value, revision=0, command_id="xpuwlm-1"):
     return json.dumps({
         "version": 1,
         "id": command_id,
@@ -289,7 +289,7 @@ def test_a_boolean_is_never_accepted_as_a_weight(tmp_path):
     assert acknowledgement["status"] == "rejected"
 
 
-def batch(changes, revision=0, command_id="tpuwm-batch"):
+def batch(changes, revision=0, command_id="xpuwlm-batch"):
     return json.dumps({
         "version": 1,
         "id": command_id,
@@ -329,7 +329,7 @@ def test_a_batch_that_cannot_apply_whole_changes_nothing(control):
             {"profileId": "no-such-profile", "enabled": True},
         ],
         revision=1,
-        command_id="tpuwm-batch-2",
+        command_id="xpuwlm-batch-2",
     ))
 
     assert acknowledgement["status"] == "rejected"
@@ -362,7 +362,7 @@ def test_a_batch_still_obeys_the_revision_compare_and_swap(control):
     apply(control, command("set-paused", None, True))
 
     stale = apply(control, batch(
-        [{"profileId": "visual-library", "enabled": True}], revision=0, command_id="tpuwm-stale"
+        [{"profileId": "visual-library", "enabled": True}], revision=0, command_id="xpuwlm-stale"
     ))
 
     assert stale["status"] == "rejected"

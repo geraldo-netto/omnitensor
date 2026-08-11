@@ -95,7 +95,7 @@ OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 PUBLISH_INTERVAL_S = 2.0
 DISCOVERY_INTERVAL_S = 10.0
 
-DEFAULT_STATE_PATH = "~/.local/state/tpu-workload-manager/state.json"
+DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
 DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
 DEFAULT_MODEL_BINDINGS_PATH = "~/.local/share/omnitensor/model-bindings"

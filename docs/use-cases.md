@@ -1,7 +1,7 @@
 # Cinnamon workload use cases
 
 OmniTensor ships the same nine version 1 workload manifests as the
-`cinnamon-tpuwlm` applet. This gives the runtime and panel one stable profile
+`cinnamon-xpuwlm` applet. This gives the runtime and panel one stable profile
 catalog: policy commands recognize every built-in ID, defaults match, routing
 uses the same accelerator preferences, and snapshots publish the same profiles.
 
@@ -96,7 +96,7 @@ Before adding inference:
    mutation gates plus reproducible hardware acceptance measurements.
 
 The canonical manifest and runtime schemas remain under `schemas/`. Coordinate
-any incompatible catalog or contract change with `cinnamon-tpuwlm` before
+any incompatible catalog or contract change with `cinnamon-xpuwlm` before
 release.
 
 Locally trained model digests cannot be known when a built-in manifest is

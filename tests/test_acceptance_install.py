@@ -592,7 +592,7 @@ def test_the_installed_applet_reads_what_this_service_publishes():
     from omnitensor.acceptance import DEFAULT_APPLET_ROOT, check_applet_contract
 
     root = Path(DEFAULT_APPLET_ROOT).expanduser()
-    snapshot = Path("~/.local/state/tpu-workload-manager/state.json").expanduser()
+    snapshot = Path("~/.local/state/xpu-workload-manager/state.json").expanduser()
     if not root.is_dir() or not snapshot.is_file():
         pytest.skip("no applet and snapshot pair is installed on this host")
 

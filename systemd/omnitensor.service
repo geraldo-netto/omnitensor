@@ -22,7 +22,7 @@ ProtectHome=read-only
 # exist, and under ProtectHome=read-only the service cannot create them, so a
 # fresh install could never persist policy or snapshots.  StateDirectory=
 # creates them under $XDG_STATE_HOME and makes them writable.
-StateDirectory=omnitensor tpu-workload-manager
+StateDirectory=omnitensor xpu-workload-manager
 PrivateTmp=true
 
 [Install]

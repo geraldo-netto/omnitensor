@@ -27,7 +27,7 @@ from .runner import (
 from .snapshot_recording import load_runtime_snapshot, record_runtime_snapshot
 
 DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
-DEFAULT_SNAPSHOT_PATH = "~/.local/state/tpu-workload-manager/state.json"
+DEFAULT_SNAPSHOT_PATH = "~/.local/state/xpu-workload-manager/state.json"
 DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"

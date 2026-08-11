@@ -65,7 +65,7 @@ a two-sided edit and changing one side alone is silent:
 
 | Side | What names the path | Default |
 | --- | --- | --- |
-| Service | `OMNITENSOR_STATE_PATH` | `~/.local/state/tpu-workload-manager/state.json` |
+| Service | `OMNITENSOR_STATE_PATH` | `~/.local/state/xpu-workload-manager/state.json` |
 | Applet | The `runtime-state-path` setting, shown as "Runtime snapshot file" | the same path |
 
 ```sh
@@ -610,7 +610,7 @@ rm -rf ~/.local/share/omnitensor/venv
 #    Removing an artifact also removes its companion files.
 rm -rf ~/.local/share/omnitensor/artifacts     # verified models
 rm -rf ~/.local/state/omnitensor               # policy, cancellation journal
-rm -f  ~/.local/state/tpu-workload-manager/state.json   # published snapshot
+rm -f  ~/.local/state/xpu-workload-manager/state.json   # published snapshot
 
 # 5. The privileged eBPF helper, if it was installed
 sudo systemctl disable --now omnitensor-bpf.service
@@ -635,28 +635,43 @@ change if it ever needs to be stronger.
 Build the payload, install exactly it, and verify the installed tree against
 the checksums it was built from:
 
+The applet UUID changed with the product rename. Before installing, remove the
+old `cinnamon-tpuwm@geraldo-netto` panel instance in Cinnamon Settings; the old
+and new UUIDs are separate applets and must not run together. The new applet
+performs a bounded one-time settings import and reads the old applet-state file
+as a migration fallback. The service now publishes to
+`~/.local/state/xpu-workload-manager/state.json`, so deploy the matched service
+and applet builds together rather than mixing names or schema digests.
+
 ```sh
-cd /path/to/cinnamon-tpuwlm
+cd /path/to/cinnamon-xpuwlm
 npm run package
-rm -rf ~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto
-cp -a dist/cinnamon-tpuwm@geraldo-netto ~/.local/share/cinnamon/applets/
+rm -rf ~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto
+cp -a dist/cinnamon-xpuwlm@geraldo-netto ~/.local/share/cinnamon/applets/
 node scripts/package-applet.js verify \
-  ~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto
+  ~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto
+```
+
+After the new applet is added and verified, the obsolete payload can be
+removed:
+
+```sh
+rm -rf ~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto
 ```
 
 Reload the applet in the running session without restarting Cinnamon:
 
 ```sh
 dbus-send --session --dest=org.Cinnamon --type=method_call /org/Cinnamon \
-  org.Cinnamon.ReloadXlet string:'cinnamon-tpuwm@geraldo-netto' string:'APPLET'
+  org.Cinnamon.ReloadXlet string:'cinnamon-xpuwlm@geraldo-netto' string:'APPLET'
 ```
 
 ## Verify
 
 ```sh
 omnitensor-verify-install \
-  --applet-root ~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto \
-  --applet-checksums /path/to/cinnamon-tpuwlm/dist/cinnamon-tpuwm@geraldo-netto.SHA256SUMS
+  --applet-root ~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto \
+  --applet-checksums /path/to/cinnamon-xpuwlm/dist/cinnamon-xpuwlm@geraldo-netto.SHA256SUMS
 ```
 
 It exits non-zero if any check fails and prints one line per check:

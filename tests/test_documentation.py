@@ -30,7 +30,21 @@ def test_use_case_guide_distinguishes_delivered_and_local_models():
 def test_readme_links_the_use_case_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "[Cinnamon workload use cases](docs/use-cases.md)" in readme
-    assert "[cinnamon-tpuwlm](../cinnamon-tpuwlm)" in readme
+    assert "[cinnamon-xpuwlm](../cinnamon-xpuwlm)" in readme
+
+
+def test_xpu_rename_is_coordinated_across_service_defaults_and_installation():
+    from omnitensor.acceptance import DEFAULT_APPLET_ROOT
+    from omnitensor.service import DEFAULT_STATE_PATH
+    from omnitensor.training.cli import DEFAULT_SNAPSHOT_PATH
+
+    guide = (ROOT / "docs/installation.md").read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+    assert DEFAULT_APPLET_ROOT == "~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto"
+    assert DEFAULT_STATE_PATH == DEFAULT_SNAPSHOT_PATH
+    assert DEFAULT_STATE_PATH == "~/.local/state/xpu-workload-manager/state.json"
+    assert "remove the old `cinnamon-tpuwm@geraldo-netto` panel instance" in normalized
+    assert "deploy the matched service" in normalized
 
 
 def test_extension_guide_covers_the_publishing_lifecycle():

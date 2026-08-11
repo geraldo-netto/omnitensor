@@ -271,7 +271,7 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
     return Check("applet", True, f"{len(checksums)} applet files match their checksums")
 
 
-DEFAULT_APPLET_ROOT = "~/.local/share/cinnamon/applets/cinnamon-tpuwm@geraldo-netto"
+DEFAULT_APPLET_ROOT = "~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto"
 
 
 def check_confinement() -> Check:
@@ -594,7 +594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(
             os.environ.get(
                 "OMNITENSOR_STATE_PATH",
-                "~/.local/state/tpu-workload-manager/state.json",
+                "~/.local/state/xpu-workload-manager/state.json",
             )
         ).expanduser(),
     )

@@ -964,7 +964,7 @@ def test_build_service_from_env_defaults_expand_home(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     service = build_service_from_env()
     assert service._publisher_port._path == (
-        Path.home() / ".local/state/tpu-workload-manager/state.json"
+        Path.home() / ".local/state/xpu-workload-manager/state.json"
     )
     assert service.control._store._path == Path.home() / ".local/state/omnitensor/policy.json"
 
