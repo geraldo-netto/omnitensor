@@ -242,7 +242,7 @@ def test_the_bpf_program_reads_no_process_identity():
 def load_helper():
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("omnitensor_bpf_helper", HELPER)
+    spec = importlib.util.spec_from_file_location("helpers.bpf.omnitensor-bpf-helper", HELPER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -273,6 +273,207 @@ def test_the_helper_aggregate_survives_the_readers_own_validation(monkeypatch):
 
     assert aggregate.usable
     assert len(aggregate.histograms) == 2
+
+
+def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, tmp_path):
+    helper = load_helper()
+    pin_dir = tmp_path / "pins"
+    object_path = tmp_path / "runq_latency.bpf.o"
+    calls = []
+
+    def run(arguments, **options):
+        calls.append((arguments, options))
+        if arguments[1:3] == ["prog", "loadall"]:
+            pin_dir.mkdir()
+        return subprocess.CompletedProcess(arguments, 0)
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+
+    helper.load_probes(object_path, pin_dir)
+
+    assert calls[0] == (
+        [
+            "bpftool",
+            "prog",
+            "loadall",
+            str(object_path),
+            str(pin_dir),
+            "pinmaps",
+            str(pin_dir),
+            "autoattach",
+        ],
+        {"check": True, "capture_output": True},
+    )
+    assert [arguments[1:4] for arguments, _options in calls[1:]] == [
+        ["map", "show", "pinned"],
+        ["map", "show", "pinned"],
+        ["map", "show", "pinned"],
+        ["link", "show", "pinned"],
+        ["link", "show", "pinned"],
+        ["link", "show", "pinned"],
+    ]
+    assert [Path(arguments[-1]).name for arguments, _options in calls[1:]] == [
+        *helper.REQUIRED_MAPS,
+        *helper.REQUIRED_LINKS,
+    ]
+    assert all(options == {"check": True, "capture_output": True} for _, options in calls)
+
+
+def test_the_helper_refuses_partial_existing_pins_instead_of_reloading(monkeypatch, tmp_path):
+    helper = load_helper()
+    pin_dir = tmp_path / "pins"
+    pin_dir.mkdir()
+    calls = []
+
+    def run(arguments, **options):
+        calls.append((arguments, options))
+        raise subprocess.CalledProcessError(1, arguments, stderr=b"not a pinned map")
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        helper.load_probes(tmp_path / "runq_latency.bpf.o", pin_dir)
+
+    assert len(calls) == 1
+    assert calls[0][0][1:4] == ["map", "show", "pinned"]
+
+
+def test_the_helper_refuses_an_existing_non_directory_pin_path(tmp_path):
+    helper = load_helper()
+    pin_path = tmp_path / "pins"
+    pin_path.write_text("not bpffs", encoding="utf-8")
+
+    with pytest.raises(OSError, match="BPF pin directory is absent"):
+        helper.load_probes(tmp_path / "runq_latency.bpf.o", pin_path)
+
+
+def test_the_helper_decodes_little_endian_map_words_and_preserves_empty_slots(monkeypatch):
+    helper = load_helper()
+    output = json.dumps(
+        [
+            {"key": ["0x00", "0x00"], "value": ["0x02", "0x00"]},
+            {"key": [2, 0], "value": [5, 0]},
+        ]
+    )
+    calls = []
+
+    def run(arguments, **options):
+        calls.append((arguments, options))
+        return subprocess.CompletedProcess(arguments, 0, stdout=output)
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+
+    assert helper._packed(["0x34", "0x12"]) == 0x1234
+    assert helper._packed([0x34, 0x12]) == 0x1234
+    assert helper.read_histogram(Path("/pins"), "runq_latency_us") == [2, 0, 5]
+    assert calls == [
+        (
+            ["bpftool", "map", "dump", "pinned", "/pins/runq_latency_us", "-j"],
+            {"check": True, "capture_output": True, "text": True},
+        )
+    ]
+
+
+class FakeConnection:
+    def __init__(self):
+        self.payloads = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_arguments):
+        return None
+
+    def sendall(self, payload):
+        self.payloads.append(payload)
+
+
+class FakeServer:
+    def __init__(self, connection):
+        self.connection = connection
+        self.bound = None
+        self.backlog = None
+        self.accepted = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_arguments):
+        return None
+
+    def bind(self, path):
+        self.bound = path
+
+    def listen(self, backlog):
+        self.backlog = backlog
+
+    def accept(self):
+        if self.accepted:
+            raise KeyboardInterrupt
+        self.accepted = True
+        return self.connection, None
+
+
+@pytest.mark.parametrize("failure", [None, subprocess.CalledProcessError(1, ["bpftool"])])
+def test_the_helper_socket_serves_aggregates_or_bounded_errors(monkeypatch, tmp_path, failure):
+    helper = load_helper()
+    socket_path = tmp_path / "bpf.sock"
+    socket_path.write_text("stale", encoding="utf-8")
+    connection = FakeConnection()
+    server = FakeServer(connection)
+    modes = []
+    monkeypatch.setattr(helper.socket, "socket", lambda *arguments: server)
+    monkeypatch.setattr(helper.os, "chmod", lambda path, mode: modes.append((path, mode)))
+
+    def aggregate(_pin_dir):
+        if failure is not None:
+            raise failure
+        return {"version": 1, "histograms": [], "counters": []}
+
+    monkeypatch.setattr(helper, "aggregate", aggregate)
+
+    with pytest.raises(KeyboardInterrupt):
+        helper.serve(socket_path, Path("/pins"))
+
+    assert server.bound == str(socket_path)
+    assert server.backlog == 8
+    assert modes == [(socket_path, 0o666)]
+    document = json.loads(connection.payloads[0])
+    if failure is None:
+        assert document == {"version": 1, "histograms": [], "counters": []}
+    else:
+        assert document["version"] == 1
+        assert document["error"].startswith("Command '['bpftool']' returned non-zero")
+        assert len(document["error"]) <= 200
+
+
+def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_path, capsys):
+    helper = load_helper()
+    object_path = tmp_path / "probe.o"
+    pin_dir = tmp_path / "pins"
+    socket_path = tmp_path / "bpf.sock"
+
+    monkeypatch.setattr(
+        helper,
+        "load_probes",
+        lambda *_arguments: (_ for _ in ()).throw(OSError("denied")),
+    )
+    assert helper.main(["--object", str(object_path), "--pin-dir", str(pin_dir)]) == 1
+    assert capsys.readouterr().err == "could not load BPF probes: denied\n"
+
+    monkeypatch.setattr(helper, "load_probes", lambda *_arguments: None)
+    monkeypatch.setattr(
+        helper,
+        "aggregate",
+        lambda observed: {"version": 1, "pin": str(observed)},
+    )
+    assert helper.main(["--pin-dir", str(pin_dir), "--print-once"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"version": 1, "pin": str(pin_dir)}
+
+    served = []
+    monkeypatch.setattr(helper, "serve", lambda *arguments: served.append(arguments))
+    assert helper.main(["--pin-dir", str(pin_dir), "--socket", str(socket_path)]) == 0
+    assert served == [(socket_path, pin_dir)]
 
 
 @pytest.mark.skipif(

@@ -28,24 +28,48 @@ DEFAULT_OBJECT = "/usr/lib/omnitensor/bpf/runq_latency.bpf.o"
 DEFAULT_PIN_DIR = "/sys/fs/bpf/omnitensor"
 DEFAULT_SOCKET = "/run/omnitensor/bpf-aggregate.sock"
 HISTOGRAMS = (("runq_latency_us", "us"), ("block_latency_us", "us"))
+REQUIRED_MAPS = ("runq_latency_us", "block_latency_us", "wakeup_at")
+REQUIRED_LINKS = ("on_wakeup", "on_switch", "on_block_complete")
+
+
+def verify_pins(pin_dir: Path) -> None:
+    """Require every map and attached link produced by the CO-RE object."""
+    if not pin_dir.is_dir():
+        raise OSError(f"BPF pin directory is absent: {pin_dir}")
+    for name in REQUIRED_MAPS:
+        subprocess.run(
+            ["bpftool", "map", "show", "pinned", str(pin_dir / name)],
+            check=True,
+            capture_output=True,
+        )
+    for name in REQUIRED_LINKS:
+        subprocess.run(
+            ["bpftool", "link", "show", "pinned", str(pin_dir / name)],
+            check=True,
+            capture_output=True,
+        )
 
 
 def load_probes(object_path: Path, pin_dir: Path) -> None:
-    """Load and pin the probes; already-pinned is success, not a failure."""
+    """Auto-attach and pin every probe; a partial prior load fails closed."""
     if pin_dir.exists():
+        verify_pins(pin_dir)
         return
     subprocess.run(
-        ["bpftool", "prog", "loadall", str(object_path), str(pin_dir), "pinmaps", str(pin_dir)],
+        [
+            "bpftool",
+            "prog",
+            "loadall",
+            str(object_path),
+            str(pin_dir),
+            "pinmaps",
+            str(pin_dir),
+            "autoattach",
+        ],
         check=True,
         capture_output=True,
     )
-    for entry in sorted(pin_dir.iterdir()):
-        if entry.name.startswith("sched_") or entry.name.startswith("block_rq"):
-            subprocess.run(
-                ["bpftool", "prog", "attach", "pinned", str(entry), "raw_tracepoint"],
-                check=False,
-                capture_output=True,
-            )
+    verify_pins(pin_dir)
 
 
 def read_histogram(pin_dir: Path, name: str) -> list[int]:
