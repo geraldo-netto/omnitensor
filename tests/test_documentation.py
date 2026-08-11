@@ -96,6 +96,24 @@ def test_generation_guide_keeps_models_and_transports_replaceable():
         assert boundary in guide
 
 
+def test_event_result_guide_keeps_evidence_private_and_writes_confirmed():
+    generation = (ROOT / "docs/generation-providers.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/event-results.md").read_text(encoding="utf-8")
+    prose = " ".join(guide.split())
+
+    assert "[grounded event result\ncontract](event-results.md)" in generation
+    for boundary in (
+        "opaque `private:` source",
+        "Public snapshots, logs, and general D-Bus",
+        "explicitly `succeeded`, `partial`, or `refused`",
+        "offset that does not describe that local wall time",
+        "cannot mark its own output confirmed or rejected",
+        "one explicit human decision for every candidate",
+        "calendar sink is invoked only for confirmed candidates",
+    ):
+        assert boundary in prose
+
+
 def test_local_training_guide_names_every_installed_feature_semantic():
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     for term in (

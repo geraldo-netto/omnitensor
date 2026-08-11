@@ -69,3 +69,7 @@ and could return a result from a different model after a partial side effect.
 Provider-specific model quality, prompt-injection, latency, memory, and device
 evidence remain separate acceptance gates. Implementing this common boundary
 does not qualify any particular model or accelerator.
+
+The first task-specific consumer is the [grounded event result
+contract](event-results.md), which keeps model proposals separate from human
+confirmation and calendar effects.

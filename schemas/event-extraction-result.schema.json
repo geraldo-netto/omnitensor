@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/event-extraction-result.schema.json",
+  "title": "OmniTensor grounded event extraction result version 1",
+  "description": "A bounded private-worker result. Every candidate starts pending and must be confirmed through the trusted domain boundary before any calendar or ICS write.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "requestId",
+    "outcome",
+    "code",
+    "detail",
+    "duplicatePolicy",
+    "confirmationState",
+    "events"
+  ],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "outcome": {"enum": ["succeeded", "partial", "refused"]},
+    "code": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
+    "detail": {"type": "string", "maxLength": 500},
+    "duplicatePolicy": {"const": "keep-first-title-start-location"},
+    "confirmationState": {"enum": ["pending", "confirmed", "mixed", "refused"]},
+    "events": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/event"}
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "title",
+        "start",
+        "end",
+        "timezone",
+        "location",
+        "confirmation",
+        "evidence"
+      ],
+      "properties": {
+        "candidateId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "start": {"type": "string", "minLength": 16, "maxLength": 35},
+        "end": {"type": ["string", "null"], "minLength": 16, "maxLength": 35},
+        "timezone": {"type": "string", "minLength": 1, "maxLength": 64},
+        "location": {"type": ["string", "null"], "minLength": 1, "maxLength": 200},
+        "confirmation": {"enum": ["pending", "confirmed", "rejected"]},
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/evidence"}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceRef", "sourceSha256", "page", "span", "textSha256"],
+      "properties": {
+        "sourceRef": {"type": "string", "pattern": "^private:[A-Za-z0-9._:-]{1,200}$"},
+        "sourceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "page": {"type": ["integer", "null"], "minimum": 1, "maximum": 2000},
+        "span": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end"],
+          "properties": {
+            "start": {"type": "integer", "minimum": 0, "maximum": 5000000},
+            "end": {"type": "integer", "minimum": 1, "maximum": 5000000}
+          }
+        },
+        "textSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}
