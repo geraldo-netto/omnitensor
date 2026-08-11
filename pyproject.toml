@@ -65,6 +65,14 @@ foundation-producers = [
     "safetensors>=0.4",
     "transformers>=4.40",
 ]
+# Producer-only reconstruction of the verified upstream architecture/checkpoint.
+# `einops` is imported by that pinned architecture, never by the service.
+retinexformer-producers = [
+    "onnx>=1.16",
+    "numpy>=1.24",
+    "torch>=2.2",
+    "einops>=0.7",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",

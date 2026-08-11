@@ -64,9 +64,12 @@ variants comparable.
 
 Retinexformer uses the authors' official MIT-licensed LOL-v1 checkpoint. Its
 immutable Drive file id, digest, byte size, architecture, and training config
-are all part of the recipe. The producer boundary fixes RGB preprocessing and
-resolution, loads the state dict strictly, and clamps the enhanced image inside
-the exported graph. It is not the profile's existing tonal-curve artifact and
+are all part of the recipe. `PinnedRetinexformerLoader` executes only that
+verified architecture, instantiates the exact one-stage 40-feature layout, and
+strictly loads the checkpoint's `params`. The producer fixes RGB preprocessing
+and resolution, clamps the enhanced image inside ONNX, and refuses publication
+unless separately licensed paired images pass source/export and target SSIM
+plus range gates. It is not the profile's existing tonal-curve artifact and
 cannot be installed in its place until a target artifact and matching consumer
 pass their fidelity and device gates.
 

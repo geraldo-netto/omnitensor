@@ -39,6 +39,7 @@ service environment.
 | `[train]` (`onnx`) | Mandatory for export | Validate and write canonical ONNX |
 | `[model-producers]` (`torch`, `onnx`, `numpy`) | Optional | Export reviewed neural sources such as CLIP in an isolated producer environment |
 | `[foundation-producers]` (`torch`, `onnx`, `numpy`, `safetensors`, `transformers`) | Optional | Export the pinned Chronos/TTM sources; a reviewed family-specific loader is also mandatory and remains an explicit producer input |
+| `[retinexformer-producers]` (`torch`, `onnx`, `numpy`, `einops`) | Optional | Reconstruct the verified Retinexformer architecture/checkpoint and export its clamped fixed graph |
 | `[convert]` (`pnnx`) | Optional | Build Vulkan/ncnn GPU artifact |
 | `[convert-npu]` (`openvino`, `ovc`) | Optional | Build OpenVINO NPU artifact |
 | `[gpu]`, `[npu]`, `[tpu]` | Not needed for training | Service-side execution runtimes only |
@@ -80,7 +81,7 @@ TRAIN=~/.local/share/omnitensor-training/venv/bin
 | `clip-vit-b-32-image` | `visual-library` | [MIT](https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE) | Fixed image-only ONNX/L2 producer, exact resize/normalization helpers, and source cosine/zero-shot gate; native lanes remain unqualified |
 | `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Fixed 512-value median-first-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
 | `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Fixed 512-value first-point-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
-| `retinexformer-lol-v1` | `low-light-enhancement` | [MIT](https://github.com/caiyuanhao1998/Retinexformer/blob/1e9a0efce4b306b6701b824768370ff26066c32a/LICENSE.txt) | Pinned architecture/checkpoint source contract; portable export, paired-data evaluation, and profile integration remain unproduced |
+| `retinexformer-lol-v1` | `low-light-enhancement` | [MIT](https://github.com/caiyuanhao1998/Retinexformer/blob/1e9a0efce4b306b6701b824768370ff26066c32a/LICENSE.txt) | Strict pinned architecture/checkpoint loader, fixed clamped ONNX export, and licensed paired-image/source-parity gate; native lanes unqualified |
 
 Downloading is explicit and fail-closed. The exact SPDX identifier shown by
 the catalog must be acknowledged; redirects, byte limits, sizes, and digests
@@ -127,6 +128,19 @@ existing local linear runner. Reports contain only corpus digest, sample count,
 and aggregate errors. No portable result establishes GPU, NPU, or TPU support;
 those lanes remain unqualified until their separate compiler, parity, and
 named-device gates pass, and service CPU fallback remains forbidden.
+
+`produce_retinexformer_source` rechecks the official checkpoint, architecture,
+and config before `PinnedRetinexformerLoader` executes the pinned architecture,
+instantiates the exact one-stage 40-feature `[1,2,2]` block layout, and loads
+only the checkpoint's `params` mapping with strict key matching. The exported
+`[1,3,256,256]` NCHW graph clamps enhanced RGB to `[0,1]`. A separately
+licensed `RetinexformerHoldout` gates minimum portable/source whole-image SSIM
+at `0.999`, minimum paired-target SSIM at `0.8`, and requires zero range or
+nonfinite violations. Reports contain references to neither side of the image
+pairs. GPU and NPU conversion may follow portable acceptance but remains
+unqualified until native parity and named-device execution. TPU publication
+additionally requires representative fully-int8 calibration, complete Edge TPU
+mapping, fidelity parity, and Coral evidence. No lane may substitute CPU.
 
 ## Dataset ownership and redistribution
 
