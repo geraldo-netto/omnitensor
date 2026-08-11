@@ -69,6 +69,7 @@ omnitensor-record-runtime-snapshot = "omnitensor.training.cli:snapshot_record_ma
 omnitensor-train-model = "omnitensor.training.cli:train_main"
 omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
 omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
+omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
 omnitensor-grant = "omnitensor.consent:main"
@@ -79,6 +80,7 @@ packages = ["src/omnitensor"]
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "omnitensor/schemas"
 "workloads" = "omnitensor/workloads"
+"model-recipes" = "omnitensor/model-recipes"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]

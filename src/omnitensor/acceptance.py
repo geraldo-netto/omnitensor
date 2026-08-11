@@ -52,6 +52,7 @@ REQUIRED_SCHEMAS = (
     "runtime-job-cancel.schema.json",
     "runtime-job-acknowledgement.schema.json",
     "workload-manifest.schema.json",
+    "model-recipe.schema.json",
     "plugin-inventory.schema.json",
     "runtime-refusal.schema.json",
     "runtime-job-result-request.schema.json",
