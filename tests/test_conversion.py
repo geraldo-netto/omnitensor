@@ -463,7 +463,18 @@ def test_pnnx_receives_an_absolute_source_when_output_directory_differs(
 
     PnnxConverter().convert(source, (1, 2), output, 23.0)
 
-    assert calls[0][0] == ["/tools/pnnx", str(source.resolve()), "inputshape=[1,2]"]
+    assert calls[0][0] == [
+        "/tools/pnnx",
+        str(source.resolve()),
+        "inputshape=[1,2]",
+        "pnnxparam=model.pnnx.param",
+        "pnnxbin=model.pnnx.bin",
+        "pnnxpy=model_pnnx.py",
+        "pnnxonnx=model.pnnx.onnx",
+        "ncnnparam=model.ncnn.param",
+        "ncnnbin=model.ncnn.bin",
+        "ncnnpy=model_ncnn.py",
+    ]
     assert calls[0][1]["cwd"] == str(output)
 
 

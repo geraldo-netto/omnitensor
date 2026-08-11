@@ -238,6 +238,13 @@ class PnnxConverter:
             found,
             str(source.resolve()),
             f"inputshape=[{','.join(str(d) for d in shape)}]",
+            f"pnnxparam={source.stem}.pnnx.param",
+            f"pnnxbin={source.stem}.pnnx.bin",
+            f"pnnxpy={source.stem}_pnnx.py",
+            f"pnnxonnx={source.stem}.pnnx.onnx",
+            f"ncnnparam={source.stem}.ncnn.param",
+            f"ncnnbin={source.stem}.ncnn.bin",
+            f"ncnnpy={source.stem}_ncnn.py",
         ]
         return _run_converter(argv, workdir, timeout_seconds)
 
