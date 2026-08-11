@@ -15,6 +15,18 @@ def test_use_case_guide_covers_every_bundled_profile():
         assert f"`{workload_id}`" in guide
 
 
+def test_use_case_guide_distinguishes_delivered_and_local_models():
+    guide = USE_CASES.read_text(encoding="utf-8")
+
+    resource_row = next(line for line in guide.splitlines() if "`resource-scheduler`" in line)
+    visual_row = next(line for line in guide.splitlines() if "`visual-library`" in line)
+    assert "opt-in local recipe" in resource_row
+    assert "restricted binding" in resource_row
+    assert "pinned ncnn classifier" in visual_row
+    assert "Embedding/search remains" in visual_row
+    assert "other eight manifests" not in guide
+
+
 def test_readme_links_the_use_case_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "[Cinnamon workload use cases](docs/use-cases.md)" in readme
@@ -80,6 +92,15 @@ def test_local_training_guide_keeps_snapshot_collection_explicit_and_bounded():
     assert "record-runtime-snapshot" not in (ROOT / "systemd/omnitensor.service").read_text(
         encoding="utf-8"
     )
+
+
+def test_local_training_examples_share_snapshot_feature_names():
+    guide = LOCAL_TRAINING.read_text(encoding="utf-8")
+
+    assert "--features queueDepth,runningProfiles" in guide
+    assert "--target queueDepth" in guide
+    assert "--feature queueDepth=3" in guide
+    assert "--feature runningProfiles=1" in guide
 
 
 def test_installation_guide_documents_every_verifier_check():

@@ -39,9 +39,9 @@ selected executor supports.
 | --- | --- | --- | --- |
 | `hardware-health` | enabled, weight 2 | Anomaly scoring over power, UPS, memory, thermal, or service-health features | No model selected. Host collects bounded telemetry; firmware limits, kernel OOM handling, UPS shutdown thresholds, and repair actions remain deterministic. |
 | `storage-intelligence` | enabled, weight 3 | Storage-pattern classification and anomaly scoring for SMART, I/O, cache, or tiering advice | No model selected. Host reads SMART and I/O data and applies any priority, cache, or maintenance policy. |
-| `resource-scheduler` | enabled, weight 3 | Queue classification and advice for placement or background-job timing | No model selected. Host supplies job features and enforces bounded scheduling policy; accelerator output never executes arbitrary commands. |
+| `resource-scheduler` | enabled, weight 3 | Queue forecasting and advice for placement or background-job timing | No bundled model. An opt-in local recipe records bounded aggregate history, fits one forecast, compiles GPU/NPU variants, installs a restricted binding, and runs it through the trusted history-only client. The forecast is advisory; host scheduling policy stays deterministic. |
 | `build-advisor` | enabled, weight 2 | Build classification and regression-risk ranking | No model selected. Host extracts change/history features. Predictions may reorder checks but must not silently omit required checks. |
-| `visual-library` | enabled, weight 2 | Image classification or embedding extraction for tagging and semantic search | No model selected. Host decodes, resizes, normalizes, stores embeddings, searches indexes, calibrates thresholds, and renders results. Exact duplicates use hashing instead. |
+| `visual-library` | enabled, weight 2 | Image classification or embedding extraction for tagging and semantic search | Ships a pinned ncnn classifier, verified weights and labels, declared preprocessing, and bounded classification output for the Vulkan GPU lane. Embedding/search remains a separate unimplemented model and host integration. Exact duplicates use hashing instead. |
 | `low-light-enhancement` | disabled, weight 2 | Bounded tonal-curve estimation for dark images | Requires fully quantized `low-light-tonal-curve` 0.1.0 in `tflite-edgetpu` format. Package contains metadata, not model weights. Host decodes and validates inputs, prepares tensors, applies the curve, denoises, color-manages, encodes, and routes results. |
 | `network-peripherals` | disabled, weight 2 | Aggregated network or peripheral anomaly scoring | No model selected. Host captures and aggregates metadata, extracts features, and owns alerts or restricted responses. Per-packet inference is normally unsuitable. |
 | `desktop-context` | disabled, weight 1 | Context prediction and window-layout suggestions | No model selected. Host gathers consented desktop context and offers allowlisted suggestions; user and window-manager policy remain authoritative. |
@@ -62,9 +62,11 @@ requires reproducible evidence for every manifest criterion:
 
 Record model, compiler, runtime, driver, and host versions; input shape; warm-up;
 sample count; preprocessing; post-processing; accuracy dataset; and baseline.
-The other eight manifests intentionally have no selected model or acceptance
-criteria yet. Define both before presenting their catalog entry as operational
-inference.
+Six other profiles still have no selected model or qualified training recipe;
+their profile-specific TODO rows retain the corpus, metrics, model, consumer,
+and acceptance blockers. `resource-scheduler` has an opt-in local forecast
+recipe, while `visual-library` ships a runnable classifier. Neither path
+satisfies or weakens these low-light gates.
 
 ## Catalog locations and extension
 

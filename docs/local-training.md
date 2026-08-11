@@ -81,8 +81,8 @@ TRAIN=~/.local/share/omnitensor-training/venv/bin
 
 "$TRAIN/omnitensor-record-training-sample" \
   --profile resource-scheduler \
-  --feature load=0.42 \
-  --feature queue=3
+  --feature queueDepth=3 \
+  --feature runningProfiles=1
 ```
 
 Repeat from an explicit timer or collector integration using the same feature
@@ -157,8 +157,8 @@ and must match `--target`.
   --profile resource-scheduler \
   --id local-resource-forecast \
   --version 1.0.0 \
-  --features load,queue \
-  --target load \
+  --features queueDepth,runningProfiles \
+  --target queueDepth \
   --window 12 \
   --horizon 1
 ```
