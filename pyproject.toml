@@ -41,6 +41,9 @@ npu = ["openvino>=2024.0"]
 # lane executes. Never installed into the service environment — converting on
 # demand would install unverified weights while answering a request.
 convert = ["pnnx>=20240101"]
+# Packaging-time only: converts ONNX into OpenVINO IR for the NPU lane. Kept
+# separate from [npu], which is the runtime installed with the service.
+convert-npu = ["openvino>=2024.0"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",

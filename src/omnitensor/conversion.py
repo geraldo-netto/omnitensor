@@ -1,4 +1,4 @@
-"""Convert a pretrained model into the ncnn form the GPU lane can execute.
+"""Convert a pretrained model into an accelerator-native artifact.
 
 Most pretrained models are published as ONNX or TorchScript, and the only GPU
 runtime available on an AMD host is ncnn over Vulkan — onnxruntime's GPU
@@ -13,9 +13,9 @@ service that converted on demand would be installing unverified weights while
 answering a request.  The extra is therefore separate (``[convert]``) and this
 module is a command, never imported by the service.
 
-The converter is invoked as a subprocess rather than in-process.  pnnx is a
-native binary that can abort on a malformed graph, and taking that down with
-the calling process would lose the diagnosis along with it.
+Converters are invoked as subprocesses rather than in-process.  Native model
+conversion can abort on a malformed graph, and taking the caller down with it
+would lose the diagnosis along with the process.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Protocol
 
 SUPPORTED_SOURCES = (".onnx", ".pt")
+OPENVINO_SOURCES = (".onnx",)
 DEFAULT_TIMEOUT_SECONDS = 900.0
 MAX_DIMENSION = 65_536
 MAX_RANK = 5
@@ -56,7 +57,7 @@ class ConversionOutcome:
 
 
 class ModelConverter(Protocol):
-    """Turn a source model into an ncnn pair inside ``workdir``.
+    """Turn a source model into a native pair inside ``workdir``.
 
     The port owns everything about *how* conversion happens — which binary,
     where it lives, how it is invoked — so the policy below can be exercised
@@ -89,6 +90,26 @@ class ConvertedModel:
             "source": str(self.source),
             "inputShape": list(self.input_shape),
             "paramBytes": self.param.stat().st_size,
+            "binBytes": self.binary.stat().st_size,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ConvertedOpenVinoModel:
+    """The OpenVINO IR pair a conversion produced."""
+
+    xml: Path
+    binary: Path
+    source: Path
+    input_shape: tuple[int, ...]
+
+    def document(self) -> dict:
+        return {
+            "xml": str(self.xml),
+            "bin": str(self.binary),
+            "source": str(self.source),
+            "inputShape": list(self.input_shape),
+            "xmlBytes": self.xml.stat().st_size,
             "binBytes": self.binary.stat().st_size,
         }
 
@@ -153,6 +174,41 @@ def convert_to_ncnn(
     return ConvertedModel(param, binary, path, shape)
 
 
+def convert_to_openvino(
+    source: Path | str,
+    input_shape: str,
+    *,
+    output_dir: Path | str | None = None,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    converter: ModelConverter | None = None,
+) -> ConvertedOpenVinoModel:
+    """Convert an ONNX model to an OpenVINO IR XML/bin pair."""
+    path = Path(source)
+    if path.suffix.lower() not in OPENVINO_SOURCES:
+        raise ConversionError(
+            "source-unsupported",
+            f"{path.suffix or 'that file'} is not one of {', '.join(OPENVINO_SOURCES)}",
+        )
+    if not path.is_file():
+        raise ConversionError("source-invalid", f"not a regular file: {path}")
+    shape = parse_input_shape(input_shape)
+    destination = Path(output_dir) if output_dir else path.parent
+    destination.mkdir(parents=True, exist_ok=True)
+
+    outcome = (converter or OvcConverter()).convert(path, shape, destination, timeout_seconds)
+    if not outcome.succeeded:
+        raise ConversionError("conversion-failed", f"the converter failed: {_tail(outcome.output)}")
+    xml = destination / f"{path.stem}.xml"
+    binary = destination / f"{path.stem}.bin"
+    missing = [item.name for item in (xml, binary) if not item.is_file()]
+    if missing:
+        raise ConversionError(
+            "conversion-incomplete",
+            f"the converter produced no {', '.join(missing)}",
+        )
+    return ConvertedOpenVinoModel(xml, binary, path, shape)
+
+
 class PnnxConverter:
     """The pnnx adapter: the only place that knows a binary is involved.
 
@@ -179,27 +235,63 @@ class PnnxConverter:
                 " to convert models",
             )
         argv = [found, source.name, f"inputshape=[{','.join(str(d) for d in shape)}]"]
-        try:
-            result = subprocess.run(  # noqa: S603 - argv is built here, never from input
-                argv,
-                cwd=str(workdir),
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
+        return _run_converter(argv, workdir, timeout_seconds)
+
+
+class OvcConverter:
+    """Adapter for OpenVINO's offline Model Converter command."""
+
+    def __init__(self, executable: str = "ovc") -> None:
+        self._executable = executable
+
+    def convert(
+        self,
+        source: Path,
+        shape: Sequence[int],
+        workdir: Path,
+        timeout_seconds: float,
+    ) -> ConversionOutcome:
+        found = shutil.which(self._executable)
+        if found is None:
+            raise ConversionError(
+                "converter-missing",
+                f"{self._executable} is not installed; install the [convert-npu] extra"
+                " to convert models",
             )
-        except subprocess.TimeoutExpired as error:
-            raise ConversionError(
-                "conversion-timeout",
-                f"the converter did not finish within {timeout_seconds:g}s",
-            ) from error
-        except OSError as error:
-            raise ConversionError(
-                "converter-missing", f"could not run the converter: {error}"
-            ) from error
-        return ConversionOutcome(
-            result.returncode == 0, result.stderr or result.stdout or ""
+        output = workdir / f"{source.stem}.xml"
+        argv = [
+            found,
+            str(source.resolve()),
+            "--input",
+            f"[{','.join(str(dimension) for dimension in shape)}]",
+            "--output_model",
+            str(output),
+        ]
+        return _run_converter(argv, workdir, timeout_seconds)
+
+
+def _run_converter(
+    argv: list[str], workdir: Path, timeout_seconds: float
+) -> ConversionOutcome:
+    try:
+        result = subprocess.run(  # noqa: S603 - argv is built here, never from input
+            argv,
+            cwd=str(workdir),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
         )
+    except subprocess.TimeoutExpired as error:
+        raise ConversionError(
+            "conversion-timeout",
+            f"the converter did not finish within {timeout_seconds:g}s",
+        ) from error
+    except OSError as error:
+        raise ConversionError(
+            "converter-missing", f"could not run the converter: {error}"
+        ) from error
+    return ConversionOutcome(result.returncode == 0, result.stderr or result.stdout or "")
 
 
 def _tail(output: str | None, limit: int = 400) -> str:
@@ -210,9 +302,16 @@ def _tail(output: str | None, limit: int = 400) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Convert an ONNX or TorchScript model into ncnn for the GPU lane"
+        prog="omnitensor-convert-model",
+        description="Convert a model into an artifact for an accelerator lane"
     )
     parser.add_argument("source", help="the .onnx or .pt model to convert")
+    parser.add_argument(
+        "--format",
+        choices=("ncnn", "openvino"),
+        default="ncnn",
+        dest="model_format",
+    )
     parser.add_argument(
         "--input-shape",
         required=True,
@@ -223,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     try:
-        converted = convert_to_ncnn(
+        convert = convert_to_openvino if arguments.model_format == "openvino" else convert_to_ncnn
+        converted = convert(
             arguments.source,
             arguments.input_shape,
             output_dir=arguments.output_dir,
@@ -233,9 +333,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"conversion failed: {error}", file=sys.stderr)
         return 1
     document = converted.document()
+    primary = converted.xml if isinstance(converted, ConvertedOpenVinoModel) else converted.param
     document["next"] = (
         "omnitensor-prepare-artifact "
-        f"{converted.param} --id <artifact-id> --version <version> --format ncnn "
+        f"{primary} --id <artifact-id> --version <version> --format {arguments.model_format} "
         "--install-root ~/.local/share/omnitensor/artifacts"
     )
     print(json.dumps(document, indent=2))
