@@ -26,6 +26,16 @@ an image-only ONNX exporter with in-graph L2 normalization, and local
 cosine/zero-shot source parity. It does not export the text encoder or qualify
 an accelerator.
 
+Chronos-Bolt-Tiny and Granite TTM R2 have a shared producer boundary in
+`omnitensor.training.foundation_forecast_production`. A reviewed,
+family-specific loader reconstructs the pinned source; the exporter freezes a
+512-value context and selects the recipe's exact first-horizon scalar inside
+ONNX. Publication requires source/export error at most `0.0001`, at least 35%
+skill over repeat-last, and strictly lower MAE than both repeat-last and the
+existing local linear forecaster on 32–512 time-ordered, operator-owned samples.
+The report records only corpus identity and aggregate error. It never contains
+telemetry values and never qualifies a compiler or device.
+
 The bundled catalog currently contains:
 
 | recipe | upstream portable source | intended output | target status |
@@ -46,11 +56,11 @@ meaning, so a native compiler may not omit or reimplement them differently.
 The existing locally fitted linear forecaster remains the working, private
 baseline: it trains from opted-in host history, exports directly to ONNX, and
 must beat repeat-last on a time-ordered holdout. TTM and Chronos-Bolt are
-optional upstream sources, not installed models. Their common producer
-boundary accepts one finite 512-observation window and emits one first-horizon
-scalar; both use the same repeat-last quality gate. TTM selects its first point
-forecast, while Chronos-Bolt selects the first-horizon 0.5 quantile. Keeping
-that selection inside the portable graph makes target variants comparable.
+optional upstream sources, not installed models. Their common producer accepts
+one finite 512-observation window and emits one first-horizon scalar. TTM
+selects its first point forecast, while Chronos-Bolt selects the first-horizon
+0.5 quantile. Keeping that selection inside the portable graph makes target
+variants comparable.
 
 Retinexformer uses the authors' official MIT-licensed LOL-v1 checkpoint. Its
 immutable Drive file id, digest, byte size, architecture, and training config

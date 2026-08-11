@@ -38,6 +38,7 @@ service environment.
 | OmniTensor base dependencies | Mandatory | Bounded recorder, fitting baseline, report and artifact contracts |
 | `[train]` (`onnx`) | Mandatory for export | Validate and write canonical ONNX |
 | `[model-producers]` (`torch`, `onnx`, `numpy`) | Optional | Export reviewed neural sources such as CLIP in an isolated producer environment |
+| `[foundation-producers]` (`torch`, `onnx`, `numpy`, `safetensors`, `transformers`) | Optional | Export the pinned Chronos/TTM sources; a reviewed family-specific loader is also mandatory and remains an explicit producer input |
 | `[convert]` (`pnnx`) | Optional | Build Vulkan/ncnn GPU artifact |
 | `[convert-npu]` (`openvino`, `ovc`) | Optional | Build OpenVINO NPU artifact |
 | `[gpu]`, `[npu]`, `[tpu]` | Not needed for training | Service-side execution runtimes only |
@@ -54,8 +55,11 @@ python3 -m venv ~/.local/share/omnitensor-training/venv
 
 Installing `[train]` does not install PyTorch or TensorFlow. The current
 numeric recipes use deterministic fitting implemented by OmniTensor and need
-neither. An image or embedding recipe may declare its own producer-only extra;
-it must not become a service dependency.
+neither. An image, embedding, or foundation recipe may declare its own
+producer-only extra; it must not become a service dependency. The foundation
+extra does not silently choose or download a model implementation: callers
+must supply a reviewed loader matching the pinned recipe family and source
+revision.
 
 ## Reviewed open-source source catalog
 
@@ -74,8 +78,8 @@ TRAIN=~/.local/share/omnitensor-training/venv/bin
 | `all-minilm-l6-v2` | `document-intelligence` | [Apache-2.0 model card and weights](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md) | Fixed mean-pooling/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
 | `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Fixed CLS/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
 | `clip-vit-b-32-image` | `visual-library` | [MIT](https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE) | Fixed image-only ONNX/L2 producer, exact resize/normalization helpers, and source cosine/zero-shot gate; native lanes remain unqualified |
-| `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
-| `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
+| `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Fixed 512-value median-first-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
+| `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Fixed 512-value first-point-horizon ONNX producer; source parity and repeat-last/local-linear gates; native lanes unqualified |
 | `retinexformer-lol-v1` | `low-light-enhancement` | [MIT](https://github.com/caiyuanhao1998/Retinexformer/blob/1e9a0efce4b306b6701b824768370ff26066c32a/LICENSE.txt) | Pinned architecture/checkpoint source contract; portable export, paired-data evaluation, and profile integration remain unproduced |
 
 Downloading is explicit and fail-closed. The exact SPDX identifier shown by
@@ -111,6 +115,18 @@ define cover-resize, center-crop, RGB-to-NCHW, mean, and scale semantics without
 coupling them to a service decoder. A separately licensed `ClipHoldout` and
 caller-supplied source/portable runners gate cosine and zero-shot top-1 parity.
 Neither image references nor prompt vectors enter the report.
+
+`produce_foundation_forecast` reopens either pinned forecast source and calls
+an explicit reviewed loader through `TorchFoundationForecastOnnxExporter`.
+The ONNX boundary is fixed at `[1,512]` float context to `[1,1]` scalar and
+keeps TTM's first point or Chronos' first-horizon median selection inside the
+graph. A `ForecastHoldout` contains 32–512 strictly time-ordered windows from
+operator-owned telemetry. Publication requires export error at most `0.0001`,
+repeat-last skill at least 35%, and lower MAE than both repeat-last and the
+existing local linear runner. Reports contain only corpus digest, sample count,
+and aggregate errors. No portable result establishes GPU, NPU, or TPU support;
+those lanes remain unqualified until their separate compiler, parity, and
+named-device gates pass, and service CPU fallback remains forbidden.
 
 ## Dataset ownership and redistribution
 

@@ -37,6 +37,16 @@ from .embedding_production import (
     produce_sentence_embedding,
 )
 from .forecast import ForecastTrainer
+from .foundation_forecast_production import (
+    ForecastHoldout,
+    FoundationForecastEvidence,
+    ProducedFoundationForecast,
+    TorchFoundationForecastOnnxExporter,
+    evaluate_foundation_forecast,
+    produce_foundation_forecast,
+    select_median_quantile,
+    select_point_forecast,
+)
 from .installation import InstalledTraining, install_training
 from .numeric_promotion import (
     NativeParityEvidence,
@@ -55,6 +65,8 @@ __all__ = [
     "EdgeTpuTargetCompiler",
     "EmbeddingGateEvidence",
     "EmbeddingHoldout",
+    "ForecastHoldout",
+    "FoundationForecastEvidence",
     "InstalledTraining",
     "NcnnTargetCompiler",
     "NativeParityEvidence",
@@ -62,9 +74,11 @@ __all__ = [
     "OpenVinoTargetCompiler",
     "ProducedClipSource",
     "ProducedEmbeddingSource",
+    "ProducedFoundationForecast",
     "SentenceEmbeddingOnnxExporter",
     "TargetCompiler",
     "TorchScriptClipOnnxExporter",
+    "TorchFoundationForecastOnnxExporter",
     "TrainingError",
     "TrainingReport",
     "TrainingSpec",
@@ -72,10 +86,14 @@ __all__ = [
     "clip_resize_geometry",
     "evaluate_clip_gate",
     "evaluate_embedding_gate",
+    "evaluate_foundation_forecast",
     "install_training",
     "normalize_clip_rgb",
     "pool_sentence_embedding",
     "promote_numeric_training",
     "produce_clip_source",
+    "produce_foundation_forecast",
     "produce_sentence_embedding",
+    "select_median_quantile",
+    "select_point_forecast",
 ]

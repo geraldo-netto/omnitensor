@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0239 | open | medium | l | OMNI-0220, OMNI-0223 | foundation forecast source production: export fixed bounded wrappers for the pinned Chronos and Granite candidates, compare them with repeat-last and the existing local linear recipe on time-ordered operator telemetry, and publish neither candidate unless it beats the baseline and passes portable/export parity. |
 | OMNI-0240 | open | medium | l | OMNI-0048, OMNI-0198, OMNI-0220, OMNI-0224 | Retinexformer source production: recreate the pinned architecture around the verified checkpoint, export a bounded portable graph, and gate native/source fidelity on separately licensed paired images. GPU/NPU conversion may proceed after portable parity; TPU still needs representative fully-int8 calibration, full mapping, and Coral evidence. |
 
 ## Blocked

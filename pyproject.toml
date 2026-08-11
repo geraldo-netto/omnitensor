@@ -55,6 +55,16 @@ events = ["pymupdf>=1.24"]
 # Producer-only neural-model export. This is intentionally separate from the
 # service and from small deterministic numeric fitting.
 model-producers = ["onnx>=1.16", "numpy>=1.24", "torch>=2.2"]
+# Producer-only adapters for pinned foundation forecasters. The family-specific
+# loader remains explicit because Chronos and TTM use distinct reviewed APIs;
+# neither dependency is imported by the service or permits CPU fallback there.
+foundation-producers = [
+    "onnx>=1.16",
+    "numpy>=1.24",
+    "torch>=2.2",
+    "safetensors>=0.4",
+    "transformers>=4.40",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
