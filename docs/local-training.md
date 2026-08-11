@@ -237,6 +237,50 @@ TPU production additionally requires representative int8 calibration,
 fully-int8 TFLite export, complete Edge TPU mapping, and Coral evidence. Until
 those independent gates pass, every target is reported as `uncompiled`.
 
+## Private desktop-suggestion portable-source recipe
+
+`confirmed-layout-suggestion-v1` is an opt-in personalized scorer. Its JSONL
+input is deliberately not a dump of the desktop collector. Each closed record
+contains only a timestamp, bounded workspace/window/visible/role counts,
+coarse focused-role and width/height buckets, and one allowlisted layout
+suggestion with `confirmation: "user-confirmed"`. Titles, text, screenshots,
+paths, application IDs, window IDs, and arbitrary suggestion strings have no
+input field and are refused as unknown data.
+
+An authorized user-facing integration must ask the user which suggestion they
+want and produce the redacted record; OmniTensor neither observes clicks nor
+guesses consent. After reviewing the local file, train with:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-train-desktop-model \
+  --history /path/to/confirmed-content-free-desktop-examples.jsonl
+```
+
+Training uses a chronological split, requires a configured number of explicit
+confirmations for every included suggestion in both partitions, and gates
+held-out top-choice accuracy and macro recall. The report contains only the
+history digest, aggregate counts, fixed feature names, suggestion catalog, and
+quality. Its result contract requires user confirmation and forbids automatic
+window actions. A future consumer must also suppress stale-session results;
+this producer workflow alone does not make the disabled profile operational.
+
+Revoke the raw personalized history with an exact-file, symlink-refusing,
+locked command:
+
+```sh
+~/.local/share/omnitensor-training/venv/bin/omnitensor-revoke-desktop-training-history \
+  --history /path/to/confirmed-content-free-desktop-examples.jsonl \
+  --confirm-delete I-confirm-delete-desktop-training-history
+```
+
+This command deletes only that explicit corpus file and is idempotent. It does
+not uninstall a model that the operator separately compiled and installed;
+use the artifact revocation/removal workflow for derived installed artifacts.
+The portable ONNX source uses common arithmetic, `MatMul`, and `Sigmoid`.
+GPU/NPU/TPU lanes remain `uncompiled` until each has native compilation,
+parity, privacy, latency, and named-device evidence; TPU additionally needs a
+representative fully-int8 calibration/export and complete Edge TPU mapping.
+
 ## 1. Record bounded numeric history
 
 Samples contain only finite numbers. Paths, titles, document text, device

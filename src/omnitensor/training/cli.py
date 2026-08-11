@@ -21,6 +21,12 @@ from .build import (
     load_build_history,
 )
 from .contracts import TrainingError, TrainingSpec
+from .desktop import (
+    DESKTOP_REVOCATION_CONFIRMATION,
+    DesktopSuggestionTrainer,
+    load_desktop_history,
+    revoke_desktop_history,
+)
 from .forecast import ForecastTrainer
 from .hardware import (
     HARDWARE_LABEL_CONFIRMATION,
@@ -56,6 +62,7 @@ DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligenc
 DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
 DEFAULT_BUILD_OUTPUT = "~/.local/share/omnitensor/training/build-advisor/local"
 DEFAULT_HARDWARE_OUTPUT = "~/.local/share/omnitensor/training/hardware-health/local"
+DEFAULT_DESKTOP_OUTPUT = "~/.local/share/omnitensor/training/desktop-context/local"
 
 
 def record_main(argv: list[str] | None = None) -> int:
@@ -377,6 +384,64 @@ def hardware_train_main(argv: list[str] | None = None) -> int:
             indent=2,
         )
     )
+    return 0
+
+
+def desktop_train_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-train-desktop-model",
+        description="Fit content-free personalized desktop suggestion scores",
+    )
+    parser.add_argument("--history", required=True)
+    parser.add_argument("--output-dir", default=DEFAULT_DESKTOP_OUTPUT)
+    parser.add_argument("--minimum-class-examples", default=8, type=int)
+    parser.add_argument("--minimum-accuracy", default=0.6, type=float)
+    parser.add_argument("--minimum-macro-recall", default=0.5, type=float)
+    arguments = parser.parse_args(argv)
+    output = Path(arguments.output_dir).expanduser()
+    try:
+        dataset = load_desktop_history(Path(arguments.history).expanduser())
+        report = DesktopSuggestionTrainer(
+            minimum_class_examples=arguments.minimum_class_examples,
+            minimum_accuracy=arguments.minimum_accuracy,
+            minimum_macro_recall=arguments.minimum_macro_recall,
+        ).train(dataset, output)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"desktop training failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "report": str(output / "desktop-training-report.json"),
+                "portableModel": str(output / "model.onnx"),
+                "samples": report["split"],
+                "quality": report["quality"],
+                "next": "compile and qualify separately; never apply a suggestion automatically",
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def desktop_revoke_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="omnitensor-revoke-desktop-training-history",
+        description="Delete one explicit desktop training history file safely",
+    )
+    parser.add_argument("--history", required=True)
+    parser.add_argument(
+        "--confirm-delete",
+        required=True,
+        help=f"pass exactly {DESKTOP_REVOCATION_CONFIRMATION}",
+    )
+    arguments = parser.parse_args(argv)
+    try:
+        removed = revoke_desktop_history(arguments.history, arguments.confirm_delete)
+    except (TrainingError, OSError, ValueError) as error:
+        print(f"desktop history revocation failed: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps({"removed": removed}, indent=2))
     return 0
 
 
