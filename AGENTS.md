@@ -9,18 +9,21 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
   missing tests, performance problem, packaging issue, technical debt), add or update a row in
   the root `TODO.md` before reporting or acting on it.
 - Do not create duplicate rows; update the existing row when a finding changes.
+- Move findings that cannot progress without external input, hardware, credentials, or a
+  dependency into the `Blocked` table; move them back to `Findings` when they become actionable.
 - Once a finding is fully resolved and verified, remove its row in the same scoped commit as
   the resolution. `done` is transitional only; no completed row may remain after its
   resolution is committed.
 - Findings intentionally rejected or not planned move to the `Rejected / Won't fix` table with
   the rationale in the description; never mix them into the active `Findings` table.
 - Use stable sequential IDs in the form `OMNI-0001`.
-- Statuses in `Findings`: `open`, `in_progress`, `blocked`, transitional `done`.
+- Statuses in `Findings`: `open`, `in_progress`, transitional `done`.
+- Status in `Blocked`: `blocked`.
   Statuses in `Rejected / Won't fix`: `rejected`, `wont_fix`.
 - Severities: `critical`, `high`, `medium`, `low`. Efforts: `xs`, `s`, `m`, `l`, `xl`.
 - `related ids` holds comma-separated IDs, `—` when none.
 - Keep descriptions concise, actionable, and specific.
-- Both tables use exactly this schema:
+- All three tables use exactly this schema:
 
   `| id | status | severity | effort | related ids | description |`
 
