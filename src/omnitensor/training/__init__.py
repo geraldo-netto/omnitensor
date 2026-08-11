@@ -17,6 +17,15 @@ from .compilers import (
     default_target_compilers,
 )
 from .contracts import TrainingError, TrainingReport, TrainingSpec
+from .embedding_production import (
+    EmbeddingGateEvidence,
+    EmbeddingHoldout,
+    ProducedEmbeddingSource,
+    SentenceEmbeddingOnnxExporter,
+    evaluate_embedding_gate,
+    pool_sentence_embedding,
+    produce_sentence_embedding,
+)
 from .forecast import ForecastTrainer
 from .installation import InstalledTraining, install_training
 from .numeric_promotion import (
@@ -32,16 +41,23 @@ __all__ = [
     "CompilerCapability",
     "CompilerError",
     "EdgeTpuTargetCompiler",
+    "EmbeddingGateEvidence",
+    "EmbeddingHoldout",
     "InstalledTraining",
     "NcnnTargetCompiler",
     "NativeParityEvidence",
     "NumericTrainingReport",
     "OpenVinoTargetCompiler",
+    "ProducedEmbeddingSource",
+    "SentenceEmbeddingOnnxExporter",
     "TargetCompiler",
     "TrainingError",
     "TrainingReport",
     "TrainingSpec",
     "default_target_compilers",
+    "evaluate_embedding_gate",
     "install_training",
+    "pool_sentence_embedding",
     "promote_numeric_training",
+    "produce_sentence_embedding",
 ]

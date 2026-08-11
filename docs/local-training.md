@@ -70,8 +70,8 @@ TRAIN=~/.local/share/omnitensor-training/venv/bin
 
 | Recipe | Intended profile | Upstream license | Current deliverable |
 | --- | --- | --- | --- |
-| `all-minilm-l6-v2` | `document-intelligence` | [Apache-2.0 model card and weights](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md) | Pinned ONNX encoder, tokenizer, and config; pooling wrapper and profile integration remain unproduced |
-| `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Pinned ONNX encoder, tokenizer, and config; pooling wrapper and profile integration remain unproduced |
+| `all-minilm-l6-v2` | `document-intelligence` | [Apache-2.0 model card and weights](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/blob/5641a7880f40ebf4035d05e60c5f9b7a9c272c84/README.md) | Fixed mean-pooling/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
+| `bge-small-en-v1-5` | `document-intelligence` | [MIT model card and weights](https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md) | Fixed CLS/L2 ONNX producer and source-parity gate; local reviewed holdout and runner adapters required; native lanes unqualified |
 | `clip-vit-b-32-image` | `visual-library` | [MIT](https://github.com/openai/CLIP/blob/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/LICENSE) | Pinned TorchScript source and preprocessing contract; image-only export and embedding consumer remain unproduced |
 | `amazon-chronos-bolt-tiny` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/amazon/chronos-bolt-tiny/blob/a0e552de83495b5c28c14c71c374f3e33280b340/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
 | `ibm-granite-ttm-r2` | `resource-scheduler` | [Apache-2.0 model card and weights](https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2/blob/d6a79570cac0f33d526601cd3a0fc7c80a8f9a2f/README.md) | Pinned safetensors/config source; fixed forecast wrapper and local-history evaluation remain unproduced |
@@ -93,6 +93,15 @@ quality, or permission for a particular downstream dataset. Fetching also does
 not execute an upstream architecture, create the missing wrapper, compile a
 native artifact, install a binding, or make a profile operational. Those are
 separate review and acceptance stages.
+
+For the two sentence-embedding recipes, `produce_sentence_embedding` reopens
+and rehashes an already fetched source, freezes all three token inputs to
+`[1,128]`, embeds the recipe's pooling and L2 normalization into ONNX, and
+writes an atomic provenance report. The caller supplies source and portable
+runner factories plus a separately licensed `EmbeddingHoldout`; acceptance
+requires cosine parity, top-10 retrieval overlap, and finite 384-value output.
+The report contains corpus identity and counts, never query or document text.
+This producer does not compile, install, or claim GPU/NPU/TPU evidence.
 
 ## Dataset ownership and redistribution
 

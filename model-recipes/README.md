@@ -14,6 +14,12 @@ separately from the OmniTensor code license:
 omnitensor-fetch-model-source bge-small-en-v1-5 --accept-license MIT
 ```
 
+MiniLM and BGE have a producer API in
+`omnitensor.training.embedding_production`. It appends their exact fixed
+pooling/L2 graph and gates portable output against the verified source on
+operator-reviewed local text. Its report leaves GPU, NPU, and TPU unqualified;
+each still needs independent compiler, parity, and named-device evidence.
+
 The bundled catalog currently contains:
 
 | recipe | upstream portable source | intended output | target status |

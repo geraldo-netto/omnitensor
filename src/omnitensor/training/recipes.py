@@ -322,6 +322,21 @@ def fetch_model_sources(
     return FetchedModelSource(recipe, destination, destination / RECEIPT_FILENAME)
 
 
+def open_fetched_model_source(
+    recipe_path: Path | str,
+    source_root: Path | str,
+) -> FetchedModelSource:
+    """Open an already fetched source only after rechecking every pinned byte."""
+    recipe = load_model_recipe(recipe_path)
+    destination = Path(source_root) / recipe.id / recipe.version
+    if not _installed_source_matches(destination, recipe):
+        raise ModelRecipeError(
+            "source-invalid",
+            f"fetched source does not match its reviewed recipe: {destination}",
+        )
+    return FetchedModelSource(recipe, destination, destination / RECEIPT_FILENAME)
+
+
 def _validate_recipe_semantics(document: dict) -> None:
     sources = document["sources"]
     roles = _validate_source_inventory(sources)
