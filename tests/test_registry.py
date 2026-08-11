@@ -140,3 +140,23 @@ def test_forecast_variants_must_repeat_every_semantic_field(change):
             }
         }
     )
+
+
+def test_numeric_variants_must_repeat_training_source_semantics():
+    from omnitensor.registry import declared_models_error
+
+    gpu = {"id": "risk-gpu", "version": "1.0.0", "format": "ncnn"}
+    npu = {"id": "risk-npu", "version": "2.0.0", "format": "openvino"}
+    contract = {
+        "version": 1,
+        "profileId": "storage-intelligence",
+        "recipe": "backblaze-smart-risk-v1",
+        "reportSha256": "0" * 64,
+        "taskSemanticsSha256": "1" * 64,
+    }
+    gpu["trainingContract"] = contract
+    npu["trainingContract"] = {**contract, "reportSha256": "2" * 64}
+
+    assert "disagree about trainingContract" in declared_models_error(
+        {"requirements": {"models": [gpu, npu]}}
+    )

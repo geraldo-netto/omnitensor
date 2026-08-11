@@ -224,7 +224,7 @@ def declared_models_error(manifest: dict) -> str | None:
         invalid = _feature_contract_error(model)
         if invalid is not None:
             return invalid
-    for field in ("featureContract", "tensorContract", "outputContract"):
+    for field in ("featureContract", "trainingContract", "tensorContract", "outputContract"):
         stated = [json.dumps(model.get(field), sort_keys=True) for model in declared]
         if len(set(stated)) > 1:
             return f"models disagree about {field}; they must describe one network"

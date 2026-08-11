@@ -19,6 +19,11 @@ from .compilers import (
 from .contracts import TrainingError, TrainingReport, TrainingSpec
 from .forecast import ForecastTrainer
 from .installation import InstalledTraining, install_training
+from .numeric_promotion import (
+    NativeParityEvidence,
+    NumericTrainingReport,
+    promote_numeric_training,
+)
 
 __all__ = [
     "ForecastTrainer",
@@ -29,6 +34,8 @@ __all__ = [
     "EdgeTpuTargetCompiler",
     "InstalledTraining",
     "NcnnTargetCompiler",
+    "NativeParityEvidence",
+    "NumericTrainingReport",
     "OpenVinoTargetCompiler",
     "TargetCompiler",
     "TrainingError",
@@ -36,4 +43,5 @@ __all__ = [
     "TrainingSpec",
     "default_target_compilers",
     "install_training",
+    "promote_numeric_training",
 ]

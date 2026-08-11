@@ -154,18 +154,23 @@ for that profile.
 | Native compiler port | `pnnx`: ONNX or TorchScript to ncnn | `ovc`: ONNX to OpenVINO IR | `edgetpu_compiler`: fully-int8 TFLite to Edge-TPU TFLite, accepted only with 100% Edge TPU operation mapping |
 | Service executor | ncnn/Vulkan with `[gpu]` | OpenVINO with `[npu]` | TFLite with Edge TPU delegate using `[tpu]` |
 | `forecast-v1` local install | Implemented when `pnnx` is present | Implemented when `ovc` is present | Not implemented: the report currently contains ONNX, not calibrated fully-int8 TFLite |
-| Storage/network/build/hardware/desktop producers | Portable ONNX source and evaluation report implemented; native binding, consumer, and hardware acceptance remain | Same | Needs a separate representative int8 export in addition to the missing binding/consumer/acceptance work |
+| Storage/network/build/hardware/desktop producers | Signed promotion boundary implemented; requires injected native parity evidence, then installs independently versioned ncnn artifacts | Same boundary for OpenVINO IR | Needs a separate representative int8 export; ONNX promotion refuses TPU |
 | Reviewed embedding/forecast/low-light catalog | Pinned source only; wrapper/export, conversion, profile integration, and acceptance remain | Same | Same, plus representative int8 calibration and full Edge TPU mapping |
 | CPU fallback | Never | Never | Never |
 
-The current compiler abstraction is shareable across recipes, but the current
-`omnitensor-install-trained-model` report/binding contract is intentionally
-specific to `forecast-v1`. Do not pass a storage, network, build, hardware, or
-desktop report to it. To graduate one of those sources, implement and test its
-profile-specific preprocessing/result contract and restricted binding adapter,
-then compile each native lane, compare it numerically with the portable source,
-sign and digest-install immutable artifacts, and record named-device acceptance.
-Do not rename an ONNX file to TFLite or treat compiler success as parity.
+`promote_numeric_training` is the fail-closed producer API for storage,
+network, build, hardware, and desktop reports. Callers inject target compilers,
+a portable/native parity runner, an Ed25519 signer, and its offline trust
+verifier. Every target receives its own semantic version. Promotion records
+the complete report digest, task-semantics digest, native digest, bounded
+numerical evidence, and publisher provenance in the immutable store. Missing
+or mismatched evidence/signatures abort before a binding is published.
+
+This API does not claim named-device acceptance and records that fact in every
+variant. Profile-specific consumers and their hardware acceptance remain
+separate work. `omnitensor-install-trained-model` remains the convenience CLI
+specific to `forecast-v1`; it does not silently weaken the signed promotion boundary.
+Never rename ONNX to TFLite or treat compiler success as parity.
 
 For sharing, publish the canonical recipe/report, preprocessing and result
 contracts, source license/attribution, portable model digest, and evaluation
