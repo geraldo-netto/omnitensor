@@ -496,19 +496,32 @@ class SystemdUserServiceProbe:
 class DbusApplyCommandProbe:
     """:class:`BusProbe` over the session bus."""
 
-    def __init__(self, *, bus_name: str = "org.cinnamon.OmniTensor1", timeout_s: float = 10.0):
+    def __init__(
+        self,
+        *,
+        bus_name: str = "org.cinnamon.OmniTensor1",
+        timeout_s: float = 30.0,
+        retry_interval_s: float = 0.25,
+        caller=None,
+    ):
+        if timeout_s <= 0 or retry_interval_s < 0:
+            raise ValueError("D-Bus probe timing must be positive")
         self._bus_name = bus_name
         self._timeout_s = timeout_s
+        self._retry_interval_s = retry_interval_s
+        self._caller = caller
 
-    def apply_command(self, text: str) -> str:  # pragma: no cover - needs a live bus
+    def apply_command(self, text: str) -> str:
         import asyncio  # noqa: PLC0415
-
-        from dbus_fast import BusType  # noqa: PLC0415
-        from dbus_fast.aio import MessageBus  # noqa: PLC0415
 
         object_path = "/" + self._bus_name.replace(".", "/")
 
-        async def call() -> str:
+        async def call_once() -> str:  # pragma: no cover - live adapter wiring
+            if self._caller is not None:
+                return await self._caller(text)
+            from dbus_fast import BusType  # noqa: PLC0415
+            from dbus_fast.aio import MessageBus  # noqa: PLC0415
+
             bus = await MessageBus(bus_type=BusType.SESSION).connect()
             try:
                 introspection = await bus.introspect(self._bus_name, object_path)
@@ -518,7 +531,20 @@ class DbusApplyCommandProbe:
             finally:
                 bus.disconnect()
 
-        return asyncio.run(asyncio.wait_for(call(), timeout=self._timeout_s))
+        async def call() -> str:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + self._timeout_s
+            while True:
+                remaining = deadline - loop.time()
+                try:
+                    return await asyncio.wait_for(call_once(), timeout=max(remaining, 0.001))
+                except Exception:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise
+                    await asyncio.sleep(min(self._retry_interval_s, remaining))
+
+        return asyncio.run(call())
 
 
 def _run_command(argv: Sequence[str]) -> tuple[int, str]:  # pragma: no cover - thin shim

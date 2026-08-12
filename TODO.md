@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0244 | in_progress | high | s | OMNI-0242, OMNI-0243 | Immediately after installing runtime 0.1.2 and restarting the user service, `omnitensor-verify-install` reports `ApplyCommand raised DBusError`; determine whether readiness timing or a service regression causes the live verification failure. |
 
 ## Blocked
 

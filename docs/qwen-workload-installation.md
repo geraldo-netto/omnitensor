@@ -377,6 +377,13 @@ journalctl --user --unit omnitensor.service --since '-5 minutes' \
   --no-pager
 ```
 
+`systemctl is-active` becomes true before model-backed workers finish their
+bounded startup. `omnitensor-verify-install` therefore retries transient D-Bus
+startup errors for up to 30 seconds; a persistent transport or contract error
+still fails the installation.
+The 12 August 2026 live recheck started the verifier immediately after service
+restart and passed every check after 12 seconds.
+
 For each of the four IDs, `DescribePlugins` must report:
 
 - `source: "external"`, the expected distribution, and `workerState: "ready"`;

@@ -383,6 +383,37 @@ def test_the_dbus_probe_derives_its_object_path_from_the_bus_name():
     assert probe._bus_name == "org.cinnamon.OmniTensor1"
 
 
+def test_the_dbus_probe_retries_transient_service_startup_errors():
+    attempts = []
+
+    async def caller(text):
+        attempts.append(text)
+        if len(attempts) < 3:
+            raise ConnectionRefusedError("service is starting")
+        return acknowledgement()
+
+    probe = DbusApplyCommandProbe(
+        timeout_s=1,
+        retry_interval_s=0,
+        caller=caller,
+    )
+
+    assert probe.apply_command("not-json") == acknowledgement()
+    assert attempts == ["not-json", "not-json", "not-json"]
+
+
+@pytest.mark.parametrize(
+    ("timeout_s", "retry_interval_s"),
+    [(0, 0.25), (-1, 0.25), (30, -0.1)],
+)
+def test_the_dbus_probe_rejects_invalid_retry_timing(timeout_s, retry_interval_s):
+    with pytest.raises(ValueError, match="timing"):
+        DbusApplyCommandProbe(
+            timeout_s=timeout_s,
+            retry_interval_s=retry_interval_s,
+        )
+
+
 def test_a_snapshot_read_a_moment_after_it_was_written_is_not_negative(tmp_path, fake_nodes):
     """Publisher and verifier read the same clock microseconds apart."""
     path = snapshot_file(tmp_path, fake_nodes, generated_at_ms=1_000_100)
