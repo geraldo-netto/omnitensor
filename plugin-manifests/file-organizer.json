@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 2,
+  "id": "file-organizer",
+  "version": "1.0.0",
+  "capabilities": ["explicit-file-selection", "review-only-file-organization"],
+  "plugin": {
+    "entryPoint": "file-organizer",
+    "protocol": {"minimum": 1, "maximum": 1, "capabilities": ["cancel", "execute", "health", "progress"]},
+    "schemas": {
+      "configuration": {"type": "object", "additionalProperties": false},
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 4096}}
+        }
+      },
+      "output": {"$ref": "file-organizer-result.schema.json"}
+    },
+    "triggers": ["manual"],
+    "artifacts": [],
+    "permissions": ["files:read-selected"]
+  },
+  "requirements": {"runtimeApi": 1, "accelerator": "gpu", "acceleratorPreference": ["gpu"], "minimumDevices": 1, "model": null},
+  "ui": {"title": "File organizer", "group": "Local workflows", "description": "Review tags, names, folders, and exact duplicate groups", "icon": "folder-symbolic", "order": 94},
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Broker only files selected for the current manual request",
+      "Validate every suggestion against bounded private evidence",
+      "Compute duplicate groups from exact file digests",
+      "Expose a review-only plan with no filesystem mutation capability"
+    ]
+  },
+  "acceptance": []
+}

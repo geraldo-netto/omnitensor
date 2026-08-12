@@ -35,6 +35,9 @@ Using an explicit clipboard selection? [Selected-text tools](docs/selected-text-
 documents the one-shot explain, summarize, rewrite, translate, and task-extraction
 contract, its private fragment boundary, and its mandatory provider dependencies.
 
+Organizing explicitly selected files? [File organizer](docs/file-organizer.md)
+documents its evidence-bound review plan and strict no-action boundary.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and

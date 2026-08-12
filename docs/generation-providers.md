@@ -86,3 +86,7 @@ The [selected-text workload guide](selected-text-tools.md) applies the same
 provider-neutral boundary to one explicitly captured clipboard selection. It
 adds no clipboard watcher or CPU path and discards its private fragments after
 success, refusal, or cancellation.
+
+The [file organizer guide](file-organizer.md) applies the boundary to bounded
+suggestions over explicit files and keeps every filesystem action outside the
+workload.

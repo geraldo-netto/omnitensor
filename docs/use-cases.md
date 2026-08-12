@@ -52,6 +52,9 @@ providers advertise readiness. `selected-text-tools` processes only the text
 captured by an explicit action; it never monitors clipboard changes or stores
 selection history. Its five operations share the generation-provider contract
 and return reviewable output plus a digest/span evidence record.
+`file-organizer` likewise reads only files selected for one manual request and
+returns an evidence-bound metadata plan; it cannot move, rename, overwrite,
+delete, or invoke commands.
 
 ## Low-light acceptance gates
 

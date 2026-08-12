@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/file-organizer-result.schema.json",
+  "title": "Public review-only selected-file organization plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "providerId", "accelerator", "plan"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "accelerator": {"enum": ["gpu", "npu"]},
+    "plan": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/item"}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0, "maximum": 5000000},
+        "end": {"type": "integer", "minimum": 1, "maximum": 5000000}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileId", "fileName", "sourceSha256", "page", "span", "textSha256"],
+      "properties": {
+        "fileId": {"type": "string", "pattern": "^selected-file-[1-9][0-9]*$"},
+        "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
+        "sourceSha256": {"$ref": "#/$defs/digest"},
+        "page": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "span": {"$ref": "#/$defs/span"},
+        "textSha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileId", "fileName", "sourceSha256", "tags", "proposedName", "proposedFolder", "duplicateGroup", "reason", "evidence"],
+      "properties": {
+        "fileId": {"type": "string", "pattern": "^selected-file-[1-9][0-9]*$"},
+        "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
+        "sourceSha256": {"$ref": "#/$defs/digest"},
+        "tags": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 48, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+        "proposedName": {"type": ["string", "null"], "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
+        "proposedFolder": {"type": ["string", "null"], "minLength": 1, "maxLength": 240},
+        "duplicateGroup": {"type": ["string", "null"], "pattern": "^duplicate-group-[1-9][0-9]*$"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/evidence"}}
+      }
+    }
+  }
+}

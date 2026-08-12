@@ -327,6 +327,24 @@ def test_selected_text_guide_keeps_capture_private_manual_and_accelerated():
         assert boundary in normalized
 
 
+def test_file_organizer_guide_keeps_selection_explicit_and_plan_review_only():
+    guide = " ".join((ROOT / "docs/file-organizer.md").read_text().split())
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for boundary in (
+        "one to sixteen explicit absolute file paths",
+        "files:read-selected",
+        "at most two bounded spans per file",
+        "full source SHA-256",
+        "never absolute paths or source text",
+        "no apply action",
+        "no CPU fallback",
+        "GPU",
+        "NPU",
+    ):
+        assert boundary in guide
+    assert "[File organizer](docs/file-organizer.md)" in readme
+
+
 def test_installation_guide_documents_every_verifier_check():
     """The guide must explain what each automated check failing means."""
     from omnitensor.acceptance import REQUIRED_SCHEMAS
