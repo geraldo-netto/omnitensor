@@ -935,6 +935,66 @@ def test_event_evidence_binding_uses_model_selected_fragment_only():
     assert unused.reference not in json.dumps(bound)
 
 
+def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
+    store = MemoryFragmentStore()
+    metadata = SourceFragment(
+        "private:job-1:metadata:1",
+        "a" * 64,
+        1,
+        '{"fileId":"selected-file-1","fileName":"notes.txt"}',
+        "b" * 64,
+    )
+    selected = SourceFragment(
+        "private:job-1:source:1:page:2:span:10-35",
+        "c" * 64,
+        2,
+        "Project Mars notes",
+        "d" * 64,
+    )
+    asyncio.run(store.publish("job-1", (metadata, selected)))
+    reply = {
+        "suggestions": [
+            {
+                "tags": ["Project Notes", "MARS", "mars", "!!!"],
+                "evidence": [
+                    {
+                        "sourceRef": selected.reference,
+                        "sourceSha256": "model-placeholder",
+                        "page": None,
+                        "span": {"start": 0, "end": 1},
+                        "textSha256": "model-placeholder",
+                    }
+                ]
+            }
+        ]
+    }
+    request = GenerationRequest(
+        "job-1", "file-organizer", (metadata.reference, selected.reference)
+    )
+
+    bound = json.loads(
+        runtime._bind_grounding_metadata(
+            json.dumps(reply), file_organizer_task(), request, store
+        )
+    )
+
+    assert bound["suggestions"][0]["evidence"] == [
+        {
+            "sourceRef": selected.reference,
+            "sourceSha256": selected.source_sha256,
+            "page": 2,
+            "span": {"start": 10, "end": 35},
+            "textSha256": selected.text_sha256,
+        }
+    ]
+    assert bound["suggestions"][0]["tags"] == ["project-notes", "mars"]
+    reply["suggestions"][0]["evidence"][0]["sourceRef"] = metadata.reference
+    raw = json.dumps(reply)
+    assert runtime._bind_grounding_metadata(
+        raw, file_organizer_task(), request, store
+    ) == raw
+
+
 def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candidate(tmp_path):
     adapter = _runtime(tmp_path)
     source = SourceFragment(

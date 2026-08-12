@@ -23,6 +23,7 @@ MAX_RUNTIME_OUTPUT_TOKENS = 4_096
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)
 _DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.IGNORECASE)
 _SPAN_REFERENCE = re.compile(r":span:(\d+)-(\d+)$")
+_TAG_SEPARATOR = re.compile(r"[^a-z0-9]+")
 _NUMERIC_CALENDAR_DATE = re.compile(
     r"\b((?:19|20)\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b"
 )
@@ -434,11 +435,15 @@ def _bind_grounding_metadata(
     allowed = set(request.content_references)
     if task.task_id == "ask-selected-files":
         allowed.discard(request.content_references[0])
+    elif task.task_id == "file-organizer":
+        allowed = {reference for reference in allowed if ":metadata:" not in reference}
     if not all(
         _bind_evidence(evidence, task.task_id, request.request_id, allowed, store)
         for evidence in evidence_items
     ):
         return raw
+    if task.task_id == "file-organizer":
+        _normalize_organizer_tags(document)
     return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -452,6 +457,7 @@ def _model_evidence(task: GenerationTask, request: GenerationRequest):
         "selected-text-tools": _selected_evidence,
         "ask-selected-files": _citation_evidence,
         "event-extraction": _event_evidence,
+        "file-organizer": _organizer_evidence,
     }.get(task.task_id)
 
 
@@ -475,6 +481,39 @@ def _event_evidence(document: object) -> tuple[object, ...]:
             return ()
         groups.extend(event["evidence"])
     return tuple(groups)
+
+
+def _organizer_evidence(document: object) -> tuple[object, ...]:
+    suggestions = document.get("suggestions") if isinstance(document, dict) else None
+    if not isinstance(suggestions, list) or not suggestions:
+        return ()
+    groups = []
+    for suggestion in suggestions:
+        if not isinstance(suggestion, dict) or not isinstance(suggestion.get("evidence"), list):
+            return ()
+        groups.extend(suggestion["evidence"])
+    return tuple(groups)
+
+
+def _normalize_organizer_tags(document: object) -> None:
+    """Project model-selected tag phrases onto the public slug contract."""
+    suggestions = document.get("suggestions") if isinstance(document, dict) else None
+    if not isinstance(suggestions, list):
+        return
+    for suggestion in suggestions:
+        tags = suggestion.get("tags") if isinstance(suggestion, dict) else None
+        if not isinstance(tags, list):
+            continue
+        normalized = []
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            slug = _TAG_SEPARATOR.sub("-", tag.casefold()).strip("-")[:48].rstrip("-")
+            if slug and slug not in normalized:
+                normalized.append(slug)
+            if len(normalized) == 16:
+                break
+        suggestion["tags"] = normalized
 
 
 def _bind_evidence(
