@@ -679,6 +679,94 @@ def test_sync_generation_streams_only_text_and_binds_private_prompt(tmp_path):
     }
 
 
+def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_path):
+    adapter = _runtime(tmp_path)
+    source = SourceFragment(
+        "private:job-1:selection", "a" * 64, 1, "alpha", "b" * 64
+    )
+    control = SourceFragment(
+        "private:job-1:control", "c" * 64, 1, "{}", "d" * 64
+    )
+    asyncio.run(adapter._store.publish("job-1", (control, source)))
+    reply = {
+        "evidence": {
+            "sourceRef": source.reference,
+            "sourceSha256": "wrong",
+            "span": {"start": 0, "end": 5},
+            "textSha256": "alpha",
+        }
+    }
+    adapter._llama = SimpleNamespace(
+        create_chat_completion=lambda **_kwargs: iter(
+            ({"choices": [{"delta": {"content": json.dumps(reply)}}]},)
+        )
+    )
+
+    answer = adapter._generate_sync(
+        _task(),
+        GenerationRequest("job-1", "selected-text-tools", (control.reference, source.reference)),
+        CancellationController(),
+    )
+
+    assert json.loads(answer) == {
+        "evidence": {
+            "sourceRef": source.reference,
+            "sourceSha256": "a" * 64,
+            "span": {"start": 0, "end": 5},
+            "textSha256": "b" * 64,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "task_id", "references"),
+    [
+        ("not-json", "selected-text-tools", ("private:control", "private:selection")),
+        ("[]", "selected-text-tools", ("private:control", "private:selection")),
+        (
+            '{"result":"missing evidence"}',
+            "selected-text-tools",
+            ("private:control", "private:selection"),
+        ),
+        ('{"evidence":[]}', "selected-text-tools", ("private:control", "private:selection")),
+        ('{"evidence":{}}', "another-task", ("private:control", "private:selection")),
+        ('{"evidence":{}}', "selected-text-tools", ("private:selection",)),
+    ],
+)
+def test_selected_text_digest_binding_leaves_unbindable_output_unchanged(
+    raw, task_id, references
+):
+    task = replace(_task(), task_id=task_id)
+    request = GenerationRequest("job-1", task_id, references)
+
+    assert runtime._bind_selected_text_digests(
+        raw, task, request, MemoryFragmentStore()
+    ) == raw
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"sourceRef": "private:other", "span": {"start": 0, "end": 5}},
+        {"sourceRef": "private:selection", "span": {"start": 1, "end": 5}},
+    ],
+)
+def test_selected_text_digest_binding_refuses_wrong_model_citations(evidence):
+    store = MemoryFragmentStore()
+    source = SourceFragment("private:selection", "a" * 64, 1, "alpha", "b" * 64)
+    asyncio.run(store.publish("job-1", (source,)))
+    raw = json.dumps({"evidence": evidence})
+
+    assert runtime._bind_selected_text_digests(
+        raw,
+        _task(),
+        GenerationRequest(
+            "job-1", "selected-text-tools", ("private:control", source.reference)
+        ),
+        store,
+    ) == raw
+
+
 def test_sync_generation_requires_a_loaded_native_model(tmp_path):
     adapter = _runtime(tmp_path)
 

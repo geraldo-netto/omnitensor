@@ -194,7 +194,9 @@ class LlamaVulkanRuntime:
                 chunks.append(text)
         if not chunks:
             raise RuntimeError("llama.cpp returned no JSON content")
-        return "".join(chunks)
+        return _bind_selected_text_digests(
+            "".join(chunks), task, request, self._store
+        )
 
     def _release(self) -> None:
         llama = self._llama
@@ -223,6 +225,33 @@ def grammar_schema(schema: Mapping[str, object]) -> dict:
     projected.pop("$defs", None)
     _project_grammar_keywords(projected)
     return projected
+
+
+def _bind_selected_text_digests(
+    raw: str,
+    task: GenerationTask,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> str:
+    """Bind hashes the model cannot calculate to its exact selected source."""
+    if task.task_id != "selected-text-tools" or len(request.content_references) != 2:
+        return raw
+    try:
+        document = json.loads(raw)
+    except (UnicodeError, json.JSONDecodeError):
+        return raw
+    if not isinstance(document, dict) or not isinstance(document.get("evidence"), dict):
+        return raw
+    source = store.resolve(request.request_id, request.content_references[1])
+    evidence = document["evidence"]
+    if (
+        evidence.get("sourceRef") != source.reference
+        or evidence.get("span") != {"start": 0, "end": len(source.text)}
+    ):
+        return raw
+    evidence["sourceSha256"] = source.source_sha256
+    evidence["textSha256"] = source.text_sha256
+    return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
 
 
 def _project_grammar_keywords(value) -> None:

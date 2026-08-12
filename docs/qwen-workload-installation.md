@@ -198,7 +198,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
-  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.1-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.1.0-*.whl \
