@@ -25,6 +25,8 @@ worker. Each copy lives below a broker-owned ordinal directory, so safe original
 basenames remain available for user-visible citations without allowing a name
 collision or path traversal. Originals and sibling files stay outside the
 namespace, and the staged copies are removed at the terminal boundary.
+The system timezone database is mounted read-only as trusted runtime metadata,
+so named-zone validation works without exposing unrelated `/usr/share` data.
 
 Each active plugin runs in one child process launched without a shell, without
 inheritable file descriptors, and in a separate process session. The service

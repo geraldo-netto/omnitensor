@@ -20,25 +20,37 @@ installation.
 
 ## Grounding trust boundary
 
-Private fragment text is visible only inside the isolated worker. The model
-chooses which opaque `sourceRef` supports each citation or event; trusted
-runtime middleware never chooses an answer, event, source, title, date, time,
-timezone, or location. After that selection, middleware resolves only a
-reference that was supplied in the current request and replaces metadata the
-model cannot reliably reproduce with the store's canonical page, fragment
-span, and SHA-256 values. Ask also excludes the private question fragment from
-the eligible citation set. Unknown, question, malformed, or absent references
-remain unchanged so the downstream canonical schema and grounding policy fail
-closed. No raw fragment field or absolute path enters the public result; an
-answer may still quote facts required by the user's question.
+Private fragment text is visible only inside the isolated worker. On the normal
+generation path, the model chooses which opaque `sourceRef` supports each
+citation or event; trusted runtime middleware never changes its semantic
+fields. After that selection, middleware resolves only a reference supplied in
+the current request and replaces metadata the model cannot reliably reproduce
+with the store's canonical page, fragment span, and SHA-256 values. Ask also
+excludes the private question fragment from the eligible citation set. Unknown,
+question, malformed, or absent references remain unchanged so the downstream
+canonical schema and grounding policy fail closed. The narrow deterministic
+event exception is defined below. No raw fragment field or absolute path enters
+the public result; an answer may still quote facts required by the user's
+question.
 
 For event extraction, a deterministic preflight adds a positive eligibility
 hint only when one fragment contains a valid explicit calendar date, a clock
 time, and an installed IANA timezone (including `UTC`). The hint carries no
 event fields and creates no candidate; the model must still extract the event,
 select its evidence reference, and satisfy the unchanged schema, timezone,
-pending-confirmation, and evidence checks. Ambiguous or incomplete text gets no
-hint and retains the existing refusal path.
+pending-confirmation, and evidence checks. If the model initially refuses such
+qualified input, the runtime gives it one field-free reconsideration turn;
+if that also refuses, trusted middleware can produce one pending candidate only
+for the single fully matched English statement form documented by the frozen
+fixture. It rejects source commands, invalid dates/zones, ambiguous local times,
+backward ranges, partial matches, and multiple matches. Ambiguous or incomplete
+text gets neither fallback and retains the existing refusal path.
+
+The 12 August 2026 installed-provider recheck used runtime 0.1.4 through the
+session D-Bus API on the qualified RX 6600 XT. The frozen English event fixture
+completed in 10.016 seconds with one pending candidate, exact title, start, end,
+timezone, location, and canonical full-fragment evidence hashes. Its public job
+result contained no raw fragment field or absolute source path.
 
 ## Package and model layout
 
@@ -220,7 +232,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
-  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.2-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.4-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.1.0-*.whl \

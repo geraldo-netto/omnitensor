@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0243 | in_progress | high | m | OMNI-0241 | Qualified runtime now adds a field-free eligibility hint only for valid explicit date/time/IANA-zone fragments and binds metadata only for model-selected evidence; focused frozen-fixture, refusal, grounding, and no-text-leak tests pass, pending installed-provider live D-Bus proof because this pass explicitly skipped live/full gates. |
 | OMNI-0244 | in_progress | high | s | OMNI-0242, OMNI-0243 | Immediately after installing runtime 0.1.2 and restarting the user service, `omnitensor-verify-install` reports `ApplyCommand raised DBusError`; determine whether readiness timing or a service regression causes the live verification failure. |
 
 ## Blocked

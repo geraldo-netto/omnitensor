@@ -95,6 +95,33 @@ def test_selected_files_permission_mounts_only_the_private_broker_root(tmp_path)
     assert denied.read_paths == ()
 
 
+def test_timezone_database_is_usable_and_read_only_inside_real_sandbox():
+    zoneinfo = Path("/usr/share/zoneinfo")
+    if not Path(BWRAP_PATH).is_file() or not zoneinfo.is_dir():
+        pytest.skip("bubblewrap or system timezone database is unavailable")
+    sandbox = FilesystemSandbox.from_permissions(
+        set(),
+        set(),
+        runtime_paths=(zoneinfo,),
+    )
+    script = (
+        "from datetime import datetime; from zoneinfo import ZoneInfo; "
+        "zone=ZoneInfo('Europe/Rome'); "
+        "assert datetime(2026,8,12,10,tzinfo=zone).isoformat().endswith('+02:00'); "
+        "open('/usr/share/zoneinfo/UTC','wb')"
+    )
+
+    completed = subprocess.run(
+        sandbox.wrap(("/usr/bin/python3", "-c", script)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "Read-only file system" in completed.stderr
+
+
 def test_host_owned_state_and_named_accelerator_are_narrowly_mounted(tmp_path):
     state = tmp_path / "plugin-state"
     lease = tmp_path / "gpu.lock"

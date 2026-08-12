@@ -44,6 +44,7 @@ _VULKAN_METADATA_ROOTS = (
     Path("/etc/vulkan"),
     Path("/usr/share/libdrm"),
 )
+_TIMEZONE_METADATA_ROOT = Path("/usr/share/zoneinfo")
 _SYS_CHAR_ROOT = Path("/sys/dev/char")
 _SYS_DEVICES_ROOT = Path("/sys/devices")
 
@@ -395,6 +396,11 @@ def _external_worker_spec(
         argv.extend(("--accelerator-lease-path", str(lease_path)))
     runtime_paths = [
         *_trusted_runtime_paths(import_paths),
+        *(
+            (_TIMEZONE_METADATA_ROOT,)
+            if _TIMEZONE_METADATA_ROOT.is_dir()
+            else ()
+        ),
         *(
             path
             for reference, resolution in resolved_artifacts

@@ -372,6 +372,8 @@ def test_external_worker_specs_pass_only_granted_declared_permissions(tmp_path):
     assert spec.argv[-2:] == ("--permission", permission)
     assert spec.sandbox is not None
     assert spec.sandbox.read_paths == (str(source),)
+    if loading_module._TIMEZONE_METADATA_ROOT.is_dir():
+        assert str(loading_module._TIMEZONE_METADATA_ROOT) in spec.sandbox.runtime_paths
 
 
 def test_external_worker_specs_fail_closed_on_undeclared_grant(tmp_path):
