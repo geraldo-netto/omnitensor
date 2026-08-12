@@ -422,12 +422,12 @@ def test_task_manifest_schemas_health_and_constructor_contracts():
 
 
 @pytest.mark.asyncio
-async def test_health_names_accelerator_without_private_state():
+async def test_health_does_not_claim_unqualified_operation_quality():
     plugin, _worker, _store = await running()
     health = await plugin.health()
     assert (health.status.value, health.detail, health.checked_at_ms) == (
-        "ready",
-        "ready; explicit selection only",
+        "degraded",
+        "operation quality is not qualified; explicit selection only",
         10,
     )
 

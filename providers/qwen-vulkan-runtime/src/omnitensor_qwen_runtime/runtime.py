@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import BinaryIO
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from omnitensor.plugins.event_workload import MemoryFragmentStore
+from omnitensor.plugins.event_workload import EventWorkloadError, MemoryFragmentStore
 from omnitensor.plugins.generation import GenerationRequest, GenerationTask
 from omnitensor.plugins.protocol import CancellationToken, ProgressReporter
 from omnitensor.plugins.qwen import NativeLoadReport, ProviderGenerationError
@@ -223,7 +223,7 @@ class LlamaVulkanRuntime:
             raise RuntimeError("model not loaded")
         content = _private_content(self._store, request)
         instruction = task.instruction_template.replace("{{UNTRUSTED_CONTENT}}", content)
-        grounding_hint = _event_grounding_hint(task, request, self._store)
+        grounding_hint = _grounding_hint(task, request, self._store)
 
         messages = [
             {
@@ -442,8 +442,7 @@ def _bind_grounding_metadata(
         for evidence in evidence_items
     ):
         return raw
-    if task.task_id == "file-organizer":
-        _normalize_organizer_tags(document)
+    _normalize_bound_document(document, task.task_id)
     return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -495,6 +494,13 @@ def _organizer_evidence(document: object) -> tuple[object, ...]:
     return tuple(groups)
 
 
+def _normalize_bound_document(document: object, task_id: str) -> None:
+    if task_id == "ask-selected-files":
+        _deduplicate_document_citations(document)
+    elif task_id == "file-organizer":
+        _normalize_organizer_tags(document)
+
+
 def _normalize_organizer_tags(document: object) -> None:
     """Project model-selected tag phrases onto the public slug contract."""
     suggestions = document.get("suggestions") if isinstance(document, dict) else None
@@ -514,6 +520,22 @@ def _normalize_organizer_tags(document: object) -> None:
             if len(normalized) == 16:
                 break
         suggestion["tags"] = normalized
+
+
+def _deduplicate_document_citations(document: object) -> None:
+    """Collapse repeated, already-bound references without selecting evidence."""
+    citations = document.get("citations") if isinstance(document, dict) else None
+    if not isinstance(citations, list):
+        return
+    unique = []
+    references: set[str] = set()
+    for citation in citations:
+        reference = citation.get("sourceRef") if isinstance(citation, dict) else None
+        if not isinstance(reference, str) or reference in references:
+            continue
+        references.add(reference)
+        unique.append(citation)
+    document["citations"] = unique
 
 
 def _bind_evidence(
@@ -556,6 +578,75 @@ def _fragment_span(source) -> dict[str, int]:
         {"start": int(match.group(1)), "end": int(match.group(2))}
         if match is not None
         else {"start": 0, "end": len(source.text)}
+    )
+
+
+def _grounding_hint(
+    task: GenerationTask,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> str:
+    hints: list[str] = []
+    citable = _citable_references(task.task_id, request.content_references)
+    if citable:
+        hints.append(
+            "Trusted citable sourceRef values are exactly "
+            f"{json.dumps(citable, separators=(',', ':'))}. "
+            "Copy only one of these opaque values into each evidence sourceRef; "
+            "never cite another fragment. Answer every explicit part of the user's request "
+            "that these sources support; preserve names, roles, dates, times, and places.\n"
+        )
+    hints.append(_selected_operation_hint(task, request, store))
+    hints.append(_event_grounding_hint(task, request, store))
+    return "".join(hints)
+
+
+def _citable_references(task_id: str, references: tuple[str, ...]) -> tuple[str, ...]:
+    if task_id in {"selected-text-tools", "ask-selected-files"}:
+        return references[1:]
+    if task_id == "file-organizer":
+        return tuple(reference for reference in references if ":metadata:" not in reference)
+    return ()
+
+
+def _selected_operation_hint(
+    task: GenerationTask,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> str:
+    if task.task_id != "selected-text-tools" or len(request.content_references) != 2:
+        return ""
+    try:
+        control = json.loads(
+            store.resolve(request.request_id, request.content_references[0]).text
+        )
+    except (EventWorkloadError, UnicodeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(control, dict) or set(control) != {"language", "operation"}:
+        return ""
+    operation = control.get("operation")
+    language = control.get("language")
+    instructions = {
+        "explain": "Explain the selection clearly in result; tasks must be empty.",
+        "summarize": "Summarize the selection concisely in result; tasks must be empty.",
+        "rewrite": "Rewrite the selection while preserving its meaning; tasks must be empty.",
+        "translate": (
+            f"Translate the selection into {json.dumps(language)} in result; tasks must be empty."
+            if isinstance(language, str) and language
+            else ""
+        ),
+        "extract-tasks": (
+            "List every explicit actionable item in tasks. If any action is present, tasks "
+            "must not be empty. Result must briefly introduce the extracted tasks, not echo "
+            "the selection."
+        ),
+    }
+    instruction = instructions.get(operation, "")
+    if not instruction:
+        return ""
+    return (
+        f"Trusted selected-text operation is {json.dumps(operation)}. {instruction} "
+        "Return operation exactly as named.\n"
     )
 
 

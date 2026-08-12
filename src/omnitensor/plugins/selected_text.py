@@ -79,8 +79,8 @@ class SelectedTextPlugin(ManagedPlugin):
     async def on_health(self) -> PluginHealth:
         self._router.require_ready()
         return PluginHealth(
-            PluginHealthStatus.READY,
-            "ready; explicit selection only",
+            PluginHealthStatus.DEGRADED,
+            "operation quality is not qualified; explicit selection only",
             self._clock_ms(),
         )
 

@@ -56,6 +56,7 @@ from .generation import (
 )
 from .ingestion import IngestedFile
 from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
+from .text_encoding import TextEncodingError, decode_plain_text
 
 PLUGIN_ID = "event-extraction"
 READ_PERMISSION = "files:read-selected"
@@ -124,9 +125,11 @@ class PlainTextAdapter:
     async def pages(self, item: IngestedFile) -> AsyncIterator[PageContent]:
         raw = await asyncio.to_thread(_read_exact_file, Path(item.path), item.size_bytes)
         try:
-            text = raw.decode("utf-8-sig")
-        except UnicodeDecodeError as error:
-            raise EventWorkloadError("source-encoding", "text source is not UTF-8") from error
+            text = decode_plain_text(raw)
+        except TextEncodingError as error:
+            raise EventWorkloadError(
+                "source-encoding", "text source encoding is unsupported or uncertain"
+            ) from error
         yield PageContent(1, text)
 
 

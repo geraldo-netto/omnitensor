@@ -20,6 +20,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Geraldo Netto", email = "geraldonetto@gmail.com"}]
 dependencies = [
+    "chardet>=5.2,<6",
     "cryptography>=42.0",
     "jsonschema>=4.21",
     "dbus-fast>=2.21",

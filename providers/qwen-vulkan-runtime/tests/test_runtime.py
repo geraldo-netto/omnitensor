@@ -101,6 +101,19 @@ def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
     assert canonical["properties"]["confirmation"]["enum"] == ["pending", "confirmed"]
 
 
+def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
+    assert runtime._is_grounded_event_refusal("not-json") is False
+    assert runtime._organizer_evidence({}) == ()
+    assert runtime._organizer_evidence({"suggestions": [None]}) == ()
+
+    assert runtime._normalize_organizer_tags(None) is None
+    malformed = {"suggestions": [None, {"tags": None}, {"tags": [1]}]}
+    assert runtime._normalize_organizer_tags(malformed) is None
+    bounded = {"suggestions": [{"tags": [f"Tag {index}" for index in range(17)]}]}
+    runtime._normalize_organizer_tags(bounded)
+    assert bounded["suggestions"][0]["tags"] == [f"tag-{index}" for index in range(16)]
+
+
 @given(
     maximum=st.integers(min_value=1, max_value=1_000_000),
     pattern=st.text(min_size=1, max_size=64),
@@ -856,6 +869,153 @@ def test_document_citations_bind_exact_retrieved_span_metadata_without_source_te
     assert public["answer"] == "Room 2"
     assert public["citations"][0]["fileName"] == "planning.txt"
     assert first.text not in json.dumps(public)
+
+
+def test_document_citation_binding_collapses_only_repeated_exact_sources():
+    store = MemoryFragmentStore()
+    question = SourceFragment("private:question", "a" * 64, 1, "Who?", "b" * 64)
+    first = SourceFragment(
+        "private:first:span:0-5", "c" * 64, 1, "alpha", "d" * 64
+    )
+    second = SourceFragment(
+        "private:second:span:0-4", "e" * 64, 1, "beta", "f" * 64
+    )
+    asyncio.run(store.publish("job-1", (question, first, second)))
+    reply = {
+        "citations": [
+            {"sourceRef": first.reference},
+            {"sourceRef": first.reference},
+            {"sourceRef": second.reference},
+        ]
+    }
+
+    bound = json.loads(
+        runtime._bind_grounding_metadata(
+            json.dumps(reply),
+            document_question_task(),
+            GenerationRequest(
+                "job-1",
+                "ask-selected-files",
+                (question.reference, first.reference, second.reference),
+            ),
+            store,
+        )
+    )
+
+    assert [item["sourceRef"] for item in bound["citations"]] == [
+        first.reference,
+        second.reference,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("task_id", "references", "expected"),
+    [
+        (
+            "selected-text-tools",
+            ("private:control", "private:selection"),
+            ("private:selection",),
+        ),
+        (
+            "ask-selected-files",
+            ("private:question", "private:span:0-5", "private:span:5-9"),
+            ("private:span:0-5", "private:span:5-9"),
+        ),
+        (
+            "file-organizer",
+            ("private:metadata:1", "private:span:0-5"),
+            ("private:span:0-5",),
+        ),
+        ("unknown", ("private:item",), ()),
+    ],
+)
+def test_grounding_hint_lists_only_task_citable_opaque_references(
+    task_id, references, expected
+):
+    request = GenerationRequest("job-1", task_id, references)
+
+    hint = runtime._grounding_hint(
+        replace(_task(), task_id=task_id), request, MemoryFragmentStore()
+    )
+
+    if not expected:
+        assert hint == ""
+        return
+    assert json.dumps(expected, separators=(",", ":")) in hint
+    for reference in set(references) - set(expected):
+        assert reference not in hint
+
+
+def test_grounding_hint_contains_no_private_source_text():
+    store = MemoryFragmentStore()
+    question = SourceFragment("private:question", "a" * 64, 1, "secret question", "b" * 64)
+    span = SourceFragment("private:span:0-6", "c" * 64, 1, "secret answer", "d" * 64)
+    asyncio.run(store.publish("job-1", (question, span)))
+    request = GenerationRequest(
+        "job-1", "ask-selected-files", (question.reference, span.reference)
+    )
+
+    hint = runtime._grounding_hint(document_question_task(), request, store)
+
+    assert span.reference in hint
+    assert question.reference not in hint
+    assert question.text not in hint
+    assert span.text not in hint
+
+
+@pytest.mark.parametrize(
+    ("operation", "language", "required"),
+    [
+        ("explain", None, "Explain the selection"),
+        ("summarize", None, "Summarize the selection"),
+        ("rewrite", None, "Rewrite the selection"),
+        ("translate", "Hebrew", 'Translate the selection into "Hebrew"'),
+        ("extract-tasks", None, "tasks must not be empty"),
+    ],
+)
+def test_selected_operation_hint_is_explicit_without_selection_text(
+    operation, language, required
+):
+    store = MemoryFragmentStore()
+    control_text = json.dumps(
+        {"language": language, "operation": operation}, separators=(",", ":")
+    )
+    control = SourceFragment("private:control", "a" * 64, 1, control_text, "b" * 64)
+    selection = SourceFragment(
+        "private:selection", "c" * 64, 1, "private selection", "d" * 64
+    )
+    asyncio.run(store.publish("job-1", (control, selection)))
+    request = GenerationRequest(
+        "job-1", "selected-text-tools", (control.reference, selection.reference)
+    )
+
+    hint = runtime._grounding_hint(selected_text_task(), request, store)
+
+    assert f'Trusted selected-text operation is "{operation}"' in hint
+    assert required in hint
+    assert selection.text not in hint
+    assert control_text not in hint
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        "not-json",
+        "[]",
+        '{"operation":"unknown","language":null}',
+        '{"operation":"summarize"}',
+        '{"operation":"translate","language":null}',
+    ],
+)
+def test_selected_operation_hint_refuses_invalid_control(control):
+    store = MemoryFragmentStore()
+    fragment = SourceFragment("private:control", "a" * 64, 1, control, "b" * 64)
+    asyncio.run(store.publish("job-1", (fragment,)))
+    request = GenerationRequest(
+        "job-1", "selected-text-tools", (fragment.reference, "private:selection")
+    )
+
+    assert runtime._selected_operation_hint(selected_text_task(), request, store) == ""
 
 
 @pytest.mark.parametrize(

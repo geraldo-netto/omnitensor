@@ -243,7 +243,9 @@ async def test_text_and_calendar_adapters_extract_only_selected_content(tmp_path
     assert refused.outcome.value == "crashed"
     assert refused.detail == "EventWorkloadError: source-encoding: calendar source is not UTF-8"
     refused = await DocumentExtractor(PlainTextAdapter()).extract(item(invalid))
-    assert refused.detail == "EventWorkloadError: source-encoding: text source is not UTF-8"
+    assert refused.detail == (
+        "EventWorkloadError: source-encoding: text source encoding is unsupported or uncertain"
+    )
 
 
 @pytest.mark.asyncio
