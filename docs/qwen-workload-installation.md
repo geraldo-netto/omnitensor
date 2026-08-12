@@ -18,6 +18,27 @@ its distribution, artifact, permission, worker, or accelerator check fails.
 Installing only the Python packages is therefore not a successful model
 installation.
 
+## Grounding trust boundary
+
+Private fragment text is visible only inside the isolated worker. The model
+chooses which opaque `sourceRef` supports each citation or event; trusted
+runtime middleware never chooses an answer, event, source, title, date, time,
+timezone, or location. After that selection, middleware resolves only a
+reference that was supplied in the current request and replaces metadata the
+model cannot reliably reproduce with the store's canonical page, fragment
+span, and SHA-256 values. Ask also excludes the private question fragment from
+the eligible citation set. Unknown, question, malformed, or absent references
+remain unchanged so the downstream canonical schema and grounding policy fail
+closed. No source text enters the public result.
+
+For event extraction, a deterministic preflight adds a positive eligibility
+hint only when one fragment contains a valid explicit calendar date, a clock
+time, and an installed IANA timezone (including `UTC`). The hint carries no
+event fields and creates no candidate; the model must still extract the event,
+select its evidence reference, and satisfy the unchanged schema, timezone,
+pending-confirmation, and evidence checks. Ambiguous or incomplete text gets no
+hint and retains the existing refusal path.
+
 ## Package and model layout
 
 The provider is five wheels rather than one wheel with four entry points. An
@@ -198,7 +219,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
-  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.1-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.2-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.1.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.1.0-*.whl \

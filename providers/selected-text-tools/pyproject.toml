@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Pinned Qwen/Vulkan provider for OmniTensor selected-text tools"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["omnitensor-qwen-vulkan-runtime==0.1.1"]
+dependencies = ["omnitensor-qwen-vulkan-runtime==0.1.2"]
 
 [project.entry-points."omnitensor.workloads"]
 selected-text-tools = "omnitensor_qwen_selected_text:create"

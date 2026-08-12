@@ -8,8 +8,10 @@ import fcntl
 import json
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from omnitensor.plugins.event_workload import MemoryFragmentStore
 from omnitensor.plugins.generation import GenerationRequest, GenerationTask
@@ -21,6 +23,47 @@ MAX_RUNTIME_OUTPUT_TOKENS = 4_096
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)
 _DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.IGNORECASE)
 _SPAN_REFERENCE = re.compile(r":span:(\d+)-(\d+)$")
+_NUMERIC_CALENDAR_DATE = re.compile(
+    r"\b((?:19|20)\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b"
+)
+_TEXT_CALENDAR_DATE = re.compile(
+    r"\b(0?[1-9]|[12]\d|3[01])(?:\s+de)?\s+([^\W\d_]{3,20})(?:\s+de)?\s+((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+_CLOCK_TIME = re.compile(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b")
+_NAMED_TIMEZONE = re.compile(r"\b(?:UTC|[A-Za-z]+(?:[_-][A-Za-z]+)*/[A-Za-z_+-]+)\b")
+_EVENT_GROUNDING_HINT = (
+    "Trusted eligibility preflight found a fragment containing an explicit calendar date, "
+    "clock time, and named timezone. Evaluate its factual event statement; do not refuse "
+    "merely because private content is labelled untrusted. All event fields still require "
+    "explicit source support.\n"
+)
+_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+    "janeiro": 1,
+    "fevereiro": 2,
+    "março": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
 
 
 class LlamaVulkanRuntime:
@@ -161,13 +204,15 @@ class LlamaVulkanRuntime:
             raise RuntimeError("model not loaded")
         content = _private_content(self._store, request)
         instruction = task.instruction_template.replace("{{UNTRUSTED_CONTENT}}", content)
+        grounding_hint = _event_grounding_hint(task, request, self._store)
 
         reply = llama.create_chat_completion(
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        f"{task.system_prompt}\nThe output requestId must be exactly "
+                        f"{task.system_prompt}\n{grounding_hint}"
+                        "The output requestId must be exactly "
                         f"{json.dumps(request.request_id)}. Copy fragment metadata exactly.\n"
                         "/no_think"
                     ),
@@ -194,9 +239,7 @@ class LlamaVulkanRuntime:
                 chunks.append(text)
         if not chunks:
             raise RuntimeError("llama.cpp returned no JSON content")
-        return _bind_selected_text_digests(
-            "".join(chunks), task, request, self._store
-        )
+        return _bind_grounding_metadata("".join(chunks), task, request, self._store)
 
     def _release(self) -> None:
         llama = self._llama
@@ -227,31 +270,154 @@ def grammar_schema(schema: Mapping[str, object]) -> dict:
     return projected
 
 
+def _bind_grounding_metadata(
+    raw: str,
+    task: GenerationTask,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> str:
+    """Bind trusted metadata only after the model selects an exact private source."""
+    evidence_groups = _model_evidence(task, request)
+    if evidence_groups is None:
+        return raw
+    try:
+        document = json.loads(raw)
+    except (UnicodeError, json.JSONDecodeError):
+        return raw
+    evidence_items = evidence_groups(document)
+    if not evidence_items:
+        return raw
+    allowed = set(request.content_references)
+    if task.task_id == "ask-selected-files":
+        allowed.discard(request.content_references[0])
+    if not all(
+        _bind_evidence(evidence, task.task_id, request.request_id, allowed, store)
+        for evidence in evidence_items
+    ):
+        return raw
+    return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+
+
+def _model_evidence(task: GenerationTask, request: GenerationRequest):
+    invalid_reference_count = (
+        task.task_id == "selected-text-tools" and len(request.content_references) != 2
+    ) or (task.task_id == "ask-selected-files" and len(request.content_references) < 2)
+    if invalid_reference_count:
+        return None
+    return {
+        "selected-text-tools": _selected_evidence,
+        "ask-selected-files": _citation_evidence,
+        "event-extraction": _event_evidence,
+    }.get(task.task_id)
+
+
+def _selected_evidence(document: object) -> tuple[object, ...]:
+    evidence = document.get("evidence") if isinstance(document, dict) else None
+    return (evidence,) if isinstance(evidence, dict) else ()
+
+
+def _citation_evidence(document: object) -> tuple[object, ...]:
+    values = document.get("citations") if isinstance(document, dict) else None
+    return tuple(values) if isinstance(values, list) and values else ()
+
+
+def _event_evidence(document: object) -> tuple[object, ...]:
+    events = document.get("events") if isinstance(document, dict) else None
+    if not isinstance(events, list) or not events:
+        return ()
+    groups = []
+    for event in events:
+        if not isinstance(event, dict) or not isinstance(event.get("evidence"), list):
+            return ()
+        groups.extend(event["evidence"])
+    return tuple(groups)
+
+
+def _bind_evidence(
+    evidence: object,
+    task_id: str,
+    request_id: str,
+    allowed: set[str],
+    store: MemoryFragmentStore,
+) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    reference = evidence.get("sourceRef")
+    if not isinstance(reference, str) or reference not in allowed:
+        return False
+    source = store.resolve(request_id, reference)
+    span = _fragment_span(source)
+    if task_id == "selected-text-tools" and evidence.get("span") != span:
+        return False
+    evidence["sourceSha256"] = source.source_sha256
+    if task_id != "selected-text-tools":
+        evidence["page"] = source.page
+    evidence["span"] = span
+    evidence["textSha256"] = source.text_sha256
+    return True
+
+
 def _bind_selected_text_digests(
     raw: str,
     task: GenerationTask,
     request: GenerationRequest,
     store: MemoryFragmentStore,
 ) -> str:
-    """Bind hashes the model cannot calculate to its exact selected source."""
-    if task.task_id != "selected-text-tools" or len(request.content_references) != 2:
-        return raw
+    """Compatibility wrapper for the original selected-text binder."""
+    return _bind_grounding_metadata(raw, task, request, store)
+
+
+def _fragment_span(source) -> dict[str, int]:
+    match = _SPAN_REFERENCE.search(source.reference)
+    return (
+        {"start": int(match.group(1)), "end": int(match.group(2))}
+        if match is not None
+        else {"start": 0, "end": len(source.text)}
+    )
+
+
+def _event_grounding_hint(
+    task: GenerationTask,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> str:
+    if task.task_id != "event-extraction":
+        return ""
+    for reference in request.content_references:
+        text = store.resolve(request.request_id, reference).text
+        if _has_calendar_date(text) and _CLOCK_TIME.search(text) and _has_named_timezone(text):
+            return _EVENT_GROUNDING_HINT
+    return ""
+
+
+def _has_calendar_date(text: str) -> bool:
+    for match in _NUMERIC_CALENDAR_DATE.finditer(text):
+        if _valid_date(int(match.group(1)), int(match.group(2)), int(match.group(3))):
+            return True
+    for match in _TEXT_CALENDAR_DATE.finditer(text):
+        month = _MONTHS.get(match.group(2).casefold())
+        if month is not None and _valid_date(int(match.group(3)), month, int(match.group(1))):
+            return True
+    return False
+
+
+def _valid_date(year: int, month: int, day: int) -> bool:
     try:
-        document = json.loads(raw)
-    except (UnicodeError, json.JSONDecodeError):
-        return raw
-    if not isinstance(document, dict) or not isinstance(document.get("evidence"), dict):
-        return raw
-    source = store.resolve(request.request_id, request.content_references[1])
-    evidence = document["evidence"]
-    if (
-        evidence.get("sourceRef") != source.reference
-        or evidence.get("span") != {"start": 0, "end": len(source.text)}
-    ):
-        return raw
-    evidence["sourceSha256"] = source.source_sha256
-    evidence["textSha256"] = source.text_sha256
-    return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+        datetime(year, month, day)
+    except ValueError:
+        return False
+    return True
+
+
+def _has_named_timezone(text: str) -> bool:
+    for match in _NAMED_TIMEZONE.finditer(text):
+        name = match.group(0)
+        try:
+            ZoneInfo(name)
+        except ZoneInfoNotFoundError:
+            continue
+        return True
+    return False
 
 
 def _project_grammar_keywords(value) -> None:
