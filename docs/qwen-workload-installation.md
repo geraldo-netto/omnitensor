@@ -29,7 +29,8 @@ model cannot reliably reproduce with the store's canonical page, fragment
 span, and SHA-256 values. Ask also excludes the private question fragment from
 the eligible citation set. Unknown, question, malformed, or absent references
 remain unchanged so the downstream canonical schema and grounding policy fail
-closed. No source text enters the public result.
+closed. No raw fragment field or absolute path enters the public result; an
+answer may still quote facts required by the user's question.
 
 For event extraction, a deterministic preflight adds a positive eligibility
 hint only when one fragment contains a valid explicit calendar date, a clock

@@ -52,6 +52,9 @@ PyMuPDF/OCR adapter inside the killable workload process.
 Normalised pages are split into at most 512 spans of at most 2,048 characters.
 Each entry binds the selected-file ordinal, safe basename, full source SHA-256,
 page, character offsets, and span SHA-256. The index exists only in memory.
+Brokering places each copy below a private ordinal directory while retaining a
+safe original basename, so public citations identify the selected file rather
+than an internal staging name.
 BGE embeds the explicit question and spans, deterministic cosine ranking keeps
 at most eight spans. Qwen receives the explicit question as a separate,
 non-citable private fragment followed by only those opaque span references.
@@ -64,7 +67,8 @@ unless its private reference,
 source digest, page, exact start/end offsets, and text digest all match a
 retrieved span. The public `document-question-result` replaces the private
 reference with `selected-file-N` plus the basename and retains the digests and
-page/span address. It contains no source text or absolute path. Malformed,
+page/span address. It contains no raw fragment field or absolute path; the
+bounded answer itself may quote facts needed to answer the question. Malformed,
 unretrieved, duplicated, or changed citations fail the whole job.
 
 Cancellation is checked before extraction, retrieval, and generation. Progress
@@ -107,6 +111,12 @@ probes require malicious and mutated documents to fail closed, revoked grants
 to refuse queued work, changed source digests to suppress stale results, an
 ephemeral index to recover on the next request, cancellation to terminate, and
 private fragments to be discarded on every terminal path.
+
+The 12 August 2026 installed-provider recheck used runtime 0.1.2 through the
+session D-Bus API on the same RX 6600 XT. A synthetic Mars fixture completed as
+`job-succeeded`; its citation retained `omni-0242-mars.txt`, canonical page/span
+and both SHA-256 values. The owner-scoped public result contained no absolute
+source path or raw fragment field.
 
 The accepted report is deliberately narrow: it qualifies this frozen public
 holdout on that GPU. It does not claim quality for arbitrary private corpora,

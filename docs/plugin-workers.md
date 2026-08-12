@@ -21,8 +21,10 @@ permission set is passed into the worker's `PluginContext`.
 `files:read-selected` is implemented by a broker, not by mounting a caller's
 directory. The service copies only the explicitly submitted, canonical regular
 files into a private per-request directory already mounted read-only in that
-worker. Originals and sibling files stay outside the namespace, and the staged
-copies are removed at the terminal boundary.
+worker. Each copy lives below a broker-owned ordinal directory, so safe original
+basenames remain available for user-visible citations without allowing a name
+collision or path traversal. Originals and sibling files stay outside the
+namespace, and the staged copies are removed at the terminal boundary.
 
 Each active plugin runs in one child process launched without a shell, without
 inheritable file descriptors, and in a separate process session. The service

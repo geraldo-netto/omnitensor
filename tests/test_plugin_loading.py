@@ -1528,17 +1528,18 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
     assert staged.parent == prepared / "external-example"
     assert staged.parent.stat().st_mode & 0o777 == 0o700
     assert rewritten == {
-        "sources": [str(staged / "00.txt")],
+        "sources": [str(staged / "00" / "event.TXT")],
         "locale": "en",
     }
-    assert (staged / "00.txt").read_text(encoding="utf-8") == "event"
+    assert (staged / "00" / "event.TXT").read_text(encoding="utf-8") == "event"
+    assert (staged / "00").stat().st_mode & 0o777 == 0o700
     loading_module.shutil.rmtree(staged)
 
     copied = []
 
     def fake_copy(path, destination, index, observed):
         copied.append((path, destination, index, observed))
-        return destination / f"{index:02d}.txt"
+        return destination / f"{index:02d}" / "source.txt"
 
     monkeypatch.setattr(loading_module, "_copy_selected_source", fake_copy)
     rewritten, staged = loading_module._stage_selected_sources(
@@ -1582,8 +1583,8 @@ def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
     monkeypatch.setattr(loading_module.shutil, "copyfileobj", copy)
     first_copy = loading_module._copy_selected_source(first, staged, 0, observed)
     second_copy = loading_module._copy_selected_source(second, staged, 1, observed)
-    assert first_copy == staged / "00.txt"
-    assert second_copy == staged / "01.bin"
+    assert first_copy == staged / "00" / "FIRST.TXT"
+    assert second_copy == staged / "01" / "second.bad-suffix-long"
     assert first_copy.read_text(encoding="utf-8") == "first"
     assert second_copy.read_text(encoding="utf-8") == "second"
     assert copy_calls == [1024 * 1024, 1024 * 1024]
@@ -1595,6 +1596,12 @@ def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
         "selected-file-invalid",
         "the same selected file appears more than once",
     )
+
+
+def test_selected_file_broker_uses_safe_fallback_for_unrepresentable_basename(tmp_path):
+    candidate = tmp_path / "unsafe\\name.md"
+
+    assert loading_module._staged_source_name(candidate) == "selected-file.md"
 
 
 def test_selected_file_helpers_reject_exact_race_and_file_boundaries(tmp_path, monkeypatch):

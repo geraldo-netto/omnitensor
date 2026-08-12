@@ -662,10 +662,7 @@ def _copy_selected_source(
     candidate = Path(source)
     resolved = _canonical_selected_source(candidate)
     descriptor = _open_selected_source(resolved)
-    suffix = candidate.suffix.lower()
-    if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
-        suffix = ".bin"
-    destination = staged / f"{index:02d}{suffix}"
+    destination = staged / f"{index:02d}" / _staged_source_name(candidate)
     try:
         with os.fdopen(descriptor, "rb") as reader:
             before = os.fstat(reader.fileno())
@@ -676,6 +673,7 @@ def _copy_selected_source(
                     "selected-file-invalid", "the same selected file appears more than once"
                 )
             observed.add(identity)
+            destination.parent.mkdir(mode=0o700)
             with destination.open("xb") as writer:
                 shutil.copyfileobj(reader, writer, length=1024 * 1024)
             after = os.fstat(reader.fileno())
@@ -688,6 +686,17 @@ def _copy_selected_source(
             "selected-file-unavailable", "selected source cannot be copied"
         ) from error
     return destination
+
+
+def _staged_source_name(candidate: Path) -> str:
+    """Keep a safe selected basename without allowing staging-path control."""
+    name = candidate.name
+    if name and len(name) <= 255 and "/" not in name and "\\" not in name:
+        return name
+    suffix = candidate.suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
+        suffix = ".bin"
+    return f"selected-file{suffix}"
 
 
 def _canonical_selected_source(candidate: Path) -> Path:
