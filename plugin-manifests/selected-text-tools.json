@@ -25,8 +25,15 @@
       "output": {"$ref": "selected-text-result.schema.json"}
     },
     "triggers": ["manual"],
-    "artifacts": [],
-    "permissions": ["clipboard:read-once"]
+    "artifacts": [
+      {
+        "id": "qwen3-0-6b-q8-0",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735"
+      }
+    ],
+    "permissions": ["accelerator:gpu", "clipboard:read-once"]
   },
   "requirements": {
     "runtimeApi": 1,

@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
 
+from omnitensor import service as service_module
 from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
@@ -84,6 +87,94 @@ def test_publish_once_reads_kernel_telemetry_into_the_applet_contract(fake_nodes
         "runq_latency_us",
         "block_latency_us",
     ]
+
+
+def test_plugin_artifact_resolution_is_fail_closed_without_a_store(fake_nodes, tmp_path):
+    service = build_service(fake_nodes, tmp_path)
+    reference = ArtifactReference("provider-model", "1.0.0", "gguf", "a" * 64)
+
+    resolution = service._resolve_plugin_artifact(reference)
+
+    assert resolution == ArtifactResolution(
+        False,
+        None,
+        "no artifact store is configured for this service",
+        0,
+    )
+
+
+def test_plugin_artifact_resolution_delegates_the_exact_reference(fake_nodes, tmp_path):
+    service = build_service(fake_nodes, tmp_path)
+    reference = ArtifactReference("provider-model", "1.0.0", "gguf", "a" * 64)
+    expected = ArtifactResolution(True, tmp_path / "model.gguf", "ready", 17)
+    calls = []
+
+    class Store:
+        def resolve(self, candidate):
+            calls.append(candidate)
+            return expected
+
+    service._artifact_store = Store()
+
+    assert service._resolve_plugin_artifact(reference) is expected
+    assert calls == [reference]
+
+
+def test_plugin_accelerator_devices_exposes_only_supported_device_nodes(fake_nodes, tmp_path):
+    service = build_service(fake_nodes, tmp_path)
+    service._devices = [
+        Device("gpu-renderD128", "gpu", "GPU 0", "dri"),
+        Device("gpu-renderD129", "gpu", "GPU 1", "dri"),
+        Device("npu-accel0", "npu", "NPU 0", "accel"),
+        Device("tpu-apex_0", "tpu", "TPU", "apex"),
+        Device("gpu-card0", "gpu", "GPU card", "card"),
+    ]
+
+    assert service._plugin_accelerator_devices() == {
+        "gpu": Path("/dev/dri/renderD128"),
+        "npu": Path("/dev/accel/accel0"),
+    }
+
+
+def test_default_plugin_runtime_receives_exact_host_owned_resources(
+    fake_nodes, tmp_path, monkeypatch
+):
+    observed = {}
+
+    class Runtime:
+        snapshot = SimpleNamespace(catalog=SimpleNamespace(plugins=()), workers=())
+
+        def plugin_ids(self):
+            return frozenset()
+
+    runtime = Runtime()
+
+    def make_runtime(path, **options):
+        observed.update(path=path, **options)
+        return runtime
+
+    monkeypatch.setattr(service_module, "InstalledPluginRuntime", make_runtime)
+    snapshot = tmp_path / "state/runtime-snapshot.json"
+    service = OmniTensorService(
+        snapshot_path=snapshot,
+        policy_path=tmp_path / "state/policy.json",
+        workloads_path=tmp_path / "workloads",
+        discovery_paths=fake_nodes,
+        artifact_root=tmp_path / "artifacts",
+    )
+
+    assert service._plugin_runtime is runtime
+    assert observed["path"] == service_module.bundled_workloads_path()
+    assert observed["grant_source"] is service._grants
+    assert observed["selected_files_root"] == snapshot.parent / "plugin-inputs"
+    assert observed["worker_state_root"] == snapshot.parent / "plugin-state"
+    assert observed["resolve_artifact"] == service._resolve_plugin_artifact
+    assert observed["accelerator_devices"] == service._plugin_accelerator_devices
+    progress = SimpleNamespace(job_id="job", stage="load", fraction=0.5, detail="working")
+    calls = []
+    service._note_job_progress = lambda *arguments: calls.append(arguments)
+    observed["progress_sink"](progress)
+    assert calls == [("job", "load", 0.5, "working")]
 
 
 def test_profile_statuses_report_backend_or_reason(fake_nodes, tmp_path):

@@ -561,7 +561,7 @@ def document_question_task():
             "outputSchema": load_schema("document-question-answer.schema.json"),
             "limits": {
                 "contextTokens": 32_768,
-                "outputTokens": 4_096,
+                "outputTokens": 1_024,
                 "outputBytes": 262_144,
             },
         }

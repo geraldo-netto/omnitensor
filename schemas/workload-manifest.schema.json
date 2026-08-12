@@ -161,12 +161,16 @@
                   "tflite",
                   "onnx",
                   "openvino",
-                  "ncnn"
+                  "ncnn",
+                  "gguf"
                 ]
               },
               "sha256": {
                 "type": "string",
                 "pattern": "^[a-f0-9]{64}$"
+              },
+              "companions": {
+                "$ref": "#/$defs/model/properties/companions"
               }
             }
           }

@@ -423,6 +423,31 @@ class PluginWorkerSupervisor:
             self._startup_order.clear()
             return self.statuses()
 
+    async def revoke(self, plugin_id: str, detail: str) -> WorkerStatus | None:
+        """Permanently stop one worker whose immutable sandbox grant changed."""
+        async with self._lock:
+            recovery = self._recoveries.pop(plugin_id, None)
+            if recovery is not None:
+                recovery.cancel()
+                await asyncio.gather(recovery, return_exceptions=True)
+            slot = self._slots.pop(plugin_id, None)
+            previous = self._statuses.get(plugin_id)
+            if slot is None:
+                return previous
+            await _cancel_monitor(slot.monitor)
+            await self._stop_process(slot)
+            status = WorkerStatus(
+                plugin_id,
+                WorkerState.STOPPED,
+                slot.process.pid,
+                slot.agreement.protocol_version,
+                detail,
+                previous.restart_attempts if previous is not None else 0,
+            )
+            self._statuses[plugin_id] = status
+        await self._cancel_orphaned_jobs(plugin_id, detail)
+        return status
+
     async def _start_one(self, spec: WorkerSpec) -> None:
         self._statuses[spec.plugin_id] = WorkerStatus(
             spec.plugin_id,

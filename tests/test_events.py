@@ -234,6 +234,16 @@ def test_refused_and_partial_outcomes_are_explicit_and_consistent():
     assert partial.outcome == "partial"
     assert partial.detail == "bounded partial result"
 
+    for outcome in ("succeeded", "partial"):
+        empty = result_document(outcome=outcome, state="pending")
+        empty["events"] = []
+        with pytest.raises(EventResultError) as caught:
+            parse_grounded_event_result(empty)
+        assert (caught.value.code, caught.value.detail) == (
+            "result-invalid",
+            "succeeded and partial results require an event",
+        )
+
 
 def test_model_output_can_never_confirm_or_reject_itself():
     for model_state in ("confirmed", "rejected"):

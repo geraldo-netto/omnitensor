@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-qwen-ask-selected-files"
+version = "0.1.0"
+description = "Pinned BGE and Qwen/Vulkan provider for OmniTensor document questions"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["omnitensor-qwen-vulkan-runtime[documents]==0.1.0"]
+
+[project.entry-points."omnitensor.workloads"]
+ask-selected-files = "omnitensor_qwen_ask:create"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnitensor_qwen_ask"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../plugin-manifests/ask-selected-files.json" = "omnitensor_qwen_ask/omnitensor-plugin.json"

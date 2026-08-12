@@ -1,0 +1,1265 @@
+"""Focused regression tests for the isolated Qwen/Vulkan provider runtime."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from omnitensor_qwen_runtime import bge, factories, qualification, runtime
+
+from omnitensor.plugins.document_qa import EmbeddingProvider, document_question_task
+from omnitensor.plugins.event_workload import MemoryFragmentStore, event_generation_task
+from omnitensor.plugins.events import SourceFragment
+from omnitensor.plugins.file_organizer import file_organizer_task
+from omnitensor.plugins.generation import GenerationLimits, GenerationRequest, GenerationTask
+from omnitensor.plugins.protocol import PluginContext, PluginProgress
+from omnitensor.plugins.qwen import NativeLoadReport, ProviderGenerationError
+from omnitensor.plugins.selected_text import selected_text_task
+from omnitensor.sdk import BootstrapArtifact, CancellationController, SDKContractError
+
+
+class Progress:
+    def __init__(self):
+        self.values = []
+
+    async def report(self, value):
+        self.values.append(value)
+
+
+def _task(*, output_tokens=128):
+    return GenerationTask(
+        "selected-text-tools",
+        1,
+        "selected-text",
+        1,
+        "system",
+        "Content: {{UNTRUSTED_CONTENT}}",
+        ("text",),
+        {"type": "object"},
+        GenerationLimits(1_024, output_tokens, 4_096),
+    )
+
+
+def _runtime(tmp_path):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    return runtime.LlamaVulkanRuntime(MemoryFragmentStore(), lease)
+
+
+def _qualification(*, device=bge.QUALIFIED_DEVICE, layers=4):
+    return qualification.Qualification(device, layers, "0.3.34", ())
+
+
+def _receipt():
+    path = Path(__file__).parents[1] / "src" / "omnitensor_qwen_runtime" / "qualification.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_receipt(monkeypatch, tmp_path, document):
+    path = tmp_path / "qualification.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    package = SimpleNamespace(joinpath=lambda _name: path)
+    monkeypatch.setattr(qualification.importlib.resources, "files", lambda _package: package)
+
+
+def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
+    canonical = {
+        "type": "object",
+        "properties": {
+            "detail": {"type": "string", "maxLength": 64},
+            "confirmation": {"type": "string", "enum": ["pending", "confirmed"]},
+            "items": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 128},
+            },
+        },
+    }
+
+    projected = runtime.grammar_schema(canonical)
+
+    assert projected["properties"]["detail"] == {"type": "string"}
+    assert projected["properties"]["items"]["items"] == {"type": "string"}
+    assert projected["properties"]["confirmation"] == {"const": "pending"}
+    assert canonical["properties"]["detail"]["maxLength"] == 64
+    assert canonical["properties"]["confirmation"]["enum"] == ["pending", "confirmed"]
+
+
+@given(
+    maximum=st.integers(min_value=1, max_value=1_000_000),
+    pattern=st.text(min_size=1, max_size=64),
+)
+def test_grammar_projection_property_removes_only_llama_unsupported_string_limits(maximum, pattern):
+    canonical = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": maximum,
+                "pattern": pattern,
+            }
+        },
+        "additionalProperties": False,
+    }
+
+    projected = runtime.grammar_schema(canonical)
+
+    assert projected == {
+        "type": "object",
+        "properties": {"value": {"type": "string", "minLength": 1}},
+        "additionalProperties": False,
+    }
+    assert canonical["properties"]["value"]["maxLength"] == maximum
+    assert canonical["properties"]["value"]["pattern"] == pattern
+
+
+def test_grammar_projection_inlines_local_definitions_and_removes_patterns():
+    canonical = {
+        "$defs": {
+            "evidence": {
+                "type": "object",
+                "properties": {"reference": {"type": "string", "pattern": "^private:"}},
+            }
+        },
+        "type": "array",
+        "items": {"$ref": "#/$defs/evidence", "description": "grounding"},
+    }
+
+    projected = runtime.grammar_schema(canonical)
+
+    assert "$defs" not in projected
+    assert projected["items"] == {
+        "type": "object",
+        "description": "grounding",
+        "properties": {"reference": {"type": "string"}},
+    }
+    assert canonical["$defs"]["evidence"]["properties"]["reference"]["pattern"] == "^private:"
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"$defs": []},
+        {"$ref": "https://example.invalid/schema"},
+        {"$ref": "#/$defs/missing"},
+        {"$defs": {"recursive": {"$ref": "#/$defs/recursive"}}, "$ref": "#/$defs/recursive"},
+        {"$defs": {"scalar": "bad"}, "$ref": "#/$defs/scalar"},
+    ],
+)
+def test_grammar_projection_refuses_unbounded_or_invalid_references(schema):
+    with pytest.raises(ValueError, match="schema (definitions|uses|reference|definition)"):
+        runtime.grammar_schema(schema)
+
+
+@pytest.mark.parametrize(
+    ("plugin_id", "model_id", "task_factory", "layers"),
+    [
+        ("event-extraction", "qwen3-4b-q4-k-m", event_generation_task, 37),
+        ("ask-selected-files", "qwen3-0-6b-q8-0", document_question_task, 29),
+        ("selected-text-tools", "qwen3-0-6b-q8-0", selected_text_task, 29),
+        ("file-organizer", "qwen3-4b-q4-k-m", file_organizer_task, 37),
+    ],
+)
+def test_receipt_binds_each_exact_task_and_model(
+    monkeypatch, tmp_path, plugin_id, model_id, task_factory, layers
+):
+    document = _receipt()
+    _load_receipt(monkeypatch, tmp_path, document)
+
+    receipt = qualification.load_qualification(
+        plugin_id,
+        model_id,
+        document["models"][model_id]["sha256"],
+        task_factory(),
+    )
+
+    assert receipt == qualification.Qualification(
+        document["device"],
+        layers,
+        document["runtime"]["version"],
+        tuple(sorted(document["runtime"]["binaries"].items())),
+    )
+    assert (
+        qualification.task_sha256(task_factory()) == document["workloads"][plugin_id]["taskSha256"]
+    )
+
+
+def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path):
+    document = _receipt()
+    _load_receipt(monkeypatch, tmp_path, document)
+    task = event_generation_task()
+    model = "qwen3-4b-q4-k-m"
+    digest = document["models"][model]["sha256"]
+
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification(
+            "event-extraction", model, digest, replace(task, task_version=2)
+        )
+    assert str(excinfo.value) == "Qwen workload differs from qualification"
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification("event-extraction", model, "0" * 64, task)
+    assert str(excinfo.value) == "Qwen model differs from qualification"
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification("event-extraction", "unknown-model", digest, task)
+    assert str(excinfo.value) == "Qwen model has no qualification"
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification("unknown-workload", model, digest, task)
+    assert str(excinfo.value) == "Qwen workload has no qualification"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "detail"),
+    [
+        (
+            lambda value: value.update(extra=True),
+            "Qwen qualification receipt fields are invalid",
+        ),
+        (
+            lambda value: value.update(version=2),
+            "Qwen qualification receipt version is invalid",
+        ),
+        (
+            lambda value: value.update(recordedAt="moving"),
+            "Qwen qualification receipt version is invalid",
+        ),
+        (
+            lambda value: value.update(device=""),
+            "Qwen qualification device is invalid",
+        ),
+        (lambda value: value.update(runtime=[]), "Qwen qualification runtime is invalid"),
+        (
+            lambda value: value["runtime"].update(version="moving"),
+            "Qwen qualification runtime identity is invalid",
+        ),
+        (
+            lambda value: value["runtime"].update(wheelSha256="bad"),
+            "Qwen qualification wheel digest is invalid",
+        ),
+        (
+            lambda value: value["runtime"].update(binaries={}),
+            "Qwen qualification native inventory is invalid",
+        ),
+        (
+            lambda value: value["runtime"]["binaries"].update({"libllama.so": "bad"}),
+            "Qwen qualification native digest is invalid",
+        ),
+        (
+            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(extra=True),
+            "Qwen model qualification is invalid",
+        ),
+        (
+            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(fullyOffloadedLayers=0),
+            "Qwen layer qualification is invalid",
+        ),
+        (
+            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(fullyOffloadedLayers=True),
+            "Qwen model differs from qualification",
+        ),
+        (
+            lambda value: value["workloads"]["event-extraction"].update(extra=True),
+            "Qwen workload qualification is invalid",
+        ),
+        (
+            lambda value: value["workloads"]["event-extraction"].update(result="failed"),
+            "Qwen workload differs from qualification",
+        ),
+    ],
+)
+def test_receipt_refuses_identity_and_shape_tampering(tmp_path, monkeypatch, mutate, detail):
+    document = _receipt()
+    mutate(document)
+    _load_receipt(monkeypatch, tmp_path, document)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification(
+            "event-extraction",
+            "qwen3-4b-q4-k-m",
+            "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            event_generation_task(),
+        )
+    assert str(excinfo.value) == detail
+
+
+def test_receipt_refuses_invalid_json_and_oversized_resource(tmp_path, monkeypatch):
+    path = tmp_path / "qualification.json"
+    package = SimpleNamespace(joinpath=lambda _name: path)
+    monkeypatch.setattr(qualification.importlib.resources, "files", lambda _package: package)
+    path.write_bytes(b"not-json")
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification("p", "m", "0" * 64, _task())
+    assert str(excinfo.value) == "Qwen qualification receipt is invalid"
+    path.write_bytes(b"x" * (qualification._MAX_RECEIPT_BYTES + 1))
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification("p", "m", "0" * 64, _task())
+    assert str(excinfo.value) == "Qwen qualification receipt is oversized"
+
+
+def test_native_runtime_verification_binds_version_and_binary_bytes(tmp_path, monkeypatch):
+    library = tmp_path / "lib"
+    library.mkdir()
+    first = library / "libggml-vulkan.so"
+    second = library / "libllama.so"
+    first.write_bytes(b"vulkan")
+    second.write_bytes(b"llama")
+    expected = qualification.Qualification(
+        bge.QUALIFIED_DEVICE,
+        29,
+        "0.3.34",
+        (
+            ("libggml-vulkan.so", qualification.file_digest(first)),
+            ("libllama.so", qualification.file_digest(second)),
+        ),
+    )
+    package = SimpleNamespace(joinpath=lambda *parts: tmp_path.joinpath(*parts))
+    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.34")
+    monkeypatch.setattr(qualification.importlib.resources, "files", lambda _name: package)
+
+    qualification.verify_native_runtime(expected)
+
+    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.35")
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.verify_native_runtime(expected)
+    assert str(excinfo.value) == "llama.cpp runtime version differs from qualification"
+    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.34")
+    second.write_bytes(b"substituted")
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.verify_native_runtime(expected)
+    assert str(excinfo.value) == "llama.cpp native bytes differ from qualification"
+
+
+def test_native_runtime_verification_refuses_missing_distribution(monkeypatch):
+    def missing(_name):
+        raise qualification.importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(qualification.importlib.metadata, "version", missing)
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.verify_native_runtime(_qualification())
+    assert str(excinfo.value) == "qualified llama.cpp runtime is not installed"
+
+
+def test_output_token_limit_honors_boundary_and_refuses_oversized_generation():
+    assert runtime._output_token_limit(runtime.MAX_RUNTIME_OUTPUT_TOKENS) == 4_096
+
+    with pytest.raises(ProviderGenerationError) as excinfo:
+        runtime._output_token_limit(runtime.MAX_RUNTIME_OUTPUT_TOKENS + 1)
+
+    assert (excinfo.value.code, excinfo.value.generation_started) == (
+        "admission-refused",
+        False,
+    )
+
+
+def test_runtime_constructor_and_load_fail_closed_at_gpu_model_boundary(tmp_path):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    with pytest.raises(TypeError) as invalid_store:
+        runtime.LlamaVulkanRuntime(object(), lease)
+    assert str(invalid_store.value) == "store must be MemoryFragmentStore"
+    with pytest.raises(ValueError) as invalid_lease:
+        runtime.LlamaVulkanRuntime(MemoryFragmentStore(), tmp_path / "missing")
+    assert str(invalid_lease.value) == "accelerator lease is unavailable"
+
+    adapter = _runtime(tmp_path)
+    assert adapter._model_path is None
+    assert adapter._llama is None
+    assert adapter._lease is None
+    assert adapter._load_report is None
+    assert adapter.physical_device == ""
+    assert adapter._active_request == ""
+    model = tmp_path / "model.gguf"
+    model.touch()
+    with pytest.raises(ProviderGenerationError) as wrong_accelerator:
+        asyncio.run(adapter.load((model,), "npu"))
+    assert (
+        wrong_accelerator.value.code,
+        wrong_accelerator.value.detail,
+        wrong_accelerator.value.generation_started,
+    ) == ("model-load-failed", "Qwen Vulkan requires one GPU GGUF", False)
+    with pytest.raises(ProviderGenerationError) as too_many_models:
+        asyncio.run(adapter.load((model, model), "gpu"))
+    assert (
+        too_many_models.value.code,
+        too_many_models.value.detail,
+        too_many_models.value.generation_started,
+    ) == ("model-load-failed", "Qwen Vulkan requires one GPU GGUF", False)
+    with pytest.raises(ProviderGenerationError) as missing_model:
+        asyncio.run(adapter.load((tmp_path / "missing.gguf",), "gpu"))
+    assert (
+        missing_model.value.code,
+        missing_model.value.detail,
+        missing_model.value.generation_started,
+    ) == ("model-load-failed", "Qwen GGUF is unavailable", False)
+
+
+def test_runtime_load_caches_valid_report_and_wraps_native_failure(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 28, False)
+    monkeypatch.setattr(adapter, "_acquire_and_load", lambda: report)
+
+    assert asyncio.run(adapter.load((model,), "gpu")) == report
+    assert adapter._model_path == model
+    adapter._llama = object()
+    adapter._load_report = report
+    assert asyncio.run(adapter.load((model,), "gpu")) == report
+
+    failed = _runtime(tmp_path)
+    monkeypatch.setattr(failed, "_acquire_and_load", lambda: (_ for _ in ()).throw(OSError()))
+    with pytest.raises(ProviderGenerationError) as excinfo:
+        asyncio.run(failed.load((model,), "gpu"))
+    assert (excinfo.value.code, excinfo.value.detail, excinfo.value.generation_started) == (
+        "model-load-failed",
+        "Vulkan model loading failed",
+        False,
+    )
+
+
+def test_runtime_generate_reports_progress_and_always_unloads(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    adapter._model_path = model
+
+    class Llama:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    native = Llama()
+    adapter._llama = native
+    monkeypatch.setattr(adapter, "_generate_sync", lambda *_args: '{"ok":true}')
+    progress = Progress()
+    cancellation = CancellationController()
+
+    reply = asyncio.run(
+        adapter.generate(
+            _task(),
+            GenerationRequest("job-1", "selected-text-tools", ("private:item",)),
+            cancellation,
+            progress,
+        )
+    )
+
+    assert reply == '{"ok":true}'
+    assert progress.values == [
+        PluginProgress("job-1", "native-generation", 0.15, "", 1),
+        PluginProgress("job-1", "native-generation", 0.95, "", 1),
+    ]
+    assert adapter._active_request == ""
+    assert adapter._llama is None
+    assert native.closed is True
+
+
+def test_runtime_generate_refuses_unloaded_and_wraps_native_error(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    request = GenerationRequest("job-1", "selected-text-tools", ("private:item",))
+    with pytest.raises(ProviderGenerationError) as unloaded:
+        asyncio.run(adapter.generate(_task(), request, CancellationController(), Progress()))
+    assert (unloaded.value.code, unloaded.value.detail, unloaded.value.generation_started) == (
+        "model-load-failed",
+        "Qwen model was not loaded",
+        False,
+    )
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    adapter._model_path = model
+    adapter._llama = object()
+    monkeypatch.setattr(
+        adapter,
+        "_generate_sync",
+        lambda *_args: (_ for _ in ()).throw(ValueError("private native error")),
+    )
+    with pytest.raises(ProviderGenerationError) as excinfo:
+        asyncio.run(adapter.generate(_task(), request, CancellationController(), Progress()))
+    assert (excinfo.value.code, excinfo.value.detail, excinfo.value.generation_started) == (
+        "generation-failed",
+        "native generation failed",
+        True,
+    )
+    assert "private native error" not in str(excinfo.value)
+
+
+def test_runtime_generate_reloads_exact_model_and_forwards_exact_arguments(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    adapter._model_path = model
+    task = _task()
+    request = GenerationRequest("job-1", "selected-text-tools", ("private:item",))
+    cancellation = CancellationController()
+    progress = Progress()
+    calls = []
+
+    async def load(artifacts, accelerator):
+        calls.append(("load", artifacts, accelerator))
+        adapter._llama = object()
+        return NativeLoadReport("llama.cpp-vulkan", "Vulkan", 29, 29, False)
+
+    def generate(received_task, received_request, received_cancellation):
+        calls.append(("generate", received_task, received_request, received_cancellation))
+        return '{"ok":true}'
+
+    monkeypatch.setattr(adapter, "load", load)
+    monkeypatch.setattr(adapter, "_generate_sync", generate)
+    monkeypatch.setattr(adapter, "_release", lambda: calls.append(("release",)))
+
+    assert asyncio.run(adapter.generate(task, request, cancellation, progress)) == '{"ok":true}'
+    assert calls == [
+        ("load", (model,), "gpu"),
+        ("generate", task, request, cancellation),
+        ("release",),
+    ]
+
+
+def test_runtime_native_load_requires_import_and_proven_full_offload(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    monkeypatch.setitem(sys.modules, "llama_cpp", None)
+    with pytest.raises(ProviderGenerationError) as missing_runtime:
+        adapter._acquire_and_load()
+    assert (
+        missing_runtime.value.code,
+        missing_runtime.value.detail,
+        missing_runtime.value.generation_started,
+    ) == (
+        "model-load-failed",
+        "install the Vulkan llama-cpp-python runtime",
+        False,
+    )
+    adapter._release()
+
+    callbacks = {}
+
+    class NativeApi:
+        @staticmethod
+        def llama_log_callback(function):
+            return function
+
+        @staticmethod
+        def llama_log_set(function, _data):
+            callbacks["log"] = function
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            callbacks["kwargs"] = kwargs
+            callbacks["log"](
+                0,
+                b"using device Vulkan0 (AMD Radeon RX 6600 XT (RADV NAVI23)) (0000:03:00.0)\n",
+                None,
+            )
+            callbacks["log"](0, b"offloaded 4/4 layers to GPU", None)
+
+        def close(self):
+            callbacks["closed"] = True
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        SimpleNamespace(Llama=FakeLlama, llama_cpp=NativeApi),
+    )
+
+    report = adapter._acquire_and_load()
+
+    assert report == NativeLoadReport("llama.cpp-vulkan", "Vulkan", 4, 4, False)
+    assert adapter.physical_device == "AMD Radeon RX 6600 XT (RADV NAVI23)"
+    assert callbacks["kwargs"] == {
+        "model_path": str(adapter._model_path),
+        "n_ctx": runtime.MAX_RUNTIME_CONTEXT_TOKENS,
+        "n_gpu_layers": -1,
+        "main_gpu": 0,
+        "offload_kqv": True,
+        "op_offload": True,
+        "flash_attn": True,
+        "verbose": False,
+    }
+    assert adapter._lease is not None
+    assert adapter._log_callback is callbacks["log"]
+    adapter._release()
+    assert callbacks["closed"] is True
+
+
+def test_runtime_native_load_rejects_partial_offload(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    callbacks = {}
+
+    class NativeApi:
+        llama_log_callback = staticmethod(lambda function: function)
+
+        @staticmethod
+        def llama_log_set(function, _data):
+            callbacks["log"] = function
+
+    class PartialLlama:
+        def __init__(self, **_kwargs):
+            callbacks["log"](
+                0,
+                b"using device Vulkan0 (AMD Radeon RX 6600 XT (RADV NAVI23)) (0000:03:00.0)\n",
+                None,
+            )
+            callbacks["log"](0, b"offloaded 3/4 layers to GPU", None)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        SimpleNamespace(Llama=PartialLlama, llama_cpp=NativeApi),
+    )
+
+    with pytest.raises(ProviderGenerationError) as partial_offload:
+        adapter._acquire_and_load()
+    assert (
+        partial_offload.value.code,
+        partial_offload.value.detail,
+        partial_offload.value.generation_started,
+    ) == (
+        "model-load-failed",
+        "llama.cpp did not prove full Vulkan layer offload",
+        False,
+    )
+    adapter._release()
+
+
+def test_sync_generation_streams_only_text_and_binds_private_prompt(tmp_path):
+    adapter = _runtime(tmp_path)
+    fragment = SourceFragment("private:job-1:span:0-5", "a" * 64, 1, "alpha", "b" * 64)
+    asyncio.run(adapter._store.publish("job-1", (fragment,)))
+    observed = {}
+
+    class Llama:
+        def create_chat_completion(self, **kwargs):
+            observed.update(kwargs)
+            return iter(
+                (
+                    {"choices": [{"delta": {"content": '{"ok"'}}]},
+                    {"choices": []},
+                    "ignored",
+                    {"choices": [{"delta": {"content": ":true}"}}]},
+                )
+            )
+
+    adapter._llama = Llama()
+    answer = adapter._generate_sync(
+        _task(),
+        GenerationRequest("job-1", "selected-text-tools", (fragment.reference,)),
+        CancellationController(),
+    )
+
+    assert answer == '{"ok":true}'
+    expected_content = runtime._private_content(
+        adapter._store,
+        GenerationRequest("job-1", "selected-text-tools", (fragment.reference,)),
+    )
+    assert observed == {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    'system\nThe output requestId must be exactly "job-1". '
+                    "Copy fragment metadata exactly.\n/no_think"
+                ),
+            },
+            {"role": "user", "content": f"Content: {expected_content}"},
+        ],
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "seed": 0,
+        "max_tokens": 128,
+        "response_format": {"type": "json_object", "schema": {"type": "object"}},
+        "stream": True,
+    }
+
+
+def test_sync_generation_requires_a_loaded_native_model(tmp_path):
+    adapter = _runtime(tmp_path)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        adapter._generate_sync(
+            _task(),
+            GenerationRequest("job-1", "selected-text-tools", ()),
+            CancellationController(),
+        )
+
+    assert str(excinfo.value) == "model not loaded"
+
+
+def test_sync_generation_refuses_empty_reply_and_terminate_obeys_identity(tmp_path):
+    adapter = _runtime(tmp_path)
+    adapter._llama = SimpleNamespace(create_chat_completion=lambda **_kwargs: iter(()))
+    adapter._store._requests["job-1"] = {
+        "private:item": SourceFragment("private:item", "a" * 64, 1, "x", "b" * 64)
+    }
+    with pytest.raises(RuntimeError) as empty_reply:
+        adapter._generate_sync(
+            _task(),
+            GenerationRequest("job-1", "selected-text-tools", ("private:item",)),
+            CancellationController(),
+        )
+    assert str(empty_reply.value) == "llama.cpp returned no JSON content"
+
+    released = []
+    adapter._release = lambda: released.append(True)
+    adapter._active_request = "active"
+    asyncio.run(adapter.terminate("other"))
+    assert released == []
+    asyncio.run(adapter.terminate("active"))
+    assert released == [True]
+    asyncio.run(adapter.terminate("__startup__"))
+    assert released == [True, True]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        ({"choices": [{"delta": {"content": ""}}]},),
+        ({"choices": [{"delta": {}}]}, {"choices": []}),
+    ],
+)
+def test_sync_generation_refuses_empty_partial_stream_events(tmp_path, reply):
+    adapter = _runtime(tmp_path)
+    adapter._llama = SimpleNamespace(create_chat_completion=lambda **_kwargs: iter(reply))
+    adapter._store._requests["job-1"] = {
+        "private:item": SourceFragment("private:item", "a" * 64, 1, "x", "b" * 64)
+    }
+
+    with pytest.raises(RuntimeError, match="returned no JSON content"):
+        adapter._generate_sync(
+            _task(),
+            GenerationRequest("job-1", "selected-text-tools", ("private:item",)),
+            CancellationController(),
+        )
+
+
+def test_private_content_carries_exact_grounding_metadata_and_spans():
+    store = MemoryFragmentStore()
+    fragments = (
+        SourceFragment(
+            "private:job-1:page:3:span:4-9",
+            "a" * 64,
+            3,
+            "alpha",
+            "b" * 64,
+        ),
+        SourceFragment("private:job-1:selection", "c" * 64, 1, "beta", "d" * 64),
+    )
+    asyncio.run(store.publish("job-1", fragments))
+
+    content = json.loads(
+        runtime._private_content(
+            store,
+            GenerationRequest(
+                "job-1", "selected-text-tools", tuple(x.reference for x in fragments)
+            ),
+        )
+    )
+
+    assert content == [
+        {
+            "sourceRef": fragments[0].reference,
+            "sourceSha256": "a" * 64,
+            "page": 3,
+            "text": "alpha",
+            "textSha256": "b" * 64,
+            "span": {"start": 4, "end": 9},
+        },
+        {
+            "sourceRef": fragments[1].reference,
+            "sourceSha256": "c" * 64,
+            "page": 1,
+            "text": "beta",
+            "textSha256": "d" * 64,
+            "span": {"start": 0, "end": 4},
+        },
+    ]
+
+
+def test_factory_refuses_absent_or_wrong_bootstrap(monkeypatch):
+    error = SDKContractError("bootstrap-unavailable", "no trusted bootstrap")
+
+    def unavailable(_plugin_id):
+        raise error
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", unavailable)
+
+    with pytest.raises(SDKContractError) as excinfo:
+        factories.create_selected_text_tools()
+
+    assert excinfo.value is error
+
+
+@pytest.mark.parametrize(
+    ("factory", "plugin_id"),
+    [
+        (factories.create_event_extraction, "event-extraction"),
+        (factories.create_ask_selected_files, "ask-selected-files"),
+        (factories.create_selected_text_tools, "selected-text-tools"),
+        (factories.create_file_organizer, "file-organizer"),
+    ],
+)
+def test_each_factory_requires_the_gpu_lease(monkeypatch, factory, plugin_id):
+    bootstrap = SimpleNamespace(accelerator_lease_path=None)
+    monkeypatch.setattr(
+        factories,
+        "current_plugin_bootstrap",
+        lambda requested: bootstrap if requested == plugin_id else None,
+    )
+
+    with pytest.raises(RuntimeError, match="GPU accelerator grant is unavailable"):
+        factory()
+
+
+def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    model = BootstrapArtifact("qwen3-4b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m")
+
+    class Bootstrap:
+        accelerator_lease_path = lease
+        state_path = None
+
+        def require_artifact(self, artifact_id):
+            if artifact_id == model.id:
+                return model
+            raise SDKContractError("artifact-unavailable", "missing")
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
+    monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification())
+
+    with pytest.raises(RuntimeError, match="event recovery state is unavailable"):
+        factories.create_event_extraction()
+
+    small = BootstrapArtifact("qwen3-0-6b-q8-0", "1.0.0", "gguf", "b" * 64, tmp_path / "s")
+    incomplete_bge = BootstrapArtifact(
+        factories.BGE_ARTIFACT_ID,
+        "1.0.0",
+        "ncnn",
+        "c" * 64,
+        tmp_path / "model.param",
+        (("model.bin", "d" * 64),),
+    )
+
+    class DocumentBootstrap:
+        accelerator_lease_path = lease
+        state_path = tmp_path
+
+        def require_artifact(self, artifact_id):
+            return small if artifact_id == small.id else incomplete_bge
+
+    monkeypatch.setattr(
+        factories,
+        "current_plugin_bootstrap",
+        lambda _plugin_id: DocumentBootstrap(),
+    )
+
+    with pytest.raises(RuntimeError, match="BGE companions are incomplete"):
+        factories.create_ask_selected_files()
+
+
+def test_generation_factory_selects_large_models_only_for_large_workloads(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    requested = []
+    qualified = []
+
+    class Bootstrap:
+        accelerator_lease_path = lease
+        state_path = tmp_path
+
+        def require_artifact(self, artifact_id):
+            requested.append(artifact_id)
+            return BootstrapArtifact(
+                artifact_id,
+                "1.0.0",
+                "gguf",
+                "a" * 64,
+                tmp_path / f"{artifact_id}.gguf",
+            )
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
+
+    def load_receipt(*args):
+        qualified.append(args)
+        return _qualification()
+
+    monkeypatch.setattr(factories, "load_qualification", load_receipt)
+
+    for plugin_id in (
+        "event-extraction",
+        "ask-selected-files",
+        "selected-text-tools",
+        "file-organizer",
+    ):
+        _bootstrap, _store, _native, model, receipt, router = factories._generation(plugin_id)
+        descriptor = router._workers["gpu"].descriptor
+        assert descriptor.provenance.model_id == model.stem
+        assert descriptor.accelerator == "gpu"
+        assert descriptor.provider_id == "qwen3-workloads-gpu"
+        assert descriptor.runtime == "llama.cpp-vulkan"
+        assert descriptor.qualified is True
+        assert descriptor.provenance.model_version == "1.0.0"
+        assert descriptor.provenance.sha256 == "a" * 64
+        assert descriptor.provenance.source_uri == (
+            factories.QWEN_LARGE_SOURCE
+            if plugin_id in factories._LARGE_WORKLOADS
+            else factories.QWEN_SOURCE
+        )
+        assert descriptor.provenance.license_spdx == "Apache-2.0"
+        assert receipt == _qualification()
+
+    assert requested == [
+        factories.QWEN_LARGE_ARTIFACT_ID,
+        factories.QWEN_ARTIFACT_ID,
+        factories.QWEN_ARTIFACT_ID,
+        factories.QWEN_LARGE_ARTIFACT_ID,
+    ]
+    assert qualified == [
+        (
+            plugin_id,
+            requested_model,
+            "a" * 64,
+            factories._TASKS[plugin_id](),
+        )
+        for plugin_id, requested_model in zip(
+            (
+                "event-extraction",
+                "ask-selected-files",
+                "selected-text-tools",
+                "file-organizer",
+            ),
+            requested,
+            strict=True,
+        )
+    ]
+
+
+def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    state = tmp_path / "state"
+    state.mkdir()
+    qwen_small = BootstrapArtifact(
+        factories.QWEN_ARTIFACT_ID, "1.0.0", "gguf", "a" * 64, tmp_path / "small.gguf"
+    )
+    qwen_large = BootstrapArtifact(
+        factories.QWEN_LARGE_ARTIFACT_ID,
+        "1.0.0",
+        "gguf",
+        "b" * 64,
+        tmp_path / "large.gguf",
+    )
+    bge_artifact = BootstrapArtifact(
+        factories.BGE_ARTIFACT_ID,
+        "1.0.0",
+        "ncnn",
+        "c" * 64,
+        tmp_path / "bge" / "model.param",
+        (("model.bin", "d" * 64), ("tokenizer.json", "e" * 64)),
+    )
+
+    class Bootstrap:
+        accelerator_lease_path = lease
+        state_path = state
+
+        def require_artifact(self, artifact_id):
+            return {
+                qwen_small.id: qwen_small,
+                qwen_large.id: qwen_large,
+                bge_artifact.id: bge_artifact,
+            }[artifact_id]
+
+    class FakeEmbedder:
+        def __init__(self, *args):
+            self.args = args
+            self.descriptor = EmbeddingProvider("bge", "gpu", "c" * 64, True)
+
+        async def embed(self, *_args, **_kwargs):
+            return ()
+
+        async def preflight(self):
+            return None
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
+    monkeypatch.setattr(factories, "BgeVulkanEmbedder", FakeEmbedder)
+    monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification())
+
+    created = (
+        factories.create_event_extraction(),
+        factories.create_ask_selected_files(),
+        factories.create_selected_text_tools(),
+        factories.create_file_organizer(),
+    )
+
+    assert [item.plugin_id for item in created] == [
+        "event-extraction",
+        "ask-selected-files",
+        "selected-text-tools",
+        "file-organizer",
+    ]
+    assert isinstance(created[1]._embedder, FakeEmbedder)
+    assert created[1]._embedder.args == (
+        bge_artifact.path,
+        bge_artifact.path.parent / "tokenizer.json",
+        bge_artifact.sha256,
+        lease,
+    )
+    assert created[0]._plugin._journal._path == state / "event-recovery.json"
+
+
+def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
+    calls = []
+    health = object()
+    result = object()
+
+    class Plugin:
+        plugin_id = "sample"
+
+        async def start(self, context):
+            calls.append(("start", context))
+
+        async def health(self):
+            return health
+
+        async def stop(self):
+            calls.append(("stop",))
+
+        async def execute(self, request, cancellation, progress):
+            calls.append(("execute", request, cancellation, progress))
+            return result
+
+    class Native:
+        physical_device = bge.QUALIFIED_DEVICE
+
+        async def load(self, paths, accelerator):
+            calls.append(("load", paths, accelerator))
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", 4, 4, False)
+
+        async def terminate(self, request_id):
+            calls.append(("terminate", request_id))
+
+    class Embedder:
+        async def preflight(self):
+            calls.append(("preflight",))
+
+    plugin = Plugin()
+    native = Native()
+    embedder = Embedder()
+    receipt = _qualification()
+    monkeypatch.setattr(
+        factories,
+        "verify_native_runtime",
+        lambda value: calls.append(("verify", value)),
+    )
+    wrapper = factories.QualifiedWorkload(plugin, native, Path("model.gguf"), receipt, embedder)
+    context = PluginContext("sample", 1, {}, frozenset())
+
+    asyncio.run(wrapper.start(context))
+    assert asyncio.run(wrapper.health()) is health
+    assert asyncio.run(wrapper.execute("request", "cancel", "progress")) is result
+    asyncio.run(wrapper.stop())
+
+    assert calls == [
+        ("start", context),
+        ("verify", receipt),
+        ("load", (Path("model.gguf"),), "gpu"),
+        ("terminate", "__startup__"),
+        ("preflight",),
+        ("execute", "request", "cancel", "progress"),
+        ("terminate", "__startup__"),
+        ("stop",),
+    ]
+
+
+def test_qualified_workload_start_failure_terminates_and_stops(monkeypatch):
+    calls = []
+
+    class Plugin:
+        plugin_id = "sample"
+
+        async def start(self, _context):
+            calls.append("start")
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        async def load(self, _paths, _accelerator):
+            raise RuntimeError("native refused")
+
+        async def terminate(self, request_id):
+            calls.append(request_id)
+
+    monkeypatch.setattr(factories, "verify_native_runtime", lambda _value: None)
+    wrapper = factories.QualifiedWorkload(Plugin(), Native(), Path("model.gguf"), _qualification())
+
+    with pytest.raises(RuntimeError, match="native refused"):
+        asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
+
+    assert calls == ["start", "__startup__", "stop"]
+
+
+@pytest.mark.parametrize(
+    ("physical_device", "layers"),
+    [("different GPU", 4), (bge.QUALIFIED_DEVICE, 3)],
+)
+def test_qualified_workload_refuses_device_or_layer_drift(monkeypatch, physical_device, layers):
+    calls = []
+
+    class Plugin:
+        plugin_id = "sample"
+
+        async def start(self, _context):
+            return None
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        async def load(self, _paths, _accelerator):
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", layers, layers, False)
+
+        @property
+        def physical_device(self):
+            return physical_device
+
+        async def terminate(self, request_id):
+            calls.append(request_id)
+
+    monkeypatch.setattr(factories, "verify_native_runtime", lambda _value: None)
+    wrapper = factories.QualifiedWorkload(
+        Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
+    )
+
+    with pytest.raises(RuntimeError, match="load differs from qualification"):
+        asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
+
+    assert calls == ["__startup__", "stop"]
+
+
+def test_qualified_device_selection_uses_unique_named_vulkan_adapter(monkeypatch):
+    names = ("integrated", bge.QUALIFIED_DEVICE, "software")
+    fake_ncnn = SimpleNamespace(
+        get_gpu_count=lambda: len(names),
+        get_gpu_info=lambda index: SimpleNamespace(device_name=lambda: names[index]),
+    )
+    monkeypatch.setitem(sys.modules, "ncnn", fake_ncnn)
+
+    assert bge._qualified_device_index() == 1
+
+
+def test_qualified_device_selection_refuses_missing_ncnn(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ncnn", None)
+
+    with pytest.raises(ValueError) as excinfo:
+        bge._qualified_device_index()
+
+    assert str(excinfo.value) == "ncnn is unavailable"
+
+
+@pytest.mark.parametrize("names", [(), ("other",), (bge.QUALIFIED_DEVICE,) * 2])
+def test_qualified_device_selection_refuses_absent_or_ambiguous_adapter(monkeypatch, names):
+    fake_ncnn = SimpleNamespace(
+        get_gpu_count=lambda: len(names),
+        get_gpu_info=lambda index: SimpleNamespace(device_name=lambda: names[index]),
+    )
+    monkeypatch.setitem(sys.modules, "ncnn", fake_ncnn)
+
+    with pytest.raises(ValueError, match="qualified BGE Vulkan device is unavailable"):
+        bge._qualified_device_index()
+
+
+def test_bge_embedder_uses_qualified_device_and_query_prefix(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    model = tmp_path / "model.param"
+    tokenizer = tmp_path / "tokenizer.json"
+    calls = []
+
+    class FakeRunner:
+        device_name = bge.QUALIFIED_DEVICE
+
+        def __init__(self, selected_model, selected_tokenizer, *, device_index):
+            calls.append((selected_model, selected_tokenizer, device_index))
+
+        def embed(self, text):
+            calls.append(text)
+            return [0.5] * 384
+
+    monkeypatch.setattr(bge, "BgeTokenizer", lambda path: ("tokenizer", path))
+    monkeypatch.setattr(bge, "VulkanBgeRunner", FakeRunner)
+    monkeypatch.setattr(bge, "_qualified_device_index", lambda: 2)
+    embedder = bge.BgeVulkanEmbedder(model, tokenizer, "a" * 64, lease)
+
+    vectors = embedder._embed_sync(("question",), True, None)
+
+    assert calls[0] == (model, ("tokenizer", tokenizer), 2)
+    assert calls[1] == f"{bge.QUERY_PREFIX}question"
+    assert vectors == ((0.5,) * 384,)
+    assert embedder.descriptor == EmbeddingProvider(
+        "bge-small-documents-gpu",
+        "gpu",
+        "a" * 64,
+        True,
+    )
+
+
+def test_bge_public_async_surface_preflights_and_observes_cancellation(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    embedder = bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, lease)
+    calls = []
+
+    def fake_embed(texts, query, cancellation):
+        calls.append((texts, query, cancellation))
+        return ((1.0,) * 384,)
+
+    monkeypatch.setattr(embedder, "_embed_sync", fake_embed)
+    asyncio.run(embedder.preflight())
+    cancellation = CancellationController()
+    vectors = asyncio.run(embedder.embed(("question",), query=True, cancellation=cancellation))
+
+    assert calls == [
+        (("BGE startup probe",), False, None),
+        (("question",), True, cancellation),
+    ]
+    assert vectors == ((1.0,) * 384,)
+
+
+def test_bge_refuses_missing_lease_wrong_device_and_invalid_vector(tmp_path, monkeypatch):
+    with pytest.raises(ValueError) as missing_lease:
+        bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, tmp_path / "x")
+    assert str(missing_lease.value) == "accelerator lease is unavailable"
+
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    embedder = bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, lease)
+    monkeypatch.setattr(bge, "BgeTokenizer", lambda _path: object())
+    monkeypatch.setattr(bge, "_qualified_device_index", lambda: 0)
+
+    class WrongDevice:
+        device_name = "unexpected"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(bge, "VulkanBgeRunner", WrongDevice)
+    with pytest.raises(ValueError, match="not qualified"):
+        embedder._embed_sync(("text",), False, None)
+
+    class InvalidVector(WrongDevice):
+        device_name = bge.QUALIFIED_DEVICE
+
+        def embed(self, _text):
+            return [float("nan")] * 384
+
+    monkeypatch.setattr(bge, "VulkanBgeRunner", InvalidVector)
+    with pytest.raises(ValueError, match="invalid embedding"):
+        embedder._embed_sync(("text",), False, CancellationController())

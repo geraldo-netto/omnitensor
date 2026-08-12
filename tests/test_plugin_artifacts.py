@@ -10,6 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.plugins import (
+    DEFAULT_MAX_ARTIFACT_BYTES,
     ArtifactActivation,
     ArtifactInstallationError,
     ArtifactInstaller,
@@ -48,6 +49,7 @@ def install(root: Path, artifact: ArtifactReference, content: bytes = b"model") 
         ("onnx", "model.onnx"),
         ("openvino", "model.xml"),
         ("ncnn", "model.param"),
+        ("gguf", "model.gguf"),
     ],
 )
 def test_artifact_filename_is_stable_for_each_executor_format(model_format, filename):
@@ -58,6 +60,10 @@ def test_artifact_filename_rejects_unknown_formats_exactly():
     with pytest.raises(ValueError) as excinfo:
         artifact_filename("pickle")
     assert str(excinfo.value) == "unsupported artifact format: pickle"
+
+
+def test_default_bound_admits_pinned_qwen4b_but_remains_finite():
+    assert 2_497_280_256 < DEFAULT_MAX_ARTIFACT_BYTES == 3 * 1024**3
 
 
 def test_resolver_returns_only_a_verified_regular_file(tmp_path):
@@ -597,9 +603,7 @@ def test_an_ncnn_artifact_installs_its_weights_beside_the_graph(tmp_path):
     param, binary = ncnn_pair(tmp_path)
     installer = ArtifactInstaller(tmp_path / "store")
 
-    installed = installer.install(
-        ncnn_reference(param), param, companions={"model.bin": binary}
-    )
+    installed = installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
 
     assert (installed.path.parent / "model.param").is_file()
     assert (installed.path.parent / "model.bin").read_bytes() == binary.read_bytes()
@@ -634,23 +638,17 @@ def test_installed_weights_are_digested_and_recorded(tmp_path):
     param, binary = ncnn_pair(tmp_path)
     installer = ArtifactInstaller(tmp_path / "store")
 
-    installed = installer.install(
-        ncnn_reference(param), param, companions={"model.bin": binary}
-    )
+    installed = installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
 
     metadata = json.loads((installed.path.parent / "artifact.json").read_text())
-    assert metadata["companions"] == {
-        "model.bin": hashlib.sha256(binary.read_bytes()).hexdigest()
-    }
+    assert metadata["companions"] == {"model.bin": hashlib.sha256(binary.read_bytes()).hexdigest()}
 
 
 def test_replaced_weights_are_detected_after_installation(tmp_path):
     """The manifest pins only the graph, so this is what notices tampering."""
     param, binary = ncnn_pair(tmp_path)
     installer = ArtifactInstaller(tmp_path / "store")
-    installed = installer.install(
-        ncnn_reference(param), param, companions={"model.bin": binary}
-    )
+    installed = installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
 
     assert installer.resolve_active("demo-ncnn").ready is True
 
@@ -664,9 +662,7 @@ def test_replaced_weights_are_detected_after_installation(tmp_path):
 def test_removed_weights_are_detected_after_installation(tmp_path):
     param, binary = ncnn_pair(tmp_path)
     installer = ArtifactInstaller(tmp_path / "store")
-    installed = installer.install(
-        ncnn_reference(param), param, companions={"model.bin": binary}
-    )
+    installed = installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
 
     (installed.path.parent / "model.bin").unlink()
 
@@ -851,9 +847,10 @@ def test_reinstalling_a_version_with_different_companion_bytes_is_refused(tmp_pa
     installer.install(reference, source, companions={"model.bin": weights})
 
     # Identical bytes stay a no-op: a version is immutable, not un-reinstallable.
-    assert installer.install(
-        reference, source, companions={"model.bin": weights}
-    ).reference == reference
+    assert (
+        installer.install(reference, source, companions={"model.bin": weights}).reference
+        == reference
+    )
 
     swapped = tmp_path / "other.bin"
     swapped.write_bytes(b"different weights entirely")

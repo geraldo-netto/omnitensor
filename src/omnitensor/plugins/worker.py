@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
 from importlib import metadata
+from pathlib import Path
 from typing import BinaryIO
 
 from ..sdk import CancellationController, cancelled_result
+from ..sdk.bootstrap import (
+    BootstrapArtifact,
+    PluginBootstrap,
+    configure_plugin_bootstrap,
+)
 from .discovery import PLUGIN_ENTRY_POINT_GROUP
 from .ipc import (
     DEFAULT_MAX_FRAME_BYTES,
@@ -324,6 +331,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--distribution", required=True)
     parser.add_argument("--import-path", action="append", default=[])
     parser.add_argument("--permission", action="append", default=[])
+    parser.add_argument("--artifact", action="append", default=[])
+    parser.add_argument("--state-path", default=None)
+    parser.add_argument("--accelerator-lease-path", default=None)
     parser.add_argument(
         "--no-seccomp",
         action="store_true",
@@ -369,6 +379,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"{blocked}. Pass --no-seccomp to accept that deliberately."
             )
         install_filter()
+    configure_plugin_bootstrap(_bootstrap(arguments))
     plugin = load_external_plugin(
         arguments.plugin_id,
         arguments.entry_point,
@@ -383,6 +394,49 @@ def main(argv: Sequence[str] | None = None) -> None:
             permissions=frozenset(arguments.permission),
         )
     )
+
+
+def _bootstrap(arguments) -> PluginBootstrap:
+    artifacts = []
+    for raw in arguments.artifact:
+        try:
+            item = json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise SystemExit("plugin artifact bootstrap is invalid") from error
+        if not isinstance(item, dict) or set(item) != {
+            "id",
+            "version",
+            "format",
+            "sha256",
+            "companions",
+            "path",
+        }:
+            raise SystemExit("plugin artifact bootstrap fields are invalid")
+        companions = item["companions"]
+        path = Path(item["path"]) if isinstance(item["path"], str) else Path()
+        if not isinstance(companions, dict) or not path.is_absolute() or not path.is_file():
+            raise SystemExit("plugin artifact bootstrap path is invalid")
+        artifacts.append(
+            BootstrapArtifact(
+                item["id"],
+                item["version"],
+                item["format"],
+                item["sha256"],
+                path,
+                tuple(sorted(companions.items())),
+            )
+        )
+    state_path = Path(arguments.state_path) if arguments.state_path else None
+    if state_path is not None and (not state_path.is_absolute() or not state_path.is_dir()):
+        raise SystemExit("plugin state bootstrap path is invalid")
+    lease_path = (
+        Path(arguments.accelerator_lease_path)
+        if arguments.accelerator_lease_path
+        else None
+    )
+    if lease_path is not None and (not lease_path.is_absolute() or not lease_path.is_file()):
+        raise SystemExit("plugin accelerator lease bootstrap path is invalid")
+    return PluginBootstrap(arguments.plugin_id, tuple(artifacts), state_path, lease_path)
 
 
 if __name__ == "__main__":  # pragma: no cover - module process entry point

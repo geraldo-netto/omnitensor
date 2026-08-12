@@ -273,7 +273,10 @@ def test_manifest_and_generation_task_are_closed_manual_contracts():
     assert validate_workload_document(manifest) == []
     declaration = manifest["plugin"]
     assert declaration["triggers"] == ["manual"]
-    assert declaration["permissions"] == ["files:read-selected"]
+    assert declaration["permissions"] == [
+        "accelerator:gpu",
+        "files:read-selected",
+    ]
     assert declaration["schemas"]["input"]["properties"]["sources"]["maxItems"] == 16
     assert declaration["schemas"]["input"]["properties"]["question"]["maxLength"] == 4096
     assert declaration["schemas"]["output"] == {
@@ -928,7 +931,7 @@ def test_generation_task_freezes_prompt_schema_and_every_limit():
         task.limits.context_tokens,
         task.limits.output_tokens,
         task.limits.output_bytes,
-    ) == (32768, 4096, 262144)
+    ) == (32768, 1024, 262144)
     assert task.output_schema == json.loads(
         (Path(__file__).parents[1] / "schemas/document-question-answer.schema.json").read_text()
     )

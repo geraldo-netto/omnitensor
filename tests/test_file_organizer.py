@@ -143,9 +143,7 @@ async def test_selected_files_produce_exact_review_only_plan_and_host_duplicate_
     plugin, worker, store = await running()
     progress = Progress()
 
-    result = await plugin.execute(
-        request((first, second)), CancellationController(), progress
-    )
+    result = await plugin.execute(request((first, second)), CancellationController(), progress)
 
     assert result.status is PluginResultStatus.SUCCEEDED
     assert result.detail == "organization plan ready for review; no files changed"
@@ -160,9 +158,7 @@ async def test_selected_files_produce_exact_review_only_plan_and_host_duplicate_
         "first.md",
         "second.md",
     ]
-    assert {item["duplicateGroup"] for item in result.output["plan"]} == {
-        "duplicate-group-1"
-    }
+    assert {item["duplicateGroup"] for item in result.output["plan"]} == {"duplicate-group-1"}
     assert all(item["tags"] == ["project-notes"] for item in result.output["plan"])
     assert all(item["proposedFolder"] == "review/project" for item in result.output["plan"])
     assert all("path" not in json.dumps(item).lower() for item in result.output["plan"])
@@ -306,11 +302,15 @@ def plan_fixture(tmp_path, *, contents=("one", "two")):
                 ],
             }
         )
-    return selected, tuple(spans), {
-        "version": 1,
-        "requestId": "job-1",
-        "suggestions": suggestions,
-    }
+    return (
+        selected,
+        tuple(spans),
+        {
+            "version": 1,
+            "requestId": "job-1",
+            "suggestions": suggestions,
+        },
+    )
 
 
 @pytest.mark.parametrize(
@@ -335,15 +335,11 @@ def plan_fixture(tmp_path, *, contents=("one", "two")):
             "evidence-invalid",
         ),
         (
-            lambda document: document["suggestions"][0].update(
-                proposedName="../escape.txt"
-            ),
+            lambda document: document["suggestions"][0].update(proposedName="../escape.txt"),
             "plan-invalid",
         ),
         (
-            lambda document: document["suggestions"][0].update(
-                proposedFolder="../escape"
-            ),
+            lambda document: document["suggestions"][0].update(proposedFolder="../escape"),
             "plan-invalid",
         ),
         (
@@ -495,9 +491,7 @@ def test_metadata_and_duplicate_helpers_expose_only_basenames_and_exact_digests(
         == hashlib.sha256(fragment.text.encode("utf-8")).hexdigest()
         for fragment in fragments
     )
-    assert _duplicate_groups(selected) == {
-        selected[0].item.digest: "duplicate-group-1"
-    }
+    assert _duplicate_groups(selected) == {selected[0].item.digest: "duplicate-group-1"}
 
 
 @pytest.mark.asyncio
@@ -516,9 +510,7 @@ async def test_provider_progress_must_be_finite_and_bounded(fraction):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "fraction,expected", [(0, 0.55), (0.5, 0.75), (1, 0.9500000000000001)]
-)
+@pytest.mark.parametrize("fraction,expected", [(0, 0.55), (0.5, 0.75), (1, 0.9500000000000001)])
 async def test_provider_progress_preserves_boundaries(fraction, expected):
     target = Progress()
     adapter = _OrganizerProgress(
@@ -534,7 +526,7 @@ def test_manifest_task_schemas_and_source_have_no_action_capability():
     assert validate_workload_document(manifest) == []
     plugin = manifest["plugin"]
     assert plugin["triggers"] == ["manual"]
-    assert plugin["permissions"] == [READ_PERMISSION]
+    assert plugin["permissions"] == ["accelerator:gpu", READ_PERMISSION]
     assert plugin["schemas"]["input"]["properties"]["sources"]["maxItems"] == 16
     assert plugin["schemas"]["output"] == {"$ref": "file-organizer-result.schema.json"}
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
@@ -554,7 +546,10 @@ def test_manifest_task_schemas_and_source_have_no_action_capability():
         "remaining fragments are content spans. Return the closed review-only "
         "plan with one ordered suggestion per selected file. Cite at least one "
         "content span for every suggestion. Do not infer duplicates; the host "
-        "computes them. {{UNTRUSTED_CONTENT}}"
+        "computes them. The output has exactly version, requestId, and suggestions; "
+        "never echo fragments or add a metadata field. Every suggestion has exactly "
+        "fileId, tags, proposedName, proposedFolder, reason, and evidence. "
+        "{{UNTRUSTED_CONTENT}}"
     )
     assert task.output_schema == json.loads(
         (root / "schemas/file-organizer-answer.schema.json").read_text()
@@ -565,7 +560,7 @@ def test_manifest_task_schemas_and_source_have_no_action_capability():
         task.limits.output_bytes,
     ) == (
         32768,
-        4096,
+        1024,
         262144,
     )
     source = (root / "src/omnitensor/plugins/file_organizer.py").read_text()
@@ -611,9 +606,7 @@ def test_error_contract_and_constructor_boundaries():
             "private fragment store is required",
         ),
         (
-            lambda: FileOrganizerPlugin(
-                GenerationRouter(()), MemoryFragmentStore(), clock_ms=1
-            ),
+            lambda: FileOrganizerPlugin(GenerationRouter(()), MemoryFragmentStore(), clock_ms=1),
             "clock-invalid",
             "clock must be callable",
         ),
@@ -652,10 +645,7 @@ def test_error_contract_and_constructor_boundaries():
         ".jpeg",
         ".webp",
     }
-    assert all(
-        isinstance(plugin._adapters[suffix], PlainTextAdapter)
-        for suffix in (".txt", ".md")
-    )
+    assert all(isinstance(plugin._adapters[suffix], PlainTextAdapter) for suffix in (".txt", ".md"))
     assert all(
         isinstance(plugin._adapters[suffix], PyMuPdfAdapter)
         for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")

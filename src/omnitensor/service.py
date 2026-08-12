@@ -339,11 +339,16 @@ class OmniTensorInterface(ServiceInterface):
 class SysfsDeviceDiscovery:
     """:class:`~omnitensor.ports.DeviceDiscovery` over kernel device nodes."""
 
-    def __init__(self, paths: DiscoveryPaths | None = None):
+    def __init__(
+        self,
+        paths: DiscoveryPaths | None = None,
+        selected_ids: dict[str, str] | None = None,
+    ):
         self._paths = paths or DiscoveryPaths()
+        self._selected_ids = dict(selected_ids or {})
 
     def detect(self) -> list[Device]:
-        return detect_devices(self._paths)
+        return detect_devices(self._paths, self._selected_ids)
 
     def utilization(self, device: Device) -> float | None:
         return device_utilization(self._paths, device)
@@ -577,8 +582,11 @@ class OmniTensorService:
         input_roots: Sequence[Path | str] = (),
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
+        accelerator_device_ids: dict[str, str] | None = None,
     ):
-        self._discovery = discovery or SysfsDeviceDiscovery(discovery_paths)
+        self._discovery = discovery or SysfsDeviceDiscovery(
+            discovery_paths, accelerator_device_ids
+        )
         self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
         self._input_roots = tuple(input_roots)
         self._kernel_telemetry_source = kernel_telemetry_source or UnixSocketAggregateSource()
@@ -590,10 +598,14 @@ class OmniTensorService:
         self._grants = grants if grants is not None else GrantLedger(grants_path)
         self._artifact_root_path = artifact_root
         self._resolutions: dict[str, tuple] = {}
+        self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
             selected_files_root=snapshot_path.parent / "plugin-inputs",
+            worker_state_root=snapshot_path.parent / "plugin-state",
+            resolve_artifact=self._resolve_plugin_artifact,
+            accelerator_devices=self._plugin_accelerator_devices,
             progress_sink=lambda progress: self._note_job_progress(
                 progress.job_id,
                 progress.stage,
@@ -616,7 +628,6 @@ class OmniTensorService:
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
         self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
-        self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
         self._job_dispatcher = _PluginAwareDispatcher(
             job_dispatcher or self._default_dispatcher(), self._plugin_runtime
         )
@@ -940,6 +951,22 @@ class OmniTensorService:
             )
         return self._cached_resolution(artifact_id, reference)
 
+    def _resolve_plugin_artifact(self, reference: ArtifactReference) -> ArtifactResolution:
+        if self._artifact_store is None:
+            return ArtifactResolution(
+                False, None, "no artifact store is configured for this service", 0
+            )
+        return self._artifact_store.resolve(reference)
+
+    def _plugin_accelerator_devices(self) -> dict[str, Path]:
+        paths: dict[str, Path] = {}
+        for device in self._devices:
+            if device.backend == "gpu" and device.kind == "dri":
+                paths.setdefault("gpu", Path("/dev/dri") / device.id.removeprefix("gpu-"))
+            elif device.backend == "npu" and device.kind == "accel":
+                paths.setdefault("npu", Path("/dev/accel") / device.id.removeprefix("npu-"))
+        return paths
+
     def _cached_resolution(self, artifact_id: str, reference) -> ArtifactResolution:
         """Resolve, but not by re-reading every model file twice a second.
 
@@ -990,7 +1017,11 @@ class OmniTensorService:
             for entry in plugin.manifest["plugin"]["artifacts"]:
                 if entry["id"] == artifact_id:
                     return ArtifactReference(
-                        entry["id"], entry["version"], entry["format"], entry["sha256"]
+                        entry["id"],
+                        entry["version"],
+                        entry["format"],
+                        entry["sha256"],
+                        tuple(sorted((entry.get("companions") or {}).items())),
                     )
         return None
 
@@ -1120,6 +1151,19 @@ def _env_paths(name: str) -> tuple[Path, ...]:
     return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
 
 
+def _env_accelerator_device_ids() -> dict[str, str]:
+    names = {
+        "gpu": "OMNITENSOR_GPU_DEVICE",
+        "npu": "OMNITENSOR_NPU_DEVICE",
+        "tpu": "OMNITENSOR_TPU_DEVICE",
+    }
+    return {
+        backend: value
+        for backend, name in names.items()
+        if (value := os.environ.get(name, "").strip())
+    }
+
+
 def build_service_from_env() -> OmniTensorService:
     """The production service instance, configured from the environment."""
     return OmniTensorService(
@@ -1130,6 +1174,7 @@ def build_service_from_env() -> OmniTensorService:
         model_bindings_path=_env_path("OMNITENSOR_MODEL_BINDINGS", DEFAULT_MODEL_BINDINGS_PATH),
         grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH),
         input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS"),
+        accelerator_device_ids=_env_accelerator_device_ids(),
     )
 
 

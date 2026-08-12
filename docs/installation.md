@@ -80,6 +80,65 @@ writes reports "No runtime service is publishing state", which reads exactly
 like a service that is not running — so check both names before concluding the
 service is down.
 
+### Select an accelerator on multi-device hosts
+
+OmniTensor enumerates the device nodes that exist when the service starts and
+during core-runtime rediscovery; it does not assume `renderD128`, `accel0`, or
+`apex_0`. With no override it chooses the lowest numbered detected node for
+each backend. The active runtime IDs are published as `devices[].id` in the
+snapshot, for example `gpu-renderD129`, `npu-accel3`, or `tpu-pcie-2`.
+
+The snapshot intentionally publishes only the active device for each backend.
+List all selectable kernel nodes on a multi-device host and translate each
+basename to its runtime ID with:
+
+```sh
+for node in /dev/dri/renderD*; do
+  test -e "$node" && printf 'gpu-%s\n' "$(basename "$node")"
+done
+for node in /dev/accel/accel*; do
+  test -e "$node" && printf 'npu-%s\n' "$(basename "$node")"
+done
+for node in /dev/apex_*; do
+  test -e "$node" && printf 'tpu-pcie-%s\n' "${node##*_}"
+done
+```
+
+`tpu-usb` is also selectable when the runtime detects a supported Coral USB
+identity. These IDs describe host-local kernel nodes; verify the associated
+device with the host's driver or `udevadm` tooling before choosing one.
+
+To choose a different installed device, set its published runtime ID rather
+than a Vulkan/OpenVINO enumeration index:
+
+```sh
+systemctl --user edit omnitensor.service
+# [Service]
+# Environment=OMNITENSOR_GPU_DEVICE=gpu-renderD129
+# Environment=OMNITENSOR_NPU_DEVICE=npu-accel3
+# Environment=OMNITENSOR_TPU_DEVICE=tpu-pcie-2
+systemctl --user daemon-reload
+systemctl --user restart omnitensor.service
+```
+
+Each setting is optional and independent. A stale, mistyped, or wrong-host ID
+matches no device, so that backend remains unavailable instead of silently
+using another accelerator. Remove the override to restore automatic selection.
+Changing a Linux node number after reboot is harmless when no override is set.
+Automatic discovery derives the selected node again. Core executors follow
+rediscovery, but installed external workers have immutable device mounts:
+restart `omnitensor.service` after accelerator hotplug or a node-number change
+so their sandboxes are rebuilt from the new node, major/minor, and exact
+read-only sysfs identity.
+
+Selecting a node does not transfer model qualification to another device
+family or runtime stack. The current Qwen receipt matches the native runtime
+bytes and Vulkan-reported device name, not a unique card serial or PCI address;
+two indistinguishable same-name devices satisfy that identity check. A
+different reported GPU/NPU/TPU identity remains unavailable until the provider
+has passed its native runtime, full-offload, parity, memory, and workload gates
+for that identity.
+
 The service refuses to start when `org.cinnamon.OmniTensor1` is already owned,
 because two instances would publish to the same snapshot path. If start fails
 with `already owned`, find the other instance and stop it first — an instance
@@ -129,6 +188,13 @@ for ncnn GPU artifacts and/or `[convert-npu]` for OpenVINO NPU artifacts, then
 install only the generated native files into the service artifact store. See
 [Local model training](local-training.md) for the complete record, fit,
 compile, binding, and restart workflow.
+
+The four optional Qwen workflows have an additional, fail-closed provider
+installation: a locally built llama.cpp/Vulkan wheel, four identity-isolated
+workload wheels, one shared runtime wheel, pinned Qwen/BGE artifacts, and
+per-plugin grants. Follow [Installing the Qwen workload providers](qwen-workload-installation.md)
+rather than installing an ordinary llama.cpp wheel or copying model files into
+the store by hand.
 
 ```sh
 # Install, or add an accelerator to an existing environment

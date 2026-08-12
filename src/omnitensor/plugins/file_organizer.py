@@ -466,7 +466,9 @@ def file_organizer_task():
                     "remaining fragments are content spans. Return the closed review-only "
                     "plan with one ordered suggestion per selected file. Cite at least one "
                     "content span for every suggestion. Do not infer duplicates; the host "
-                    "computes them. "
+                    "computes them. The output has exactly version, requestId, and suggestions; "
+                    "never echo fragments or add a metadata field. Every suggestion has exactly "
+                    "fileId, tags, proposedName, proposedFolder, reason, and evidence. "
                     "{{UNTRUSTED_CONTENT}}"
                 ),
             },
@@ -474,7 +476,7 @@ def file_organizer_task():
             "outputSchema": load_schema("file-organizer-answer.schema.json"),
             "limits": {
                 "contextTokens": 32_768,
-                "outputTokens": 4_096,
+                "outputTokens": 1_024,
                 "outputBytes": 262_144,
             },
         }

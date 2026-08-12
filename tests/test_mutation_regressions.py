@@ -279,13 +279,13 @@ def test_tpu_pcie_index_and_naming_are_exact(tmp_path):
     assert device.vendor == ""
 
 
-def test_tpu_pcie_scan_bound_is_exact(tmp_path):
+def test_tpu_pcie_candidate_count_is_bounded_but_ids_are_not(tmp_path):
     nodes = paths(tmp_path)
-    (nodes.dev / "apex_7").touch()
-    assert detect_tpu(nodes).id == "tpu-pcie-7"
-    (nodes.dev / "apex_7").unlink()
-    (nodes.dev / "apex_8").touch()
-    assert detect_tpu(nodes) is None
+    (nodes.dev / "apex_80").touch()
+    assert detect_tpu(nodes).id == "tpu-pcie-80"
+    for index in range(8):
+        (nodes.dev / f"apex_{index}").touch()
+    assert detect_tpu(nodes, "tpu-pcie-80") is None
 
 
 def test_tpu_usb_identities_are_exact(tmp_path):
@@ -313,16 +313,16 @@ def test_vendor_read_truncates_to_32_characters_and_replaces_bad_bytes(tmp_path)
     assert detect_npu(nodes).vendor == "��"
 
 
-def test_gpu_render_node_scan_bound_is_exact(tmp_path):
+def test_gpu_candidate_count_is_bounded_but_render_ids_are_not(tmp_path):
     nodes = paths(tmp_path)
     (nodes.dev / "dri").mkdir()
-    (nodes.dev / "dri/renderD135").touch()
+    (nodes.dev / "dri/renderD913").touch()
     device = detect_gpu(nodes)
-    assert device.id == "gpu-renderD135"
+    assert device.id == "gpu-renderD913"
     assert device.kind == "dri"
-    (nodes.dev / "dri/renderD135").unlink()
-    (nodes.dev / "dri/renderD136").touch()
-    assert detect_gpu(nodes) is None
+    for node in range(128, 136):
+        (nodes.dev / f"dri/renderD{node}").touch()
+    assert detect_gpu(nodes, "gpu-renderD913") is None
 
 
 def test_utilization_clamps_negative_and_overflow_values(tmp_path):

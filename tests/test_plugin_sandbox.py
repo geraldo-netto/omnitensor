@@ -12,6 +12,30 @@ from omnitensor.plugins import (
     FilesystemSandbox,
     SandboxPolicyError,
 )
+from omnitensor.plugins import sandbox as sandbox_module
+
+
+def test_filesystem_permission_split_is_exact_and_deterministic(tmp_path):
+    readable = tmp_path / "readable"
+    writable = tmp_path / "writable"
+    colon_path = tmp_path / "name:with-colon"
+
+    assert sandbox_module._filesystem_paths(
+        frozenset(
+            {
+                "unrelated:value",
+                f"write:{writable}",
+                "device:/dev/dri/renderD128",
+                f"read:{readable}/*",
+                f"read:{colon_path}",
+            }
+        )
+    ) == [
+        ("device", "/dev/dri/renderD128"),
+        ("read", str(colon_path)),
+        ("read", str(readable)),
+        ("write", str(writable)),
+    ]
 
 
 def test_policy_uses_only_declared_active_filesystem_and_device_grants(tmp_path):
@@ -67,10 +91,109 @@ def test_selected_files_permission_mounts_only_the_private_broker_root(tmp_path)
     assert str(original) not in sandbox.wrap(("/usr/bin/python3",))
     with pytest.raises(SandboxPolicyError, match="brokered input root"):
         FilesystemSandbox.from_permissions({permission}, {permission})
-    denied = FilesystemSandbox.from_permissions(
-        {permission}, set(), selected_files_root=broker
-    )
+    denied = FilesystemSandbox.from_permissions({permission}, set(), selected_files_root=broker)
     assert denied.read_paths == ()
+
+
+def test_host_owned_state_and_named_accelerator_are_narrowly_mounted(tmp_path):
+    state = tmp_path / "plugin-state"
+    lease = tmp_path / "gpu.lock"
+    state.mkdir()
+    lease.touch()
+    device = Path("/dev/dri/renderD128")
+    if not device.exists():
+        pytest.skip("host has no renderD128 device node")
+
+    sandbox = FilesystemSandbox.from_permissions(
+        {"accelerator:gpu"},
+        {"accelerator:gpu"},
+        trusted_write_paths=(state, lease),
+        accelerator_devices=(device,),
+    )
+
+    assert sandbox.write_paths == tuple(sorted((str(lease), str(state))))
+    assert sandbox.device_paths == (str(device),)
+    wrapped = sandbox.wrap(("/usr/bin/python3", "worker.py"))
+    assert any(
+        wrapped[index : index + 3] == ("--bind-try", str(state), str(state))
+        for index in range(len(wrapped) - 2)
+    )
+    index = wrapped.index("--dev-bind-try")
+    assert wrapped[index : index + 3] == ("--dev-bind-try", str(device), str(device))
+
+
+def test_host_owned_resources_still_reject_missing_or_unallowlisted_paths(tmp_path):
+    with pytest.raises(SandboxPolicyError, match="runtime paths must exist"):
+        FilesystemSandbox.from_permissions(
+            set(), set(), trusted_write_paths=(tmp_path / "missing",)
+        )
+    with pytest.raises(SandboxPolicyError, match="accelerator device is not allowlisted"):
+        FilesystemSandbox.from_permissions(set(), set(), accelerator_devices=(tmp_path,))
+
+
+def test_trusted_sysfs_link_targets_only_an_exact_mounted_device_identity():
+    source = "../../devices/pci0000:00/0000:03:00.0/drm/renderD128"
+    destination = "/sys/dev/char/226:128"
+
+    sandbox = FilesystemSandbox.from_permissions(
+        set(),
+        set(),
+        runtime_paths=(Path("/sys/devices"),),
+        trusted_symlinks=((source, destination),),
+    )
+
+    assert sandbox.trusted_symlinks == ((source, destination),)
+    wrapped = sandbox.wrap(("/usr/bin/python3",))
+    index = wrapped.index("--symlink")
+    assert wrapped[index : index + 3] == ("--symlink", source, destination)
+    assert ("--ro-bind", "/sys/dev/char", "/sys/dev/char") not in tuple(
+        zip(wrapped, wrapped[1:], wrapped[2:], strict=False)
+    )
+
+
+def test_trusted_symlink_parent_directories_are_exact_and_depth_ordered():
+    assert sandbox_module._symlink_directories(
+        (("source-a", "/z/a/b/link"), ("source-b", "/a/z/link"))
+    ) == ("/a", "/z", "/a/z", "/z/a", "/z/a/b")
+
+
+@pytest.mark.parametrize(
+    ("source", "destination", "message"),
+    [
+        ("/sys/devices/gpu", "/sys/dev/char/226:128", "invalid"),
+        ("../../devices/gpu", "/sys/dev/char/not-a-node", "invalid"),
+        ("../../../outside/gpu", "/sys/dev/char/226:128", "invalid"),
+    ],
+)
+def test_trusted_sysfs_links_fail_closed(source, destination, message):
+    with pytest.raises(SandboxPolicyError, match=message):
+        FilesystemSandbox.from_permissions(
+            set(),
+            set(),
+            runtime_paths=(Path("/sys/devices"),),
+            trusted_symlinks=((source, destination),),
+        )
+
+
+def test_trusted_sysfs_link_refuses_an_unmounted_device_identity():
+    with pytest.raises(SandboxPolicyError, match="not mounted"):
+        FilesystemSandbox.from_permissions(
+            set(),
+            set(),
+            runtime_paths=(Path("/usr/lib"),),
+            trusted_symlinks=(("../../devices/other/gpu", "/sys/dev/char/226:128"),),
+        )
+
+
+def test_trusted_sysfs_link_destination_cannot_be_duplicated():
+    link = ("../../devices/gpu", "/sys/dev/char/226:128")
+    with pytest.raises(SandboxPolicyError, match="duplicated"):
+        FilesystemSandbox.from_permissions(
+            set(),
+            set(),
+            runtime_paths=(Path("/sys/devices"),),
+            trusted_symlinks=(link, link),
+        )
 
 
 @pytest.mark.parametrize(
@@ -109,17 +232,12 @@ def test_only_named_accelerator_device_families_are_allowed(device):
 
 
 def test_path_count_and_runtime_roots_are_bounded_and_canonical(tmp_path):
-    permissions = {
-        f"read:{tmp_path}/source-{index}"
-        for index in range(MAX_SANDBOX_PATHS + 1)
-    }
+    permissions = {f"read:{tmp_path}/source-{index}" for index in range(MAX_SANDBOX_PATHS + 1)}
     with pytest.raises(SandboxPolicyError, match="at most"):
         FilesystemSandbox.from_permissions(permissions, permissions)
     for runtime_path in (Path("relative"), tmp_path / "missing", Path("/")):
         with pytest.raises(SandboxPolicyError, match="runtime path"):
-            FilesystemSandbox.from_permissions(
-                set(), set(), runtime_paths=(runtime_path,)
-            )
+            FilesystemSandbox.from_permissions(set(), set(), runtime_paths=(runtime_path,))
     with pytest.raises(SandboxPolicyError, match="declared runtime path"):
         FilesystemSandbox.from_permissions(
             set(),
@@ -197,9 +315,7 @@ def test_wrapped_command_uses_private_process_mount_and_device_namespaces(tmp_pa
         "/dev/dri/renderD128",
         "/dev/dri/renderD128",
     )
-    assert ("--ro-bind", "/", "/") not in zip(
-        command, command[1:], command[2:], strict=False
-    )
+    assert ("--ro-bind", "/", "/") not in zip(command, command[1:], command[2:], strict=False)
     assert command[-2:] == ("/usr/bin/python3", "-V")
 
 
@@ -246,9 +362,7 @@ def test_a_worker_gets_no_network_by_default():
 
 def test_localhost_is_served_by_the_private_namespace():
     """bwrap gives a new netns its own loopback, so this needs no host sharing."""
-    policy = FilesystemSandbox.from_permissions(
-        {"network:localhost"}, {"network:localhost"}
-    )
+    policy = FilesystemSandbox.from_permissions({"network:localhost"}, {"network:localhost"})
 
     command = policy.wrap(("/usr/bin/python3",))
 
@@ -257,9 +371,7 @@ def test_localhost_is_served_by_the_private_namespace():
 
 
 def test_only_an_outbound_grant_shares_the_host_network():
-    policy = FilesystemSandbox.from_permissions(
-        {"network:outbound"}, {"network:outbound"}
-    )
+    policy = FilesystemSandbox.from_permissions({"network:outbound"}, {"network:outbound"})
 
     command = policy.wrap(("/usr/bin/python3",))
 

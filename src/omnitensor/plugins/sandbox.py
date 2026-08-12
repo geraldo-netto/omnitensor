@@ -55,6 +55,7 @@ class FilesystemSandbox:
     write_paths: tuple[str, ...]
     device_paths: tuple[str, ...]
     runtime_paths: tuple[str, ...]
+    trusted_symlinks: tuple[tuple[str, str], ...] = ()
     network: bool = False
     python_path: str | None = None
 
@@ -65,6 +66,9 @@ class FilesystemSandbox:
         granted: Collection[str],
         *,
         runtime_paths: Sequence[str | Path] = (),
+        trusted_write_paths: Sequence[str | Path] = (),
+        accelerator_devices: Sequence[str | Path] = (),
+        trusted_symlinks: Sequence[tuple[str, str | Path]] = (),
         python_path: str | Path | None = None,
         selected_files_root: str | Path | None = None,
     ) -> FilesystemSandbox:
@@ -75,14 +79,7 @@ class FilesystemSandbox:
             raise SandboxPolicyError(
                 f"sandbox grant is undeclared: {min(undeclared)}"
             )
-        filesystem = []
-        for permission in sorted(granted_set):
-            action, separator, value = permission.partition(":")
-            if action not in _FILESYSTEM_ACTIONS:
-                continue
-            if not separator:
-                raise SandboxPolicyError("filesystem permission is malformed")
-            filesystem.append((action, _permission_path(action, value)))
+        filesystem = _filesystem_paths(granted_set)
         if len(filesystem) > MAX_SANDBOX_PATHS:
             raise SandboxPolicyError(
                 f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
@@ -102,12 +99,20 @@ class FilesystemSandbox:
                 f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
             )
         trusted = tuple(sorted({_runtime_path(path) for path in runtime_paths}))
+        links = _trusted_symlinks(trusted_symlinks, trusted)
+        writes.update(_runtime_path(path) for path in trusted_write_paths)
+        devices.update(_device_path(path) for path in accelerator_devices)
+        if len(reads) + len(writes) + len(devices) > MAX_SANDBOX_PATHS:
+            raise SandboxPolicyError(
+                f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
+            )
         trusted_python = _trusted_python_path(python_path, trusted)
         return cls(
             tuple(sorted(reads)),
             tuple(sorted(writes)),
             tuple(sorted(devices)),
             trusted,
+            links,
             _network_granted(granted_set),
             trusted_python,
         )
@@ -165,10 +170,14 @@ class FilesystemSandbox:
             *self.write_paths,
             *self.device_paths,
         ]
-        for directory in _target_directories(bindings):
+        directories = set(_target_directories(bindings))
+        directories.update(_symlink_directories(self.trusted_symlinks))
+        for directory in sorted(directories, key=lambda item: (item.count("/"), item)):
             command.extend(("--dir", directory))
         for path in sorted(set(runtime_roots)):
             command.extend(("--ro-bind", path, path))
+        for source, destination in self.trusted_symlinks:
+            command.extend(("--symlink", source, destination))
         for path in self.read_paths:
             command.extend(("--ro-bind-try", path, path))
         for path in self.write_paths:
@@ -177,6 +186,18 @@ class FilesystemSandbox:
             command.extend(("--dev-bind-try", path, path))
         command.extend(("--", *argv))
         return tuple(command)
+
+
+def _filesystem_paths(granted: frozenset[str]) -> list[tuple[str, str]]:
+    filesystem = []
+    for permission in sorted(granted):
+        action, separator, value = permission.partition(":")
+        if action not in _FILESYSTEM_ACTIONS:
+            continue
+        if not separator:
+            raise SandboxPolicyError("filesystem permission is malformed")
+        filesystem.append((action, _permission_path(action, value)))
+    return filesystem
 
 
 def _selected_files_path(
@@ -265,6 +286,36 @@ def _runtime_path(value: str | Path) -> str:
     return absolute
 
 
+def _device_path(value: str | Path) -> str:
+    path = _runtime_path(value)
+    if _DEVICE_PATH.fullmatch(path) is None:
+        raise SandboxPolicyError("accelerator device is not allowlisted")
+    return path
+
+
+def _trusted_symlinks(
+    values: Sequence[tuple[str, str | Path]],
+    runtime_paths: Collection[str],
+) -> tuple[tuple[str, str], ...]:
+    links: dict[str, str] = {}
+    for source, destination_value in values:
+        destination = str(destination_value)
+        if (
+            not re.fullmatch(r"/sys/dev/char/[0-9]+:[0-9]+", destination)
+            or not re.fullmatch(r"(?:\.\./)+devices(?:/[A-Za-z0-9_.:-]+)+", source)
+        ):
+            raise SandboxPolicyError("trusted sysfs symlink is invalid")
+        resolved = PurePosixPath(
+            posixpath.normpath(posixpath.join(str(PurePosixPath(destination).parent), source))
+        )
+        if not any(resolved.is_relative_to(root) for root in runtime_paths):
+            raise SandboxPolicyError("trusted sysfs symlink target is not mounted")
+        if destination in links:
+            raise SandboxPolicyError("trusted sysfs symlink is duplicated")
+        links[destination] = source
+    return tuple(sorted((source, destination) for destination, source in links.items()))
+
+
 def _executable_runtime_paths(value: str | Path) -> tuple[str, ...]:
     current = Path(value).absolute()
     paths = []
@@ -296,6 +347,18 @@ def _target_directories(paths: Sequence[str]) -> tuple[str, ...]:
     for value in paths:
         path = PurePosixPath(value)
         parent = path if Path(value).is_dir() else path.parent
+        directories.update(
+            str(candidate)
+            for candidate in (parent, *parent.parents)
+            if str(candidate) != "/"
+        )
+    return tuple(sorted(directories, key=lambda item: (item.count("/"), item)))
+
+
+def _symlink_directories(links: Sequence[tuple[str, str]]) -> tuple[str, ...]:
+    directories = set()
+    for _source, destination in links:
+        parent = PurePosixPath(destination).parent
         directories.update(
             str(candidate)
             for candidate in (parent, *parent.parents)

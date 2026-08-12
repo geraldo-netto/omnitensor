@@ -30,8 +30,25 @@
       "output": {"$ref": "document-question-result.schema.json"}
     },
     "triggers": ["manual"],
-    "artifacts": [],
-    "permissions": ["files:read-selected"]
+    "artifacts": [
+      {
+        "id": "qwen3-0-6b-q8-0",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735"
+      },
+      {
+        "id": "bge-small-en-v1-5-ask-gpu",
+        "version": "1.0.0",
+        "format": "ncnn",
+        "sha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
+        "companions": {
+          "model.bin": "44034070d5e86e6be4829dc4a69c1e959ee895b07877d89b34c98d2adcf9e994",
+          "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        }
+      }
+    ],
+    "permissions": ["accelerator:gpu", "files:read-selected"]
   },
   "requirements": {
     "runtimeApi": 1,

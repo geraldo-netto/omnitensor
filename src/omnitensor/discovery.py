@@ -12,13 +12,16 @@ expressed by omission.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 MAX_PCIE_DEVICES = 8
 MAX_ACCEL_DEVICES = 8
 MAX_RENDER_DEVICES = 8
-RENDER_NODE_BASE = 128
+_PCIE_NODE = re.compile(r"^apex_([0-9]{1,6})$")
+_ACCEL_NODE = re.compile(r"^accel([0-9]{1,6})$")
+_RENDER_NODE = re.compile(r"^renderD([0-9]{1,6})$")
 
 CORAL_USB_IDENTITIES = {
     ("18d1", "9302"): "Coral USB Accelerator",
@@ -77,34 +80,60 @@ def _read_trimmed(path: Path) -> str:
         return ""
 
 
-def detect_tpu(paths: DiscoveryPaths) -> Device | None:
-    for index in range(MAX_PCIE_DEVICES):
-        if (paths.dev / f"apex_{index}").exists():
-            suffix = "" if index == 0 else f" {index + 1}"
-            return Device(
+def _numbered_nodes(
+    root: Path, pattern: re.Pattern[str], limit: int
+) -> tuple[tuple[int, Path], ...]:
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return ()
+    matched = []
+    for entry in entries:
+        match = pattern.fullmatch(entry.name)
+        if match is not None and entry.exists():
+            matched.append((int(match.group(1)), entry))
+    return tuple(sorted(matched, key=lambda item: (item[0], item[1].name))[:limit])
+
+
+def _selected(candidates: list[Device], selected_id: str | None) -> Device | None:
+    if selected_id is None:
+        return candidates[0] if candidates else None
+    return next((device for device in candidates if device.id == selected_id), None)
+
+
+def detect_tpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
+    candidates = []
+    for index, _node in _numbered_nodes(paths.dev, _PCIE_NODE, MAX_PCIE_DEVICES):
+        suffix = "" if index == 0 else f" {index + 1}"
+        candidates.append(
+            Device(
                 id=f"tpu-pcie-{index}",
                 backend="tpu",
                 name=f"Coral PCIe Edge TPU{suffix}",
                 kind="pcie",
             )
+        )
     usb_root = paths.sys / "bus/usb/devices"
     try:
         entries = sorted(usb_root.iterdir())
     except OSError:
-        return None
+        entries = []
     for entry in entries:
         vendor = _read_trimmed(entry / "idVendor")
         product = _read_trimmed(entry / "idProduct")
         name = CORAL_USB_IDENTITIES.get((vendor, product))
         if name is not None:
-            return Device(
-                id="tpu-usb",
-                backend="tpu",
-                name=name,
-                kind="usb",
-                vendor=f"{vendor}:{product}",
+            candidates.append(
+                Device(
+                    id="tpu-usb",
+                    backend="tpu",
+                    name=name,
+                    kind="usb",
+                    vendor=f"{vendor}:{product}",
+                )
             )
-    return None
+            break
+    return _selected(candidates, selected_id)
 
 
 def _detect_node(
@@ -128,10 +157,11 @@ def _detect_node(
     )
 
 
-def detect_npu(paths: DiscoveryPaths) -> Device | None:
-    for index in range(MAX_ACCEL_DEVICES):
+def detect_npu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
+    candidates = []
+    for index, node in _numbered_nodes(paths.dev / "accel", _ACCEL_NODE, MAX_ACCEL_DEVICES):
         device = _detect_node(
-            paths.dev / f"accel/accel{index}",
+            node,
             paths.sys / f"class/accel/accel{index}/device/vendor",
             NPU_VENDOR_NAMES,
             "NPU accelerator",
@@ -140,15 +170,17 @@ def detect_npu(paths: DiscoveryPaths) -> Device | None:
             "accel",
         )
         if device is not None:
-            return device
-    return None
+            candidates.append(device)
+    return _selected(candidates, selected_id)
 
 
-def detect_gpu(paths: DiscoveryPaths) -> Device | None:
-    for offset in range(MAX_RENDER_DEVICES):
-        node_number = RENDER_NODE_BASE + offset
+def detect_gpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
+    candidates = []
+    for node_number, node in _numbered_nodes(
+        paths.dev / "dri", _RENDER_NODE, MAX_RENDER_DEVICES
+    ):
         device = _detect_node(
-            paths.dev / f"dri/renderD{node_number}",
+            node,
             paths.sys / f"class/drm/renderD{node_number}/device/vendor",
             GPU_VENDOR_NAMES,
             "GPU (render node)",
@@ -157,14 +189,22 @@ def detect_gpu(paths: DiscoveryPaths) -> Device | None:
             "dri",
         )
         if device is not None:
-            return device
-    return None
+            candidates.append(device)
+    return _selected(candidates, selected_id)
 
 
-def detect_devices(paths: DiscoveryPaths | None = None) -> list[Device]:
+def detect_devices(
+    paths: DiscoveryPaths | None = None,
+    selected_ids: dict[str, str] | None = None,
+) -> list[Device]:
     """Detect one device per backend, in tpu > npu > gpu hierarchy order."""
     resolved = paths or DiscoveryPaths()
-    found = (detect_tpu(resolved), detect_npu(resolved), detect_gpu(resolved))
+    selectors = selected_ids or {}
+    found = (
+        detect_tpu(resolved, selectors.get("tpu")),
+        detect_npu(resolved, selectors.get("npu")),
+        detect_gpu(resolved, selectors.get("gpu")),
+    )
     return [device for device in found if device is not None]
 
 

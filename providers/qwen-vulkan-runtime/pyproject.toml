@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-qwen-vulkan-runtime"
+version = "0.1.0"
+description = "GPU-only Qwen and BGE runtime wiring for OmniTensor workloads"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "omnitensor>=0.1,<1",
+  "llama-cpp-python==0.3.34",
+]
+
+[project.optional-dependencies]
+documents = ["ncnn>=1.0.20260526", "numpy>=1.24", "tokenizers>=0.22"]
+media = ["pymupdf>=1.24"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnitensor_qwen_runtime"]
+
+[tool.mutmut]
+source_paths = ["src/omnitensor_qwen_runtime/"]
+pytest_add_cli_args_test_selection = ["tests/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../../src"]
+asyncio_mode = "auto"

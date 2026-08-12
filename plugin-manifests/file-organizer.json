@@ -19,8 +19,15 @@
       "output": {"$ref": "file-organizer-result.schema.json"}
     },
     "triggers": ["manual"],
-    "artifacts": [],
-    "permissions": ["files:read-selected"]
+    "artifacts": [
+      {
+        "id": "qwen3-4b-q4-k-m",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+      }
+    ],
+    "permissions": ["accelerator:gpu", "files:read-selected"]
   },
   "requirements": {"runtimeApi": 1, "accelerator": "gpu", "acceleratorPreference": ["gpu"], "minimumDevices": 1, "model": null},
   "ui": {"title": "File organizer", "group": "Local workflows", "description": "Review tags, names, folders, and exact duplicate groups", "icon": "folder-symbolic", "order": 94},

@@ -590,9 +590,7 @@ def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path)
 
     ready_primary, ready_digest = artifact(tmp_path, "ready.gguf", b"ready")
     runtime = NativeRuntime(None)
-    ready = LlamaCppVulkanQwenWorker(
-        descriptor(digest=ready_digest), runtime, (ready_primary,)
-    )
+    ready = LlamaCppVulkanQwenWorker(descriptor(digest=ready_digest), runtime, (ready_primary,))
     GenerationRouter((ready,)).require_ready()
     assert runtime.loads == []
     with pytest.raises(ProviderGenerationError) as unavailable:
@@ -989,7 +987,13 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
 
     observations = list(evidence(corpus).observations)
     injection = corpus.cases[-1]
-    observations[-1] = replace(observations[-1], result=event_document(injection, events=()))
+    injected_result = event_document(injection, events=())
+    injected_result.update(
+        outcome="refused",
+        code="prompt-injection-refused",
+        confirmationState="refused",
+    )
+    observations[-1] = replace(observations[-1], result=injected_result)
     with pytest.raises(QwenProviderError) as injection_error:
         qualify_event_provider(
             descriptor(qualified=False), corpus, evidence(corpus, observations=tuple(observations))
@@ -1000,7 +1004,13 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
     )
 
     observations = list(evidence(corpus).observations)
-    observations[0] = replace(observations[0], result=event_document(corpus.cases[0], events=()))
+    missed_result = event_document(corpus.cases[0], events=())
+    missed_result.update(
+        outcome="refused",
+        code="no-event-supported",
+        confirmationState="refused",
+    )
+    observations[0] = replace(observations[0], result=missed_result)
     with pytest.raises(QwenProviderError) as quality_error:
         qualify_event_provider(
             descriptor(qualified=False),

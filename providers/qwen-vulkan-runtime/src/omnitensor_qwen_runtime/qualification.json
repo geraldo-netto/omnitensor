@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-12",
+  "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+  "runtime": {
+    "distribution": "llama-cpp-python",
+    "version": "0.3.34",
+    "wheelSha256": "8fe651093900aa4b2a21c1bd5d0ca6bc6bed619511f2962deac6a06689a19aca",
+    "binaries": {
+      "libggml-vulkan.so": "505fd5f88249babd789a5ef9272617893833526b69616d08e269cd7562b48ccf",
+      "libllama.so": "dc289c1fe7f93c2433cbc7f5aafc6f72e8b86cc3772a22071b8b33aabf7de2a3"
+    }
+  },
+  "models": {
+    "qwen3-0-6b-q8-0": {
+      "sha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735",
+      "fullyOffloadedLayers": 29
+    },
+    "qwen3-4b-q4-k-m": {
+      "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+      "fullyOffloadedLayers": 37
+    }
+  },
+  "workloads": {
+    "ask-selected-files": {
+      "modelId": "qwen3-0-6b-q8-0",
+      "taskSha256": "c84e10f5734347ebb44f6566187b5d7a4aacb1357c52ebfb5cca2546b643cc85",
+      "result": "passed"
+    },
+    "event-extraction": {
+      "modelId": "qwen3-4b-q4-k-m",
+      "taskSha256": "7634ecb26f3de71ae2232e35782e47b494d49f20d154b2cc0ca6641ca7b3dc63",
+      "result": "passed"
+    },
+    "file-organizer": {
+      "modelId": "qwen3-4b-q4-k-m",
+      "taskSha256": "5cfc4943339ed59f21bd6bfdfea17cb7c3d387a8e86700aa2309b27acc64a6a0",
+      "result": "passed"
+    },
+    "selected-text-tools": {
+      "modelId": "qwen3-0-6b-q8-0",
+      "taskSha256": "f974502f55cea211933d2462ece78e3e93ee908fd15efdfbf884da3fb35e3322",
+      "result": "passed"
+    }
+  }
+}

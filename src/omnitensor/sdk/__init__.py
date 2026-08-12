@@ -25,6 +25,7 @@ from ..plugins.protocol import (
 from ..plugins.settings import ConfigurationMigration, PluginConfigurationSpec
 from ..plugins.triggers import Collector, CollectorReadiness, SourceStatus, Trigger, TriggerKind
 from .base import ManagedPlugin
+from .bootstrap import BootstrapArtifact, PluginBootstrap, current_plugin_bootstrap
 from .conformance import (
     DEFAULT_CONTRACT_TIMEOUT_SECONDS,
     DEFAULT_FUZZ_CASES,
@@ -128,6 +129,9 @@ __all__ = [
     "LocalPipelineRunner",
     "LocalRun",
     "ManagedPlugin",
+    "BootstrapArtifact",
+    "PluginBootstrap",
+    "current_plugin_bootstrap",
     "PermissionView",
     "PipelineHooks",
     "PluginCancelledError",

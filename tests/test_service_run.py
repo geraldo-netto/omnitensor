@@ -743,10 +743,12 @@ def test_runtime_job_boundary_authorizes_catalog_and_fails_closed_without_dispat
 
 def test_sysfs_discovery_adapter_detects_and_reads_utilization(fake_nodes):
     add_pcie_tpu(fake_nodes)
+    add_pcie_tpu(fake_nodes, index=42)
     add_npu(fake_nodes)
-    adapter = SysfsDeviceDiscovery(fake_nodes)
+    adapter = SysfsDeviceDiscovery(fake_nodes, {"tpu": "tpu-pcie-42"})
     devices = adapter.detect()
     assert [device.backend for device in devices] == ["tpu", "npu"]
+    assert devices[0].id == "tpu-pcie-42"
     assert adapter.utilization(devices[0]) is None
 
 
@@ -1352,6 +1354,28 @@ def test_the_artifact_root_defaults_to_the_user_share_directory(monkeypatch, tmp
 
     assert str(service._artifact_store._root).endswith("omnitensor/artifacts")
     assert DEFAULT_ARTIFACT_ROOT.endswith("omnitensor/artifacts")
+
+
+def test_accelerator_device_ids_are_configurable_from_the_environment(
+    monkeypatch, tmp_path
+):
+    from omnitensor.service import SysfsDeviceDiscovery, build_service_from_env
+
+    monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("OMNITENSOR_POLICY_PATH", str(tmp_path / "policy.json"))
+    monkeypatch.setenv("OMNITENSOR_WORKLOADS", str(tmp_path / "workloads"))
+    monkeypatch.setenv("OMNITENSOR_GPU_DEVICE", " gpu-renderD902 ")
+    monkeypatch.setenv("OMNITENSOR_NPU_DEVICE", "npu-accel23")
+    monkeypatch.setenv("OMNITENSOR_TPU_DEVICE", "tpu-pcie-42")
+
+    service = build_service_from_env()
+
+    assert isinstance(service._discovery, SysfsDeviceDiscovery)
+    assert service._discovery._selected_ids == {
+        "gpu": "gpu-renderD902",
+        "npu": "npu-accel23",
+        "tpu": "tpu-pcie-42",
+    }
 
 
 def test_inventory_readiness_uses_the_declared_digest_like_dispatch_does(tmp_path):

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import omnitensor.sdk as sdk
+from omnitensor.sdk import bootstrap as bootstrap_module
 
 
 def request() -> sdk.PluginRequest:
@@ -53,9 +54,7 @@ def test_cancellation_reason_is_bounded(reason):
     with pytest.raises(sdk.SDKContractError) as excinfo:
         sdk.CancellationController().cancel(reason)
     assert excinfo.value.code == "invalid-text"
-    assert excinfo.value.detail == (
-        "cancellation reason must contain 1-2048 characters"
-    )
+    assert excinfo.value.detail == ("cancellation reason must contain 1-2048 characters")
 
 
 class RecordingProgressSink:
@@ -113,9 +112,7 @@ def test_progress_cannot_move_backward_and_fields_are_validated():
             await emitter.report("infer", 0.4, "", observed_at_ms=2)
         with pytest.raises(sdk.SDKContractError) as stage_error:
             await emitter.report("", 0.5, "", observed_at_ms=2)
-        assert stage_error.value.detail == (
-            "progress stage must contain 1-80 characters"
-        )
+        assert stage_error.value.detail == ("progress stage must contain 1-80 characters")
         with pytest.raises(sdk.SDKContractError) as detail_error:
             await emitter.report(
                 "infer",
@@ -123,9 +120,7 @@ def test_progress_cannot_move_backward_and_fields_are_validated():
                 "x" * (sdk.MAX_PROGRESS_DETAIL_CHARS + 1),
                 observed_at_ms=2,
             )
-        assert detail_error.value.detail == (
-            "progress detail must contain 0-1024 characters"
-        )
+        assert detail_error.value.detail == ("progress detail must contain 0-1024 characters")
         with pytest.raises(sdk.SDKContractError, match="invalid-timestamp"):
             await emitter.report("infer", 0.5, "", observed_at_ms=-1)
 
@@ -216,11 +211,73 @@ def test_artifact_view_rejects_invalid_duplicates_and_unready_paths(tmp_path):
     view = sdk.ArtifactView([(artifact, unavailable)])
     with pytest.raises(sdk.SDKContractError, match="digest mismatch"):
         view.require_ready(artifact)
-    no_reason = sdk.ArtifactView(
-        [(artifact, sdk.ArtifactResolution(False, None, "", 0))]
-    )
+    no_reason = sdk.ArtifactView([(artifact, sdk.ArtifactResolution(False, None, "", 0))])
     with pytest.raises(sdk.SDKContractError, match="artifact is not ready"):
         no_reason.require_ready(artifact)
+
+
+def test_plugin_bootstrap_returns_one_exact_artifact_and_is_identity_scoped(tmp_path, monkeypatch):
+    primary = tmp_path / "model.gguf"
+    primary.write_bytes(b"model")
+    artifact = sdk.BootstrapArtifact(
+        "qwen-model",
+        "1.0.0",
+        "gguf",
+        hashlib.sha256(b"model").hexdigest(),
+        primary,
+        (("tokenizer.json", "a" * 64),),
+    )
+    bootstrap = sdk.PluginBootstrap("sample-plugin", (artifact,), tmp_path, tmp_path / "lease")
+    monkeypatch.setattr(bootstrap_module, "_CURRENT", None)
+
+    bootstrap_module.configure_plugin_bootstrap(bootstrap)
+
+    assert sdk.current_plugin_bootstrap("sample-plugin") is bootstrap
+    assert bootstrap.require_artifact("qwen-model") is artifact
+    with pytest.raises(sdk.SDKContractError) as identity_error:
+        sdk.current_plugin_bootstrap("other-plugin")
+    assert (identity_error.value.code, identity_error.value.detail) == (
+        "bootstrap-unavailable",
+        "plugin bootstrap identity is unavailable",
+    )
+    with pytest.raises(sdk.SDKContractError, match="exactly one mounted artifact"):
+        bootstrap.require_artifact("other-model")
+    bootstrap_module.configure_plugin_bootstrap(bootstrap)
+
+
+def test_plugin_bootstrap_rejects_absence_invalid_identity_duplicate_and_ambiguity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(bootstrap_module, "_CURRENT", None)
+    with pytest.raises(sdk.SDKContractError) as absent_error:
+        sdk.current_plugin_bootstrap("sample-plugin")
+    assert (absent_error.value.code, absent_error.value.detail) == (
+        "bootstrap-unavailable",
+        "plugin bootstrap identity is unavailable",
+    )
+    with pytest.raises(sdk.SDKContractError) as invalid_error:
+        bootstrap_module.configure_plugin_bootstrap(sdk.PluginBootstrap("Bad", (), None))
+    assert (invalid_error.value.code, invalid_error.value.detail) == (
+        "bootstrap-invalid",
+        "plugin bootstrap is invalid",
+    )
+
+    first = sdk.PluginBootstrap("sample-plugin", (), None)
+    bootstrap_module.configure_plugin_bootstrap(first)
+    with pytest.raises(sdk.SDKContractError) as duplicate_error:
+        bootstrap_module.configure_plugin_bootstrap(sdk.PluginBootstrap("other-plugin", (), None))
+    assert (duplicate_error.value.code, duplicate_error.value.detail) == (
+        "bootstrap-duplicate",
+        "plugin bootstrap is already configured",
+    )
+
+    duplicate = sdk.BootstrapArtifact(
+        "same-model", "1.0.0", "gguf", "a" * 64, tmp_path / "model.gguf"
+    )
+    with pytest.raises(sdk.SDKContractError, match="exactly one mounted artifact"):
+        sdk.PluginBootstrap("sample-plugin", (duplicate, duplicate), None).require_artifact(
+            "same-model"
+        )
 
 
 def test_result_factories_copy_outputs_and_assign_terminal_statuses():
@@ -314,9 +371,7 @@ def test_managed_plugin_provides_identity_checked_idempotent_lifecycle():
             await plugin.start(context)
         assert already_started.value.code == "plugin-already-started"
         assert already_started.value.detail == "plugin is already started"
-        result = await plugin.execute(
-            request(), sdk.CancellationController(), object()
-        )
+        result = await plugin.execute(request(), sdk.CancellationController(), object())
         assert result.status is sdk.PluginResultStatus.SUCCEEDED
         await plugin.stop()
         await plugin.stop()
@@ -335,12 +390,8 @@ def test_managed_plugin_rejects_identity_and_rolls_back_failed_start():
         with pytest.raises(sdk.SDKContractError) as mismatch:
             await plugin.start(wrong)
         assert mismatch.value.code == "plugin-identity-mismatch"
-        assert mismatch.value.detail == (
-            "expected sample-plugin; received other-plugin"
-        )
-        context = sdk.PluginContext(
-            "sample-plugin", 1, {"mode": "safe"}, frozenset()
-        )
+        assert mismatch.value.detail == ("expected sample-plugin; received other-plugin")
+        context = sdk.PluginContext("sample-plugin", 1, {"mode": "safe"}, frozenset())
         with pytest.raises(RuntimeError, match="start failed"):
             await plugin.start(context)
         assert plugin._context is None

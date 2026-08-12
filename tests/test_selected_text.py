@@ -141,8 +141,7 @@ async def test_every_selected_text_operation_is_one_shot_grounded_and_reviewable
         "private:job-1:selection",
     )
     observed_progress = [
-        (item.stage, item.fraction, item.detail, item.observed_at_ms)
-        for item in progress.items
+        (item.stage, item.fraction, item.detail, item.observed_at_ms) for item in progress.items
     ]
     assert observed_progress == [
         ("generate", 0.1, "", 10),
@@ -296,8 +295,12 @@ def source_fragment():
 def test_grounded_result_rejects_identity_tasks_evidence_and_public_contract_drift():
     source = source_fragment()
     result = grounded_selected_text_result(
-        private_document(), "job-1", "summarize", source,
-        provider_id="qwen3-gpu", accelerator="gpu",
+        private_document(),
+        "job-1",
+        "summarize",
+        source,
+        provider_id="qwen3-gpu",
+        accelerator="gpu",
     )
     assert result["evidence"]["span"] == {"start": 0, "end": 4}
     faults = [
@@ -315,17 +318,29 @@ def test_grounded_result_rejects_identity_tasks_evidence_and_public_contract_dri
     for document in faults:
         with pytest.raises(SelectedTextError):
             grounded_selected_text_result(
-                document, "job-1", "summarize", source,
-                provider_id="qwen3-gpu", accelerator="gpu",
+                document,
+                "job-1",
+                "summarize",
+                source,
+                provider_id="qwen3-gpu",
+                accelerator="gpu",
             )
     with pytest.raises(SelectedTextError, match="result-invalid"):
         grounded_selected_text_result(
-            private_document(), "job-1", "summarize", source,
-            provider_id="Bad Provider", accelerator="gpu",
+            private_document(),
+            "job-1",
+            "summarize",
+            source,
+            provider_id="Bad Provider",
+            accelerator="gpu",
         )
     empty_tasks = grounded_selected_text_result(
-        private_document("extract-tasks", tasks=[]), "job-1", "extract-tasks", source,
-        provider_id="qwen3-gpu", accelerator="gpu",
+        private_document("extract-tasks", tasks=[]),
+        "job-1",
+        "extract-tasks",
+        source,
+        provider_id="qwen3-gpu",
+        accelerator="gpu",
     )
     assert empty_tasks["tasks"] == []
 
@@ -342,11 +357,23 @@ async def test_provider_progress_is_finite_and_bounded(fraction):
 def test_task_manifest_schemas_health_and_constructor_contracts():
     task = selected_text_task()
     assert (
-        task.task_id, task.task_version, task.prompt_id, task.prompt_version,
-        task.modalities, task.limits.context_tokens, task.limits.output_tokens,
+        task.task_id,
+        task.task_version,
+        task.prompt_id,
+        task.prompt_version,
+        task.modalities,
+        task.limits.context_tokens,
+        task.limits.output_tokens,
         task.limits.output_bytes,
     ) == (
-        PLUGIN_ID, 1, "selected-text-operation", 1, ("text",), 32_768, 4_096, 262_144,
+        PLUGIN_ID,
+        1,
+        "selected-text-operation",
+        1,
+        ("text",),
+        32_768,
+        1_024,
+        262_144,
     )
     assert task.system_prompt == (
         "Apply only the requested operation to the explicit selection. "
@@ -357,15 +384,16 @@ def test_task_manifest_schemas_health_and_constructor_contracts():
         "the second is the selection. Return only the closed JSON result and "
         "cite the complete second fragment exactly. {{UNTRUSTED_CONTENT}}"
     )
-    assert task.output_schema == json.loads(
-        json.dumps(task.output_schema, sort_keys=True)
-    )
+    assert task.output_schema == json.loads(json.dumps(task.output_schema, sort_keys=True))
     manifest = json.loads(
         (Path(__file__).parents[1] / "plugin-manifests" / "selected-text-tools.json").read_text()
     )
     assert validate_workload_document(manifest) == []
     assert manifest["plugin"]["triggers"] == ["manual"]
-    assert manifest["plugin"]["permissions"] == [READ_ONCE_PERMISSION]
+    assert manifest["plugin"]["permissions"] == [
+        "accelerator:gpu",
+        READ_ONCE_PERMISSION,
+    ]
     selection_schema = manifest["plugin"]["schemas"]["input"]["properties"]["selection"]
     assert selection_schema["maxLength"] == MAX_SELECTION_CHARACTERS
     for schema in ["selected-text-answer.schema.json", "selected-text-result.schema.json"]:
@@ -398,7 +426,9 @@ async def test_health_names_accelerator_without_private_state():
     plugin, _worker, _store = await running()
     health = await plugin.health()
     assert (health.status.value, health.detail, health.checked_at_ms) == (
-        "ready", "ready; explicit selection only", 10,
+        "ready",
+        "ready; explicit selection only",
+        10,
     )
 
 
@@ -416,8 +446,12 @@ def test_public_evidence_digest_and_span_round_trip_any_explicit_unicode(selecti
         "textSha256": digest,
     }
     result = grounded_selected_text_result(
-        document, "job-1", "summarize", source,
-        provider_id="qwen3-gpu", accelerator="gpu",
+        document,
+        "job-1",
+        "summarize",
+        source,
+        provider_id="qwen3-gpu",
+        accelerator="gpu",
     )
     assert result["evidence"] == {
         "selectionSha256": digest,

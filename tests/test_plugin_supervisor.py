@@ -236,12 +236,42 @@ def test_starts_in_identity_order_and_stops_in_reverse_without_leaks():
     run_scenario(scenario())
 
 
+def test_live_revocation_stops_one_worker_without_recovery_and_cancels_orphans():
+    async def scenario():
+        events = []
+        process = FakeProcess("alpha", worker_offer("alpha"), events, pid=91)
+        observer = FailureObserver()
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"alpha": process}), failure_observer=observer
+        )
+        await supervisor.start([worker_spec("alpha")])
+        monitor = supervisor._slots["alpha"].monitor
+        recovery = asyncio.create_task(asyncio.sleep(60))
+        supervisor._recoveries["alpha"] = recovery
+        supervisor._statuses["alpha"] = WorkerStatus(
+            "alpha", WorkerState.READY, 91, 2, "ready", 2
+        )
+
+        status = await supervisor.revoke("alpha", "permission changed")
+
+        assert status == WorkerStatus("alpha", WorkerState.STOPPED, 91, 2, "permission changed", 2)
+        assert observer.calls == [("alpha", "permission changed")]
+        assert process.returncode == 0
+        assert recovery.cancelled()
+        assert monitor is not None and monitor.done()
+        assert "alpha" not in supervisor._slots
+        assert "alpha" not in supervisor._recoveries
+        assert decode_frame(process.writer.writes[-1]).payload == {"reason": "shutdown"}
+        assert await supervisor.revoke("alpha", "again") == status
+        assert await supervisor.stop() == (status,)
+
+    run_scenario(scenario())
+
+
 def test_supervisor_executes_and_forwards_correlated_progress():
     async def scenario():
         events = []
-        offer = HandshakeOffer(
-            "events", 1, 1, frozenset({"cancel", "execute", "progress"})
-        )
+        offer = HandshakeOffer("events", 1, 1, frozenset({"cancel", "execute", "progress"}))
         process = FakeProcess("events", offer, events)
         supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}))
         spec = WorkerSpec(
@@ -268,9 +298,7 @@ def test_supervisor_executes_and_forwards_correlated_progress():
         process.reader.feed_data(
             encode_frame(progress_frame(PluginProgress("job-1", "extract", 0.5, "", 11)))
         )
-        expected = PluginResult(
-            "job-1", PluginResultStatus.SUCCEEDED, {"events": []}, "done", 12
-        )
+        expected = PluginResult("job-1", PluginResultStatus.SUCCEEDED, {"events": []}, "done", 12)
         process.reader.feed_data(encode_frame(result_frame(expected)))
 
         assert await pending == expected
@@ -285,9 +313,7 @@ def test_supervisor_cancels_and_drains_worker_before_releasing_channel():
         events = []
         offer = HandshakeOffer("events", 1, 1, frozenset({"cancel", "execute"}))
         process = FakeProcess("events", offer, events)
-        supervisor = PluginWorkerSupervisor(
-            FakeLauncher({"events": process}), stop_timeout=0.05
-        )
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}), stop_timeout=0.05)
         spec = WorkerSpec(
             "events",
             ("python", "worker.py", "events"),
@@ -308,9 +334,7 @@ def test_supervisor_cancels_and_drains_worker_before_releasing_channel():
             "job-1",
             {"reason": "job cancelled"},
         )
-        cancelled = PluginResult(
-            "job-1", PluginResultStatus.CANCELLED, {}, "cancelled", 12
-        )
+        cancelled = PluginResult("job-1", PluginResultStatus.CANCELLED, {}, "cancelled", 12)
         process.reader.feed_data(encode_frame(result_frame(cancelled)))
         with pytest.raises(asyncio.CancelledError):
             await pending
@@ -359,9 +383,7 @@ def test_supervisor_rejects_worker_error_and_response_protocol_drift():
 
         async def refused(frame):
             pending = asyncio.create_task(
-                supervisor.execute(
-                    PluginRequest("job-1", "events", "manual", {}, 1, None)
-                )
+                supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
             )
             await asyncio.sleep(0)
             process.reader.feed_data(encode_frame(frame))
@@ -388,19 +410,13 @@ def test_supervisor_rejects_worker_error_and_response_protocol_drift():
             "worker-protocol-failed",
             "worker error response is invalid",
         )
-        unexpected = await refused(
-            IPCFrame(1, WorkerMessageType.HEALTH, "job-1", {})
-        )
+        unexpected = await refused(IPCFrame(1, WorkerMessageType.HEALTH, "job-1", {}))
         assert (unexpected.code, unexpected.detail) == (
             "worker-protocol-failed",
             "unexpected worker message: health",
         )
         mismatched = await refused(
-            result_frame(
-                PluginResult(
-                    "other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2
-                )
-            )
+            result_frame(PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2))
         )
         assert (mismatched.code, mismatched.detail) == (
             "worker-protocol-failed",
@@ -427,9 +443,7 @@ def test_supervisor_maps_broken_channel_and_forces_unresponsive_cancel(tmp_path)
             )
         )
         pending = asyncio.create_task(
-            supervisor.execute(
-                PluginRequest("job-1", "events", "manual", {}, 1, None)
-            )
+            supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
         )
         await asyncio.sleep(0)
         broken.reader.feed_eof()
@@ -444,9 +458,7 @@ def test_supervisor_maps_broken_channel_and_forces_unresponsive_cancel(tmp_path)
             events,
             exit_on_close=False,
         )
-        cancelling = PluginWorkerSupervisor(
-            FakeLauncher({"stuck": stuck}), stop_timeout=0.01
-        )
+        cancelling = PluginWorkerSupervisor(FakeLauncher({"stuck": stuck}), stop_timeout=0.01)
         await cancelling.start(
             (
                 WorkerSpec(
@@ -457,9 +469,7 @@ def test_supervisor_maps_broken_channel_and_forces_unresponsive_cancel(tmp_path)
             )
         )
         task = asyncio.create_task(
-            cancelling.execute(
-                PluginRequest("job-2", "stuck", "manual", {}, 1, None)
-            )
+            cancelling.execute(PluginRequest("job-2", "stuck", "manual", {}, 1, None))
         )
         for _ in range(10):
             await asyncio.sleep(0)
@@ -492,9 +502,7 @@ def test_launch_and_handshake_failures_are_isolated_and_children_are_reaped():
         by_id = {status.plugin_id: status for status in statuses}
         assert by_id["broken"].detail == "worker launch failed: OSError"
         assert by_id["broken"].pid is None
-        assert by_id["wrong"].detail == (
-            "worker handshake rejected: plugin-identity-mismatch"
-        )
+        assert by_id["wrong"].detail == ("worker handshake rejected: plugin-identity-mismatch")
         assert by_id["wrong"].pid == 21
         assert by_id["wrong"].protocol_version is None
         assert wrong.returncode == 0
@@ -550,9 +558,7 @@ def test_monitor_records_unexpected_worker_exit(returncode):
         status = supervisor.statuses()[0]
         expected_state = WorkerState.EXITED if returncode == 0 else WorkerState.FAILED
         expected_detail = (
-            "worker exited"
-            if returncode == 0
-            else f"worker exited with status {returncode}"
+            "worker exited" if returncode == 0 else f"worker exited with status {returncode}"
         )
         assert status.state is expected_state
         assert status.detail == expected_detail
@@ -672,9 +678,7 @@ def test_restart_failures_are_redacted_and_budget_exhaustion_is_terminal():
     async def scenario():
         events = []
         crashed = FakeProcess("exhausted", worker_offer("exhausted"), events, pid=41)
-        launcher = SequencedLauncher(
-            [crashed, OSError("secret one"), RuntimeError("secret two")]
-        )
+        launcher = SequencedLauncher([crashed, OSError("secret one"), RuntimeError("secret two")])
         supervisor = PluginWorkerSupervisor(
             launcher,
             recovery_policy=WorkerRecoveryPolicy(
@@ -693,8 +697,7 @@ def test_restart_failures_are_redacted_and_budget_exhaustion_is_terminal():
         assert status.state is WorkerState.EXHAUSTED
         assert status.restart_attempts == 2
         assert status.detail == (
-            "worker restart budget exhausted after 2 attempts: "
-            "worker launch failed: RuntimeError"
+            "worker restart budget exhausted after 2 attempts: worker launch failed: RuntimeError"
         )
         assert "secret" not in status.detail
         diagnostics = supervisor.diagnostics("exhausted")

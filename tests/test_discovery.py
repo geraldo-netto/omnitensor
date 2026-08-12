@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from conftest import add_gpu, add_npu, add_pcie_tpu, add_usb_tpu
 
+from omnitensor import discovery as discovery_module
 from omnitensor.discovery import detect_devices, detect_gpu, detect_npu, detect_tpu
 
 
@@ -49,6 +50,59 @@ def test_gpu_vendor_mapping(fake_nodes):
     assert device.id == "gpu-renderD130"
     assert device.name == "AMD GPU"
     assert device.kind == "dri"
+
+
+def test_runtime_device_ids_are_enumerated_and_can_be_selected(fake_nodes):
+    add_pcie_tpu(fake_nodes, index=0)
+    add_pcie_tpu(fake_nodes, index=42)
+    add_npu(fake_nodes, index=0, vendor="0x8086")
+    add_npu(fake_nodes, index=23, vendor="0x1022")
+    add_gpu(fake_nodes, node=128, vendor="0x8086")
+    add_gpu(fake_nodes, node=2048, vendor="0x1002")
+
+    devices = detect_devices(
+        fake_nodes,
+        {
+            "tpu": "tpu-pcie-42",
+            "npu": "npu-accel23",
+            "gpu": "gpu-renderD2048",
+        },
+    )
+
+    assert [device.id for device in devices] == [
+        "tpu-pcie-42",
+        "npu-accel23",
+        "gpu-renderD2048",
+    ]
+
+
+def test_explicit_device_selection_chooses_a_non_default_gpu(fake_nodes):
+    add_gpu(fake_nodes, node=301, vendor="0x8086")
+    add_gpu(fake_nodes, node=902, vendor="0x1002")
+
+    assert detect_gpu(fake_nodes).id == "gpu-renderD301"
+    assert detect_gpu(fake_nodes, "gpu-renderD902").id == "gpu-renderD902"
+    assert detect_gpu(fake_nodes, "gpu-renderD999") is None
+
+
+def test_device_discovery_ignores_names_that_only_resemble_accelerators(fake_nodes):
+    (fake_nodes.dev / "dri").mkdir()
+    for name in ("renderD", "renderD-1", "renderDabc", "card7", "renderD1234567"):
+        (fake_nodes.dev / "dri" / name).touch()
+
+    assert detect_gpu(fake_nodes) is None
+
+
+def test_a_node_removed_between_enumeration_and_inspection_is_ignored(fake_nodes):
+    assert discovery_module._detect_node(
+        fake_nodes.dev / "dri/renderD777",
+        fake_nodes.sys / "class/drm/renderD777/device/vendor",
+        discovery_module.GPU_VENDOR_NAMES,
+        "GPU (render node)",
+        "gpu-renderD777",
+        "gpu",
+        "dri",
+    ) is None
 
 
 def test_combined_order_is_tpu_npu_gpu(fake_nodes):

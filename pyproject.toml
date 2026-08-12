@@ -118,6 +118,7 @@ omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
 omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
 omnitensor-install-document-model = "omnitensor.training.document_model:main"
 omnitensor-qualify-document-questions = "omnitensor.plugins.document_acceptance:main"
+omnitensor-install-qwen-artifacts = "omnitensor.qwen_installation:main"
 omnitensor-configure-low-light = "omnitensor.lowlight:configure_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
@@ -151,6 +152,7 @@ also_copy = [
     "generation-models/",
     "evaluation-corpora/",
     "plugin-manifests/",
+    "providers/",
     "acceptance-evidence/",
     "README.md",
 ]

@@ -13,6 +13,11 @@ Installing? [docs/installation.md](docs/installation.md) has the service and
 applet sequence and the `omnitensor-verify-install` gate that proves the result
 is actually serving.
 
+Installing the four local Qwen workflows? The
+[Qwen workload provider guide](docs/qwen-workload-installation.md) covers the
+five-wheel layout, pinned Qwen/BGE artifacts, mandatory and optional
+dependencies, grants, readiness, rollback, and removal without a CPU fallback.
+
 Writing a plugin? Start with the [extension guide](docs/extension-guide.md),
 which walks packaging, discovery, schemas, permissions, artifacts, local
 testing, install, upgrade, rollback, and the compatibility policy in order.

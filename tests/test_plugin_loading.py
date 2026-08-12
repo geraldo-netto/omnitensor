@@ -8,6 +8,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import sample_plugin_manifest
@@ -16,6 +17,8 @@ from omnitensor.discovery import Device
 from omnitensor.plugins import (
     DEFAULT_MAX_FRAME_BYTES,
     MAX_WORKER_IMPORT_PATHS,
+    ArtifactReference,
+    ArtifactResolution,
     HandshakeOffer,
     InstalledPluginRuntime,
     InstalledPluginSnapshot,
@@ -57,6 +60,96 @@ from omnitensor.plugins.worker import (
 )
 from omnitensor.sdk import CancellationController, cancelled_result, succeeded_result
 from omnitensor.service import OmniTensorService
+
+
+def test_worker_parser_exposes_the_exact_trusted_bootstrap_contract():
+    parser = worker_module._parser()
+    actions = {
+        action.dest: {
+            "options": tuple(action.option_strings),
+            "required": action.required,
+            "default": action.default,
+            "action": type(action).__name__,
+            "help": action.help,
+        }
+        for action in parser._actions
+        if action.dest != "help"
+    }
+
+    assert actions == {
+        "plugin_id": {
+            "options": ("--plugin-id",),
+            "required": True,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "entry_point": {
+            "options": ("--entry-point",),
+            "required": True,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "target": {
+            "options": ("--target",),
+            "required": True,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "distribution": {
+            "options": ("--distribution",),
+            "required": True,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "import_path": {
+            "options": ("--import-path",),
+            "required": False,
+            "default": [],
+            "action": "_AppendAction",
+            "help": None,
+        },
+        "permission": {
+            "options": ("--permission",),
+            "required": False,
+            "default": [],
+            "action": "_AppendAction",
+            "help": None,
+        },
+        "artifact": {
+            "options": ("--artifact",),
+            "required": False,
+            "default": [],
+            "action": "_AppendAction",
+            "help": None,
+        },
+        "state_path": {
+            "options": ("--state-path",),
+            "required": False,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "accelerator_lease_path": {
+            "options": ("--accelerator-lease-path",),
+            "required": False,
+            "default": None,
+            "action": "_StoreAction",
+            "help": None,
+        },
+        "no_seccomp": {
+            "options": ("--no-seccomp",),
+            "required": False,
+            "default": False,
+            "action": "_StoreTrueAction",
+            "help": (
+                "run without the exec/fork filter; only for kernels that cannot install one"
+            ),
+        },
+    }
 
 
 class TrackingPlugin:
@@ -153,9 +246,7 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
     assert spec.maximum_protocol == 4
     assert spec.capabilities == frozenset({"cancel", "execute", "health", "progress"})
     assert spec.sandbox is not None
-    assert spec.sandbox.python_path == str(
-        Path(__file__).resolve().parents[1] / "src"
-    )
+    assert spec.sandbox.python_path == str(Path(__file__).resolve().parents[1] / "src")
     assert spec.argv == (
         "/usr/bin/python3",
         "-m",
@@ -171,6 +262,96 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
         "--import-path",
         str(site),
     )
+
+
+def test_external_worker_spec_forwards_the_exact_launch_contract(tmp_path):
+    plugin = _resolved(tmp_path=tmp_path)
+    provider = tmp_path / "provider"
+    provider.mkdir()
+
+    spec = loading_module._external_worker_spec(
+        plugin,
+        executable="/opt/omnitensor/bin/python",
+        import_paths=(str(provider),),
+        granted=frozenset(),
+        selected_files_root=None,
+        worker_state_root=None,
+        resolve_artifact=None,
+        accelerator_devices={},
+    )
+
+    assert spec.plugin_id == plugin.plugin_id
+    assert spec.minimum_protocol == 2
+    assert spec.maximum_protocol == 4
+    assert spec.capabilities == frozenset({"cancel", "execute", "health", "progress"})
+    assert spec.argv == (
+        "/opt/omnitensor/bin/python",
+        "-m",
+        "omnitensor.plugins.worker",
+        "--plugin-id",
+        "external-example",
+        "--entry-point",
+        "external-example",
+        "--target",
+        "external_package:Plugin",
+        "--distribution",
+        "external-dist",
+        "--import-path",
+        str(provider),
+    )
+
+
+def test_installed_runtime_initializes_exact_host_owned_provider_boundaries(tmp_path):
+    bundled = tmp_path / "bundled"
+    selected = tmp_path / "selected"
+    state = tmp_path / "state"
+    supervisor = object()
+    grants = object()
+    sink = object()
+
+    def entry_points():
+        return ()
+
+    def clock():
+        return 7
+
+    def resolver(_reference):
+        return None
+
+    def devices():
+        return {"gpu": Path("/dev/dri/renderD128")}
+
+    runtime = InstalledPluginRuntime(
+        bundled,
+        supervisor=supervisor,
+        entry_points_provider=entry_points,
+        python_executable="/usr/bin/python3",
+        worker_import_paths=(tmp_path,),
+        grant_source=grants,
+        progress_sink=sink,
+        clock_ms=clock,
+        selected_files_root=selected,
+        worker_state_root=state,
+        resolve_artifact=resolver,
+        accelerator_devices=devices,
+    )
+
+    assert runtime._bundled_root == bundled
+    assert runtime._supervisor is supervisor
+    assert runtime._entry_points_provider is entry_points
+    assert runtime._python_executable == "/usr/bin/python3"
+    assert runtime._worker_import_paths == (str(tmp_path),)
+    assert runtime._grant_source is grants
+    assert runtime._progress_sink is sink
+    assert runtime._clock_ms is clock
+    assert runtime._selected_files_root == selected.resolve()
+    assert runtime._worker_state_root == state.resolve()
+    assert runtime._resolve_artifact is resolver
+    assert runtime._accelerator_devices is devices
+    assert runtime._granted == {}
+    assert runtime._revoked_workers == set()
+    assert runtime._snapshot == InstalledPluginSnapshot(PluginCatalog((), ()), ())
+    assert runtime._grant_monitor is None
 
 
 def test_external_worker_specs_pass_only_granted_declared_permissions(tmp_path):
@@ -200,6 +381,283 @@ def test_external_worker_specs_fail_closed_on_undeclared_grant(tmp_path):
             (plugin,),
             granted_permissions={plugin.plugin_id: {f"read:{tmp_path}"}},
         )
+
+
+def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(tmp_path):
+    site = tmp_path / "site"
+    state = tmp_path / "state"
+    artifact_root = tmp_path / "artifact"
+    site.mkdir()
+    state.mkdir()
+    artifact_root.mkdir()
+    primary = artifact_root / "model.gguf"
+    tokenizer = artifact_root / "tokenizer.json"
+    primary.write_bytes(b"gguf")
+    tokenizer.write_bytes(b"tokens")
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["accelerator:gpu"]
+    plugin.manifest["plugin"]["artifacts"] = [
+        {
+            "id": "qwen-model",
+            "version": "1.0.0",
+            "format": "gguf",
+            "sha256": "a" * 64,
+            "companions": {"tokenizer.json": "b" * 64},
+        }
+    ]
+
+    [spec] = external_worker_specs(
+        (plugin,),
+        worker_import_paths=(site,),
+        granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
+        worker_state_root=state,
+        resolve_artifact=lambda reference: ArtifactResolution(True, primary, "", 4),
+    )
+
+    artifact_index = spec.argv.index("--artifact")
+    bootstrap = json.loads(spec.argv[artifact_index + 1])
+    assert bootstrap == {
+        "id": "qwen-model",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "a" * 64,
+        "companions": {"tokenizer.json": "b" * 64},
+        "path": str(primary),
+    }
+    plugin_state = (state / plugin.plugin_id).resolve()
+    lease = (state / "_accelerator-gpu.lock").resolve()
+    assert spec.argv[spec.argv.index("--state-path") + 1] == str(plugin_state)
+    assert spec.argv[spec.argv.index("--accelerator-lease-path") + 1] == str(lease)
+    assert spec.sandbox.write_paths == tuple(sorted((str(lease), str(plugin_state))))
+    assert str(primary) in spec.sandbox.runtime_paths
+    assert str(tokenizer) in spec.sandbox.runtime_paths
+    assert str(artifact_root) not in spec.sandbox.runtime_paths
+
+
+def test_vulkan_sysfs_mounts_only_selected_render_device_identity(tmp_path, monkeypatch):
+    char_root = tmp_path / "sys" / "dev" / "char"
+    devices_root = tmp_path / "sys" / "devices"
+    identity = devices_root / "pci0000:00" / "0000:03:00.0"
+    render_identity = identity / "drm" / "renderD128"
+    render_identity.mkdir(parents=True)
+    (render_identity / "dev").write_text("226:128\n", encoding="ascii")
+    (render_identity / "device").symlink_to(identity, target_is_directory=True)
+    char_root.mkdir(parents=True)
+    link = char_root / "226:128"
+    relative_source = os.path.relpath(render_identity, char_root)
+    link.symlink_to(relative_source, target_is_directory=True)
+    render = Path("/dev/dri/renderD128")
+    missing_render = Path("/dev/dri/renderD129")
+
+    class _Status:
+        def __init__(self, minor):
+            self.st_rdev = os.makedev(226, minor)
+
+    original_stat = Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if path == render:
+            return _Status(128)
+        if path == missing_render:
+            return _Status(129)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    assert loading_module._vulkan_sysfs_resources(
+        (Path("/dev/apex_0"), Path("/dev/dri/card0"), missing_render, render),
+        char_root=char_root,
+        devices_root=devices_root,
+    ) == ((identity,), ((relative_source, Path("/sys/dev/char/226:128")),))
+
+
+def test_vulkan_sysfs_ignores_non_drm_missing_and_escaped_identities(
+    tmp_path, monkeypatch
+):
+    char_root = tmp_path / "sys" / "dev" / "char"
+    devices_root = tmp_path / "sys" / "devices"
+    outside = tmp_path / "outside"
+    char_root.mkdir(parents=True)
+    devices_root.mkdir(parents=True)
+    outside.mkdir()
+    link = char_root / "226:128"
+    link.symlink_to(outside, target_is_directory=True)
+
+    class _Status:
+        st_rdev = os.makedev(226, 128)
+
+    original_stat = Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if path == Path("/dev/dri/renderD128"):
+            return _Status()
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    assert loading_module._vulkan_sysfs_resources(
+        (Path("/dev/apex_0"), Path("/dev/dri/renderD128")),
+        char_root=char_root,
+        devices_root=devices_root,
+    ) == ((), ())
+    link.unlink()
+    assert loading_module._vulkan_sysfs_resources(
+        (Path("/dev/dri/renderD128"),),
+        char_root=char_root,
+        devices_root=devices_root,
+    ) == ((), ())
+
+
+def test_external_worker_refuses_missing_declared_artifact_companion(tmp_path):
+    primary = tmp_path / "model.gguf"
+    primary.write_bytes(b"gguf")
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["artifacts"] = [
+        {
+            "id": "qwen-model",
+            "version": "1.0.0",
+            "format": "gguf",
+            "sha256": "a" * 64,
+            "companions": {"tokenizer.json": "b" * 64},
+        }
+    ]
+
+    with pytest.raises(ValueError, match="companions are unavailable"):
+        external_worker_specs(
+            (plugin,),
+            resolve_artifact=lambda _reference: ArtifactResolution(True, primary, "", 4),
+        )
+
+
+def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["accelerator:gpu"]
+    plugin.manifest["plugin"]["artifacts"] = [
+        {
+            "id": "qwen-model",
+            "version": "1.0.0",
+            "format": "gguf",
+            "sha256": "a" * 64,
+            "companions": {"tokenizer.json": "b" * 64},
+        }
+    ]
+    argv = loading_module._worker_argv(
+        plugin,
+        "/usr/bin/python3",
+        ("/site/a", "/site/b"),
+        frozenset({"accelerator:gpu", "files:read-selected"}),
+    )
+    assert argv == [
+        "/usr/bin/python3",
+        "-m",
+        "omnitensor.plugins.worker",
+        "--plugin-id",
+        "external-example",
+        "--entry-point",
+        "external-example",
+        "--target",
+        "external_package:Plugin",
+        "--distribution",
+        "external-dist",
+        "--import-path",
+        "/site/a",
+        "--import-path",
+        "/site/b",
+        "--permission",
+        "accelerator:gpu",
+        "--permission",
+        "files:read-selected",
+    ]
+
+    state_root = loading_module._prepare_worker_state_root(tmp_path / "nested" / "state")
+    assert state_root == (tmp_path / "nested" / "state").resolve()
+    assert state_root.stat().st_mode & 0o777 == 0o700
+    assert loading_module._prepare_worker_state_root(state_root) == state_root
+    assert loading_module._prepare_worker_state_root(None) is None
+    with pytest.raises(ValueError) as relative_root:
+        loading_module._prepare_worker_state_root(Path("relative"))
+    assert str(relative_root.value) == "worker_state_root must be absolute"
+
+    plugin_state = loading_module._plugin_state_path(state_root, plugin.plugin_id)
+    assert plugin_state == (state_root / plugin.plugin_id).resolve()
+    assert plugin_state.stat().st_mode & 0o777 == 0o700
+    assert loading_module._plugin_state_path(state_root, plugin.plugin_id) == plugin_state
+    assert loading_module._plugin_state_path(None, plugin.plugin_id) is None
+    with pytest.raises(ValueError) as invalid_identity:
+        loading_module._plugin_state_path(state_root, "../plugin")
+    assert str(invalid_identity.value) == "plugin identity is invalid for state storage"
+
+    lease = loading_module._accelerator_lease_path(
+        state_root,
+        frozenset({"accelerator:gpu"}),
+        frozenset({"accelerator:gpu"}),
+    )
+    assert lease == (state_root / "_accelerator-gpu.lock").resolve()
+    assert lease.stat().st_mode & 0o777 == 0o600
+    assert loading_module._accelerator_lease_path(None, frozenset(), frozenset()) is None
+    assert (
+        loading_module._accelerator_lease_path(state_root, frozenset(), frozenset())
+        is None
+    )
+    both = frozenset({"accelerator:gpu", "accelerator:npu"})
+    with pytest.raises(ValueError) as ambiguous_lease:
+        loading_module._accelerator_lease_path(state_root, both, both)
+    assert str(ambiguous_lease.value) == "a plugin worker must use exactly one accelerator lease"
+    assert (
+        loading_module._accelerator_lease_path(
+            state_root,
+            frozenset({"accelerator:gpu"}),
+            frozenset({"accelerator:npu"}),
+        )
+        is None
+    )
+    assert (
+        loading_module._accelerator_lease_path(
+            state_root, both, both - {"accelerator:npu"}
+        )
+        == lease
+    )
+
+    gpu = tmp_path / "renderD128"
+    npu = tmp_path / "accel0"
+    gpu.touch()
+    npu.touch()
+    assert loading_module._accelerator_paths(
+        both,
+        both,
+        {"gpu": gpu, "npu": npu},
+    ) == (gpu, npu)
+    assert loading_module._accelerator_paths(
+        both,
+        frozenset({"accelerator:gpu"}),
+        {"gpu": tmp_path / "missing"},
+    ) == ()
+
+    resolution = ArtifactResolution(True, tmp_path / "model.gguf", "ready", 4)
+    calls = []
+    resolved = loading_module._resolved_artifacts(
+        plugin,
+        lambda reference: calls.append(reference) or resolution,
+    )
+    reference = ArtifactReference(
+        "qwen-model",
+        "1.0.0",
+        "gguf",
+        "a" * 64,
+        (("tokenizer.json", "b" * 64),),
+    )
+    assert calls == [reference]
+    assert resolved == ((reference, resolution),)
+    assert loading_module._resolved_artifacts(plugin, None) == ()
+    assert loading_module._artifact_bootstrap(reference, resolution) == (
+        '{"companions":{"tokenizer.json":"'
+        + "b" * 64
+        + '"},"format":"gguf","id":"qwen-model","path":"'
+        + str(resolution.path)
+        + '","sha256":"'
+        + "a" * 64
+        + '","version":"1.0.0"}'
+    )
 
 
 def test_installed_runtime_admits_dispatches_and_forwards_worker_progress(tmp_path):
@@ -244,6 +702,253 @@ def test_installed_runtime_admits_dispatches_and_forwards_worker_progress(tmp_pa
     assert observed == [PluginProgress("job-1", "extract", 0.5, "", 11)]
 
 
+def test_external_runtime_cancels_active_work_and_stops_worker_on_live_grant_change(  # noqa: C901
+    tmp_path,
+):
+    permission = f"read:{tmp_path}"
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = [permission]
+
+    class Grants:
+        active = frozenset({permission})
+        reloads = 0
+
+        def reload(self):
+            self.reloads += 1
+
+        def active_permissions(self, _plugin_id, declared):
+            return self.active & frozenset(declared)
+
+    class Supervisor:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.cancelled = False
+            self.revocations = []
+
+        def statuses(self):
+            return (WorkerStatus(plugin.plugin_id, WorkerState.READY, 1, 1, "ready"),)
+
+        async def execute(self, _request, _progress):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+        async def revoke(self, plugin_id, detail):
+            self.revocations.append((plugin_id, detail))
+
+    async def scenario():
+        grants = Grants()
+        supervisor = Supervisor()
+        runtime = InstalledPluginRuntime(tmp_path, supervisor=supervisor, grant_source=grants)
+        runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+        runtime._granted[plugin.plugin_id] = frozenset({permission})
+        execution = asyncio.create_task(
+            runtime._execute_with_live_grants(
+                PluginRequest("job-1", plugin.plugin_id, "manual", {}, 1, None)
+            )
+        )
+        await supervisor.started.wait()
+        grants.active = frozenset()
+
+        with pytest.raises(PluginWorkerError) as caught:
+            await asyncio.wait_for(execution, 0.5)
+
+        assert (caught.value.code, caught.value.detail) == (
+            "consent-revoked",
+            "Plugin permission changed while work was active",
+        )
+        assert supervisor.cancelled is True
+        assert supervisor.revocations == [
+            (plugin.plugin_id, "worker stopped because its permission grant changed")
+        ]
+        assert plugin.plugin_id in runtime._revoked_workers
+        assert grants.reloads >= 1
+
+    asyncio.run(scenario())
+
+
+def test_external_runtime_idle_monitor_revokes_once_and_admission_stays_closed(tmp_path):
+    from omnitensor.jobs import JobDispatchError
+
+    permission = f"read:{tmp_path}"
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = [permission]
+
+    class Grants:
+        calls = []
+
+        def reload(self):
+            self.calls.append(("reload",))
+
+        def active_permissions(self, plugin_id, declared):
+            self.calls.append(("active", plugin_id, declared))
+            return frozenset()
+
+    class Supervisor:
+        revocations = []
+
+        def statuses(self):
+            return (WorkerStatus(plugin.plugin_id, WorkerState.READY, 1, 1, "ready"),)
+
+        async def revoke(self, plugin_id, detail):
+            self.revocations.append((plugin_id, detail))
+
+    async def scenario():
+        supervisor = Supervisor()
+        grants = Grants()
+        runtime = InstalledPluginRuntime(tmp_path, supervisor=supervisor, grant_source=grants)
+        runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+        runtime._granted[plugin.plugin_id] = frozenset({permission})
+        monitor = asyncio.create_task(runtime._monitor_permission_grants())
+        for _ in range(20):
+            if supervisor.revocations:
+                break
+            await asyncio.sleep(0.01)
+        monitor.cancel()
+        await monitor
+
+        assert supervisor.revocations == [
+            (plugin.plugin_id, "worker stopped because its permission grant changed")
+        ]
+        assert ("active", plugin.plugin_id, {permission}) in grants.calls
+        with pytest.raises(JobDispatchError) as caught:
+            runtime.admit(plugin.plugin_id, {})
+        assert (caught.value.code, caught.value.message) == (
+            "consent-revoked",
+            "Plugin worker was stopped after a grant change",
+        )
+
+    asyncio.run(scenario())
+
+
+def test_external_runtime_rechecks_exact_grants_after_worker_completion(tmp_path):
+    permission = f"read:{tmp_path}"
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = [permission]
+    request = PluginRequest("job-1", plugin.plugin_id, "manual", {}, 1, None)
+    calls = []
+
+    class Grants:
+        active = frozenset({permission})
+
+        def reload(self):
+            calls.append(("reload",))
+
+        def active_permissions(self, plugin_id, declared):
+            calls.append(("active", plugin_id, declared))
+            return self.active
+
+    class Supervisor:
+        async def execute(self, received, progress):
+            calls.append(("execute", received, progress._sink))
+            grants.active = frozenset()
+            return PluginResult("job-1", PluginResultStatus.SUCCEEDED, {}, "done", 2)
+
+        async def revoke(self, plugin_id, detail):
+            calls.append(("revoke", plugin_id, detail))
+
+    grants = Grants()
+    sink = object()
+    runtime = InstalledPluginRuntime(
+        tmp_path,
+        supervisor=Supervisor(),
+        grant_source=grants,
+        progress_sink=sink,
+    )
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+    runtime._granted[plugin.plugin_id] = frozenset({permission})
+
+    with pytest.raises(PluginWorkerError) as caught:
+        asyncio.run(runtime._execute_with_live_grants(request))
+
+    assert (caught.value.code, caught.value.detail) == (
+        "consent-revoked",
+        "Plugin permission changed while work was active",
+    )
+    assert calls[:3] == [
+        ("execute", request, sink),
+        ("reload",),
+        ("active", plugin.plugin_id, {permission}),
+    ]
+
+
+def test_external_runtime_rechecks_grants_when_execution_is_already_done(tmp_path, monkeypatch):
+    permission = f"read:{tmp_path}"
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = [permission]
+    request = PluginRequest("job-1", plugin.plugin_id, "manual", {}, 1, None)
+    calls = []
+
+    class Grants:
+        def reload(self):
+            calls.append(("reload",))
+
+        def active_permissions(self, plugin_id, declared):
+            calls.append(("active", plugin_id, declared))
+            return frozenset()
+
+    class Supervisor:
+        async def execute(self, _request, _progress):
+            raise AssertionError("the completed-task double supplies the result")
+
+    def completed_task(coroutine):
+        coroutine.close()
+        task = asyncio.get_running_loop().create_future()
+        task.set_result(PluginResult("job-1", PluginResultStatus.SUCCEEDED, {}, "done", 2))
+        return task
+
+    monkeypatch.setattr(loading_module.asyncio, "create_task", completed_task)
+    runtime = InstalledPluginRuntime(tmp_path, supervisor=Supervisor(), grant_source=Grants())
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+    runtime._granted[plugin.plugin_id] = frozenset({permission})
+
+    with pytest.raises(PluginWorkerError) as caught:
+        asyncio.run(runtime._execute_with_live_grants(request))
+
+    assert (caught.value.code, caught.value.detail) == (
+        "consent-revoked",
+        "Plugin permission changed while work was active",
+    )
+    assert calls == [("reload",), ("active", plugin.plugin_id, {permission})]
+
+
+def test_external_runtime_admission_compares_live_and_worker_grants_exactly(tmp_path):
+    from omnitensor.jobs import JobDispatchError
+
+    permission = f"read:{tmp_path}"
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = [permission]
+    calls = []
+
+    class Grants:
+        active = frozenset({permission})
+
+        def reload(self):
+            calls.append(("reload",))
+
+        def active_permissions(self, plugin_id, declared):
+            calls.append(("active", plugin_id, declared))
+            return self.active
+
+    grants = Grants()
+    runtime = InstalledPluginRuntime(tmp_path, grant_source=grants)
+    runtime._granted[plugin.plugin_id] = frozenset({permission})
+
+    runtime._admit_permissions(plugin)
+    assert calls == [("reload",), ("active", plugin.plugin_id, {permission})]
+
+    grants.active = frozenset()
+    with pytest.raises(JobDispatchError) as caught:
+        runtime._admit_permissions(plugin)
+    assert (caught.value.code, caught.value.message) == (
+        "consent-missing",
+        "Plugin permissions are not granted",
+    )
+
+
 def test_selected_sources_are_brokered_into_worker_sandbox_and_removed(tmp_path):
     source = tmp_path / "private.txt"
     source.write_text("private event", encoding="utf-8")
@@ -253,9 +958,7 @@ def test_selected_sources_are_brokered_into_worker_sandbox_and_removed(tmp_path)
         requests = []
 
         def statuses(self):
-            return (
-                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
-            )
+            return (WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),)
 
         async def execute(self, request, _progress):
             self.requests.append(request)
@@ -286,18 +989,10 @@ def test_selected_sources_are_brokered_into_worker_sandbox_and_removed(tmp_path)
         "required": ["sources"],
         "properties": {"sources": {"type": "array", "minItems": 1}},
     }
-    runtime._snapshot = InstalledPluginSnapshot(
-        PluginCatalog((plugin,), ()), supervisor.statuses()
-    )
-    runtime._granted = {
-        "external-example": frozenset({"files:read-selected"})
-    }
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), supervisor.statuses())
+    runtime._granted = {"external-example": frozenset({"files:read-selected"})}
 
-    output = asyncio.run(
-        runtime.dispatch(
-            "job-1", "external-example", {"sources": [str(source)]}
-        )
-    )
+    output = asyncio.run(runtime.dispatch("job-1", "external-example", {"sources": [str(source)]}))
 
     assert output == {"events": []}
     assert source.read_text(encoding="utf-8") == "private event"
@@ -312,9 +1007,7 @@ def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_
 
     class Supervisor:
         def statuses(self):
-            return (
-                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
-            )
+            return (WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),)
 
         async def execute(self, _request, _progress):
             raise AssertionError("invalid selected files must not reach the worker")
@@ -337,9 +1030,7 @@ def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_
         subject._snapshot = InstalledPluginSnapshot(
             PluginCatalog((plugin,), ()), subject._supervisor.statuses()
         )
-        subject._granted = {
-            "external-example": frozenset({"files:read-selected"})
-        }
+        subject._granted = {"external-example": frozenset({"files:read-selected"})}
         return subject
 
     for sources, code in (
@@ -355,17 +1046,11 @@ def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_
         assert error.value.code == code
 
     with pytest.raises(PluginWorkerError) as unavailable:
-        asyncio.run(
-            runtime(None).dispatch(
-                "job-1", "external-example", {"sources": [str(source)]}
-            )
-        )
+        asyncio.run(runtime(None).dispatch("job-1", "external-example", {"sources": [str(source)]}))
     assert unavailable.value.code == "selected-files-unavailable"
 
 
-def test_selected_source_broker_refuses_missing_empty_and_unopenable_files(
-    tmp_path, monkeypatch
-):
+def test_selected_source_broker_refuses_missing_empty_and_unopenable_files(tmp_path, monkeypatch):
     missing = tmp_path / "missing.txt"
     with pytest.raises(PluginWorkerError) as absent:
         loading_module._canonical_selected_source(missing)
@@ -402,20 +1087,14 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
             )
             is False
         )
-        wrong = execute_frame(
-            PluginRequest("wrong-job", "other-plugin", "manual", {}, 1, None)
-        )
-        assert await worker_module._handle_request_frame(
-            plugin, wrong, writer, 1, active
-        )
+        wrong = execute_frame(PluginRequest("wrong-job", "other-plugin", "manual", {}, 1, None))
+        assert await worker_module._handle_request_frame(plugin, wrong, writer, 1, active)
         token = CancellationController()
         active["duplicate"] = (asyncio.current_task(), token)
         duplicate = execute_frame(
             PluginRequest("duplicate", "external-example", "manual", {}, 1, None)
         )
-        assert await worker_module._handle_request_frame(
-            plugin, duplicate, writer, 1, active
-        )
+        assert await worker_module._handle_request_frame(plugin, duplicate, writer, 1, active)
         assert await worker_module._handle_request_frame(
             plugin,
             IPCFrame(1, WorkerMessageType.CANCEL, "duplicate", {"reason": "cancel"}),
@@ -459,9 +1138,7 @@ def test_worker_progress_and_terminal_failures_stay_correlated():
 
         class WrongResult:
             async def execute(self, *_arguments):
-                return PluginResult(
-                    "other-job", PluginResultStatus.SUCCEEDED, {}, "", 2
-                )
+                return PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "", 2)
 
         class Cancelled:
             async def execute(self, *_arguments):
@@ -553,9 +1230,7 @@ def test_installed_runtime_admission_errors_are_stable_contracts(tmp_path):
 
     plugin = _resolved(tmp_path=tmp_path)
     runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
-    refused(
-        "external-example", {}, "worker-unavailable", "Plugin worker is not ready"
-    )
+    refused("external-example", {}, "worker-unavailable", "Plugin worker is not ready")
 
     supervisor.statuses_value = (
         WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
@@ -570,13 +1245,9 @@ def test_installed_runtime_admission_errors_are_stable_contracts(tmp_path):
 
     plugin.manifest["plugin"]["protocol"]["capabilities"] = ["execute"]
     plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
-    refused(
-        "external-example", {}, "consent-missing", "Plugin permissions are not granted"
-    )
+    refused("external-example", {}, "consent-missing", "Plugin permissions are not granted")
 
-    runtime._granted = {
-        "external-example": frozenset({"files:read-selected"})
-    }
+    runtime._granted = {"external-example": frozenset({"files:read-selected"})}
     refused(
         "external-example",
         [],
@@ -612,7 +1283,7 @@ def test_installed_runtime_ignores_bundled_identity_when_dispatching(tmp_path):
     assert runtime._plugin("external-example") is None
 
 
-def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
+def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(  # noqa: C901
     tmp_path, monkeypatch
 ):
     bundled = _resolved(PluginSource.BUNDLED, tmp_path)
@@ -621,9 +1292,7 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
     candidates = (object(),)
     identified = object()
     catalog = PluginCatalog((bundled, external), ())
-    workers = (
-        WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
-    )
+    workers = (WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),)
     observed = []
 
     class Grants:
@@ -638,6 +1307,13 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
         async def start(self, specs):
             observed.append(("start", specs, runtime._snapshot))
             return workers
+
+        async def stop(self):
+            observed.append(("stop",))
+            return workers
+
+        async def revoke(self, _plugin_id, _detail):
+            raise AssertionError("unchanged grants must not revoke a worker")
 
     def discover(**options):
         observed.append(("discover", options))
@@ -659,9 +1335,7 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
 
     monkeypatch.setattr(loading_module, "discover_plugin_metadata", discover)
     monkeypatch.setattr(loading_module, "resolve_plugin_identities", resolve_identities)
-    monkeypatch.setattr(
-        loading_module, "resolve_plugin_compatibility", resolve_compatibility
-    )
+    monkeypatch.setattr(loading_module, "resolve_plugin_compatibility", resolve_compatibility)
     monkeypatch.setattr(loading_module, "external_worker_specs", specs)
     broker = tmp_path / "nested" / "broker"
     runtime = InstalledPluginRuntime(
@@ -674,9 +1348,18 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
         selected_files_root=broker,
     )
 
-    snapshot = asyncio.run(runtime.start())
+    async def scenario():
+        snapshot = await runtime.start()
+        assert runtime._grant_monitor is not None
+        assert runtime._grant_monitor.get_name() == "omnitensor-plugin-grant-monitor"
+        stopped = await runtime.stop()
+        assert runtime._grant_monitor is None
+        return snapshot, stopped
+
+    snapshot, stopped = asyncio.run(scenario())
 
     assert snapshot == InstalledPluginSnapshot(catalog, workers)
+    assert stopped == workers
     assert observed == [
         (
             "discover",
@@ -694,9 +1377,7 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
             {
                 "python_executable": "/usr/bin/python3",
                 "worker_import_paths": (str(tmp_path),),
-                "granted_permissions": {
-                    "external-example": frozenset({"files:read-selected"})
-                },
+                "granted_permissions": {"external-example": frozenset({"files:read-selected"})},
                 "selected_files_root": broker.resolve(),
             },
         ),
@@ -705,15 +1386,51 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(
             expected_specs,
             InstalledPluginSnapshot(catalog, ()),
         ),
+        ("stop",),
     ]
-    assert runtime._granted == {
-        "external-example": frozenset({"files:read-selected"})
-    }
+    assert runtime._granted == {"external-example": frozenset({"files:read-selected"})}
+    assert runtime.snapshot == InstalledPluginSnapshot(catalog, workers)
 
 
-def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(
-    tmp_path, monkeypatch
-):
+def test_installed_runtime_stop_cancels_monitor_and_preserves_catalog(tmp_path):
+    plugin = _resolved(tmp_path=tmp_path)
+    workers = (WorkerStatus(plugin.plugin_id, WorkerState.STOPPED, 7, 1, "stopped"),)
+    calls = []
+
+    class Supervisor:
+        def statuses(self):
+            return workers
+
+        async def stop(self):
+            calls.append(("stop",))
+            return workers
+
+    async def scenario():
+        runtime = InstalledPluginRuntime(tmp_path, supervisor=Supervisor())
+        runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+        entered = asyncio.Event()
+
+        async def monitor():
+            entered.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(monitor(), name="test-grant-monitor")
+        runtime._grant_monitor = task
+        await entered.wait()
+        stopped = await runtime.stop()
+        return runtime, task, stopped
+
+    runtime, monitor, stopped = asyncio.run(scenario())
+
+    assert calls == [("stop",)]
+    assert stopped == workers
+    assert monitor.cancelled() is True
+    assert runtime._grant_monitor is None
+    assert runtime.snapshot == InstalledPluginSnapshot(PluginCatalog((plugin,), ()), workers)
+    assert runtime._snapshot == InstalledPluginSnapshot(PluginCatalog((plugin,), ()), workers)
+
+
+def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(tmp_path, monkeypatch):
     source = tmp_path / "source.txt"
     source.write_text("event", encoding="utf-8")
     broker = tmp_path / "broker"
@@ -727,14 +1444,10 @@ def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(
     monkeypatch.setattr(loading_module.shutil, "rmtree", remove)
 
     class Supervisor:
-        result = PluginResult(
-            "job-1", PluginResultStatus.FAILED, {}, "provider refused", 12
-        )
+        result = PluginResult("job-1", PluginResultStatus.FAILED, {}, "provider refused", 12)
 
         def statuses(self):
-            return (
-                WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),
-            )
+            return (WorkerStatus("external-example", WorkerState.READY, 10, 1, "ready"),)
 
         async def execute(self, _request, _progress):
             return self.result
@@ -748,19 +1461,11 @@ def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(
     plugin = _resolved(tmp_path=tmp_path)
     plugin.manifest["plugin"]["permissions"] = ["files:read-selected"]
     plugin.manifest["plugin"]["schemas"]["input"] = {"type": "object"}
-    runtime._snapshot = InstalledPluginSnapshot(
-        PluginCatalog((plugin,), ()), supervisor.statuses()
-    )
-    runtime._granted = {
-        "external-example": frozenset({"files:read-selected"})
-    }
+    runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), supervisor.statuses())
+    runtime._granted = {"external-example": frozenset({"files:read-selected"})}
 
     with pytest.raises(PluginWorkerError) as failed:
-        asyncio.run(
-            runtime.dispatch(
-                "job-1", "external-example", {"sources": [str(source)]}
-            )
-        )
+        asyncio.run(runtime.dispatch("job-1", "external-example", {"sources": [str(source)]}))
     assert (failed.value.code, failed.value.detail) == (
         "plugin-failed",
         "provider refused",
@@ -769,29 +1474,17 @@ def test_installed_runtime_maps_terminal_worker_results_and_cleans_staging(
     assert removed[0][0].parent == broker / "external-example"
     assert removed[0][1] is True
 
-    supervisor.result = PluginResult(
-        "job-1", PluginResultStatus.FAILED, {}, "", 12
-    )
+    supervisor.result = PluginResult("job-1", PluginResultStatus.FAILED, {}, "", 12)
     with pytest.raises(PluginWorkerError) as defaulted:
-        asyncio.run(
-            runtime.dispatch(
-                "job-1", "external-example", {"sources": [str(source)]}
-            )
-        )
+        asyncio.run(runtime.dispatch("job-1", "external-example", {"sources": [str(source)]}))
     assert (defaulted.value.code, defaulted.value.detail) == (
         "plugin-failed",
         "plugin request failed",
     )
 
-    supervisor.result = PluginResult(
-        "job-1", PluginResultStatus.CANCELLED, {}, "user", 12
-    )
+    supervisor.result = PluginResult("job-1", PluginResultStatus.CANCELLED, {}, "user", 12)
     with pytest.raises(asyncio.CancelledError, match="user"):
-        asyncio.run(
-            runtime.dispatch(
-                "job-1", "external-example", {"sources": [str(source)]}
-            )
-        )
+        asyncio.run(runtime.dispatch("job-1", "external-example", {"sources": [str(source)]}))
 
 
 def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypatch):
@@ -904,9 +1597,7 @@ def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
     )
 
 
-def test_selected_file_helpers_reject_exact_race_and_file_boundaries(
-    tmp_path, monkeypatch
-):
+def test_selected_file_helpers_reject_exact_race_and_file_boundaries(tmp_path, monkeypatch):
     source = tmp_path / "source.txt"
     source.write_text("event", encoding="utf-8")
     alias = tmp_path / "alias.txt"
@@ -944,9 +1635,7 @@ def test_selected_file_helpers_reject_exact_race_and_file_boundaries(
     assert opened == [
         (
             source,
-            loading_module.os.O_RDONLY
-            | loading_module.os.O_CLOEXEC
-            | loading_module.os.O_NOFOLLOW,
+            loading_module.os.O_RDONLY | loading_module.os.O_CLOEXEC | loading_module.os.O_NOFOLLOW,
         )
     ]
 
@@ -997,19 +1686,13 @@ def test_selected_file_helpers_reject_exact_race_and_file_boundaries(
     assert not loading_module._selected_source_changed(regular, regular, destination)
     changed = list(regular)
     changed[1] += 1
-    assert loading_module._selected_source_changed(
-        regular, os.stat_result(changed), destination
-    )
+    assert loading_module._selected_source_changed(regular, os.stat_result(changed), destination)
     changed = list(regular)
     changed[6] += 1
-    assert loading_module._selected_source_changed(
-        regular, os.stat_result(changed), destination
-    )
+    assert loading_module._selected_source_changed(regular, os.stat_result(changed), destination)
     changed = list(regular)
     changed[8] += 1
-    assert loading_module._selected_source_changed(
-        regular, os.stat_result(changed), destination
-    )
+    assert loading_module._selected_source_changed(regular, os.stat_result(changed), destination)
     destination.write_text("different", encoding="utf-8")
     assert loading_module._selected_source_changed(regular, regular, destination)
 
@@ -1071,9 +1754,9 @@ def test_worker_loads_only_the_exact_validated_entry_point():
         "external-example",
         "external_package:Plugin",
         "external-dist",
-        entry_points_provider=lambda **selection: [entry_point]
-        if selection == {"group": "omnitensor.workloads"}
-        else [],
+        entry_points_provider=lambda **selection: (
+            [entry_point] if selection == {"group": "omnitensor.workloads"} else []
+        ),
     )
 
     assert isinstance(plugin, TrackingPlugin)
@@ -1117,9 +1800,7 @@ def test_worker_contains_enumeration_load_and_contract_failures():
             "external-example",
             "external_package:Plugin",
             "external-dist",
-            entry_points_provider=lambda **_selection: [
-                FakeEntryPoint(factory=fail_factory)
-            ],
+            entry_points_provider=lambda **_selection: [FakeEntryPoint(factory=fail_factory)],
         )
     with pytest.raises(ExternalPluginLoadError) as error:
         load_external_plugin(
@@ -1142,13 +1823,9 @@ def test_worker_contains_enumeration_load_and_contract_failures():
 
 
 def test_worker_acknowledges_the_handshake_before_starting_the_plugin():
-    service_offer = HandshakeOffer(
-        "external-example", 1, 3, frozenset({"cancel", "progress"})
-    )
+    service_offer = HandshakeOffer("external-example", 1, 3, frozenset({"cancel", "progress"}))
     health = encode_frame(
-        handshake_frame(service_offer).__class__(
-            1, WorkerMessageType.HEALTH, "request-1", {}
-        )
+        handshake_frame(service_offer).__class__(1, WorkerMessageType.HEALTH, "request-1", {})
     )
     cancel = encode_frame(
         handshake_frame(service_offer).__class__(
@@ -1204,9 +1881,7 @@ def test_worker_receives_only_the_service_supplied_active_permissions():
 
 
 def test_worker_default_protocol_and_eof_shutdown():
-    service_offer = HandshakeOffer(
-        "external-example", 1, 1, frozenset({"cancel", "health"})
-    )
+    service_offer = HandshakeOffer("external-example", 1, 1, frozenset({"cancel", "health"}))
     plugin = TrackingPlugin()
     writer = io.BytesIO()
 
@@ -1286,9 +1961,7 @@ def test_executable_worker_receives_cancel_while_request_is_running():
             await cancellation.wait()
             return cancelled_result(request, "cancelled", completed_at_ms=20)
 
-    service_offer = HandshakeOffer(
-        "external-example", 1, 1, frozenset({"cancel", "execute"})
-    )
+    service_offer = HandshakeOffer("external-example", 1, 1, frozenset({"cancel", "execute"}))
     request = PluginRequest("job-1", "external-example", "manual", {}, 10, None)
     cancel = encode_frame(
         handshake_frame(service_offer).__class__(
@@ -1296,9 +1969,7 @@ def test_executable_worker_receives_cancel_while_request_is_running():
         )
     )
     reader = io.BytesIO(
-        encode_frame(handshake_frame(service_offer))
-        + encode_frame(execute_frame(request))
-        + cancel
+        encode_frame(handshake_frame(service_offer)) + encode_frame(execute_frame(request)) + cancel
     )
     writer = io.BytesIO()
 
@@ -1338,8 +2009,7 @@ def test_worker_blocking_frame_reader_bounds_and_reports_truncation():
         _read_frame(io.BytesIO(oversized))
     assert error.value.code == "frame-too-large"
     assert error.value.detail == (
-        f"declared {DEFAULT_MAX_FRAME_BYTES + 1} bytes; "
-        f"limit is {DEFAULT_MAX_FRAME_BYTES}"
+        f"declared {DEFAULT_MAX_FRAME_BYTES + 1} bytes; limit is {DEFAULT_MAX_FRAME_BYTES}"
     )
 
 
@@ -1438,8 +2108,7 @@ class ThirdPartyPlugin(ManagedPlugin):
             "Root-Is-Purelib: true\nTag: py3-none-any\n"
         ),
         f"{dist_info}/entry_points.txt": (
-            "[omnitensor.workloads]\n"
-            "third-party-plugin = third_party_plugin:ThirdPartyPlugin\n"
+            "[omnitensor.workloads]\nthird-party-plugin = third_party_plugin:ThirdPartyPlugin\n"
         ),
         "omnitensor-plugin.json": json.dumps(manifest),
     }
@@ -1524,10 +2193,7 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
         runner = asyncio.create_task(service.run())
         try:
             for _ in range(200):
-                if any(
-                    worker.state is WorkerState.READY
-                    for worker in runtime.snapshot.workers
-                ):
+                if any(worker.state is WorkerState.READY for worker in runtime.snapshot.workers):
                     break
                 await asyncio.sleep(0.005)
             started = runtime.snapshot
@@ -1573,13 +2239,11 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
     first, restarted = asyncio.run(scenario())
     for started, stopped in (first, restarted):
         external = [
-            plugin
-            for plugin in started.catalog.plugins
-            if plugin.source is PluginSource.EXTERNAL
+            plugin for plugin in started.catalog.plugins if plugin.source is PluginSource.EXTERNAL
         ]
-        assert [plugin.plugin_id for plugin in external] == [
-            "third-party-plugin"
-        ], started.catalog.rejections
+        assert [plugin.plugin_id for plugin in external] == ["third-party-plugin"], (
+            started.catalog.rejections
+        )
         assert started.catalog.rejections == ()
         assert len(started.workers) == 1
         assert started.workers[0].state is WorkerState.READY
@@ -1608,7 +2272,7 @@ def test_worker_rejects_a_plugin_that_omits_its_identity():
     assert str(error.value) == "entry point does not implement the declared plugin"
 
 
-_CHATTY_PLUGIN = '''\
+_CHATTY_PLUGIN = """\
 import sys
 
 print("noise from import", flush=True)
@@ -1631,9 +2295,9 @@ class Plugin:
 
     async def execute(self, request, cancellation, progress):
         raise AssertionError("worker bootstrap must not execute jobs")
-'''
+"""
 
-_CHATTY_BOOTSTRAP = '''\
+_CHATTY_BOOTSTRAP = """\
 from omnitensor.plugins import worker
 
 
@@ -1656,7 +2320,7 @@ worker.main(
         "chatty-dist",
     ]
 )
-'''
+"""
 
 
 def test_plugin_stdout_never_reaches_the_frame_channel(tmp_path):
@@ -1710,9 +2374,7 @@ def test_worker_answers_the_handshake_before_its_plugin_starts():
         writer,
     )
 
-    assert [frame.type for frame in ObservantPlugin.frames_at_start] == [
-        WorkerMessageType.HELLO
-    ]
+    assert [frame.type for frame in ObservantPlugin.frames_at_start] == [WorkerMessageType.HELLO]
     assert [frame.type for frame in _frames(writer.getvalue())] == [
         WorkerMessageType.HELLO,
         WorkerMessageType.READY,
@@ -1733,16 +2395,13 @@ def test_the_worker_confines_itself_before_it_imports_the_plugin(monkeypatch, tm
 
     monkeypatch.setattr(worker_module, "install_filter", install)
     monkeypatch.setattr(worker_module, "load_external_plugin", load)
+
     async def serve(*_args, **_options):
         order.append("serve")
 
     monkeypatch.setattr(worker_module, "serve_worker_requests", serve)
-    monkeypatch.setattr(
-        worker_module, "claim_frame_channel", lambda: io.BytesIO()
-    )
-    monkeypatch.setattr(
-        worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})()
-    )
+    monkeypatch.setattr(worker_module, "claim_frame_channel", lambda: io.BytesIO())
+    monkeypatch.setattr(worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})())
 
     worker_module.main(
         [
@@ -1760,19 +2419,77 @@ def test_the_worker_confines_itself_before_it_imports_the_plugin(monkeypatch, tm
     assert order == ["install", "load", "serve"]
 
 
+def test_worker_bootstrap_accepts_only_exact_absolute_resources(tmp_path):
+    artifact = tmp_path / "model.gguf"
+    state = tmp_path / "state"
+    lease = tmp_path / "gpu.lock"
+    artifact.write_bytes(b"model")
+    state.mkdir()
+    lease.touch()
+    arguments = SimpleNamespace(
+        plugin_id="sample-plugin",
+        artifact=[
+            json.dumps(
+                {
+                    "id": "qwen-model",
+                    "version": "1.0.0",
+                    "format": "gguf",
+                    "sha256": "a" * 64,
+                    "companions": {"tokenizer.json": "b" * 64},
+                    "path": str(artifact),
+                }
+            )
+        ],
+        state_path=str(state),
+        accelerator_lease_path=str(lease),
+    )
+
+    bootstrap = worker_module._bootstrap(arguments)
+
+    assert bootstrap.plugin_id == "sample-plugin"
+    assert bootstrap.state_path == state
+    assert bootstrap.accelerator_lease_path == lease
+    assert bootstrap.artifacts[0].id == "qwen-model"
+    assert bootstrap.artifacts[0].path == artifact
+    assert bootstrap.artifacts[0].companions == (("tokenizer.json", "b" * 64),)
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        ({"artifact": ["not-json"]}, "artifact bootstrap is invalid"),
+        (
+            {"artifact": [json.dumps({"id": "missing-fields"})]},
+            "artifact bootstrap fields are invalid",
+        ),
+        ({"state_path": "relative"}, "state bootstrap path is invalid"),
+        ({"accelerator_lease_path": "relative"}, "lease bootstrap path is invalid"),
+    ],
+)
+def test_worker_bootstrap_rejects_malformed_or_untrusted_resources(tmp_path, change, detail):
+    values = {
+        "plugin_id": "sample-plugin",
+        "artifact": [],
+        "state_path": None,
+        "accelerator_lease_path": None,
+    }
+    values.update(change)
+    with pytest.raises(SystemExit, match=detail):
+        worker_module._bootstrap(SimpleNamespace(**values))
+
+
 def test_a_worker_told_not_to_confine_itself_does_not(monkeypatch):
     """Only for kernels that cannot install one; it is never the default."""
     installed = []
     monkeypatch.setattr(worker_module, "install_filter", lambda: installed.append(1))
     monkeypatch.setattr(worker_module, "load_external_plugin", lambda *a: TrackingPlugin())
+
     async def serve(*_args, **_options):
         return None
 
     monkeypatch.setattr(worker_module, "serve_worker_requests", serve)
     monkeypatch.setattr(worker_module, "claim_frame_channel", lambda: io.BytesIO())
-    monkeypatch.setattr(
-        worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})()
-    )
+    monkeypatch.setattr(worker_module.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})())
 
     worker_module.main(
         [
