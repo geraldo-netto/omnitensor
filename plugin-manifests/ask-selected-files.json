@@ -55,5 +55,48 @@
       "Require exact file, page, span, and digest citations on every answer"
     ]
   },
-  "acceptance": []
+  "acceptance": [
+    {
+      "metric": "retrieval-recall",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Expected supporting files retrieved on the frozen public document-question corpus."
+    },
+    {
+      "metric": "grounded-term-recall",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Expected grounded answer facts retained on the frozen public corpus."
+    },
+    {
+      "metric": "citation-integrity",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Every cited file, page, span, and digest must match selected input bytes exactly."
+    },
+    {
+      "metric": "p95-question-latency",
+      "comparator": "at-most",
+      "target": 10000,
+      "unit": "milliseconds",
+      "description": "End-to-end retrieval and grounded generation on the qualified named GPU."
+    },
+    {
+      "metric": "cancellation-latency",
+      "comparator": "at-most",
+      "target": 2000,
+      "unit": "milliseconds",
+      "description": "A cancelled selected-file question reaches a terminal result within this bound."
+    },
+    {
+      "metric": "grant-revocation-latency",
+      "comparator": "at-most",
+      "target": 500,
+      "unit": "milliseconds",
+      "description": "Revoked selected-file permission refuses queued work within this bound."
+    }
+  ]
 }

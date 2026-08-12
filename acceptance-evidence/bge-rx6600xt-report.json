@@ -1,0 +1,39 @@
+{
+  "reportVersion": 1,
+  "kind": "bge-small-document-model",
+  "recipeId": "bge-small-en-v1-5",
+  "recipeVersion": "1.0.0",
+  "recipeSha256": "93ea4210b4777c0fcc7e64ec7b44426a669d2b708186340739d89c0a35e74081",
+  "sourceReceiptSha256": "ea48b87dd0d41e7e3e4be8f9dfe60a14645c5ec78f5ad6023a338b01e12504a0",
+  "portableReferenceSha256": "69d70b6dde80e6187d49d092f86f185aa71a9660f417dca3cd97c6f8e3d018fc",
+  "nativeArtifactSha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
+  "tensorContract": {
+    "inputs": [
+      {"shape": [1, 128], "dtype": "int32", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "float32", "layout": "NC"},
+      {"shape": [1, 128], "dtype": "int32", "layout": "NC"}
+    ]
+  },
+  "outputContract": {"kind": "embedding"},
+  "holdout": {
+    "licenseId": "CC0-1.0",
+    "corpusSha256": "0f9efc25e4563bf0c29aea80772052fc0c32c1c1adacf4136c78657aae3fc14e",
+    "queryCount": 2,
+    "documentCount": 12
+  },
+  "device": {"index": 1, "name": "AMD Radeon RX 6600 XT (RADV NAVI23)"},
+  "nativeGate": {
+    "samples": 28,
+    "minimumCosineSimilarity": 0.9999975860522868,
+    "minimumTop10Overlap": 1.0,
+    "maximumAbsoluteError": 0.00047920838693432666,
+    "expectedTopHits": 2,
+    "accepted": true
+  },
+  "limitations": {
+    "productionDomainQuality": "not-claimed",
+    "namedDeviceProfileAcceptance": false,
+    "cpuFallback": "forbidden",
+    "otherProfiles": "disabled"
+  }
+}

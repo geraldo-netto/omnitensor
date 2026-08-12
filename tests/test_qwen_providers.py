@@ -274,7 +274,7 @@ def test_qwen_error_preserves_stable_machine_and_human_contract():
     ],
 )
 def test_catalog_rejects_unpinned_or_unsafe_changes(tmp_path, mutate):
-    source = next(iter((Path(__file__).parents[1] / "generation-models").glob("*.json")))
+    source = Path(__file__).parents[1] / "generation-models/qwen2-5-vl-7b.json"
     path = write_changed_json(tmp_path, source, mutate)
 
     with pytest.raises(QwenProviderError) as excinfo:

@@ -117,6 +117,7 @@ omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
 omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
 omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
 omnitensor-install-document-model = "omnitensor.training.document_model:main"
+omnitensor-qualify-document-questions = "omnitensor.plugins.document_acceptance:main"
 omnitensor-configure-low-light = "omnitensor.lowlight:configure_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
@@ -133,6 +134,7 @@ packages = ["src/omnitensor"]
 "generation-models" = "omnitensor/generation-models"
 "evaluation-corpora" = "omnitensor/evaluation-corpora"
 "plugin-manifests" = "omnitensor/plugin-manifests"
+"acceptance-evidence" = "omnitensor/acceptance-evidence"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
@@ -149,6 +151,7 @@ also_copy = [
     "generation-models/",
     "evaluation-corpora/",
     "plugin-manifests/",
+    "acceptance-evidence/",
     "README.md",
 ]
 

@@ -59,6 +59,7 @@ REQUIRED_SCHEMAS = (
     "runtime-job-result.schema.json",
     "event-extraction-result.schema.json",
     "document-question-answer.schema.json",
+    "document-question-acceptance.schema.json",
     "document-question-result.schema.json",
     "selected-text-answer.schema.json",
     "selected-text-result.schema.json",

@@ -1,0 +1,44 @@
+{
+  "reportVersion": 1,
+  "kind": "document-question-operational-acceptance",
+  "evidenceSha256": "22747c56e7019a08fb137f4175a7fa905ed1626312e81554c1619d191c55f994",
+  "corpusSha256": "da58477462f26065d23813727e96349ed104171210685051f6c3ca851bfd05d4",
+  "models": {
+    "embedding": {
+      "reportSha256": "5990e2b4a0c0af1c0713e2ee70375d01077b30b4561e53373af9260e9b1c4714",
+      "artifactSha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
+      "deviceName": "AMD Radeon RX 6600 XT (RADV NAVI23)"
+    },
+    "generation": {
+      "modelId": "qwen3-0.6b-q8-0",
+      "artifactSha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735",
+      "runtimeVersion": "llama.cpp-d654a8ee8ad70bf10c678c199e99049ced60a955",
+      "deviceName": "AMD Radeon RX 6600 XT (RADV NAVI23)"
+    }
+  },
+  "metrics": {
+    "retrievalRecall": 1.0,
+    "groundedTermRecall": 1.0,
+    "citationIntegrity": 1.0,
+    "p95LatencyMs": 2386,
+    "peakMemoryBytes": 1415577600,
+    "cancellationLatencyMs": 1,
+    "revocationLatencyMs": 2
+  },
+  "safety": {
+    "maliciousDocumentRefused": true,
+    "mutatedDocumentRefused": true,
+    "grantRevocationRefused": true,
+    "staleVersionSuppressed": true,
+    "indexRecovered": true,
+    "privateFragmentsDiscarded": true
+  },
+  "qualified": true,
+  "scope": {
+    "accelerator": "gpu",
+    "cpuFallback": "forbidden",
+    "npu": "not-qualified",
+    "tpu": "not-qualified",
+    "arbitraryPrivateCorpora": "not-claimed"
+  }
+}

@@ -181,7 +181,11 @@ def test_document_question_guide_freezes_manual_privacy_and_model_boundaries():
         "at most 2,048 characters",
         "selected-file-N",
         "file name, page, and character span",
-        "OMNI-0121",
+        "Qwen3-0.6B-Q8_0",
+        "all 29 model layers",
+        "1.0 citation integrity",
+        "does not claim quality for arbitrary private corpora",
+        "omnitensor-qualify-document-questions",
     ):
         assert required in guide
     assert "[Ask selected files](docs/document-questions.md)" in readme

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/document-question-acceptance.schema.json",
+  "title": "Document question operational acceptance report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reportVersion", "kind", "evidenceSha256", "corpusSha256", "models", "metrics", "safety", "qualified", "scope"],
+  "properties": {
+    "reportVersion": {"const": 1},
+    "kind": {"const": "document-question-operational-acceptance"},
+    "evidenceSha256": {"$ref": "#/$defs/digest"},
+    "corpusSha256": {"$ref": "#/$defs/digest"},
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["embedding", "generation"],
+      "properties": {
+        "embedding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reportSha256", "artifactSha256", "deviceName"],
+          "properties": {
+            "reportSha256": {"$ref": "#/$defs/digest"},
+            "artifactSha256": {"$ref": "#/$defs/digest"},
+            "deviceName": {"$ref": "#/$defs/text"}
+          }
+        },
+        "generation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["modelId", "artifactSha256", "runtimeVersion", "deviceName"],
+          "properties": {
+            "modelId": {"const": "qwen3-0.6b-q8-0"},
+            "artifactSha256": {"$ref": "#/$defs/digest"},
+            "runtimeVersion": {"$ref": "#/$defs/text"},
+            "deviceName": {"$ref": "#/$defs/text"}
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retrievalRecall", "groundedTermRecall", "citationIntegrity", "p95LatencyMs", "peakMemoryBytes", "cancellationLatencyMs", "revocationLatencyMs"],
+      "properties": {
+        "retrievalRecall": {"type": "number", "minimum": 0, "maximum": 1},
+        "groundedTermRecall": {"type": "number", "minimum": 0, "maximum": 1},
+        "citationIntegrity": {"type": "number", "minimum": 0, "maximum": 1},
+        "p95LatencyMs": {"type": "integer", "minimum": 1},
+        "peakMemoryBytes": {"type": "integer", "minimum": 1},
+        "cancellationLatencyMs": {"type": "integer", "minimum": 1},
+        "revocationLatencyMs": {"type": "integer", "minimum": 1}
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maliciousDocumentRefused", "mutatedDocumentRefused", "grantRevocationRefused", "staleVersionSuppressed", "indexRecovered", "privateFragmentsDiscarded"],
+      "properties": {
+        "maliciousDocumentRefused": {"const": true},
+        "mutatedDocumentRefused": {"const": true},
+        "grantRevocationRefused": {"const": true},
+        "staleVersionSuppressed": {"const": true},
+        "indexRecovered": {"const": true},
+        "privateFragmentsDiscarded": {"const": true}
+      }
+    },
+    "qualified": {"const": true},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accelerator", "cpuFallback", "npu", "tpu", "arbitraryPrivateCorpora"],
+      "properties": {
+        "accelerator": {"const": "gpu"},
+        "cpuFallback": {"const": "forbidden"},
+        "npu": {"const": "not-qualified"},
+        "tpu": {"const": "not-qualified"},
+        "arbitraryPrivateCorpora": {"const": "not-claimed"}
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 200}
+  }
+}

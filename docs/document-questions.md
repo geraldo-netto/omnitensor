@@ -22,7 +22,9 @@ fixed pooling graph, semantic parity, compiler evidence, and named-device runs
 pass the recipe gates.
 
 Qwen generation uses the same provider-neutral worker boundary as private event
-extraction. GPU through llama.cpp/Vulkan is the default. An NPU through
+extraction. The pinned text model for this workflow is the official Apache-2.0
+`Qwen/Qwen3-0.6B-GGUF` Q8_0 artifact at an immutable upstream revision. GPU through
+llama.cpp/Vulkan is the default. An NPU through
 OpenVINO GenAI is used only after explicit configuration and local
 qualification; it may fall back to GPU only before generation starts. There is
 no CPU lane. Install producer-only dependencies only where models are built:
@@ -54,8 +56,11 @@ BGE embeds the explicit question and spans, deterministic cosine ranking keeps
 at most eight spans. Qwen receives the explicit question as a separate,
 non-citable private fragment followed by only those opaque span references.
 
-Qwen must return the closed `document-question-answer` contract with at least
-one citation. The plugin rejects a citation unless its private reference,
+Qwen must return the closed `document-question-answer` contract with a concise
+answer of at most 1,024 characters and at least one citation. The explicit
+bound is accepted by llama.cpp's JSON-schema grammar while the larger job byte
+limit continues to bound the complete envelope. The plugin rejects a citation
+unless its private reference,
 source digest, page, exact start/end offsets, and text digest all match a
 retrieved span. The public `document-question-result` replaces the private
 reference with `selected-file-N` plus the basename and retains the digests and
@@ -77,7 +82,34 @@ answer view renders every citation as file name, page, and character span.
 There is no background ingestion, persistent history, or autonomous file
 action.
 
-The included deterministic tests exercise the complete private contract and
-hostile citation drift. They do not claim production retrieval or answer
-quality for arbitrary documents. That broader malicious-document, revocation,
-quality, latency, and named-device evidence remains tracked by OMNI-0121.
+## Operational acceptance
+
+`evaluation-corpora/document-question-v1.json` is a CC0 synthetic, immutable
+six-case holdout. It covers single- and multi-source retrieval, arithmetic
+grounding, a changed configuration, and a document-borne prompt injection.
+`omnitensor-qualify-document-questions` validates one bounded evidence document
+against that exact corpus, the pinned Qwen3 digest, the digest-locked BGE
+source/native report, exact answer citations, all mandatory safety probes, and
+the declared quality, memory, cancellation, revocation, and latency gates:
+
+```sh
+omnitensor-qualify-document-questions \
+  --evidence acceptance-evidence/document-question-rx6600xt-evidence.json \
+  --output /tmp/document-question-acceptance.json
+```
+
+The archived run used BGE-small/ncnn plus Qwen3-0.6B-Q8_0/llama.cpp on the named
+`AMD Radeon RX 6600 XT (RADV NAVI23)`. llama.cpp reported all 29 model layers on
+Vulkan with CPU fallback forbidden. The holdout recorded 1.0 retrieval recall,
+1.0 grounded-term recall, 1.0 citation integrity, 2,386 ms p95 end-to-end
+latency, and 1,415,577,600 peak model/runtime bytes. Regression and integration
+probes require malicious and mutated documents to fail closed, revoked grants
+to refuse queued work, changed source digests to suppress stale results, an
+ephemeral index to recover on the next request, cancellation to terminate, and
+private fragments to be discarded on every terminal path.
+
+The accepted report is deliberately narrow: it qualifies this frozen public
+holdout on that GPU. It does not claim quality for arbitrary private corpora,
+and does not qualify an NPU or TPU lane. Provider distributions must still
+verify installed artifact digests and satisfy the same gate before advertising
+the external workload as ready.
