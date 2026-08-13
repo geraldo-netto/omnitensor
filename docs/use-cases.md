@@ -42,7 +42,7 @@ selected executor supports.
 | `resource-scheduler` | enabled, weight 3 | Queue forecasting and advice for placement or background-job timing | No bundled model. An opt-in local recipe records bounded aggregate history, fits one forecast, compiles GPU/NPU variants, installs a restricted binding, and runs it through the trusted history-only client. Reviewed Chronos and Granite sources are catalog entries only. Forecasts are advisory; host scheduling policy stays deterministic. |
 | `build-advisor` | enabled, weight 2 | Build classification and regression-risk ranking | No bundled model. An opt-in approved-metadata producer emits portable build-risk and optional-check scores, but native binding, consumer, and acceptance remain. Mandatory checks are outside model authority and may never be omitted. |
 | `visual-library` | enabled, weight 2 | Image classification or embedding extraction for tagging and semantic search | Ships a pinned ncnn classifier, verified weights and labels, declared preprocessing, and bounded classification output for the Vulkan GPU lane. Embedding/search remains unimplemented: a reviewed CLIP source recipe exists, but its image-only export, consumer, and target acceptance remain. Exact duplicates use hashing instead. |
-| `low-light-enhancement` | disabled, weight 2 | Bounded tonal-curve estimation for dark images | Requires fully quantized `low-light-tonal-curve` 0.1.0 in `tflite-edgetpu` format. Package contains metadata, not weights. A reviewed Retinexformer source recipe exists, but portable export, licensed paired evaluation, native artifacts, image pipeline, and hardware acceptance remain. |
+| `low-light-enhancement` | disabled, weight 2 | Bounded enhanced-RGB generation for dark images | Profile 0.2.0 targets only the Vulkan GPU with Retinexformer in ncnn format and an exact float32 `[1,3,256,256]` contract. Package metadata intentionally contains no unqualified graph or weights. Portable export, licensed paired evaluation, signed native artifacts, image pipeline, and named-GPU acceptance remain. |
 | `network-peripherals` | disabled, weight 2 | Aggregated network or peripheral anomaly scoring | No bundled model. An opt-in normal-only aggregate producer emits a portable reconstruction source without identities or packet payloads, but it has no attack-recall claim and native binding, pipeline, and acceptance remain. Responses stay explicitly granted and outside model control. |
 | `desktop-context` | disabled, weight 1 | Context prediction and window-layout suggestions | No bundled model. An opt-in content-free producer scores allowlisted suggestions from explicit confirmations, but native binding, stale-session consumer, and acceptance remain. Every window action still requires user confirmation. |
 | `document-intelligence` | disabled, weight 2 | Private semantic retrieval and grounded answers over explicitly selected documents | No large weights are bundled. MiniLM and BGE remain reviewed portable embedding sources; BGE has an explicit one-shot producer that builds and gates a digest-locked ncnn artifact on a named Vulkan GPU. The external `ask-selected-files` workload builds an ephemeral page/span index and requires exact citations from qualified BGE and Qwen providers. Its frozen public holdout and safety gate passed with BGE-small plus pinned Qwen3-8B-Q4_K_M on the named RX 6600 XT; arbitrary-corpus quality and NPU/TPU lanes are not claimed. Exact duplicates use hashing. |
@@ -66,12 +66,14 @@ delete, or invoke commands.
 The named low-light model stays disabled by default. Enabling it for production
 requires reproducible evidence for every manifest criterion:
 
-- 100% of model operations mapped to the Edge TPU by the compiler report;
-- quantized SSIM of at least 0.95 against the frozen float baseline;
+- zero CPU fallback during the named hardware Vulkan run;
+- portable/native SSIM of at least 0.999 on the frozen holdout;
+- paired-target SSIM of at least 0.8;
+- zero non-finite or out-of-range native output components;
 - median CIEDE2000 color error no greater than 3;
 - warm p95 device latency no greater than 50 ms for 256×256 inputs on the
-  named Coral USB reference device; and
-- end-to-end speedup of at least 1.2 over the documented CPU tone-mapping
+  named RX 6600 XT; and
+- end-to-end speedup of at least 1.2 over the documented CPU enhancement
   baseline, including host work.
 
 Record model, compiler, runtime, driver, and host versions; input shape; warm-up;
@@ -102,7 +104,8 @@ writable, and the two roots must be disjoint: they cannot be equal or nested in
 either direction. This stronger rule prevents a future watcher from ingesting
 its own results. The versioned configuration is stored under
 `~/.config/omnitensor/workload-settings/` by default; `--settings-root` selects
-another user-owned store.
+another user-owned store. Loading profile 0.2.0 migrates the unchanged 0.1.0
+folder document atomically, preserving its paths and incrementing its revision.
 
 The delivery boundary creates a new, fully written output atomically in the
 output folder. It refuses an existing filename, including a symlink, and never

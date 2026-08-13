@@ -178,8 +178,12 @@ only the checkpoint's `params` mapping with strict key matching. The exported
 licensed `RetinexformerHoldout` gates minimum portable/source whole-image SSIM
 at `0.999`, minimum paired-target SSIM at `0.8`, and requires zero range or
 nonfinite violations. Reports contain references to neither side of the image
-pairs. GPU and NPU conversion may follow portable acceptance but remains
-unqualified until native parity and named-device execution. TPU publication
+pairs. The disabled `low-light-enhancement` 0.2.0 profile now declares this
+enhanced-RGB contract for an ncnn/Vulkan artifact; it does not claim that such
+an artifact is installed or accepted. GPU conversion remains unqualified until
+native parity, signature verification, no-CPU-fallback evidence, and named RX
+6600 XT execution pass. Other target conversion may follow portable acceptance.
+TPU publication
 additionally requires representative fully-int8 calibration, complete Edge TPU
 mapping, fidelity parity, and Coral evidence. No lane may substitute CPU.
 

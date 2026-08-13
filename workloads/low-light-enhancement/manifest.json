@@ -1,75 +1,133 @@
 {
   "manifestVersion": 1,
   "id": "low-light-enhancement",
-  "version": "0.1.0",
-  "capabilities": ["image-enhancement", "tonal-curve-estimation"],
+  "version": "0.2.0",
+  "capabilities": [
+    "image-enhancement",
+    "enhanced-image-generation"
+  ],
   "requirements": {
     "runtimeApi": 1,
-    "accelerator": "tpu",
-    "acceleratorPreference": ["tpu", "npu", "gpu"],
+    "accelerator": "gpu",
+    "acceleratorPreference": [
+      "gpu"
+    ],
     "minimumDevices": 1,
     "model": {
-      "id": "low-light-tonal-curve",
-      "version": "0.1.0",
-      "format": "tflite-edgetpu",
-      "fullyQuantized": true,
+      "id": "retinexformer-lol-v1",
+      "version": "1.0.0",
+      "format": "ncnn",
+      "fullyQuantized": false,
       "minimumCompilerVersion": "validated-release",
-      "minimumRuntimeVersion": "validated-release"
+      "minimumRuntimeVersion": "validated-release",
+      "tensorContract": {
+        "inputs": [
+          {
+            "shape": [
+              1,
+              3,
+              256,
+              256
+            ],
+            "dtype": "float32",
+            "layout": "NCHW",
+            "preprocess": {
+              "channelOrder": "RGB",
+              "mean": [
+                0,
+                0,
+                0
+              ],
+              "scale": [
+                0.00392156862745098,
+                0.00392156862745098,
+                0.00392156862745098
+              ],
+              "resize": {
+                "filter": "bicubic",
+                "fit": "exact"
+              }
+            }
+          }
+        ]
+      },
+      "outputContract": {
+        "kind": "raw"
+      }
     }
   },
   "ui": {
     "title": "Low-light enhancement",
     "group": "Local workflows",
-    "description": "Enhance dark images with bounded tonal-curve inference",
+    "description": "Enhance dark images with bounded Vulkan inference",
     "icon": "image-x-generic-symbolic",
     "order": 55
   },
-  "defaults": {"enabled": false, "weight": 2},
+  "defaults": {
+    "enabled": false,
+    "weight": 2
+  },
   "pipeline": {
     "hostResponsibilities": [
       "Read images only from the configured input folder without modifying originals",
       "Decode and validate bounded image inputs",
-      "Resize, normalize, and quantize the model tensor",
-      "Apply the predicted tonal curve to the full-resolution image",
-      "Denoise, color-manage, encode, display, and route results",
+      "Apply orientation and convert to sRGB before exact bicubic preprocessing",
+      "Construct the RGB float32 NCHW tensor scaled to the unit range",
+      "Validate finite enhanced RGB output with shape [1,3,256,256] in the unit range",
+      "Resize validated enhanced RGB back to original geometry with bicubic interpolation",
+      "Color-manage, encode, display, and route results",
       "Publish new files without overwrite only in a disjoint configured output folder"
     ]
   },
   "acceptance": [
     {
-      "metric": "edge-tpu-compiled-operations",
+      "metric": "vulkan-cpu-fallback-rate",
       "comparator": "equal",
-      "target": 100,
+      "target": 0,
       "unit": "percent",
-      "description": "Compiler report maps every model operation to the Edge TPU"
+      "description": "The named hardware Vulkan run performs inference without CPU fallback"
     },
     {
-      "metric": "quantized-ssim",
+      "metric": "portable-native-ssim",
       "comparator": "at-least",
-      "target": 0.95,
+      "target": 0.999,
       "unit": "ratio",
-      "description": "Quantized output matches the frozen float-model baseline on the holdout set"
+      "description": "The ncnn output matches the accepted portable Retinexformer output on the frozen holdout"
+    },
+    {
+      "metric": "paired-holdout-ssim",
+      "comparator": "at-least",
+      "target": 0.8,
+      "unit": "ratio",
+      "description": "The complete enhanced output meets the paired normal-light holdout threshold"
+    },
+    {
+      "metric": "output-range-violation-rate",
+      "comparator": "equal",
+      "target": 0,
+      "unit": "ratio",
+      "description": "No native output component is non-finite or outside the unit range"
     },
     {
       "metric": "color-error-ciede2000",
       "comparator": "at-most",
       "target": 3,
       "unit": "score",
-      "description": "Median color error stays below the visible-quality threshold on the holdout set"
+      "description": "Median color error stays below the visible-quality threshold on the paired holdout"
     },
     {
       "metric": "p95-device-latency",
       "comparator": "at-most",
       "target": 50,
       "unit": "milliseconds",
-      "description": "Warm 256×256 model invocation on the reference Coral USB Accelerator"
+      "description": "Warm 256x256 ncnn invocation on the named RX 6600 XT"
     },
     {
       "metric": "end-to-end-speedup",
       "comparator": "at-least",
       "target": 1.2,
       "unit": "ratio",
-      "description": "Complete host pipeline beats the documented CPU tone-mapping baseline"
+      "description": "Complete GPU pipeline beats the documented CPU enhancement baseline"
     }
   ]
 }

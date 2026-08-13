@@ -19,17 +19,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .plugins.settings import (
+    ConfigurationMigration,
     PluginConfigurationSpec,
     PluginSettingsError,
     PluginSettingsStore,
 )
 
 LOW_LIGHT_WORKLOAD_ID = "low-light-enhancement"
-LOW_LIGHT_CONFIGURATION_VERSION = "0.1.0"
+LOW_LIGHT_CONFIGURATION_VERSION = "0.2.0"
 DEFAULT_LOW_LIGHT_SETTINGS_ROOT = "~/.config/omnitensor/workload-settings"
 DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_PATH_CHARACTERS = 4096
 MAX_OUTPUT_NAME_CHARACTERS = 255
+
+
+def _migrate_low_light_0_1_to_0_2(configuration: dict) -> dict:
+    """Preserve the unchanged folder contract across the GPU profile migration."""
+    return dict(configuration)
 
 LOW_LIGHT_CONFIGURATION_SPEC = PluginConfigurationSpec(
     plugin_id=LOW_LIGHT_WORKLOAD_ID,
@@ -53,6 +59,13 @@ LOW_LIGHT_CONFIGURATION_SPEC = PluginConfigurationSpec(
         },
     },
     defaults={"inputFolder": None, "outputFolder": None},
+    migrations=(
+        ConfigurationMigration(
+            "0.1.0",
+            LOW_LIGHT_CONFIGURATION_VERSION,
+            _migrate_low_light_0_1_to_0_2,
+        ),
+    ),
 )
 
 

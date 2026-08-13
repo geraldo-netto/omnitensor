@@ -24,7 +24,7 @@ from omnitensor.lowlight import (
     publish_low_light_output,
     validate_low_light_workspace,
 )
-from omnitensor.plugins.settings import PluginSettingsStore
+from omnitensor.plugins.settings import PluginConfigurationSpec, PluginSettingsStore
 
 
 def _workspace(tmp_path: Path) -> tuple[LowLightWorkspace, Path]:
@@ -64,6 +64,49 @@ def test_configuration_persists_canonical_folders_and_reloads(tmp_path):
 
 def test_unconfigured_store_is_explicit(tmp_path):
     assert load_low_light_workspace(PluginSettingsStore(tmp_path)) is None
+
+
+def test_version_0_1_folder_settings_migrate_without_semantic_drift(tmp_path):
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    store = PluginSettingsStore(tmp_path / "settings")
+    legacy = PluginConfigurationSpec(
+        plugin_id=LOW_LIGHT_CONFIGURATION_SPEC.plugin_id,
+        plugin_version="0.1.0",
+        schema=LOW_LIGHT_CONFIGURATION_SPEC.schema,
+        defaults=LOW_LIGHT_CONFIGURATION_SPEC.defaults,
+    )
+    stored = store.update(
+        legacy,
+        expected_revision=0,
+        configuration={"inputFolder": str(source), "outputFolder": str(output)},
+    )
+
+    migrated = load_low_light_workspace(store)
+
+    assert stored.revision == 1
+    assert migrated == ConfiguredLowLightWorkspace(
+        LowLightWorkspace(source.resolve(), output.resolve()),
+        2,
+    )
+    document = json.loads((tmp_path / "settings/low-light-enhancement.json").read_text())
+    assert document["pluginVersion"] == "0.2.0"
+
+
+@given(
+    source=st.one_of(st.none(), st.text(min_size=1, max_size=32)),
+    destination=st.one_of(st.none(), st.text(min_size=1, max_size=32)),
+)
+def test_property_version_0_2_migration_preserves_folder_values(source, destination):
+    legacy = {"inputFolder": source, "outputFolder": destination}
+
+    migrated = lowlight._migrate_low_light_0_1_to_0_2(legacy)
+
+    assert lowlight.LOW_LIGHT_CONFIGURATION_VERSION == "0.2.0"
+    assert migrated == legacy
+    assert migrated is not legacy
 
 
 def test_semantically_incomplete_or_noncanonical_persisted_settings_fail_closed(tmp_path):
