@@ -417,19 +417,32 @@ class JobSubmissionService:
             request_id = document["requestId"]
             job_id = document["jobId"]
         except _RequestError as error:
-            return _result_reply(
-                error.request_id, "unknown", "unknown", error.code, error.message,
-                self._clock_ms(),
+            reply = _result_reply(
+                error.request_id,
+                "unknown",
+                "unknown",
+                error.code,
+                error.message,
+                max(1, int(self._clock_ms())),
             )
-        record = self._lookup(job_id, owner)
-        if record is None:
-            # A job belonging to someone else answers exactly as one that never
-            # existed, so a reply never confirms which job ids are real.
-            return _result_reply(
-                request_id, job_id, "unknown", "job-not-found",
-                "No such job for this caller", self._clock_ms(),
-            )
-        return _record_reply(request_id, record, self._clock_ms())
+        else:
+            record = self._lookup(job_id, owner)
+            if record is None:
+                # A job belonging to someone else answers exactly as one that never
+                # existed, so a reply never confirms which job ids are real.
+                reply = _result_reply(
+                    request_id,
+                    job_id,
+                    "unknown",
+                    "job-not-found",
+                    "No such job for this caller",
+                    max(1, int(self._clock_ms())),
+                )
+            else:
+                reply = _record_reply(
+                    request_id, record, max(1, int(self._clock_ms()))
+                )
+        return _validated_result_reply(reply)
 
     def _lookup(self, job_id: str, owner: str):
         if not isinstance(job_id, str) or not job_id:
@@ -610,6 +623,18 @@ def _terminal_status(task: asyncio.Future) -> tuple[PluginResultStatus, str]:
     if error is not None:
         return PluginResultStatus.FAILED, f"{type(error).__name__}: {error}"
     return PluginResultStatus.SUCCEEDED, "Job completed"
+
+
+def _validated_result_reply(reply: str) -> str:
+    """Validate the exact job-result text at its single emission boundary."""
+    try:
+        document = json.loads(reply, parse_constant=_reject_json_constant)
+    except (TypeError, ValueError, RecursionError) as error:
+        raise RuntimeError("job result reply is not valid JSON") from error
+    violations = validate_document("runtime-job-result.schema.json", document)
+    if violations:
+        raise RuntimeError(f"job result reply violates contract: {violations}")
+    return reply
 
 
 def _result_reply(

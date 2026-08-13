@@ -15,6 +15,8 @@ from omnitensor.jobs import (
     JobSubmissionService,
     PredicateJobAuthorizer,
 )
+from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
+from omnitensor.plugins.results import JobResultStore
 from omnitensor.registry import validate_document
 
 T = TypeVar("T")
@@ -808,6 +810,143 @@ def test_an_impossible_fraction_is_clamped_rather_than_losing_the_update(fractio
         return reply
 
     assert run_scenario(scenario())["progress"]["fraction"] == expected
+
+
+@pytest.mark.parametrize("fraction", [0.0, 1.0])
+@pytest.mark.parametrize("detail_length", [200, 201])
+def test_running_result_progress_and_truncation_boundaries(fraction, detail_length):
+    store = JobResultStore()
+    detail = "p" * detail_length
+    store.record_progress(
+        "job-progress",
+        "uid:1000",
+        PluginProgress("job-progress", "infer", fraction, detail, 100),
+    )
+    service = JobSubmissionService(results=store, clock_ms=lambda: 123)
+
+    reply = run_scenario(
+        service.job_result_text(
+            json.dumps(result_document("job-progress")), owner="uid:1000"
+        )
+    )
+
+    document = decode_result(reply)
+    assert document["state"] == "running"
+    assert document["progress"] == {
+        "fraction": fraction,
+        "detail": "p" * min(detail_length, 200),
+    }
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        PluginResultStatus.SUCCEEDED,
+        PluginResultStatus.FAILED,
+        PluginResultStatus.CANCELLED,
+    ],
+)
+def test_every_terminal_result_state_is_schema_valid(status):
+    store = JobResultStore()
+    store.record_result(
+        "job-terminal",
+        "uid:1000",
+        PluginResult("job-terminal", status, {"value": 1}, "finished", 100),
+    )
+    service = JobSubmissionService(results=store, clock_ms=lambda: 123)
+
+    document = decode_result(
+        run_scenario(
+            service.job_result_text(
+                json.dumps(result_document("job-terminal")), owner="uid:1000"
+            )
+        )
+    )
+
+    assert document["state"] == str(status)
+    assert document["code"] == f"job-{status}"
+    assert document["message"] == "finished"
+
+
+@pytest.mark.parametrize("detail_length", [500, 501])
+def test_terminal_result_message_truncation_boundary(detail_length):
+    store = JobResultStore()
+    store.record_result(
+        "job-detail",
+        "uid:1000",
+        PluginResult(
+            "job-detail",
+            PluginResultStatus.FAILED,
+            {},
+            "d" * detail_length,
+            100,
+        ),
+    )
+    service = JobSubmissionService(results=store, clock_ms=lambda: 123)
+
+    document = decode_result(
+        run_scenario(
+            service.job_result_text(
+                json.dumps(result_document("job-detail")), owner="uid:1000"
+            )
+        )
+    )
+
+    assert document["message"] == "d" * min(detail_length, 500)
+
+
+def test_job_result_validation_fails_closed_for_an_invalid_stored_state():
+    store = JobResultStore()
+    store.record_result(
+        "job-invalid",
+        "uid:1000",
+        PluginResult("job-invalid", "invalid", {}, "finished", 100),  # type: ignore[arg-type]
+    )
+    service = JobSubmissionService(results=store, clock_ms=lambda: 123)
+
+    with pytest.raises(RuntimeError, match="job result reply violates contract"):
+        run_scenario(
+            service.job_result_text(
+                json.dumps(result_document("job-invalid")), owner="uid:1000"
+            )
+        )
+
+
+def test_job_result_validation_fails_closed_for_non_json_output():
+    store = JobResultStore()
+    store.record_result(
+        "job-invalid-json",
+        "uid:1000",
+        PluginResult(
+            "job-invalid-json",
+            PluginResultStatus.SUCCEEDED,
+            {"score": float("nan")},
+            "finished",
+            100,
+        ),
+    )
+    service = JobSubmissionService(results=store, clock_ms=lambda: 123)
+
+    with pytest.raises(RuntimeError, match="job result reply is not valid JSON"):
+        run_scenario(
+            service.job_result_text(
+                json.dumps(result_document("job-invalid-json")), owner="uid:1000"
+            )
+        )
+
+
+def test_job_result_timestamp_is_clamped_to_the_schema_minimum():
+    service = JobSubmissionService(clock_ms=lambda: 0)
+
+    document = decode_result(
+        run_scenario(
+            service.job_result_text(
+                json.dumps(result_document("job-unknown")), owner="uid:1000"
+            )
+        )
+    )
+
+    assert document["timestamp"] == 1
 
 
 def test_progress_for_an_unknown_job_is_ignored_not_filed_under_a_guess():
