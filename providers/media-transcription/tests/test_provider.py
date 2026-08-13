@@ -1041,7 +1041,13 @@ def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_p
         lease_path,
     )
     monkeypatch.setattr(provider, "_qualification", _qualification_document)
-    monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: bootstrap)
+    requested_plugin_ids = []
+
+    def current_bootstrap(plugin_id):
+        requested_plugin_ids.append(plugin_id)
+        return bootstrap
+
+    monkeypatch.setattr(provider, "current_plugin_bootstrap", current_bootstrap)
     preflight_order = []
 
     def vision_runtime():
@@ -1059,6 +1065,7 @@ def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_p
     )
     monkeypatch.setattr(provider.WhisperVulkanTranscriber, "preflight", speech_preflight)
     plugin = provider.create()
+    assert requested_plugin_ids == [provider.PLUGIN_ID]
     assert plugin.plugin_id == provider.PLUGIN_ID
     assert plugin._identity.provider_id == provider.PROVIDER_ID
     asyncio.run(plugin._preflight())
@@ -1066,8 +1073,17 @@ def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_p
 
     missing_lease = PluginBootstrap(provider.PLUGIN_ID, bootstrap.artifacts, None, None)
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: missing_lease)
-    with pytest.raises(provider.QualifiedMediaError, match="grant is unavailable"):
+    with pytest.raises(provider.QualifiedMediaError) as excinfo:
         provider.create()
+    assert str(excinfo.value) == "GPU accelerator grant is unavailable"
+
+    wrong_artifacts = _qualification_document()
+    wrong_artifacts["artifacts"] = {}
+    monkeypatch.setattr(provider, "_qualification", lambda: wrong_artifacts)
+    monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: bootstrap)
+    with pytest.raises(provider.QualifiedMediaError) as excinfo:
+        provider.create()
+    assert str(excinfo.value) == "media artifacts differ from qualification"
 
 
 def test_public_provider_exports_are_bounded():
