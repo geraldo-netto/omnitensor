@@ -14,6 +14,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import omnitensor_media_transcription.documents as documents
+import omnitensor_media_transcription.presentations as presentations
 import omnitensor_media_transcription.provider as provider
 import pytest
 from PIL import Image, ImageDraw, ImageFont
@@ -510,7 +512,7 @@ async def test_presentation_image_failure_and_cancellation_always_remove_temp_fi
 ):
     source = _odp(tmp_path / "slides.odp", image=b"not an image")
     fixed_root = tmp_path / "presentation-work"
-    monkeypatch.setattr(provider.tempfile, "mkdtemp", lambda **_kwargs: str(fixed_root))
+    monkeypatch.setattr(presentations.tempfile, "mkdtemp", lambda **_kwargs: str(fixed_root))
     fixed_root.mkdir()
 
     class Vision:
@@ -673,14 +675,14 @@ def test_svg_document_and_slide_failure_branches_are_bounded(monkeypatch, tmp_pa
     source.write_bytes(b"pdf")
     refusal = MediaTranscriptionError("document-invalid", "refused")
     monkeypatch.setattr(
-        provider,
+        documents,
         "_render_pdf_page",
         lambda *_arguments: (_ for _ in ()).throw(refusal),
     )
     with pytest.raises(MediaTranscriptionError, match="refused"):
         provider._render_document_page(source, root, 1)
     monkeypatch.setattr(
-        provider,
+        documents,
         "_render_pdf_page",
         lambda *_arguments: (_ for _ in ()).throw(RuntimeError("decoder crashed")),
     )
@@ -1080,3 +1082,8 @@ def test_public_provider_exports_are_bounded():
         "WhisperVulkanTranscriber",
         "create",
     ]
+    assert provider.AvMediaAdapter.__module__.endswith(".formats")
+    assert provider.WhisperVulkanTranscriber.__module__.endswith(".models")
+    assert provider.QwenVulkanVisualTranscriber.__module__.endswith(".models")
+    assert provider.DocumentPageTranscriber.__module__.endswith(".documents")
+    assert provider.PresentationArchiveTranscriber.__module__.endswith(".presentations")
