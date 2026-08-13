@@ -254,7 +254,7 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
             "selected-text-tools",
             "selected-text-tools",
             "omnitensor_qwen_selected_text",
-            ["qwen3-8b-q4-k-m"],
+            ["qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
         ),
         ("file-organizer", "file-organizer", "omnitensor_qwen_file_organizer", ["qwen3-8b-q4-k-m"]),
     ],
@@ -273,7 +273,9 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == plugin_id
     assert [item["id"] for item in manifest["plugin"]["artifacts"]] == artifact_ids
     qwen_artifacts = [
-        artifact for artifact in manifest["plugin"]["artifacts"] if artifact["format"] == "gguf"
+        artifact
+        for artifact in manifest["plugin"]["artifacts"]
+        if artifact["id"] == QWEN_REFERENCE.id
     ]
     assert qwen_artifacts == [
             {

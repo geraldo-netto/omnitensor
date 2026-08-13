@@ -36,6 +36,18 @@ def load_qualification(
     model_sha256: str,
     task: GenerationTask,
 ) -> Qualification:
+    document = _qualification_document()
+    qualification = _model_qualification(document, model_id, model_sha256)
+    _workload(document["workloads"], plugin_id, model_id, task_sha256(task))
+    return qualification
+
+
+def load_model_qualification(model_id: str, model_sha256: str) -> Qualification:
+    """Bind an operation-specific model to the same native GPU receipt."""
+    return _model_qualification(_qualification_document(), model_id, model_sha256)
+
+
+def _qualification_document() -> dict:
     resource = importlib.resources.files("omnitensor_qwen_runtime").joinpath("qualification.json")
     raw = resource.read_bytes()
     if len(raw) > _MAX_RECEIPT_BYTES:
@@ -58,9 +70,13 @@ def load_qualification(
     device = document["device"]
     if not isinstance(device, str) or not device:
         raise RuntimeError("Qwen qualification device is invalid")
+    return document
+
+
+def _model_qualification(document: dict, model_id: str, model_sha256: str) -> Qualification:
+    device = document["device"]
     runtime = _runtime(document["runtime"])
     model_layers = _model(document["models"], model_id, model_sha256)
-    _workload(document["workloads"], plugin_id, model_id, task_sha256(task))
     return Qualification(device, model_layers, runtime[0], runtime[1])
 
 

@@ -59,6 +59,7 @@ class SelectedTextPlugin(ManagedPlugin):
         router: GenerationRouter,
         fragment_store: MemoryFragmentStore,
         *,
+        translation_routes: Mapping[str, GenerationRouter] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         super().__init__()
@@ -69,12 +70,15 @@ class SelectedTextPlugin(ManagedPlugin):
         if clock_ms is not None and not callable(clock_ms):
             raise SelectedTextError("clock-invalid", "clock must be callable")
         self._router = router
+        self._translation_routes = _validated_translation_routes(translation_routes)
         self._store = fragment_store
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
 
     async def on_start(self) -> None:
         self.permissions.require(READ_ONCE_PERMISSION)
         self._router.require_ready()
+        for router in self._translation_routes.values():
+            router.require_ready()
 
     async def on_health(self) -> PluginHealth:
         self._router.require_ready()
@@ -118,7 +122,7 @@ class SelectedTextPlugin(ManagedPlugin):
             await progress.report(
                 PluginProgress(request.job_id, "generate", 0.1, "", self._clock_ms())
             )
-            generated = await self._router.run(
+            generated = await self._route(operation, language).run(
                 selected_text_task(),
                 generation_request(
                     request.job_id,
@@ -193,6 +197,11 @@ class SelectedTextPlugin(ManagedPlugin):
             )
         return selection, str(operation), language
 
+    def _route(self, operation: str, language: str | None) -> GenerationRouter:
+        if operation != "translate" or language is None:
+            return self._router
+        return self._translation_routes.get(language.casefold(), self._router)
+
 
 class _SelectedTextProgress:
     def __init__(
@@ -237,6 +246,31 @@ def _validated_language(value: object) -> str:
             f"translation language must contain 1-{MAX_LANGUAGE_CHARACTERS} letters",
         )
     return value.strip()
+
+
+def _validated_translation_routes(
+    value: Mapping[str, GenerationRouter] | None,
+) -> dict[str, GenerationRouter]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise SelectedTextError(
+            "provider-invalid", "translation routes must be a language mapping"
+        )
+    routes: dict[str, GenerationRouter] = {}
+    for language, router in value.items():
+        try:
+            normalized = _validated_language(language).casefold()
+        except SelectedTextError as error:
+            raise SelectedTextError(
+                "provider-invalid", "translation route language is invalid"
+            ) from error
+        if normalized in routes or not isinstance(router, GenerationRouter):
+            raise SelectedTextError(
+                "provider-invalid", "translation routes must be unique generation routers"
+            )
+        routes[normalized] = router
+    return routes
 
 
 def grounded_selected_text_result(

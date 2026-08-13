@@ -18,6 +18,13 @@
       "contextTokens": 32768,
       "keyCache": "q8_0",
       "valueCache": "q8_0"
+    },
+    "dictalm2-hebrew-q4-k-m": {
+      "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
+      "fullyOffloadedLayers": 33,
+      "contextTokens": 32768,
+      "keyCache": "q8_0",
+      "valueCache": "q8_0"
     }
   },
   "workloads": {

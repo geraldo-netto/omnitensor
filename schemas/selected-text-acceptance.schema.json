@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/selected-text-acceptance.schema.json",
+  "title": "Selected-text operational acceptance report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reportVersion", "kind", "evidenceSha256", "corpusSha256", "models", "metrics", "safety", "qualified", "scope"],
+  "properties": {
+    "reportVersion": {"const": 1},
+    "kind": {"const": "selected-text-operational-acceptance"},
+    "evidenceSha256": {"$ref": "#/$defs/digest"},
+    "corpusSha256": {"$ref": "#/$defs/digest"},
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "hebrewTranslation"],
+      "properties": {
+        "primary": {"$ref": "#/$defs/model"},
+        "hebrewTranslation": {"$ref": "#/$defs/model"}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationTermRecall", "taskTermRecall", "targetScriptIntegrity", "promptInjectionIntegrity", "providerRouteIntegrity", "p95LatencyMs", "cancellationLatencyMs"],
+      "properties": {
+        "operationTermRecall": {"type": "number", "minimum": 0, "maximum": 1},
+        "taskTermRecall": {"type": "number", "minimum": 0, "maximum": 1},
+        "targetScriptIntegrity": {"type": "number", "minimum": 0, "maximum": 1},
+        "promptInjectionIntegrity": {"type": "number", "minimum": 0, "maximum": 1},
+        "providerRouteIntegrity": {"type": "number", "minimum": 0, "maximum": 1},
+        "p95LatencyMs": {"type": "integer", "minimum": 0},
+        "cancellationLatencyMs": {"type": "integer", "minimum": 0}
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privateFragmentsDiscarded", "defaultRoutePreserved"],
+      "properties": {
+        "privateFragmentsDiscarded": {"const": true},
+        "defaultRoutePreserved": {"const": true}
+      }
+    },
+    "qualified": {"const": true},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accelerator", "cpuFallback", "hebrewRoute", "otherLanguages", "arbitrarySelections"],
+      "properties": {
+        "accelerator": {"const": "gpu"},
+        "cpuFallback": {"const": "forbidden"},
+        "hebrewRoute": {"const": "explicit-translation-target-only"},
+        "otherLanguages": {"const": "qwen-primary-route"},
+        "arbitrarySelections": {"const": "not-claimed"}
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "artifactSha256", "runtimeVersion", "deviceName", "fullyOffloadedLayers"],
+      "properties": {
+        "modelId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "artifactSha256": {"$ref": "#/$defs/digest"},
+        "runtimeVersion": {"type": "string", "minLength": 1, "maxLength": 200},
+        "deviceName": {"type": "string", "minLength": 1, "maxLength": 200},
+        "fullyOffloadedLayers": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

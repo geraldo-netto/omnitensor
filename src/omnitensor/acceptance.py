@@ -62,6 +62,7 @@ REQUIRED_SCHEMAS = (
     "document-question-answer.schema.json",
     "document-question-acceptance.schema.json",
     "document-question-result.schema.json",
+    "selected-text-acceptance.schema.json",
     "selected-text-answer.schema.json",
     "selected-text-result.schema.json",
     "file-organizer-answer.schema.json",

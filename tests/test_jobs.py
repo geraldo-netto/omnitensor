@@ -9,6 +9,7 @@ from typing import TypeVar
 import pytest
 
 from omnitensor.jobs import (
+    DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS,
     DEFAULT_MAX_JOB_REQUEST_BYTES,
     JobDispatchError,
     JobSubmissionService,
@@ -349,6 +350,19 @@ def test_cancellation_deadline_is_bounded_and_job_remains_accounted():
         assert service.active_job_ids() == ()
 
     run_scenario(scenario())
+
+
+def test_default_cancellation_budget_contains_worker_drain_and_escalation():
+    from omnitensor.plugins.supervisor import (
+        DEFAULT_CANCEL_TIMEOUT_SECONDS,
+        DEFAULT_STOP_TIMEOUT_SECONDS,
+    )
+
+    assert DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS == 2.0
+    assert (
+        DEFAULT_CANCEL_TIMEOUT_SECONDS + DEFAULT_STOP_TIMEOUT_SECONDS
+        < DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS
+    )
 
 
 def test_stop_cancels_every_active_job_and_is_idempotent():

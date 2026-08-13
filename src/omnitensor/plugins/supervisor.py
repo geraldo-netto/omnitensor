@@ -36,8 +36,11 @@ DEFAULT_HANDSHAKE_TIMEOUT_SECONDS = 5.0
 # Startup may load a model or open a device; it is not protocol negotiation
 # and must not share the handshake's deadline.
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
-DEFAULT_STOP_TIMEOUT_SECONDS = 2.0
-DEFAULT_CANCEL_TIMEOUT_SECONDS = 60.0
+# A public cancellation waits at most two seconds.  Keep worker drain and
+# process escalation inside that parent budget so native calls cannot make the
+# public API report a timeout while cleanup continues for another minute.
+DEFAULT_STOP_TIMEOUT_SECONDS = 0.5
+DEFAULT_CANCEL_TIMEOUT_SECONDS = 0.25
 DEFAULT_MAX_RESTARTS = 3
 DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS = 0.1
 DEFAULT_RESTART_MAX_BACKOFF_SECONDS = 5.0

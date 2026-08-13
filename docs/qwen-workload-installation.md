@@ -64,7 +64,7 @@ wheel. All four depend on one implementation wheel:
 | `omnitensor-qwen-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the four factories | runtime only |
 | `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3-8B Q4_K_M |
 | `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3-8B Q4_K_M plus BGE-small-en-v1.5 |
-| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-8B Q4_K_M |
+| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-8B Q4_K_M plus operation-specific DictaLM2 Hebrew |
 | `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3-8B Q4_K_M |
 
 The single shared generation artifact is the official
@@ -81,6 +81,16 @@ selection and installation paths; every workload retains an independent worker,
 task contract, grant set, and acceptance status. No checkout, package install,
 or catalog entry is by itself a live readiness or quality claim;
 final provider qualification and `DescribePlugins` must still pass.
+
+Selected text additionally binds the official
+`dicta-il/dictalm2.0-instruct-GGUF` Q4_K_M artifact at revision
+`9ed3346a1440643825287abf86e28800005ec9b3`. It is Apache-2.0,
+4,374,991,808 bytes, and has SHA-256
+`dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735`.
+The [DictaLM catalog](../generation-models/dictalm2-hebrew.json) binds those
+bytes and provenance. It is not a global language model: the selected-text
+worker invokes it only for an explicit `translate` request whose target is
+Hebrew. Qwen remains primary for English and every other route.
 
 Ask selected files additionally requires the accepted BGE/ncnn graph and its
 two declared companions:
@@ -109,7 +119,8 @@ ncnn export is not interchangeable with this graph.
 | Access to the selected `/dev/dri/renderD*` device | The sandbox mounts only the device granted to that worker |
 | The exact accepted `llama-cpp-python==0.3.34` Vulkan wheel | In-process Qwen execution inside the seccomp worker; startup verifies its native-library hashes, so an arbitrary rebuild or ordinary CPU wheel is not acceptable |
 | All five provider wheels | The runtime implementation and all four independently discoverable workload identities |
-| The pinned Qwen3-8B Q4_K_M GGUF | One digest-locked generation artifact shared by all four workload providers |
+| The pinned Qwen3-8B Q4_K_M GGUF | One digest-locked primary generation artifact shared by all four workload providers |
+| The pinned DictaLM2.0 7B Instruct Q4_K_M GGUF | Explicit Hebrew translation for selected-text tools only |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
 | A user D-Bus session | The OmniTensor control and job-result surface |
 
@@ -244,6 +255,7 @@ in the generation catalog before running:
 ```sh
 OMNI_MODELS=~/.local/share/omnitensor/provider-sources
 mkdir -p "$OMNI_MODELS/qwen3-8b"
+mkdir -p "$OMNI_MODELS/dictalm2-hebrew"
 
 curl --fail --location \
   'https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf' \
@@ -254,6 +266,17 @@ printf '%s  %s\n' \
   "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" | sha256sum --check --strict
 test "$(stat --format=%s "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf")" \
   -eq 5027783488
+
+curl --fail --location \
+  'https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/9ed3346a1440643825287abf86e28800005ec9b3/dictalm2.0-instruct-Q4_K_M.gguf' \
+  --output "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf"
+
+printf '%s  %s\n' \
+  'dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735' \
+  "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf" | \
+  sha256sum --check --strict
+test "$(stat --format=%s "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf")" \
+  -eq 4374991808
 ```
 
 Produce BGE in a separate producer venv as described in
@@ -285,6 +308,11 @@ OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
   --bge-tokenizer "$BGE_TOKENIZER" \
   --accept-qwen-license Apache-2.0 \
   --accept-bge-license MIT
+
+"$OMNI_SERVICE/omnitensor-install-hebrew-translation-model" \
+  --artifact-root "$OMNI_ARTIFACTS" \
+  --model "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf" \
+  --accept-license Apache-2.0
 ```
 
 Set `OMNITENSOR_ARTIFACT_ROOT` for the service to the same absolute store if it
@@ -396,11 +424,24 @@ llama.cpp bytes. Verify a newly collected evidence document with:
 Event extraction and file organizer currently have
 closed schemas, privacy/safety regression coverage, worker startup checks, and
 representative integration tests, but no declared model-quality acceptance
-metrics. Their manifest `acceptance` arrays are intentionally empty. Selected
-text remains below the Cinnamon readiness floor because the 8B model still
-fails the Hebrew semantic-translation probe even though its structural schema
-and task-separation probes pass. Do not present installation as selected-text
-quality qualification.
+metrics. Their manifest `acceptance` arrays are intentionally empty.
+
+Selected text has a separate frozen 16-case operational gate. The qualified
+RX 6600 XT run uses Qwen for English/default, Italian, and every non-Hebrew
+route, and DictaLM only for explicit Hebrew translation. It passed operation
+and task term recall, target-script, injection, route, latency, cancellation,
+privacy, full-offload, and no-CPU-fallback gates. Verify newly collected
+evidence with:
+
+```sh
+"$OMNI_SERVICE/omnitensor-qualify-selected-text" \
+  --evidence /absolute/path/to/selected-text-evidence.json \
+  --output /absolute/path/to/selected-text-acceptance.json
+```
+
+That qualification is digest-bound to both model artifacts, runtime 0.3.34,
+the frozen corpus, and the named GPU. It is not an arbitrary-text benchmark and
+does not authorize silently inferred or globally fixed language routing.
 
 The provider wheel contains `qualification.json`. It binds the exact task
 contract hashes, Qwen hashes, `llama-cpp-python` version and native-library
@@ -435,7 +476,9 @@ undeclared quality metrics for the other tasks.
 
 ## Future GPU models and NPU providers
 
-The four current manifests select one shared Qwen3-8B Q4_K_M artifact. A future
+The four current manifests select one shared primary Qwen3-8B Q4_K_M artifact;
+selected text additionally selects its dedicated Hebrew artifact only at the
+explicit operation boundary. A future
 larger or differently quantized GPU model must be a new provider release rather
 than a replacement under the existing identity. Such a release must:
 

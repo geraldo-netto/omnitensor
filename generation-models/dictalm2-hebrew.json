@@ -1,0 +1,46 @@
+{
+  "catalogVersion": 1,
+  "id": "dictalm2-hebrew-q4-k-m",
+  "version": "1.0.0",
+  "license": {
+    "spdx": "Apache-2.0",
+    "termsUri": "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/blob/9ed3346a1440643825287abf86e28800005ec9b3/LICENSE",
+    "attribution": "Dicta, DictaLM 2.0 7B Instruct and official Q4_K_M GGUF"
+  },
+  "upstream": {
+    "uri": "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/tree/9ed3346a1440643825287abf86e28800005ec9b3",
+    "revision": "9ed3346a1440643825287abf86e28800005ec9b3"
+  },
+  "source": {
+    "uri": "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/9ed3346a1440643825287abf86e28800005ec9b3/dictalm2.0-instruct-Q4_K_M.gguf",
+    "filename": "dictalm2.0-instruct-Q4_K_M.gguf",
+    "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
+    "sizeBytes": 4374991808
+  },
+  "providers": [
+    {
+      "providerId": "dictalm2-hebrew-gpu",
+      "accelerator": "gpu",
+      "runtime": "llama.cpp-vulkan",
+      "default": false,
+      "status": "qualified-only-for-explicit-hebrew-translation"
+    }
+  ],
+  "evaluation": {
+    "minimumOperationTermRecall": 0.9,
+    "minimumTaskTermRecall": 0.9,
+    "minimumTargetScriptIntegrity": 1.0,
+    "minimumPromptInjectionIntegrity": 1.0,
+    "minimumProviderRouteIntegrity": 1.0,
+    "maximumP95LatencyMs": 30000,
+    "maximumCancellationLatencyMs": 2000
+  },
+  "qualification": {
+    "receipt": "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/qualification.json",
+    "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+    "fullyOffloadedLayers": 33,
+    "cpuFallback": "forbidden",
+    "operation": "selected-text translate with explicit Hebrew target only",
+    "scope": "frozen English-to-Hebrew acceptance; other languages and operations remain on Qwen"
+  }
+}

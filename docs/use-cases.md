@@ -51,7 +51,12 @@ Related external workflows remain manual and disabled until their complete
 providers advertise readiness. `selected-text-tools` processes only the text
 captured by an explicit action; it never monitors clipboard changes or stores
 selection history. Its five operations share the generation-provider contract
-and return reviewable output plus a digest/span evidence record.
+and return reviewable output plus a digest/span evidence record. Its installed
+1.1.0 Vulkan worker passed the frozen 16-case gate on the RX 6600 XT: Qwen3-8B
+remains primary for English and all routes except explicit Hebrew translation,
+which alone uses pinned DictaLM2. Language is never inferred from source text
+or fixed globally. Arbitrary-selection quality and NPU/TPU lanes are not
+claimed.
 `file-organizer` likewise reads only files selected for one manual request and
 returns an evidence-bound metadata plan; it cannot move, rename, overwrite,
 delete, or invoke commands.

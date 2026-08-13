@@ -108,6 +108,24 @@ async def running(*, mutate=None):
     return plugin, worker, store
 
 
+def described_worker(store, provider_id):
+    worker = Worker(store)
+    worker.descriptor = GenerationProviderDescriptor(
+        provider_id,
+        "gpu",
+        "llama.cpp-vulkan",
+        True,
+        ArtifactProvenance(
+            provider_id,
+            "1",
+            "b" * 64,
+            f"https://example.invalid/{provider_id}.gguf",
+            "Apache-2.0",
+        ),
+    )
+    return worker
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
 async def test_every_selected_text_operation_is_one_shot_grounded_and_reviewable(operation):
@@ -163,6 +181,81 @@ async def test_translation_control_is_private_bounded_and_exact():
     assert result.status is PluginResultStatus.SUCCEEDED
     generation = worker.requests[0][1]
     assert generation.content_references[0] == "private:job-1:control"
+
+
+@pytest.mark.asyncio
+async def test_explicit_hebrew_target_alone_uses_the_hebrew_translation_route():
+    store = MemoryFragmentStore()
+    primary = described_worker(store, "qwen3-gpu")
+    hebrew = described_worker(store, "dictalm2-hebrew-gpu")
+    plugin = SelectedTextPlugin(
+        GenerationRouter((primary,)),
+        store,
+        translation_routes={"Hebrew": GenerationRouter((hebrew,))},
+        clock_ms=lambda: 10,
+    )
+    await plugin.start(PluginContext(PLUGIN_ID, 1, {}, frozenset({READ_ONCE_PERMISSION})))
+
+    translated = await plugin.execute(
+        request("translate", selection="The train is blue.", language="hEbReW"),
+        CancellationController(),
+        Progress(),
+    )
+    assert translated.status is PluginResultStatus.SUCCEEDED
+    assert translated.output["providerId"] == "dictalm2-hebrew-gpu"
+    assert len(hebrew.requests) == 1
+    assert primary.requests == []
+
+    translated_elsewhere = await plugin.execute(
+        request("translate", selection="The train is blue.", language="Italian"),
+        CancellationController(),
+        Progress(),
+    )
+    assert translated_elsewhere.status is PluginResultStatus.SUCCEEDED
+    assert translated_elsewhere.output["providerId"] == "qwen3-gpu"
+
+    non_translation = await plugin.execute(
+        request("summarize", selection="רכבת כחולה."),
+        CancellationController(),
+        Progress(),
+    )
+    assert non_translation.status is PluginResultStatus.SUCCEEDED
+    assert non_translation.output["providerId"] == "qwen3-gpu"
+    assert len(primary.requests) == 2
+
+
+def test_translation_route_configuration_is_closed_and_case_unique():
+    store = MemoryFragmentStore()
+    router = GenerationRouter((Worker(store),))
+    invalid = (
+        ([], "translation routes must be a language mapping"),
+        ({"!": router}, "translation route language is invalid"),
+        ({"Hebrew": object()}, "translation routes must be unique generation routers"),
+        (
+            {"Hebrew": router, "hebrew": router},
+            "translation routes must be unique generation routers",
+        ),
+    )
+    for routes, detail in invalid:
+        with pytest.raises(SelectedTextError) as captured:
+            SelectedTextPlugin(router, store, translation_routes=routes)
+        assert (captured.value.code, captured.value.detail, str(captured.value)) == (
+            "provider-invalid",
+            detail,
+            f"provider-invalid: {detail}",
+        )
+
+
+@pytest.mark.asyncio
+async def test_every_configured_translation_route_must_be_ready_at_startup():
+    store = MemoryFragmentStore()
+    plugin = SelectedTextPlugin(
+        GenerationRouter((Worker(store),)),
+        store,
+        translation_routes={"Hebrew": GenerationRouter(())},
+    )
+    with pytest.raises(Exception, match="no qualified provider"):
+        await plugin.start(PluginContext(PLUGIN_ID, 1, {}, frozenset({READ_ONCE_PERMISSION})))
 
 
 @pytest.mark.asyncio
