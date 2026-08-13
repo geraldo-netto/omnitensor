@@ -344,6 +344,45 @@ def test_supervisor_cancels_and_drains_worker_before_releasing_channel():
     run_scenario(scenario())
 
 
+def test_request_cancel_drain_does_not_share_the_short_process_stop_deadline():
+    async def scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"cancel", "execute"}))
+        process = FakeProcess("events", offer, events)
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"events": process}),
+            stop_timeout=0.001,
+            cancel_timeout=0.05,
+        )
+        await supervisor.start(
+            (
+                WorkerSpec(
+                    "events",
+                    ("python", "worker.py"),
+                    capabilities=frozenset({"cancel", "execute"}),
+                ),
+            )
+        )
+        request = PluginRequest("job-1", "events", "manual", {}, 10, None)
+        pending = asyncio.create_task(supervisor.execute(request))
+        await asyncio.sleep(0)
+        pending.cancel()
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if decode_frame(process.writer.writes[-1]).type is WorkerMessageType.CANCEL:
+                break
+        await asyncio.sleep(0.01)
+        cancelled = PluginResult("job-1", PluginResultStatus.CANCELLED, {}, "cancelled", 12)
+        process.reader.feed_data(encode_frame(result_frame(cancelled)))
+
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert process.terminate_calls == process.kill_calls == 0
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
 def test_supervisor_refuses_missing_or_incompatible_executable_worker():
     async def scenario():
         supervisor = PluginWorkerSupervisor()
@@ -458,7 +497,11 @@ def test_supervisor_maps_broken_channel_and_forces_unresponsive_cancel(tmp_path)
             events,
             exit_on_close=False,
         )
-        cancelling = PluginWorkerSupervisor(FakeLauncher({"stuck": stuck}), stop_timeout=0.01)
+        cancelling = PluginWorkerSupervisor(
+            FakeLauncher({"stuck": stuck}),
+            stop_timeout=0.01,
+            cancel_timeout=0.01,
+        )
         await cancelling.start(
             (
                 WorkerSpec(
@@ -892,6 +935,8 @@ def test_timeouts_must_be_positive_numbers(timeout):
         PluginWorkerSupervisor(handshake_timeout=timeout)
     with pytest.raises(ValueError, match="stop_timeout must be positive"):
         PluginWorkerSupervisor(stop_timeout=timeout)
+    with pytest.raises(ValueError, match="cancel_timeout must be positive"):
+        PluginWorkerSupervisor(cancel_timeout=timeout)
 
 
 def test_worker_specs_are_bounded_unique_and_protocol_validated():

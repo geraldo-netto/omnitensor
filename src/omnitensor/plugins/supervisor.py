@@ -37,6 +37,7 @@ DEFAULT_HANDSHAKE_TIMEOUT_SECONDS = 5.0
 # and must not share the handshake's deadline.
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
 DEFAULT_STOP_TIMEOUT_SECONDS = 2.0
+DEFAULT_CANCEL_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RESTARTS = 3
 DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS = 0.1
 DEFAULT_RESTART_MAX_BACKOFF_SECONDS = 5.0
@@ -252,16 +253,19 @@ class PluginWorkerSupervisor:
         handshake_timeout: float = DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
         startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
         stop_timeout: float = DEFAULT_STOP_TIMEOUT_SECONDS,
+        cancel_timeout: float = DEFAULT_CANCEL_TIMEOUT_SECONDS,
         recovery_policy: WorkerRecoveryPolicy | None = None,
         failure_observer: WorkerFailureObserver | None = None,
     ) -> None:
         _validate_timeout("handshake_timeout", handshake_timeout)
         _validate_timeout("startup_timeout", startup_timeout)
         _validate_timeout("stop_timeout", stop_timeout)
+        _validate_timeout("cancel_timeout", cancel_timeout)
         self._launcher = launcher or AsyncioSubprocessLauncher()
         self._handshake_timeout = handshake_timeout
         self._startup_timeout = startup_timeout
         self._stop_timeout = stop_timeout
+        self._cancel_timeout = cancel_timeout
         self._recovery_policy = recovery_policy or WorkerRecoveryPolicy()
         self._failure_observer = failure_observer or _NullWorkerFailureObserver()
         self._slots: dict[str, _WorkerSlot] = {}
@@ -354,7 +358,7 @@ class PluginWorkerSupervisor:
                 ),
             )
             await asyncio.wait_for(
-                self._read_result(slot, request_id, None), timeout=self._stop_timeout
+                self._read_result(slot, request_id, None), timeout=self._cancel_timeout
             )
         except (Exception, asyncio.CancelledError):
             await _force_stop(slot.process, self._stop_timeout)
