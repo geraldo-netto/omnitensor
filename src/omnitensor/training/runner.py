@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from ..contract import schema_versions
 from ..plugins.recorder import FeatureRow, TelemetryRecorder
 from ..registry import (
     ManifestError,
@@ -29,12 +30,12 @@ BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 MAX_WIRE_BYTES = 1024 * 1024
 REQUIRED_METHODS = frozenset({"DescribeContract", "SubmitJob", "GetJobResult"})
-REQUIRED_SCHEMAS = {
-    "runtime-job-submit": 1,
-    "runtime-job-acknowledgement": 1,
-    "runtime-job-result-request": 1,
-    "runtime-job-result": 1,
-}
+REQUIRED_SCHEMAS = (
+    "runtime-job-submit",
+    "runtime-job-acknowledgement",
+    "runtime-job-result-request",
+    "runtime-job-result",
+)
 
 
 class ForecastRunError(ValueError):
@@ -166,6 +167,17 @@ def wire_document(text: str, schema: str) -> dict:
     return document
 
 
+def _runtime_job_schema_versions() -> dict[str, int]:
+    """Snapshot the four job contracts this client actually exchanges."""
+    available = schema_versions()
+    try:
+        return {name: available[name] for name in REQUIRED_SCHEMAS}
+    except KeyError as error:
+        raise ForecastRunError(
+            "runtime-contract-mismatch", "local runtime job schema versions are incomplete"
+        ) from error
+
+
 class TrustedForecastRunner:
     """Handshake, assemble measured history, submit, and poll one forecast."""
 
@@ -197,6 +209,7 @@ class TrustedForecastRunner:
         self._request_id = request_id
 
     async def run(self) -> dict:
+        required_schemas = _runtime_job_schema_versions()
         contract = wire_document(
             await self._client.describe_contract(), "runtime-contract.schema.json"
         )
@@ -205,7 +218,8 @@ class TrustedForecastRunner:
                 "runtime-contract-mismatch", "runtime lacks forecast job methods"
             )
         if any(
-            contract["schemas"].get(name) != version for name, version in REQUIRED_SCHEMAS.items()
+            contract["schemas"].get(name) != version
+            for name, version in required_schemas.items()
         ):
             raise ForecastRunError(
                 "runtime-contract-mismatch", "runtime job schema versions differ"
@@ -214,7 +228,7 @@ class TrustedForecastRunner:
         request_id = self._request_id()
         request = json.dumps(
             {
-                "version": 1,
+                "version": required_schemas["runtime-job-submit"],
                 "requestId": request_id,
                 "workloadId": self._workload.id,
                 "payload": payload,
@@ -230,13 +244,17 @@ class TrustedForecastRunner:
             raise ForecastRunError("runtime-response-invalid", "submission request id differs")
         if reply["status"] != "accepted" or reply["jobId"] is None:
             raise ForecastRunError(reply["code"], reply["message"])
-        return await self._poll(reply["jobId"])
+        return await self._poll(reply["jobId"], required_schemas)
 
-    async def _poll(self, job_id: str) -> dict:
+    async def _poll(self, job_id: str, schema_snapshot: dict[str, int]) -> dict:
         for attempt in range(self._attempts):
             request_id = self._request_id()
             request = json.dumps(
-                {"version": 1, "requestId": request_id, "jobId": job_id},
+                {
+                    "version": schema_snapshot["runtime-job-result-request"],
+                    "requestId": request_id,
+                    "jobId": job_id,
+                },
                 separators=(",", ":"),
             )
             reply = wire_document(

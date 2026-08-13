@@ -19,6 +19,7 @@ from omnitensor.training.runner import (
     ForecastRunError,
     TrustedForecastRunner,
     _load_catalog,
+    _runtime_job_schema_versions,
     _validate_binding_models,
     latest_forecast_payload,
     load_forecast_binding,
@@ -425,6 +426,16 @@ def test_wire_document_accepts_exact_byte_ceiling():
     assert wire_document(text, "runtime-contract.schema.json")["version"] == 1
 
 
+def test_runtime_job_schema_snapshot_fails_closed_when_packaging_is_incomplete(monkeypatch):
+    monkeypatch.setattr("omnitensor.training.runner.schema_versions", lambda: {})
+
+    with pytest.raises(ForecastRunError) as captured:
+        _runtime_job_schema_versions()
+
+    assert captured.value.code == "runtime-contract-mismatch"
+    assert captured.value.detail == "local runtime job schema versions are incomplete"
+
+
 @pytest.mark.asyncio
 async def test_runner_handshakes_submits_exact_tensor_and_polls_to_success(tmp_path):
     recorder = TelemetryRecorder(tmp_path)
@@ -472,6 +483,44 @@ async def test_runner_handshakes_submits_exact_tensor_and_polls_to_success(tmp_p
         {"version": 1, "requestId": "poll-2", "jobId": "job-1"},
     ]
     assert sleeps == [0.25]
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_one_derived_schema_snapshot_and_ignores_unrelated_versions(
+    tmp_path, monkeypatch
+):
+    recorder = TelemetryRecorder(tmp_path)
+    for row in _rows(2):
+        recorder.record(row.profile_id, row.features, row.observed_at_ms)
+    local_versions = {
+        "runtime-job-submit": 7,
+        "runtime-job-acknowledgement": 1,
+        "runtime-job-result-request": 9,
+        "runtime-job-result": 1,
+        "runtime-command": 2,
+    }
+    announced_versions = dict(local_versions)
+    announced_versions["runtime-command"] = 99
+    calls = []
+
+    def snapshot():
+        calls.append(True)
+        return dict(local_versions)
+
+    monkeypatch.setattr("omnitensor.training.runner.schema_versions", snapshot)
+    client = FakeClient(contract=_contract(schemas=announced_versions))
+    ids = iter(("submit-derived", "poll-derived"))
+
+    output = await TrustedForecastRunner(
+        _workload(), recorder, client, attempts=1, request_id=lambda: next(ids)
+    ).run()
+
+    assert output["reading"]["value"] == 0.75
+    assert calls == [True]
+    assert client.submissions[0]["version"] == 7
+    assert client.polls == [
+        {"version": 9, "requestId": "poll-derived", "jobId": "job-1"}
+    ]
 
 
 async def _record_sleep(seen, delay):
