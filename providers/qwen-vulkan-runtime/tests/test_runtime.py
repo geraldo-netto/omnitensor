@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from omnitensor_qwen_runtime import bge, factories, qualification, runtime
+from omnitensor_qwen_runtime import bge, factories, grammar, grounding, qualification, runtime
 
 from omnitensor.plugins.document_qa import (
     EmbeddingProvider,
@@ -92,7 +92,7 @@ def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
         },
     }
 
-    projected = runtime.grammar_schema(canonical)
+    projected = grammar.grammar_schema(canonical)
 
     assert projected["properties"]["detail"] == {"type": "string"}
     assert projected["properties"]["items"]["items"] == {"type": "string"}
@@ -103,17 +103,69 @@ def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
 
 def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
     assert runtime._is_grounded_event_refusal("not-json") is False
-    assert runtime._organizer_evidence({}) == ()
-    assert runtime._organizer_evidence({"suggestions": [None]}) == ()
+    assert grounding._organizer_evidence({}) == ()
+    assert grounding._organizer_evidence({"suggestions": [None]}) == ()
 
-    assert runtime._normalize_organizer_tags(None) is None
+    assert grounding._normalize_organizer_tags(None) is None
     malformed = {"suggestions": [None, {"tags": None}, {"tags": [1]}]}
-    assert runtime._normalize_organizer_tags(malformed) is None
+    assert grounding._normalize_organizer_tags(malformed) is None
     bounded = {"suggestions": [{"tags": [f"Tag {index}" for index in range(17)]}]}
-    runtime._normalize_organizer_tags(bounded)
+    grounding._normalize_organizer_tags(bounded)
     assert bounded["suggestions"][0]["tags"] == [f"tag-{index}" for index in range(16)]
-    assert runtime._unique_strings([], [1], 2) is None
-    assert runtime._unique_evidence([], [None], 2) is None
+    assert grounding._unique_strings([], [1], 2) is None
+    assert grounding._unique_evidence([], [None], 2) is None
+    assert grounding._unique_evidence((), [], 2) is None
+
+
+def test_grounding_dispatch_enforces_workload_reference_cardinality():
+    selected = selected_text_task()
+    question = document_question_task()
+
+    assert grounding._model_evidence(
+        selected, GenerationRequest("job", selected.task_id, ("selection",))
+    ) is None
+    assert grounding._model_evidence(
+        selected, GenerationRequest("job", selected.task_id, ("selection", "span"))
+    ) is grounding._selected_evidence
+    assert grounding._model_evidence(
+        question, GenerationRequest("job", question.task_id, ("metadata",))
+    ) is None
+    assert grounding._model_evidence(
+        question, GenerationRequest("job", question.task_id, ("metadata", "span"))
+    ) is grounding._citation_evidence
+
+
+def test_selected_text_task_normalization_preserves_extraction_results():
+    extracted = {"operation": "extract-tasks", "tasks": ["One"]}
+    summarized = {"operation": "summarize", "tasks": ["Placeholder"]}
+
+    grounding._normalize_selected_text_tasks(None)
+    grounding._normalize_selected_text_tasks(extracted)
+    grounding._normalize_selected_text_tasks(summarized)
+
+    assert extracted["tasks"] == ["One"]
+    assert summarized["tasks"] == []
+
+
+def test_organizer_tag_normalization_skips_bad_entries_without_stopping():
+    document = {
+        "suggestions": [
+            {"tags": None},
+            {"tags": [None, "A" * 49]},
+        ]
+    }
+
+    grounding._normalize_organizer_tags(document)
+
+    assert document["suggestions"][1]["tags"] == ["a" * 48]
+
+
+def test_organizer_name_completion_enforces_types_hidden_names_and_length():
+    assert grounding._completed_organizer_name("notes", 1) == "notes"
+    assert grounding._completed_organizer_name(1, ".md") == 1
+    assert grounding._completed_organizer_name(".hidden", ".md") == ".hidden"
+    assert grounding._completed_organizer_name("a" * 252, ".md") == "a" * 252 + ".md"
+    assert grounding._completed_organizer_name("a" * 253, ".md") == "a" * 253
 
 
 def test_organizer_normalization_merges_compatible_per_span_suggestions():
@@ -138,7 +190,7 @@ def test_organizer_normalization_merges_compatible_per_span_suggestions():
         ]
     }
 
-    runtime._normalize_bound_document(document, "file-organizer")
+    grounding._normalize_bound_document(document, "file-organizer")
 
     assert document == {
         "suggestions": [
@@ -178,7 +230,7 @@ def test_organizer_normalization_refuses_to_merge_conflicting_move_advice():
     ]
     document = {"suggestions": suggestions}
 
-    runtime._normalize_bound_document(document, "file-organizer")
+    grounding._normalize_bound_document(document, "file-organizer")
 
     assert document["suggestions"] == suggestions
 
@@ -209,7 +261,7 @@ def test_organizer_same_file_merge_never_exceeds_tag_contract(first, second):
         ]
     }
 
-    runtime._normalize_bound_document(document, "file-organizer")
+    grounding._normalize_bound_document(document, "file-organizer")
 
     assert all(len(suggestion["tags"]) <= 16 for suggestion in document["suggestions"])
 
@@ -232,7 +284,7 @@ def test_grammar_projection_property_removes_only_llama_unsupported_string_limit
         "additionalProperties": False,
     }
 
-    projected = runtime.grammar_schema(canonical)
+    projected = grammar.grammar_schema(canonical)
 
     assert projected == {
         "type": "object",
@@ -255,7 +307,7 @@ def test_grammar_projection_inlines_local_definitions_and_removes_patterns():
         "items": {"$ref": "#/$defs/evidence", "description": "grounding"},
     }
 
-    projected = runtime.grammar_schema(canonical)
+    projected = grammar.grammar_schema(canonical)
 
     assert "$defs" not in projected
     assert projected["items"] == {
@@ -278,7 +330,7 @@ def test_grammar_projection_inlines_local_definitions_and_removes_patterns():
 )
 def test_grammar_projection_refuses_unbounded_or_invalid_references(schema):
     with pytest.raises(ValueError, match="schema (definitions|uses|reference|definition)"):
-        runtime.grammar_schema(schema)
+        grammar.grammar_schema(schema)
 
 
 @pytest.mark.parametrize(
@@ -908,7 +960,7 @@ def test_selected_text_digest_binding_leaves_unbindable_output_unchanged(
     task = replace(_task(), task_id=task_id)
     request = GenerationRequest("job-1", task_id, references)
 
-    assert runtime._bind_selected_text_digests(
+    assert grounding.bind_selected_text_digests(
         raw, task, request, MemoryFragmentStore()
     ) == raw
 
@@ -926,7 +978,7 @@ def test_selected_text_digest_binding_refuses_wrong_model_citations(evidence):
     asyncio.run(store.publish("job-1", (source,)))
     raw = json.dumps({"evidence": evidence})
 
-    assert runtime._bind_selected_text_digests(
+    assert grounding.bind_selected_text_digests(
         raw,
         _task(),
         GenerationRequest(
@@ -970,7 +1022,7 @@ def test_document_citations_bind_exact_retrieved_span_metadata_without_source_te
     }
 
     bound = json.loads(
-        runtime._bind_grounding_metadata(
+        grounding.bind_grounding_metadata(
             json.dumps(reply),
             document_question_task(),
             GenerationRequest(
@@ -1036,7 +1088,7 @@ def test_document_citation_binding_collapses_only_repeated_exact_sources():
     }
 
     bound = json.loads(
-        runtime._bind_grounding_metadata(
+        grounding.bind_grounding_metadata(
             json.dumps(reply),
             document_question_task(),
             GenerationRequest(
@@ -1179,7 +1231,7 @@ def test_document_citation_binding_preserves_untrusted_or_question_reference_for
     asyncio.run(store.publish("job-1", (question, span)))
     raw = json.dumps({"citations": [{"sourceRef": source_ref}]})
 
-    assert runtime._bind_grounding_metadata(
+    assert grounding.bind_grounding_metadata(
         raw,
         document_question_task(),
         GenerationRequest(
@@ -1219,7 +1271,7 @@ def test_event_evidence_binding_uses_model_selected_fragment_only():
     }
 
     bound = json.loads(
-        runtime._bind_grounding_metadata(
+        grounding.bind_grounding_metadata(
             json.dumps(reply),
             event_generation_task(),
             GenerationRequest(
@@ -1279,7 +1331,7 @@ def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
     )
 
     bound = json.loads(
-        runtime._bind_grounding_metadata(
+        grounding.bind_grounding_metadata(
             json.dumps(reply), file_organizer_task(), request, store
         )
     )
@@ -1296,7 +1348,7 @@ def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
     assert bound["suggestions"][0]["tags"] == ["project-notes", "mars"]
     reply["suggestions"][0]["evidence"][0]["sourceRef"] = metadata.reference
     raw = json.dumps(reply)
-    assert runtime._bind_grounding_metadata(
+    assert grounding.bind_grounding_metadata(
         raw, file_organizer_task(), request, store
     ) == raw
 
@@ -1320,7 +1372,7 @@ def test_organizer_binding_completes_only_safe_extensionless_names():
 
     def bind(name):
         return json.loads(
-            runtime._bind_grounding_metadata(
+            grounding.bind_grounding_metadata(
                 json.dumps(
                     {
                         "suggestions": [
@@ -1360,7 +1412,7 @@ def test_organizer_extension_binding_fails_closed_on_untrusted_metadata(metadata
     request = GenerationRequest("job-1", "file-organizer", (metadata.reference,))
     document = {"suggestions": [{"fileId": "selected-file-1", "proposedName": "Notes"}]}
 
-    runtime._normalize_organizer_name_extensions(document, request, store)
+    grounding._normalize_organizer_name_extensions(document, request, store)
 
     assert document["suggestions"][0]["proposedName"] == "Notes"
 
@@ -1368,7 +1420,7 @@ def test_organizer_extension_binding_fails_closed_on_untrusted_metadata(metadata
 def test_organizer_extension_binding_ignores_non_suggestion_documents():
     request = GenerationRequest("job-1", "file-organizer", ())
 
-    runtime._normalize_organizer_name_extensions({}, request, MemoryFragmentStore())
+    grounding._normalize_organizer_name_extensions({}, request, MemoryFragmentStore())
 
 
 def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candidate(tmp_path):
