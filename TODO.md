@@ -1,5 +1,17 @@
 # TODO
 
+## Work groups
+
+Items remain in the canonical lifecycle tables below; these ranges preserve the
+audit's dependency order without weakening the required status schema.
+
+- **Low-light delivery:** OMNI-0048, OMNI-0103–OMNI-0106
+- **Audit behavior and contracts:** OMNI-0242–OMNI-0257
+- **Audit wiring and consolidation:** OMNI-0258–OMNI-0272
+- **Audit module splits:** OMNI-0273–OMNI-0284
+- **Audit architecture hygiene:** OMNI-0285–OMNI-0289
+- **Audit regression and mutation gates:** OMNI-0290–OMNI-0297
+
 ## Findings
 
 | id | status | severity | effort | related ids | description |
@@ -8,6 +20,61 @@
 | OMNI-0104 | open | medium | s | OMNI-0103 | Connect the 0.2.0 enhanced-image pipeline to the existing disjoint-folder, atomic no-overwrite publisher; preserve allowed metadata, expose progress/result evidence, and clean only partial outputs on cancellation or failure. |
 | OMNI-0048 | in_progress | high | s | OMNI-0036 | Produce and publish the `low-light-enhancement` 0.2.0 Retinexformer ncnn artifact with exact graph/weights digests, tensor/output contracts, an idempotently provisioned machine-local `xpuwlm` Ed25519 publisher identity, portable/native parity report, and proof of hardware Vulkan execution with CPU fallback disabled. |
 | OMNI-0105 | in_progress | high | s | OMNI-0082, OMNI-0103 | Freeze an explicitly open/free paired low/normal-light holdout and record 0.2.0 portable/native SSIM, paired-target SSIM, median CIEDE2000, noise, color, range, and artifact measurements. Keep corpus bytes test-only and record source licensing/provenance. |
+| OMNI-0242 | open | high | s | — | Make `InferenceJobDispatcher` resolve the current executor map after rediscovery; prove GPU hotplug routes immediately and TPU removal produces a stable pre-dispatch refusal instead of using stale executors. |
+| OMNI-0243 | open | medium | s | — | Clear a backend's scheduler degradation state after successful execution and discard degradation entries when executors are removed; test fail/recover and remove/re-add lifecycles. |
+| OMNI-0244 | open | high | s | — | Require `BoundedCollector` subclasses to declare their plugin ID and reject triggers addressed to other plugins; wire the existing desktop, hardware, resource, and storage IDs and test each refusal. |
+| OMNI-0245 | open | high | l | OMNI-0244 | Migrate network and peripheral collection onto `BoundedCollector`, add network allowlisting, per-link permission, and churn controls, remove duplicate collection infrastructure, and preserve each current churn wire shape byte-for-byte. |
+| OMNI-0246 | open | high | xs | — | Enforce `BUILD_METADATA_PERMISSION` in `BuildMetadataIngestor.profile()` using the same gate as sibling collectors and test refusal without the grant. |
+| OMNI-0247 | open | medium | s | — | Restrict the BPF helper socket from world-writable mode to `0644` and add bounded client socket handling so one hung client cannot block every collector. |
+| OMNI-0248 | open | medium | s | — | Validate every running, succeeded, failed, and cancelled job-result reply against `runtime-job-result.schema.json`, including progress and truncation boundary cases. |
+| OMNI-0249 | open | high | s | — | Replace hardcoded selected-text no-CPU acceptance claims with measured worker load evidence; fail collection on CPU fallback or unexpected accelerator-layer counts. |
+| OMNI-0250 | open | medium | s | — | Cache GPU ONNX Runtime sessions with `ModelCache` as the TPU, NPU, and Vulkan lanes do while preserving the CPU-provider refusal exactly. |
+| OMNI-0251 | open | medium | xs | — | Enforce `MAX_EVENTS` and `MAX_EVIDENCE_PER_EVENT` in event parsing using the repository's established bounded-parser overflow policy; test MAX and MAX+1. |
+| OMNI-0252 | open | high | xs | — | Move the inline low-light Draft 2020-12 configuration contract into canonical `schemas/low-light-configuration.schema.json` and load it through the schema registry without semantic change. |
+| OMNI-0253 | open | high | m | — | Add canonical base and numeric training-report schemas, validate both report readers through the registry, and remove overlapping hand-maintained key-set validation. |
+| OMNI-0254 | open | high | xs | OMNI-0253 | Put measured `cpuFallback` at the top level of document-model training reports and require it through the canonical report schema, retaining a limitations copy only if a consumer needs it. |
+| OMNI-0255 | open | medium | xs | — | Replace `training.runner.REQUIRED_SCHEMAS` hardcoded version literals with `contract.schema_versions()` while retaining the deliberately independent acceptance version list. |
+| OMNI-0256 | open | high | m | — | Align runtime, plugin, and cancellation Protocols with actual calls: declare text handlers, admission/dispatch/snapshot/permission capabilities, remove callable `getattr` probes, and replace nominal cancellation-journal checks with a Protocol. |
+| OMNI-0257 | open | high | m | OMNI-0245 | Add and enforce a canonical collected-output schema at the single shared collector emission boundary while allowing family-specific item keys. |
+| OMNI-0258 | open | high | m | OMNI-0253 | Wire a `promote_main` console entry point for the five numeric trainers so a trained domain fixture can be promoted into a schema-valid binding; retain the separate forecast report path. |
+| OMNI-0259 | open | high | m | OMNI-0261 | After production-pipeline consolidation, add one recipe-dispatched `omnitensor-produce-source` CLI that reaches embedding, CLIP, Retinexformer, and foundation-forecast producers. |
+| OMNI-0260 | open | high | xl | OMNI-0253 | Extract the five numeric domain trainers into a shared `training/tabular/` package for ONNX export, chronological/class-floor splits, metrics, fitting, bounded JSONL, publication, reports, and shared model types while preserving fixture report values exactly. |
+| OMNI-0261 | open | high | l | OMNI-0254 | Consolidate the four production source pipelines, digests, report envelopes, Torch-to-ONNX export, IO validation, and width-checked dot product behind a shared production pipeline without changing artifacts or reports. |
+| OMNI-0262 | open | high | m | — | Consolidate media, Qwen, and Hebrew pinned-artifact source verification, installed documents, CLI handling, and error types in `plugins/artifact_installation.py`, retaining compatibility aliases where callers catch old names. |
+| OMNI-0263 | open | high | l | OMNI-0253 | Consolidate forecast, numeric, and document model binding publication/model fragments behind `training/binding.py`, parameterizing lane order and native evidence while preserving each caller's current order. |
+| OMNI-0264 | open | high | l | — | Create a shared acceptance kit for bounded typed JSON, corpus discovery, CLI execution, and public accelerator-load validators; validate acceptance documents inside builders rather than only in CLI entry points. |
+| OMNI-0265 | open | medium | s | OMNI-0256 | Replace four workflow progress adapters and duplicate fraction validation with a parameterized `ScaledProgressReporter` in the plugin Protocol layer. |
+| OMNI-0266 | open | medium | s | — | Unify file SHA-256 calculation in `preparation.file_digest(max_bytes=...)`, raise on overflow, remove three copies, and regression-test the correction from partial oversized-file digests to explicit refusal. |
+| OMNI-0267 | open | medium | s | — | Consolidate directory fsync and atomic byte/JSON writes in `atomicio`, reuse them from publisher identity and event publication, and preserve event CLI's exclusive-create behavior. |
+| OMNI-0268 | open | low | s | — | Hoist duplicated document/visual index entry construction, entry IDs, error prefixes, and attribute validation into shared index helpers. |
+| OMNI-0269 | open | low | s | — | Rename the canonical results module to `job_results.py` with a one-release compatibility shim and fold the small visual-results layer into visual indexing. |
+| OMNI-0270 | open | low | xs | — | Share one positive-bound parser between document and build ingestion without changing accepted values or errors. |
+| OMNI-0271 | open | low | s | — | Replace duplicate tensor-reference digest/finiteness readers with one chunked implementation parameterized by whether bytes are retained. |
+| OMNI-0272 | open | low | xs | — | Make selected-text acceptance collection import the canonical D-Bus bus name and object path rather than restating them. |
+| OMNI-0273 | open | high | l | OMNI-0258 | Split training CLI responsibilities into record, train, install, and forecast modules behind stable import paths and a table-driven trainer dispatcher; move the live D-Bus forecast client to its own module. |
+| OMNI-0274 | open | high | l | — | Split training recipes into model, validation/producer registry, URI policy, transport, fetch, and registry modules; replace the validation chain and raw schema-property indexing with registry accessors. |
+| OMNI-0275 | open | high | l | OMNI-0254, OMNI-0261 | Split document-model runners, export, gate, install, and CLI; reuse the Vulkan executor's device selector, label and guard the producer-only CPU reference runner, and use the recipe tensor contract as the sole truth. |
+| OMNI-0276 | open | high | l | OMNI-0242, OMNI-0256 | Reduce `service.py` to lifecycle orchestration by extracting runtime API, profiles, artifact resolution, telemetry observation, dispatch routing, and environment composition; replace private compatibility re-exports with real module imports. |
+| OMNI-0277 | open | high | l | — | Split plugin supervision into process, recovery, session, and diagnostics modules while preserving its state machine and facade. |
+| OMNI-0278 | open | high | l | OMNI-0256 | Split plugin loading into staging, accelerator, and worker-spec modules; move `JobDispatchError` to a leaf contract/errors module and eliminate deferred imports caused by the jobs-loading cycle. |
+| OMNI-0279 | open | medium | m | OMNI-0264 | Split Qwen providers, catalog, and qualification behind the existing facade after accelerator-evidence validators move to their public module. |
+| OMNI-0280 | open | medium | m | OMNI-0248 | Split jobs into codec, lifecycle, and ports modules while retaining existing imports and schema-valid replies. |
+| OMNI-0281 | open | medium | m | — | Split acceptance checks, probes, and CLI behind the current acceptance facade. |
+| OMNI-0282 | open | low | s | — | Route composite GPU execution by declared model format rather than filename suffix and refuse unknown formats before ONNX execution; add mixed-format regression coverage. |
+| OMNI-0283 | open | low | s | OMNI-0252 | Split the low-light settings specification from runtime configuration while preserving its public facade and migration step. |
+| OMNI-0284 | open | low | s | — | Split media acceptance fixture generation by format and prefer ImageMagick 7 `magick` before the legacy `convert` executable. |
+| OMNI-0285 | open | high | l | — | Move training-shared plugin value types into neutral `telemetry_types.py`, re-export them for compatibility, and enforce an import rule forbidding training-to-plugin dependencies. |
+| OMNI-0286 | open | high | m | OMNI-0278 | Replace the eager plugin barrel with a PEP 562 lazy export surface, trim unconsumed re-exports, and add required kernel-telemetry names without changing public discovery. |
+| OMNI-0287 | open | medium | s | OMNI-0290 | Reverify and remove dead `StageFailure`, `pick_backend`, and `_digest_of`; either route dispatch through `referenced_inputs` when the factoring remains small or delete it, updating tests to assert stable reason codes. |
+| OMNI-0288 | open | low | s | OMNI-0285 | Normalize the audited imports, emit or remove the telemetry contract constant, and relocate compiler-tool and desktop-history revocation helpers to their owning modules. |
+| OMNI-0290 | open | high | m | OMNI-0242, OMNI-0243, OMNI-0282 | Add accelerator-order regression tests that pin TPU then NPU selection, stable reason codes, actionable refusal ordering and tie-breaks, mixed-backend format availability, and multi-model selection without admitting CPU providers. |
+| OMNI-0291 | open | medium | m | OMNI-0242, OMNI-0243, OMNI-0282, OMNI-0290 | Cover public runnable-model branches, empty-code fallback, CPU-provider filtering, mixed-lane composite routing, and any accelerator lifecycle branches not already pinned by behavior-fix tests. |
+| OMNI-0292 | open | high | s | — | Pin tensor input count at 8/9 and output top-k at 100/101, explicitly defining the v1 overflow fate rather than leaving silent half-enforcement. |
+| OMNI-0293 | open | medium | m | OMNI-0248, OMNI-0292 | Pin snapshot version constants, telemetry version use, metric conversion and epoch floor, tensor/output shape branches, and the runtime schema-prefix surface. |
+| OMNI-0294 | open | medium | m | — | Add stable refusal-path tests for forecast, store locking, training contracts, artifact cache/installation, publisher identity, plugin loading, and remaining low-light image errors. |
+| OMNI-0295 | open | high | l | OMNI-0264, OMNI-0290, OMNI-0291, OMNI-0292, OMNI-0293, OMNI-0294 | Commit mutation selectors, wire the mutation quality gate into CI, and include the previously unexecuted scheduler, executor, runtime-contract, tensor/output-contract, snapshot, and forecast-result modules. |
+| OMNI-0296 | open | medium | l | OMNI-0264, OMNI-0295 | Re-measure and burn down remaining acceptance, event-workload, document-binding, and grounded-answer survivor hotspots until every changed callable meets the 80% mutation threshold; do not re-add already-fixed low-light hotspots without fresh evidence. |
+| OMNI-0297 | open | high | xl | OMNI-0242, OMNI-0243, OMNI-0244, OMNI-0245, OMNI-0246, OMNI-0247, OMNI-0248, OMNI-0249, OMNI-0250, OMNI-0251, OMNI-0252, OMNI-0253, OMNI-0254, OMNI-0255, OMNI-0256, OMNI-0257, OMNI-0258, OMNI-0259, OMNI-0260, OMNI-0261, OMNI-0262, OMNI-0263, OMNI-0264, OMNI-0265, OMNI-0266, OMNI-0267, OMNI-0268, OMNI-0269, OMNI-0270, OMNI-0271, OMNI-0272, OMNI-0273, OMNI-0274, OMNI-0275, OMNI-0276, OMNI-0277, OMNI-0278, OMNI-0279, OMNI-0280, OMNI-0281, OMNI-0282, OMNI-0283, OMNI-0284, OMNI-0285, OMNI-0286, OMNI-0287, OMNI-0288, OMNI-0290, OMNI-0291, OMNI-0292, OMNI-0293, OMNI-0294, OMNI-0295, OMNI-0296 | Run the full mutation campaign only after every audit behavior, contract, consolidation, split, architecture, and regression task lands; archive the result and enforce the repository's 80% threshold. |
 
 ## Blocked
 
@@ -44,6 +111,7 @@
 | OMNI-0184 | blocked | medium | s | OMNI-0183 | the eBPF helper's privileged path is unverified: the loader, map reads, and socket service were written and compile-checked, but nothing on this host can run them — loading needs CAP_BPF and `bpftool prog load` fails EPERM as this user, so `load_probes`/`read_histogram` have never executed against a real kernel; verify on a host where the helper can be installed as root before relying on the data. |
 | OMNI-0198 | blocked | medium | l | OMNI-0186, OMNI-0221 | TPU lane parity — produce and accept an Edge TPU artifact: the fail-closed compiler adapter now exists, but every recipe still needs a representative-calibrated fully-int8 TFLite export, the externally distributed `edgetpu_compiler`, 100% Edge TPU operation mapping, portable/native semantic parity, and named Coral execution evidence. Decide whether releases use a pinned compiler container or trusted precompiled artifacts. This host has neither the compiler nor a Coral device, so production and execution remain unverified. |
 | OMNI-0235 | blocked | medium | l | OMNI-0198, OMNI-0233 | Coral event-extraction alternative: Qwen2.5-VL is not a realistic Edge TPU artifact, so evaluate a small fully-int8 candidate-line/token classifier combined with deterministic calendar parsing under the same event result contract. Qualify it only with representative calibration, full compiler mapping, multilingual grounded-event quality, parity of safety/refusal semantics, and named Coral evidence; blocked here on a selected model/corpus, external compiler, and hardware. |
+| OMNI-0289 | blocked | low | xs | — | Decide whether generation intentionally excludes TPU despite the global TPU>NPU>GPU preference. Until the product decision is made, document the absent lane at `GenerationRouter` and do not change routing. |
 
 ## Rejected / Won't fix
 
