@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, remove_durable, write_json_atomic
 
@@ -122,6 +123,26 @@ class JobCancellationToken:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+
+@runtime_checkable
+class CancellationJournal(Protocol):
+    """Crash-recovery view of jobs left in flight by a stopped service."""
+
+    def recover(self) -> tuple[Cancellation, ...]: ...
+
+
+@runtime_checkable
+class CancellationRegistry(CancellationJournal, Protocol):
+    """Job-runner view of cancellation state and its recovery journal."""
+
+    def track(self, job_id: str, profile_id: str = "") -> JobCancellationToken: ...
+
+    def cancel(
+        self, job_id: str, reason: CancellationReason, detail: str = ""
+    ) -> bool: ...
+
+    def release(self, job_id: str) -> None: ...
 
 
 class JobCancellationRegistry:

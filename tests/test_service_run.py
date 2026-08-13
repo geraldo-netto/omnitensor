@@ -1317,6 +1317,82 @@ def test_describe_plugins_answers_a_contract_valid_inventory(tmp_path):
     assert isinstance(document["plugins"], list)
 
 
+def test_plugin_snapshot_capabilities_fail_closed_without_callable_probes():
+    service = object.__new__(OmniTensorService)
+    service._resolve_artifact = lambda _reference: None
+
+    service._plugin_runtime = object()
+    assert json.loads(service._describe_plugins())["plugins"] == []
+
+    service._plugin_runtime = type("MalformedSnapshot", (), {"snapshot": object()})()
+    assert json.loads(service._describe_plugins())["plugins"] == []
+
+    snapshot = type(
+        "Snapshot",
+        (),
+        {
+            "catalog": type("Catalog", (), {"plugins": ()})(),
+            "workers": (),
+        },
+    )()
+    service._plugin_runtime = type("SnapshotOnly", (), {"snapshot": snapshot})()
+    assert json.loads(service._describe_plugins())["plugins"] == []
+
+
+def test_plugin_inventory_uses_permission_worker_and_timestamp_ports(monkeypatch):
+    from types import SimpleNamespace
+
+    from omnitensor import service as service_module
+
+    manifest = sample_plugin_manifest("events")
+    manifest["plugin"]["permissions"] = ["files:read-selected"]
+    plugin = SimpleNamespace(
+        plugin_id="events",
+        version="1.2.3",
+        source="external",
+        distribution_name="events-package",
+        manifest=manifest,
+    )
+    snapshot = SimpleNamespace(
+        catalog=SimpleNamespace(plugins=(plugin,)),
+        workers=(SimpleNamespace(plugin_id="events", state="ready"),),
+    )
+    runtime = SimpleNamespace(
+        snapshot=snapshot,
+        granted_permissions=lambda _plugin_id: frozenset({"files:read-selected"}),
+    )
+    service = object.__new__(OmniTensorService)
+    service._plugin_runtime = runtime
+    service._resolve_artifact = lambda _artifact_id: pytest.fail("no artifact is declared")
+    monkeypatch.setattr(service_module.time, "time", lambda: 1_234.567)
+
+    text = service._describe_plugins()
+    document = json.loads(text)
+    [entry] = document["plugins"]
+
+    assert document["generatedAt"] == 1_234_567
+    assert entry["workerState"] == "ready"
+    assert entry["permissions"] == [
+        {"name": "files:read-selected", "granted": True}
+    ]
+    assert ": " not in text
+    assert ", " not in text
+
+
+def test_plugin_start_ignores_a_result_without_the_snapshot_port():
+    class Plugins:
+        async def start(self):
+            return object()
+
+    service = object.__new__(OmniTensorService)
+    service._plugin_runtime = Plugins()
+    service.plugin_telemetry = type(
+        "Telemetry", (), {"register": lambda *_arguments: pytest.fail("must not register")}
+    )()
+
+    asyncio.run(service._start_plugin_runtime())
+
+
 def test_the_dbus_shim_passes_describe_plugins_through():
     class FakeControl:
         async def apply_command_text(self, text: str) -> str:

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from .cancellation import (
     CancellationReason,
-    JobCancellationRegistry,
+    CancellationRegistry,
     JobCancelledError,
 )
 from .flow import FlowRefusedError, PluginFlowController
@@ -67,7 +67,7 @@ class PipelineRunner:
         *,
         policy: PipelinePolicyGate,
         flow: PluginFlowController,
-        cancellations: JobCancellationRegistry,
+        cancellations: CancellationRegistry,
         clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
     ) -> None:
         missing = [stage for stage in STAGE_ORDER if stage not in stages]

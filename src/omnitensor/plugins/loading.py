@@ -15,10 +15,11 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import jsonschema
 
+from ..job_ports import JobDispatchError
 from .artifacts import ArtifactReference, ArtifactResolution
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
@@ -55,6 +56,20 @@ class PermissionGrantSource(Protocol):
         plugin_id: str,
         declared_permissions: set[str],
     ) -> frozenset[str]: ...
+
+
+@runtime_checkable
+class ReloadablePermissionGrantSource(Protocol):
+    """Optional grant source capability for refreshing persisted consent."""
+
+    def reload(self) -> object: ...
+
+
+@runtime_checkable
+class WorkerRevoker(Protocol):
+    """Optional supervisor capability for stopping one compromised worker."""
+
+    async def revoke(self, plugin_id: str, detail: str) -> None: ...
 
 
 class ArtifactProvider(Protocol):
@@ -132,8 +147,6 @@ class InstalledPluginRuntime:
 
     def admit(self, plugin_id: str, payload: dict) -> None:
         """Refuse jobs synchronously unless the declared worker is ready."""
-        from ..jobs import JobDispatchError  # noqa: PLC0415 - avoids jobs/protocol cycle
-
         plugin = self._plugin(plugin_id)
         if plugin is None:
             raise JobDispatchError("workload-unknown", f"No installed plugin: {plugin_id}")
@@ -162,8 +175,6 @@ class InstalledPluginRuntime:
             raise JobDispatchError("payload-invalid", "Payload violates the plugin input contract")
 
     def _admit_permissions(self, plugin: ResolvedPlugin) -> None:
-        from ..jobs import JobDispatchError  # noqa: PLC0415 - avoids jobs/protocol cycle
-
         plugin_id = plugin.plugin_id
         declared = set(plugin.manifest["plugin"]["permissions"])
         current = self._current_permissions(plugin_id, declared)
@@ -241,9 +252,10 @@ class InstalledPluginRuntime:
         if plugin_id in self._revoked_workers:
             return
         self._revoked_workers.add(plugin_id)
-        revoke = getattr(self._supervisor, "revoke", None)
-        if callable(revoke):
-            await revoke(plugin_id, "worker stopped because its permission grant changed")
+        if isinstance(self._supervisor, WorkerRevoker):
+            await self._supervisor.revoke(
+                plugin_id, "worker stopped because its permission grant changed"
+            )
 
     async def _monitor_permission_grants(self) -> None:
         try:
@@ -264,9 +276,8 @@ class InstalledPluginRuntime:
     ) -> frozenset[str]:
         if isinstance(self._grant_source, _DenyAllGrants):
             return self.granted_permissions(plugin_id)
-        reload_grants = getattr(self._grant_source, "reload", None)
-        if callable(reload_grants):
-            reload_grants()
+        if isinstance(self._grant_source, ReloadablePermissionGrantSource):
+            self._grant_source.reload()
         return self._grant_source.active_permissions(plugin_id, declared)
 
     def _plugin(self, plugin_id: str) -> ResolvedPlugin | None:
@@ -320,7 +331,7 @@ class InstalledPluginRuntime:
             external_worker_specs(catalog.plugins, **spec_options)
         )
         self._snapshot = InstalledPluginSnapshot(catalog, workers)
-        if callable(getattr(self._supervisor, "revoke", None)):
+        if isinstance(self._supervisor, WorkerRevoker):
             self._grant_monitor = asyncio.create_task(
                 self._monitor_permission_grants(),
                 name="omnitensor-plugin-grant-monitor",

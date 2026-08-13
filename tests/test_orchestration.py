@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from omnitensor.plugins.cancellation import CancellationReason, JobCancellationRegistry
+from omnitensor.plugins.cancellation import (
+    Cancellation,
+    CancellationReason,
+    JobCancellationRegistry,
+)
 from omnitensor.plugins.orchestration import (
     JobSubmission,
     OrchestrationError,
@@ -333,7 +337,7 @@ def test_recovery_is_attached_to_the_runner_set(tmp_path):
 
 @pytest.mark.parametrize("registry", [object(), None])
 def test_the_cancellation_registry_is_required(tmp_path, registry):
-    with pytest.raises(OrchestrationError, match="cancellations-invalid"):
+    with pytest.raises(OrchestrationError) as build_error:
         build_plugin_runners(
             {"visual-library": workload()},
             dispatcher=Dispatcher(),
@@ -343,8 +347,30 @@ def test_the_cancellation_registry_is_required(tmp_path, registry):
             is_paused=lambda: False,
             is_enabled=lambda _profile: True,
         )
-    with pytest.raises(OrchestrationError, match="cancellations-invalid"):
+    with pytest.raises(OrchestrationError) as recovery_error:
         recover_interrupted_jobs(registry)
+    for error in (build_error.value, recovery_error.value):
+        assert (error.code, error.detail, str(error)) == (
+            "cancellations-invalid",
+            "cancellations must be a JobCancellationRegistry",
+            "cancellations-invalid: cancellations must be a JobCancellationRegistry",
+        )
+
+
+def test_recovery_accepts_a_structural_cancellation_journal():
+    interrupted = (
+        Cancellation(
+            "job-structural",
+            CancellationReason.INTERRUPTED,
+            "the previous service stopped",
+        ),
+    )
+
+    class Journal:
+        def recover(self):
+            return interrupted
+
+    assert recover_interrupted_jobs(Journal()) is interrupted
 
 
 def test_the_number_of_wired_profiles_is_bounded(tmp_path):

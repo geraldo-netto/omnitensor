@@ -12,6 +12,7 @@ class JobAuthorizer(Protocol):
     def allows(self, action: str, workload_id: str) -> bool: ...
 
 
+@runtime_checkable
 class JobDispatcher(Protocol):
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> Awaitable[object]: ...
 

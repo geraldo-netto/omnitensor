@@ -28,10 +28,11 @@ from pathlib import Path
 from typing import Protocol
 
 from ..forecastresult import forecast_reading
+from ..job_ports import JobDispatcher
 from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
 from .artifacts import ArtifactReference
-from .cancellation import Cancellation, JobCancellationRegistry
+from .cancellation import Cancellation, CancellationJournal, CancellationRegistry
 from .flow import PluginFlowController
 from .pipeline import (
     CollectedOutput,
@@ -148,16 +149,10 @@ class ProgressSink(Protocol):
     def __call__(self, job_id: str, stage: str, fraction: float, detail: str) -> None: ...
 
 
-class Dispatcher(Protocol):
-    """Queue one job onto an accelerator and return the pending future."""
-
-    def dispatch(self, job_id: str, workload_id: str, payload: dict): ...
-
-
 def inference_stages(
     workload: Workload,
     *,
-    dispatcher: Dispatcher,
+    dispatcher: JobDispatcher,
     resolve_artifact: ArtifactResolver,
     encode_result: Callable[[object], dict],
     deliver: Callable[[str, dict], None] | None = None,
@@ -248,7 +243,7 @@ def _resolve_stage(model: Mapping[str, object], resolve_artifact: ArtifactResolv
 
 
 def _infer_stage(
-    workload: Workload, dispatcher: Dispatcher, encode_result: Callable[[object], dict]
+    workload: Workload, dispatcher: JobDispatcher, encode_result: Callable[[object], dict]
 ) -> Callable:
     async def infer(resolved: ResolvedOutput) -> InferenceOutput:
         job_id, job_payload = _current_job()
@@ -334,10 +329,10 @@ def _reference_of(resolution: object, model: Mapping[str, object]):
 def build_plugin_runners(
     workloads: Mapping[str, Workload],
     *,
-    dispatcher: Dispatcher,
+    dispatcher: JobDispatcher,
     resolve_artifact: ArtifactResolver,
     encode_result: Callable[[object], dict],
-    cancellations: JobCancellationRegistry,
+    cancellations: CancellationRegistry,
     is_paused: Callable[[], bool],
     is_enabled: Callable[[str], bool],
     allows_permission: Callable[[str, str], bool] = lambda _profile, _permission: True,
@@ -347,7 +342,7 @@ def build_plugin_runners(
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> RunnerSet:
     """One runner per profile that can execute; a reason for each that cannot."""
-    if not isinstance(cancellations, JobCancellationRegistry):
+    if not isinstance(cancellations, CancellationRegistry):
         raise OrchestrationError(
             "cancellations-invalid", "cancellations must be a JobCancellationRegistry"
         )
@@ -409,16 +404,16 @@ def required_permissions(workload: Workload) -> tuple[str, ...]:
     return tuple(sorted(item for item in declared if isinstance(item, str)))
 
 
-def recover_interrupted_jobs(cancellations: JobCancellationRegistry) -> tuple[Cancellation, ...]:
+def recover_interrupted_jobs(cancellations: CancellationJournal) -> tuple[Cancellation, ...]:
     """Reconcile jobs the previous process left claiming to be in flight."""
-    if not isinstance(cancellations, JobCancellationRegistry):
+    if not isinstance(cancellations, CancellationJournal):
         raise OrchestrationError(
             "cancellations-invalid", "cancellations must be a JobCancellationRegistry"
         )
     return cancellations.recover()
 
 
-def with_recovery(runner_set: RunnerSet, cancellations: JobCancellationRegistry) -> RunnerSet:
+def with_recovery(runner_set: RunnerSet, cancellations: CancellationJournal) -> RunnerSet:
     """Attach the startup reconciliation to a freshly built runner set."""
     return RunnerSet(
         runner_set.runners, runner_set.skipped, recover_interrupted_jobs(cancellations)
@@ -452,14 +447,14 @@ class RunnerBackedDispatcher:
     routing here cannot loop back into itself.
     """
 
-    def __init__(self, runners: RunnerSet, fallback: Dispatcher) -> None:
+    def __init__(self, runners: RunnerSet, fallback: JobDispatcher) -> None:
         if not isinstance(runners, RunnerSet):
             raise OrchestrationError("runners-invalid", "runners must be a RunnerSet")
         self._runners = runners
         self._fallback = fallback
 
     @property
-    def fallback(self) -> Dispatcher:
+    def fallback(self) -> JobDispatcher:
         """Where a profile without a runner is dispatched."""
         return self._fallback
 

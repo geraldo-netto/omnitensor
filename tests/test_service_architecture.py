@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from dbus_fast import BusType, RequestNameReply
@@ -34,6 +35,15 @@ from omnitensor.host import (
     SysfsDeviceDiscovery,
     build_host_ports,
 )
+from omnitensor.ports import (
+    PluginCatalogSnapshot,
+    PluginIdentitySource,
+    PluginJobRuntime,
+    PluginPermissionSource,
+    PluginRuntimeSnapshot,
+    PluginSnapshotSource,
+    RuntimeHandler,
+)
 
 
 class DiscoveryPort:
@@ -58,6 +68,44 @@ class TransportPort:
 
     async def stop(self):
         return None
+
+
+def test_runtime_and_plugin_ports_match_the_calls_made_through_them():
+    assert inspect.iscoroutinefunction(RuntimeHandler.apply_command_text)
+    assert inspect.iscoroutinefunction(RuntimeHandler.submit_job_text)
+    assert inspect.iscoroutinefunction(RuntimeHandler.cancel_job_text)
+    assert inspect.iscoroutinefunction(RuntimeHandler.job_result_text)
+    assert callable(RuntimeHandler.describe_plugins_text)
+    assert callable(RuntimeHandler.describe_contract_text)
+
+    snapshot = SimpleNamespace(
+        catalog=SimpleNamespace(plugins=()),
+        workers=(),
+    )
+
+    class Plugins:
+        def __init__(self, retained_snapshot):
+            self.snapshot = retained_snapshot
+
+        def plugin_ids(self):
+            return frozenset({"events"})
+
+        def admit(self, _workload_id, _payload):
+            return None
+
+        async def dispatch(self, _job_id, _workload_id, _payload):
+            return {}
+
+        def granted_permissions(self, _plugin_id):
+            return frozenset({"files:read-selected"})
+
+    plugins = Plugins(snapshot)
+    assert isinstance(plugins, PluginIdentitySource)
+    assert isinstance(plugins, PluginJobRuntime)
+    assert isinstance(plugins, PluginSnapshotSource)
+    assert isinstance(plugins, PluginPermissionSource)
+    assert isinstance(snapshot, PluginRuntimeSnapshot)
+    assert isinstance(snapshot.catalog, PluginCatalogSnapshot)
 
 
 def test_host_port_composition_preserves_every_injected_boundary(tmp_path):

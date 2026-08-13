@@ -92,9 +92,8 @@ from .host import FileSnapshotPublisher as FileSnapshotPublisher
 from .host import SysfsDeviceDiscovery as SysfsDeviceDiscovery
 from .host import build_host_ports
 from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
+from .job_ports import JobAdmission, JobDispatcher
 from .jobs import (
-    JobAdmission,
-    JobDispatcher,
     JobSubmissionService,
     PredicateJobAuthorizer,
     UnavailableJobDispatcher,
@@ -119,7 +118,12 @@ from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
     ControlTransport,
     DeviceDiscovery,
+    PluginCatalogSnapshot,
+    PluginIdentitySource,
+    PluginPermissionSource,
     PluginRuntime,
+    PluginRuntimeSnapshot,
+    PluginSnapshotSource,
     PolicyStorage,
     SnapshotPublisher,
 )
@@ -153,10 +157,9 @@ def _admit_plugin_job(
     plugin_ids = plugin_ids_provider()
     installed_plugin = workload_id in plugin_ids
     if installed_plugin:
-        admit = getattr(plugins, "admit", None)
-        if not callable(admit):
+        if not isinstance(plugins, JobAdmission):
             raise RuntimeError("plugin runtime does not implement admission")
-        admit(workload_id, payload)
+        plugins.admit(workload_id, payload)
         return
     if isinstance(inference, JobAdmission):
         inference.admit(workload_id, payload)
@@ -176,15 +179,15 @@ class _PluginAwareDispatcher:
         )
 
     def _plugin_ids(self) -> frozenset[str]:
-        provider = getattr(self._plugins, "plugin_ids", None)
-        return frozenset(provider()) if callable(provider) else frozenset()
+        if not isinstance(self._plugins, PluginIdentitySource):
+            return frozenset()
+        return frozenset(self._plugins.plugin_ids())
 
     def dispatch(self, job_id: str, workload_id: str, payload: dict):
         if workload_id in self._plugin_ids():
-            dispatch = getattr(self._plugins, "dispatch", None)
-            if not callable(dispatch):
+            if not isinstance(self._plugins, JobDispatcher):
                 raise RuntimeError("plugin runtime does not implement dispatch")
-            return dispatch(job_id, workload_id, payload)
+            return self._plugins.dispatch(job_id, workload_id, payload)
         return self._inference.dispatch(job_id, workload_id, payload)
 
 
@@ -572,7 +575,11 @@ class OmniTensorService:
         return policy is None or policy.enabled
 
     def _job_authorized(self, action: str, workload_id: str) -> bool:
-        plugin_ids = getattr(self._plugin_runtime, "plugin_ids", lambda: ())()
+        plugin_ids = (
+            self._plugin_runtime.plugin_ids()
+            if isinstance(self._plugin_runtime, PluginIdentitySource)
+            else ()
+        )
         known_workload = workload_id in self._workloads or workload_id in plugin_ids
         if not known_workload:
             return False
@@ -754,17 +761,26 @@ class OmniTensorService:
         Building this from the discovery snapshot means it never imports a
         plugin module: asking what a plugin requires must not run its code.
         """
+        if not isinstance(self._plugin_runtime, PluginSnapshotSource):
+            return _no_inventory()
         snapshot = self._plugin_runtime.snapshot
+        if not isinstance(snapshot, PluginRuntimeSnapshot) or not isinstance(
+            snapshot.catalog, PluginCatalogSnapshot
+        ):
+            return _no_inventory()
         states = {status.plugin_id: str(status.state) for status in snapshot.workers}
+        granted_permissions = (
+            self._plugin_runtime.granted_permissions
+            if isinstance(self._plugin_runtime, PluginPermissionSource)
+            else lambda _plugin_id: ()
+        )
         document = build_plugin_inventory(
             snapshot.catalog.plugins,
             resolve_artifact=self._resolve_artifact,
             # Without this every permission reports granted:false, so a user
             # reading the inventory sees a plugin as unauthorised while its
             # worker is running with the grant.
-            granted_permissions=getattr(
-                self._plugin_runtime, "granted_permissions", lambda _plugin_id: ()
-            ),
+            granted_permissions=granted_permissions,
             worker_states=states.get,
             generated_at_ms=int(time.time() * 1000),
         )
@@ -1022,9 +1038,11 @@ class OmniTensorService:
 
     async def _start_plugin_runtime(self) -> None:
         plugin_snapshot = await self._plugin_runtime.start()
-        plugin_catalog = getattr(plugin_snapshot, "catalog", None)
-        plugins = getattr(plugin_catalog, "plugins", ())
-        for plugin in plugins:
+        if not isinstance(plugin_snapshot, PluginRuntimeSnapshot) or not isinstance(
+            plugin_snapshot.catalog, PluginCatalogSnapshot
+        ):
+            return
+        for plugin in plugin_snapshot.catalog.plugins:
             self.plugin_telemetry.register(plugin.plugin_id)
 
 
