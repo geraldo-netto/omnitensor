@@ -106,6 +106,7 @@ def parse_grounded_event_result(document: object) -> GroundedEventResult:
     A model cannot confirm its own suggestion: incoming ``confirmed`` or
     ``rejected`` values are refused rather than trusted or silently rewritten.
     """
+    _enforce_event_bounds(document)
     violations = validate_document("event-extraction-result.schema.json", document)
     if violations:
         raise EventResultError("result-invalid", violations[0])
@@ -138,6 +139,28 @@ def parse_grounded_event_result(document: object) -> GroundedEventResult:
         tuple(events),
         duplicates,
     )
+
+
+def _enforce_event_bounds(document: object) -> None:
+    """Refuse collection overflow before canonical validation walks its contents."""
+    if not isinstance(document, Mapping):
+        return
+    raw_events = document.get("events")
+    if not isinstance(raw_events, list):
+        return
+    if len(raw_events) > MAX_EVENTS:
+        raise EventResultError(
+            "result-invalid", f"event result exceeds {MAX_EVENTS} events"
+        )
+    for raw_event in raw_events:
+        if not isinstance(raw_event, Mapping):
+            continue
+        raw_evidence = raw_event.get("evidence")
+        if isinstance(raw_evidence, list) and len(raw_evidence) > MAX_EVIDENCE_PER_EVENT:
+            raise EventResultError(
+                "result-invalid",
+                f"event evidence exceeds {MAX_EVIDENCE_PER_EVENT} entries",
+            )
 
 
 def confirm_event_candidates(

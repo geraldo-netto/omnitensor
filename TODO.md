@@ -22,7 +22,6 @@ audit's dependency order without weakening the required status schema.
 | OMNI-0248 | open | medium | s | — | Validate every running, succeeded, failed, and cancelled job-result reply against `runtime-job-result.schema.json`, including progress and truncation boundary cases. |
 | OMNI-0249 | open | high | s | — | Replace hardcoded selected-text no-CPU acceptance claims with measured worker load evidence; fail collection on CPU fallback or unexpected accelerator-layer counts. |
 | OMNI-0250 | open | medium | s | — | Cache GPU ONNX Runtime sessions with `ModelCache` as the TPU, NPU, and Vulkan lanes do while preserving the CPU-provider refusal exactly. |
-| OMNI-0251 | open | medium | xs | — | Enforce `MAX_EVENTS` and `MAX_EVIDENCE_PER_EVENT` in event parsing using the repository's established bounded-parser overflow policy; test MAX and MAX+1. |
 | OMNI-0252 | open | high | xs | — | Move the inline low-light Draft 2020-12 configuration contract into canonical `schemas/low-light-configuration.schema.json` and load it through the schema registry without semantic change. |
 | OMNI-0253 | open | high | m | — | Add canonical base and numeric training-report schemas, validate both report readers through the registry, and remove overlapping hand-maintained key-set validation. |
 | OMNI-0254 | open | high | xs | OMNI-0253 | Put measured `cpuFallback` at the top level of document-model training reports and require it through the canonical report schema, retaining a limitations copy only if a consumer needs it. |
