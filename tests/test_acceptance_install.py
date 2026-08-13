@@ -138,14 +138,20 @@ def test_the_systemd_probe_reports_anything_but_active_as_down(code, output):
 
 def test_every_canonical_schema_is_installed_and_valid():
     check = check_schemas()
-    assert check.ok is True
-    assert str(len(REQUIRED_SCHEMAS)) in check.detail
+    assert check == Check(
+        "schemas",
+        True,
+        f"{len(REQUIRED_SCHEMAS)} canonical schemas installed and valid",
+    )
 
 
 def test_a_missing_schema_fails_the_check():
-    check = check_schemas(("runtime-snapshot.schema.json", "absent.schema.json"))
-    assert check.ok is False
-    assert "missing absent.schema.json" in check.detail
+    check = check_schemas(("absent-b.schema.json", "absent-a.schema.json"))
+    assert check == Check(
+        "schemas",
+        False,
+        "missing absent-a.schema.json, absent-b.schema.json",
+    )
 
 
 def test_an_invalid_schema_fails_the_check(monkeypatch, tmp_path):
@@ -160,8 +166,34 @@ def test_an_invalid_schema_fails_the_check(monkeypatch, tmp_path):
 
     check = check_schemas(("broken.schema.json",))
 
-    assert check.ok is False
-    assert "invalid broken.schema.json" in check.detail
+    assert check == Check("schemas", False, "invalid broken.schema.json")
+
+
+def test_missing_and_invalid_schema_failures_are_reported_together(monkeypatch, tmp_path):
+    packaged = tmp_path / "schemas"
+    packaged.mkdir()
+    for name in ("broken-b.schema.json", "broken-a.schema.json"):
+        (packaged / name).write_text('{"type": 7}', encoding="utf-8")
+    import omnitensor.registry as registry
+
+    monkeypatch.setattr(registry, "_PACKAGED_SCHEMAS", packaged)
+    monkeypatch.setattr(registry, "_SOURCE_SCHEMAS", None)
+
+    check = check_schemas(
+        (
+            "broken-b.schema.json",
+            "absent-b.schema.json",
+            "broken-a.schema.json",
+            "absent-a.schema.json",
+        )
+    )
+
+    assert check == Check(
+        "schemas",
+        False,
+        "missing absent-a.schema.json, absent-b.schema.json; "
+        "invalid broken-a.schema.json, broken-b.schema.json",
+    )
 
 
 def test_the_bundled_workload_catalog_loads():

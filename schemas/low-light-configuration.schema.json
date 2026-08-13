@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["inputFolder", "outputFolder"],
+  "properties": {
+    "inputFolder": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "outputFolder": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 4096
+    }
+  }
+}

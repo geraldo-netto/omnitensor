@@ -24,6 +24,7 @@ from .plugins.settings import (
     PluginSettingsError,
     PluginSettingsStore,
 )
+from .registry import load_schema
 
 LOW_LIGHT_WORKLOAD_ID = "low-light-enhancement"
 LOW_LIGHT_CONFIGURATION_VERSION = "0.2.0"
@@ -40,24 +41,7 @@ def _migrate_low_light_0_1_to_0_2(configuration: dict) -> dict:
 LOW_LIGHT_CONFIGURATION_SPEC = PluginConfigurationSpec(
     plugin_id=LOW_LIGHT_WORKLOAD_ID,
     plugin_version=LOW_LIGHT_CONFIGURATION_VERSION,
-    schema={
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["inputFolder", "outputFolder"],
-        "properties": {
-            "inputFolder": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "maxLength": MAX_PATH_CHARACTERS,
-            },
-            "outputFolder": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "maxLength": MAX_PATH_CHARACTERS,
-            },
-        },
-    },
+    schema=load_schema("low-light-configuration.schema.json"),
     defaults={"inputFolder": None, "outputFolder": None},
     migrations=(
         ConfigurationMigration(

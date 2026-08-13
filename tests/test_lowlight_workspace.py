@@ -25,6 +25,7 @@ from omnitensor.lowlight import (
     validate_low_light_workspace,
 )
 from omnitensor.plugins.settings import PluginConfigurationSpec, PluginSettingsStore
+from omnitensor.registry import load_schema
 
 
 def _workspace(tmp_path: Path) -> tuple[LowLightWorkspace, Path]:
@@ -35,6 +36,70 @@ def _workspace(tmp_path: Path) -> tuple[LowLightWorkspace, Path]:
     source = source_root / "dark.jpg"
     source.write_bytes(b"original image")
     return validate_low_light_workspace(source_root, output_root), source
+
+
+def test_configuration_spec_uses_the_canonical_schema_without_semantic_drift(tmp_path):
+    schema = load_schema("low-light-configuration.schema.json")
+
+    assert LOW_LIGHT_CONFIGURATION_SPEC.schema == schema
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["inputFolder", "outputFolder"]
+    assert schema["properties"] == {
+        "inputFolder": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "maxLength": lowlight.MAX_PATH_CHARACTERS,
+        },
+        "outputFolder": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "maxLength": lowlight.MAX_PATH_CHARACTERS,
+        },
+    }
+    assert LOW_LIGHT_CONFIGURATION_SPEC.defaults == {
+        "inputFolder": None,
+        "outputFolder": None,
+    }
+    assert PluginSettingsStore(tmp_path).load(
+        LOW_LIGHT_CONFIGURATION_SPEC
+    ).configuration == LOW_LIGHT_CONFIGURATION_SPEC.defaults
+
+
+@pytest.mark.parametrize(
+    ("configuration", "detail"),
+    [
+        (
+            {"inputFolder": None, "outputFolder": None, "unexpected": True},
+            "$: Additional properties are not allowed ('unexpected' was unexpected)",
+        ),
+        (
+            {"outputFolder": None},
+            "$: 'inputFolder' is a required property",
+        ),
+        (
+            {"inputFolder": "", "outputFolder": None},
+            "$.inputFolder: '' should be non-empty",
+        ),
+        (
+            {"inputFolder": None, "outputFolder": False},
+            "$.outputFolder: False is not of type 'string', 'null'",
+        ),
+    ],
+)
+def test_canonical_configuration_schema_preserves_refusal_contracts(
+    tmp_path, configuration, detail
+):
+    with pytest.raises(lowlight.PluginSettingsError) as excinfo:
+        PluginSettingsStore(tmp_path).update(
+            LOW_LIGHT_CONFIGURATION_SPEC,
+            expected_revision=0,
+            configuration=configuration,
+        )
+
+    assert excinfo.value.code == "invalid-configuration"
+    assert excinfo.value.detail == detail
+    assert not (tmp_path / "low-light-enhancement.json").exists()
 
 
 def test_configuration_persists_canonical_folders_and_reloads(tmp_path):
