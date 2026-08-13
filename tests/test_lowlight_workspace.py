@@ -13,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import omnitensor.lowlight as lowlight
+import omnitensor.lowlight_settings as lowlight_settings
 from omnitensor.lowlight import (
     LOW_LIGHT_CONFIGURATION_SPEC,
     ConfiguredLowLightWorkspace,
@@ -36,6 +37,35 @@ def _workspace(tmp_path: Path) -> tuple[LowLightWorkspace, Path]:
     source = source_root / "dark.jpg"
     source.write_bytes(b"original image")
     return validate_low_light_workspace(source_root, output_root), source
+
+
+def test_lowlight_facade_preserves_the_extracted_settings_contract():
+    assert lowlight.LOW_LIGHT_CONFIGURATION_SPEC is (
+        lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC
+    )
+    assert lowlight.LOW_LIGHT_CONFIGURATION_VERSION == (
+        lowlight_settings.LOW_LIGHT_CONFIGURATION_VERSION
+    )
+    assert lowlight.LOW_LIGHT_WORKLOAD_ID == lowlight_settings.LOW_LIGHT_WORKLOAD_ID
+    assert lowlight.MAX_PATH_CHARACTERS == lowlight_settings.MAX_PATH_CHARACTERS
+    assert lowlight._migrate_low_light_0_1_to_0_2 is (
+        lowlight_settings._migrate_low_light_0_1_to_0_2
+    )
+    assert lowlight.LOW_LIGHT_CONFIGURATION_SPEC.migrations[0].transform is (
+        lowlight_settings._migrate_low_light_0_1_to_0_2
+    )
+
+
+def test_settings_specification_is_owned_by_the_extracted_module():
+    migration = lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.migrations[0]
+
+    assert lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.plugin_id == (
+        "low-light-enhancement"
+    )
+    assert lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.plugin_version == "0.2.0"
+    assert migration.source_version == "0.1.0"
+    assert migration.target_version == "0.2.0"
+    assert migration.transform.__module__ == "omnitensor.lowlight_settings"
 
 
 def test_configuration_spec_uses_the_canonical_schema_without_semantic_drift(tmp_path):
@@ -167,7 +197,7 @@ def test_version_0_1_folder_settings_migrate_without_semantic_drift(tmp_path):
 def test_property_version_0_2_migration_preserves_folder_values(source, destination):
     legacy = {"inputFolder": source, "outputFolder": destination}
 
-    migrated = lowlight._migrate_low_light_0_1_to_0_2(legacy)
+    migrated = lowlight_settings._migrate_low_light_0_1_to_0_2(legacy)
 
     assert lowlight.LOW_LIGHT_CONFIGURATION_VERSION == "0.2.0"
     assert migrated == legacy

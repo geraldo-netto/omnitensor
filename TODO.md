@@ -51,7 +51,6 @@ audit's dependency order without weakening the required status schema.
 | OMNI-0280 | open | medium | m | OMNI-0248 | Split jobs into codec, lifecycle, and ports modules while retaining existing imports and schema-valid replies. |
 | OMNI-0281 | open | medium | m | — | Split acceptance checks, probes, and CLI behind the current acceptance facade. |
 | OMNI-0282 | open | low | s | — | Route composite GPU execution by declared model format rather than filename suffix and refuse unknown formats before ONNX execution; add mixed-format regression coverage. |
-| OMNI-0283 | open | low | s | OMNI-0252 | Split the low-light settings specification from runtime configuration while preserving its public facade and migration step. |
 | OMNI-0284 | open | low | s | — | Split media acceptance fixture generation by format and prefer ImageMagick 7 `magick` before the legacy `convert` executable. |
 | OMNI-0285 | open | high | l | — | Move training-shared plugin value types into neutral `telemetry_types.py`, re-export them for compatibility, and enforce an import rule forbidding training-to-plugin dependencies. |
 | OMNI-0286 | open | high | m | OMNI-0278 | Replace the eager plugin barrel with a PEP 562 lazy export surface, trim unconsumed re-exports, and add required kernel-telemetry names without changing public discovery. |
