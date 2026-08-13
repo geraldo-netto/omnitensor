@@ -194,7 +194,8 @@ def test_confinement_probe_reports_available_and_blocked_hosts(monkeypatch):
 
 def test_ingestor_root_ports_expose_normalized_opt_in_paths(tmp_path):
     expected = (tmp_path.resolve(),)
-    assert BuildMetadataIngestor([tmp_path]).roots == expected
+    permissions = SimpleNamespace(allows=lambda _permission: True)
+    assert BuildMetadataIngestor([tmp_path], permissions).roots == expected
     assert DocumentIngestor([tmp_path]).roots == expected
 
 

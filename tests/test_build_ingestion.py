@@ -6,6 +6,7 @@ import pytest
 
 from omnitensor.plugins import build_ingestion
 from omnitensor.plugins.build_ingestion import (
+    BUILD_METADATA_PERMISSION,
     MAX_DURATION_MS,
     BuildMetadataIngestor,
     BuildOutcome,
@@ -13,6 +14,12 @@ from omnitensor.plugins.build_ingestion import (
     build_record_error,
 )
 from omnitensor.plugins.ingestion import IngestionError
+from omnitensor.sdk import PermissionView
+
+
+def permission_view(granted: bool = True) -> PermissionView:
+    declared = frozenset({BUILD_METADATA_PERMISSION})
+    return PermissionView(declared, declared if granted else frozenset())
 
 
 def write(root, relative, content=b"source"):
@@ -41,7 +48,7 @@ def test_a_repository_is_profiled_from_metadata_alone(tmp_path):
     write(repo, "b.py", b"y" * 20)
     write(repo, "README.md", b"z" * 5)
 
-    [profile] = BuildMetadataIngestor([repo]).profile()
+    [profile] = BuildMetadataIngestor([repo], permission_view()).profile()
 
     assert profile.file_count == 3
     assert profile.total_bytes == 35
@@ -53,7 +60,7 @@ def test_no_file_content_appears_in_a_profile(tmp_path):
     repo = tmp_path / "repo"
     write(repo, "secret.py", b"API_KEY = 'private-value'")
 
-    [profile] = BuildMetadataIngestor([repo]).profile()
+    [profile] = BuildMetadataIngestor([repo], permission_view()).profile()
 
     assert "private-value" not in repr(profile)
     assert set(vars(profile) if hasattr(profile, "__dict__") else {}) == set()
@@ -90,10 +97,46 @@ def test_only_configured_repositories_are_profiled(tmp_path):
     write(configured, "a.py")
     write(other, "b.py")
 
-    profiles = BuildMetadataIngestor([configured]).profile()
+    profiles = BuildMetadataIngestor([configured], permission_view()).profile()
 
     assert len(profiles) == 1
     assert profiles[0].file_count == 1
+
+
+def test_profile_refuses_missing_grant_before_scanner_access(tmp_path, monkeypatch):
+    ingestor = BuildMetadataIngestor([tmp_path], permission_view(False))
+
+    def unexpected_scan():
+        raise AssertionError("scanner accessed without build metadata consent")
+
+    monkeypatch.setattr(ingestor._scanner, "scan", unexpected_scan)
+
+    with pytest.raises(IngestionError) as excinfo:
+        ingestor.profile()
+
+    assert (excinfo.value.code, excinfo.value.detail) == (
+        "permission-denied",
+        "build metadata permission is not granted",
+    )
+
+
+def test_build_ingestor_requires_the_canonical_permission_gate(tmp_path):
+    with pytest.raises(TypeError) as excinfo:
+        BuildMetadataIngestor([tmp_path], object())
+    assert str(excinfo.value) == "permissions must implement CollectionPermissionGate"
+
+
+def test_scanner_bounds_are_forwarded_to_repository_profiling(tmp_path):
+    repo = tmp_path / "repo"
+    write(repo, "a.py")
+    write(repo, "b.py")
+
+    [profile] = BuildMetadataIngestor(
+        [repo], permission_view(), max_files=1
+    ).profile()
+
+    assert profile.file_count == 1
+    assert profile.truncated is True
 
 
 def test_a_symlink_out_of_the_repository_is_not_followed(tmp_path):
@@ -102,13 +145,13 @@ def test_a_symlink_out_of_the_repository_is_not_followed(tmp_path):
     repo.mkdir()
     (repo / "link.py").symlink_to(secret)
 
-    [profile] = BuildMetadataIngestor([repo]).profile()
+    [profile] = BuildMetadataIngestor([repo], permission_view()).profile()
 
     assert profile.file_count == 0
 
 
 def test_a_valid_history_is_accepted():
-    accepted, rejected = BuildMetadataIngestor(["/tmp"]).accept_history(
+    accepted, rejected = BuildMetadataIngestor(["/tmp"], permission_view()).accept_history(
         [record("build-1"), record("build-2", outcome=BuildOutcome.FAILED)]
     )
     assert [item.build_id for item in accepted] == ["build-1", "build-2"]
@@ -128,7 +171,9 @@ def test_a_valid_history_is_accepted():
     ],
 )
 def test_a_malformed_record_is_rejected_with_a_reason(changes):
-    accepted, rejected = BuildMetadataIngestor(["/tmp"]).accept_history([record(**changes)])
+    accepted, rejected = BuildMetadataIngestor(["/tmp"], permission_view()).accept_history(
+        [record(**changes)]
+    )
     assert accepted == ()
     assert len(rejected) == 1
 
@@ -138,25 +183,43 @@ def test_a_non_record_is_rejected():
 
 
 def test_history_is_bounded_and_truncation_is_reported():
-    ingestor = BuildMetadataIngestor(["/tmp"], max_records=2)
+    ingestor = BuildMetadataIngestor(["/tmp"], permission_view(), max_records=2)
     accepted, rejected = ingestor.accept_history([record(f"build-{i}") for i in range(5)])
     assert len(accepted) == 2
     assert any("truncated at 2" in reason for reason in rejected)
 
 
-def test_the_record_bound_is_validated():
-    with pytest.raises(IngestionError, match="max_records"):
-        BuildMetadataIngestor(["/tmp"], max_records=0)
+@pytest.mark.parametrize("value", [True, 0, "1"])
+def test_the_record_bound_is_validated(value):
+    with pytest.raises(IngestionError) as excinfo:
+        BuildMetadataIngestor(["/tmp"], permission_view(), max_records=value)
+    assert (excinfo.value.code, excinfo.value.detail) == (
+        "bounds-invalid",
+        "max_records must be a positive integer",
+    )
+
+
+def test_one_build_record_is_a_valid_bound():
+    ingestor = BuildMetadataIngestor(["/tmp"], permission_view(), max_records=1)
+
+    accepted, rejected = ingestor.accept_history([record("build-1"), record("build-2")])
+
+    assert [item.build_id for item in accepted] == ["build-1"]
+    assert rejected == ("history truncated at 1 records",)
 
 
 def test_a_failed_build_carries_its_failed_checks():
-    accepted, _rejected = BuildMetadataIngestor(["/tmp"]).accept_history(
+    accepted, _rejected = BuildMetadataIngestor(
+        ["/tmp"], permission_view()
+    ).accept_history(
         [record(outcome=BuildOutcome.FAILED, failed_checks=("lint", "types"))]
     )
     assert accepted[0].failed_checks == ("lint", "types")
 
 
 def test_a_missing_repository_profiles_as_empty(tmp_path):
-    [profile] = BuildMetadataIngestor([tmp_path / "absent"]).profile()
+    [profile] = BuildMetadataIngestor(
+        [tmp_path / "absent"], permission_view()
+    ).profile()
     assert profile.file_count == 0
     assert profile.total_bytes == 0
