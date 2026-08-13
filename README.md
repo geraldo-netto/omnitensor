@@ -48,6 +48,11 @@ documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and
 mandatory versus optional producer dependencies.
 
+Publishing a qualified local artifact? The
+[publisher identity section](docs/local-training.md#machine-local-artifact-publisher-identity)
+explains why signatures are required and how the idempotent `xpuwlm` Ed25519
+key is created, reused, protected, and exposed as public trust metadata.
+
 ## Backend hierarchy
 
 `tpu > npu > gpu` — no CPU backend by design: the CPU is the scarcest shared

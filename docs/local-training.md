@@ -63,6 +63,44 @@ extra does not silently choose or download a model implementation: callers
 must supply a reviewed loader matching the pinned recipe family and source
 revision.
 
+## Machine-local artifact publisher identity
+
+A model digest proves which bytes arrived, but not who accepted those bytes,
+their conversion report, or their source. OmniTensor therefore signs the exact
+artifact id, version, format, SHA-256, publisher identity, source evidence, and
+publication time before a qualified native model becomes active. This prevents
+an unsigned or substituted file from inheriting the trust of a previously
+reviewed build.
+
+The default local identity is deliberately recognizable:
+
+- label: `xpuwlm`;
+- publisher: `xpuwlm.local`;
+- key id: `xpuwlm-ed25519-v1`;
+- algorithm: Ed25519.
+
+Create it explicitly, or let an artifact-publisher command call the same
+idempotent API when it first needs to sign:
+
+```sh
+omnitensor-setup-publisher-key
+```
+
+The first call creates the key; later calls verify and reuse it. The private
+key defaults to
+`~/.local/share/omnitensor/publisher-keys/xpuwlm/xpuwlm-ed25519-v1.private.pem`
+with mode `0600` inside a `0700` directory. The public trust record defaults to
+`~/.config/omnitensor/artifact-publishers/xpuwlm.json`. Output includes paths
+and the SHA-256 public-key fingerprint, never private key material.
+
+This is an unattended, machine-local producer identity, so its PKCS#8 private
+key is not passphrase-encrypted. Filesystem ownership and mode are the custody
+boundary. Never commit, copy into an artifact, expose to a plugin worker, or
+mount it into the inference service. Back it up only if artifacts must remain
+reproducibly attributable after reinstalling the workstation. A distributable
+release needs a separately governed offline key and rotation/revocation policy;
+do not reuse `xpuwlm.local` as a public release identity.
+
 ## Reviewed open-source source catalog
 
 The bundled recipe catalog pins every remote byte by revision, filename, size,
