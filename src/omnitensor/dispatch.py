@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping
 from typing import Protocol, runtime_checkable
 
 from .executors.base import Executor, InferenceResult
-from .jobs import JobDispatchError
+from .job_ports import JobDispatchError
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .registry import Workload
 from .scheduler import QueueFullError, Scheduler, runnable_model, select_backend

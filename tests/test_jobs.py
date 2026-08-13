@@ -8,18 +8,222 @@ from typing import TypeVar
 
 import pytest
 
-from omnitensor.jobs import (
+import omnitensor.job_codec as job_codec
+import omnitensor.job_lifecycle as job_lifecycle
+import omnitensor.job_ports as job_ports
+import omnitensor.jobs as jobs
+from omnitensor.job_codec import DEFAULT_MAX_JOB_REQUEST_BYTES
+from omnitensor.job_lifecycle import (
     DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS,
-    DEFAULT_MAX_JOB_REQUEST_BYTES,
-    JobDispatchError,
     JobSubmissionService,
     PredicateJobAuthorizer,
 )
+from omnitensor.job_ports import JobDispatchError
 from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
-from omnitensor.plugins.results import JobResultStore
+from omnitensor.plugins.results import JobRecord, JobResultStore
 from omnitensor.registry import validate_document
 
 T = TypeVar("T")
+
+
+def test_jobs_facade_preserves_extracted_contract_identity():
+    assert jobs.JobRequest is job_codec.JobRequest
+    assert jobs.JobSubmissionService is job_lifecycle.JobSubmissionService
+    assert jobs.NoJobObserver is job_lifecycle.NoJobObserver
+    assert jobs.PredicateJobAuthorizer is job_lifecycle.PredicateJobAuthorizer
+    assert jobs.UnavailableJobDispatcher is job_lifecycle.UnavailableJobDispatcher
+    assert jobs.JobAdmission is job_ports.JobAdmission
+    assert jobs.JobAuthorizer is job_ports.JobAuthorizer
+    assert jobs.JobDispatcher is job_ports.JobDispatcher
+    assert jobs.JobDispatchError is job_ports.JobDispatchError
+    assert jobs.JobLifecycleObserver is job_ports.JobLifecycleObserver
+    assert jobs._parse_request is job_codec._parse_request
+    assert jobs._request_id_from_text is job_codec._request_id_from_text
+    assert jobs._record_reply is job_codec._record_reply
+    assert jobs._result_reply is job_codec._result_reply
+    assert jobs._validated_result_reply is job_codec._validated_result_reply
+
+
+def test_job_components_own_their_responsibilities_without_a_facade_cycle():
+    assert job_codec.JobRequest.__module__ == "omnitensor.job_codec"
+    assert job_lifecycle.JobSubmissionService.__module__ == "omnitensor.job_lifecycle"
+    assert job_ports.JobDispatchError.__module__ == "omnitensor.job_ports"
+    assert "omnitensor.jobs" not in {
+        value.__name__
+        for value in vars(job_ports).values()
+        if isinstance(value, type(json))
+    }
+
+
+def test_extracted_codec_preserves_exact_wire_shapes():
+    acknowledgement = job_codec._acknowledgement_reply(
+        "request-1", "job-1", "accepted", "job-accepted", "Job accepted", 123
+    )
+    unknown = job_codec._result_reply(
+        "result-1", "job-1", "unknown", "job-not-found", "No such job", 123
+    )
+    running = job_codec._record_reply(
+        "result-1",
+        JobRecord(
+            "job-1",
+            PluginProgress("job-1", "infer", 0.5, "Half way", 100),
+            None,
+            100.0,
+        ),
+        123,
+    )
+    succeeded = job_codec._record_reply(
+        "result-1",
+        JobRecord(
+            "job-1",
+            None,
+            PluginResult(
+                "job-1",
+                PluginResultStatus.SUCCEEDED,
+                {"value": 7},
+                "Done",
+                100,
+            ),
+            100.0,
+        ),
+        123,
+    )
+
+    assert acknowledgement == (
+        '{"version":1,"requestId":"request-1","jobId":"job-1",'
+        '"status":"accepted","code":"job-accepted","message":"Job accepted",'
+        '"timestamp":123}'
+    )
+    assert unknown == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"unknown","code":"job-not-found","message":"No such job",'
+        '"timestamp":123,"progress":null,"output":null}'
+    )
+    assert running == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"running","code":"job-running","message":"Half way",'
+        '"timestamp":123,"progress":{"fraction":0.5,"detail":"Half way"},'
+        '"output":null}'
+    )
+    assert succeeded == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"succeeded","code":"job-succeeded","message":"Done",'
+        '"timestamp":123,"progress":null,"output":{"value":7}}'
+    )
+    assert validate_document(
+        "runtime-job-acknowledgement.schema.json", json.loads(acknowledgement)
+    ) == []
+    for reply in (unknown, running, succeeded):
+        assert validate_document(
+            "runtime-job-result.schema.json", json.loads(reply)
+        ) == []
+
+
+def test_extracted_codec_preserves_refusal_details_and_identifier_boundaries():
+    with pytest.raises(job_codec._RequestError) as caught:
+        job_codec._parse_request(
+            None,  # type: ignore[arg-type]
+            "runtime-job-submit.schema.json",
+            DEFAULT_MAX_JOB_REQUEST_BYTES,
+        )
+    assert caught.value.request_id == "invalid"
+    assert caught.value.code == "invalid-request"
+    assert caught.value.message == "Request must be JSON text"
+    assert str(caught.value) == "Request must be JSON text"
+
+    with pytest.raises(ValueError, match="^invalid JSON constant: NaN$"):
+        job_codec._reject_json_constant("NaN")
+    assert job_codec._valid_identifier("a" * 120) is True
+    assert job_codec._valid_identifier("a" * 121) is False
+    with pytest.raises(ValueError, match="^generated job ID is invalid$"):
+        job_codec._validate_identifier("generated job ID", "bad id")
+
+
+def test_extracted_dispatch_error_preserves_code_boundaries_and_diagnostic():
+    assert JobDispatchError("a", "message").code == "a"
+    assert JobDispatchError("a" * 80, "message").code == "a" * 80
+    for code in (None, "a" * 81, "bad-"):
+        with pytest.raises(ValueError, match="^job dispatch code is invalid$"):
+            JobDispatchError(code, "message")  # type: ignore[arg-type]
+
+
+def test_extracted_lifecycle_helpers_preserve_exact_terminal_outcomes():
+    async def scenario():
+        completed = asyncio.get_running_loop().create_future()
+        completed.set_result({})
+        failed = asyncio.get_running_loop().create_future()
+        failed.set_exception(RuntimeError("accelerator lost"))
+        cancelled = asyncio.get_running_loop().create_future()
+        cancelled.cancel()
+
+        assert job_lifecycle._settled_outcome(completed) == (
+            "rejected",
+            "job-already-completed",
+            "Job had already completed when cancellation arrived",
+        )
+        assert job_lifecycle._settled_outcome(failed) == (
+            "rejected",
+            "job-already-failed",
+            "Job had already failed when cancellation arrived",
+        )
+        assert job_lifecycle._terminal_status(cancelled) == (
+            PluginResultStatus.CANCELLED,
+            "Job cancelled",
+        )
+        assert job_lifecycle._terminal_status(failed) == (
+            PluginResultStatus.FAILED,
+            "RuntimeError: accelerator lost",
+        )
+
+    run_scenario(scenario())
+
+
+def test_extracted_lifecycle_completion_preserves_owner_and_task_identity():
+    async def scenario():
+        service = JobSubmissionService()
+        active_task = asyncio.get_running_loop().create_future()
+        other_task = asyncio.get_running_loop().create_future()
+        calls = []
+        service._record_outcome = lambda *arguments: calls.append(arguments)
+        service._active["active"] = job_lifecycle._ActiveJob(
+            "visual-library", active_task, "uid:1000"
+        )
+
+        service._job_completed("missing", other_task)
+        service._job_completed("active", other_task)
+        assert service.active_job_ids() == ("active",)
+        service._job_completed("active", active_task)
+
+        assert calls == [
+            ("missing", "anonymous", "", other_task),
+            ("active", "uid:1000", "visual-library", other_task),
+            ("active", "uid:1000", "visual-library", active_task),
+        ]
+        assert service.active_job_ids() == ()
+        active_task.cancel()
+        other_task.cancel()
+
+    run_scenario(scenario())
+
+
+def test_extracted_lifecycle_stop_passes_the_configured_deadline(monkeypatch):
+    async def scenario():
+        service = JobSubmissionService(cancel_timeout_seconds=0.25)
+        task = asyncio.get_running_loop().create_future()
+        service._active["active"] = job_lifecycle._ActiveJob("workload", task)
+        observed = []
+
+        async def wait(tasks, *, timeout):
+            observed.append((tasks, timeout))
+            return set(tasks), set()
+
+        monkeypatch.setattr(job_lifecycle.asyncio, "wait", wait)
+        await service.stop()
+
+        assert observed == [((task,), 0.25)]
+        assert task.cancelled() is True
+
+    run_scenario(scenario())
 
 
 def run_scenario(coroutine: Awaitable[T]) -> T:
