@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnitensor-qwen-ask-selected-files"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pinned BGE and Qwen/Vulkan provider for OmniTensor document questions"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["omnitensor-qwen-vulkan-runtime[documents]==0.1.4"]
+dependencies = ["omnitensor-qwen-vulkan-runtime[documents]==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
 ask-selected-files = "omnitensor_qwen_ask:create"

@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnitensor-qwen-event-extraction"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pinned Qwen/Vulkan provider for OmniTensor event extraction"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["omnitensor-qwen-vulkan-runtime==0.1.4"]
+dependencies = ["omnitensor-qwen-vulkan-runtime==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
 event-extraction = "omnitensor_qwen_event:create"

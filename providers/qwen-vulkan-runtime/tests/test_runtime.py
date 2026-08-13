@@ -284,10 +284,10 @@ def test_grammar_projection_refuses_unbounded_or_invalid_references(schema):
 @pytest.mark.parametrize(
     ("plugin_id", "model_id", "task_factory", "layers"),
     [
-        ("event-extraction", "qwen3-4b-q4-k-m", event_generation_task, 37),
-        ("ask-selected-files", "qwen3-0-6b-q8-0", document_question_task, 29),
-        ("selected-text-tools", "qwen3-0-6b-q8-0", selected_text_task, 29),
-        ("file-organizer", "qwen3-4b-q4-k-m", file_organizer_task, 37),
+        ("event-extraction", "qwen3-8b-q4-k-m", event_generation_task, 37),
+        ("ask-selected-files", "qwen3-8b-q4-k-m", document_question_task, 37),
+        ("selected-text-tools", "qwen3-8b-q4-k-m", selected_text_task, 37),
+        ("file-organizer", "qwen3-8b-q4-k-m", file_organizer_task, 37),
     ],
 )
 def test_receipt_binds_each_exact_task_and_model(
@@ -318,7 +318,7 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
     document = _receipt()
     _load_receipt(monkeypatch, tmp_path, document)
     task = event_generation_task()
-    model = "qwen3-4b-q4-k-m"
+    model = "qwen3-8b-q4-k-m"
     digest = document["models"][model]["sha256"]
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -374,15 +374,15 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
             "Qwen qualification native digest is invalid",
         ),
         (
-            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(extra=True),
+            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(extra=True),
             "Qwen model qualification is invalid",
         ),
         (
-            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(fullyOffloadedLayers=0),
+            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=0),
             "Qwen layer qualification is invalid",
         ),
         (
-            lambda value: value["models"]["qwen3-4b-q4-k-m"].update(fullyOffloadedLayers=True),
+            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=True),
             "Qwen model differs from qualification",
         ),
         (
@@ -403,8 +403,8 @@ def test_receipt_refuses_identity_and_shape_tampering(tmp_path, monkeypatch, mut
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification(
             "event-extraction",
-            "qwen3-4b-q4-k-m",
-            "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "qwen3-8b-q4-k-m",
+            "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
             event_generation_task(),
         )
     assert str(excinfo.value) == detail
@@ -644,6 +644,43 @@ def test_runtime_generate_reloads_exact_model_and_forwards_exact_arguments(tmp_p
     ]
 
 
+def test_runtime_generate_releases_model_when_cancelled_during_load(tmp_path, monkeypatch):
+    adapter = _runtime(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    adapter._model_path = model
+    cancellation = CancellationController()
+
+    class Llama:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    native = Llama()
+
+    async def load(_artifacts, _accelerator):
+        adapter._llama = native
+        cancellation.cancel("cancelled while loading")
+        return NativeLoadReport("llama.cpp-vulkan", "Vulkan", 37, 37, False)
+
+    monkeypatch.setattr(adapter, "load", load)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            adapter.generate(
+                _task(),
+                GenerationRequest("job-1", "selected-text-tools", ("private:item",)),
+                cancellation,
+                Progress(),
+            )
+        )
+
+    assert adapter._active_request == ""
+    assert adapter._llama is None
+    assert native.closed is True
+
+
 def test_runtime_native_load_requires_import_and_proven_full_offload(tmp_path, monkeypatch):
     adapter = _runtime(tmp_path)
     adapter._model_path = tmp_path / "model.gguf"
@@ -664,6 +701,8 @@ def test_runtime_native_load_requires_import_and_proven_full_offload(tmp_path, m
     callbacks = {}
 
     class NativeApi:
+        GGML_TYPE_Q8_0 = 8
+
         @staticmethod
         def llama_log_callback(function):
             return function
@@ -703,6 +742,8 @@ def test_runtime_native_load_requires_import_and_proven_full_offload(tmp_path, m
         "offload_kqv": True,
         "op_offload": True,
         "flash_attn": True,
+        "type_k": 8,
+        "type_v": 8,
         "verbose": False,
     }
     assert adapter._lease is not None
@@ -717,6 +758,7 @@ def test_runtime_native_load_rejects_partial_offload(tmp_path, monkeypatch):
     callbacks = {}
 
     class NativeApi:
+        GGML_TYPE_Q8_0 = 8
         llama_log_callback = staticmethod(lambda function: function)
 
         @staticmethod
@@ -812,6 +854,8 @@ def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_pat
     )
     asyncio.run(adapter._store.publish("job-1", (control, source)))
     reply = {
+        "operation": "translate",
+        "tasks": ["extract-tasks"],
         "evidence": {
             "sourceRef": source.reference,
             "sourceSha256": "wrong",
@@ -832,6 +876,8 @@ def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_pat
     )
 
     assert json.loads(answer) == {
+        "operation": "translate",
+        "tasks": [],
         "evidence": {
             "sourceRef": source.reference,
             "sourceSha256": "a" * 64,
@@ -1069,7 +1115,7 @@ def test_grounding_hint_contains_no_private_source_text():
         ("explain", None, "Explain the selection"),
         ("summarize", None, "Summarize the selection"),
         ("rewrite", None, "Rewrite the selection"),
-        ("translate", "Hebrew", 'Translate the selection into "Hebrew"'),
+        ("translate", "Hebrew", "preserve the exact meaning"),
         ("extract-tasks", None, "tasks must not be empty"),
     ],
 )
@@ -1253,6 +1299,76 @@ def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
     assert runtime._bind_grounding_metadata(
         raw, file_organizer_task(), request, store
     ) == raw
+
+
+def test_organizer_binding_completes_only_safe_extensionless_names():
+    store = MemoryFragmentStore()
+    metadata = SourceFragment(
+        "private:job-1:metadata:1",
+        "a" * 64,
+        1,
+        '{"fileId":"selected-file-1","fileName":"notes.md"}',
+        "b" * 64,
+    )
+    selected = SourceFragment(
+        "private:job-1:source:1:span:0-5", "c" * 64, 1, "notes", "d" * 64
+    )
+    asyncio.run(store.publish("job-1", (metadata, selected)))
+    request = GenerationRequest(
+        "job-1", "file-organizer", (metadata.reference, selected.reference)
+    )
+
+    def bind(name):
+        return json.loads(
+            runtime._bind_grounding_metadata(
+                json.dumps(
+                    {
+                        "suggestions": [
+                            {
+                                "fileId": "selected-file-1",
+                                "proposedName": name,
+                                "evidence": [{"sourceRef": selected.reference}],
+                            }
+                        ]
+                    }
+                ),
+                file_organizer_task(),
+                request,
+                store,
+            )
+        )["suggestions"][0]["proposedName"]
+
+    assert bind("Project Notes") == "Project Notes.md"
+    assert bind("project.txt") == "project.txt"
+    assert bind("../project") == "../project"
+
+
+@pytest.mark.parametrize(
+    "metadata_text",
+    [
+        "{",
+        "[]",
+        '{"fileId":7,"fileName":"notes.md"}',
+    ],
+)
+def test_organizer_extension_binding_fails_closed_on_untrusted_metadata(metadata_text):
+    store = MemoryFragmentStore()
+    metadata = SourceFragment(
+        "private:job-1:metadata:1", "a" * 64, 1, metadata_text, "b" * 64
+    )
+    asyncio.run(store.publish("job-1", (metadata,)))
+    request = GenerationRequest("job-1", "file-organizer", (metadata.reference,))
+    document = {"suggestions": [{"fileId": "selected-file-1", "proposedName": "Notes"}]}
+
+    runtime._normalize_organizer_name_extensions(document, request, store)
+
+    assert document["suggestions"][0]["proposedName"] == "Notes"
+
+
+def test_organizer_extension_binding_ignores_non_suggestion_documents():
+    request = GenerationRequest("job-1", "file-organizer", ())
+
+    runtime._normalize_organizer_name_extensions({}, request, MemoryFragmentStore())
 
 
 def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candidate(tmp_path):
@@ -1564,7 +1680,7 @@ def test_each_factory_requires_the_gpu_lease(monkeypatch, factory, plugin_id):
 def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
-    model = BootstrapArtifact("qwen3-4b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m")
+    model = BootstrapArtifact("qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m")
 
     class Bootstrap:
         accelerator_lease_path = lease
@@ -1581,7 +1697,6 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
     with pytest.raises(RuntimeError, match="event recovery state is unavailable"):
         factories.create_event_extraction()
 
-    small = BootstrapArtifact("qwen3-0-6b-q8-0", "1.0.0", "gguf", "b" * 64, tmp_path / "s")
     incomplete_bge = BootstrapArtifact(
         factories.BGE_ARTIFACT_ID,
         "1.0.0",
@@ -1596,7 +1711,7 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
         state_path = tmp_path
 
         def require_artifact(self, artifact_id):
-            return small if artifact_id == small.id else incomplete_bge
+            return model if artifact_id == model.id else incomplete_bge
 
     monkeypatch.setattr(
         factories,
@@ -1608,7 +1723,7 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
         factories.create_ask_selected_files()
 
 
-def test_generation_factory_selects_large_models_only_for_large_workloads(tmp_path, monkeypatch):
+def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
     requested = []
@@ -1651,19 +1766,15 @@ def test_generation_factory_selects_large_models_only_for_large_workloads(tmp_pa
         assert descriptor.qualified is True
         assert descriptor.provenance.model_version == "1.0.0"
         assert descriptor.provenance.sha256 == "a" * 64
-        assert descriptor.provenance.source_uri == (
-            factories.QWEN_LARGE_SOURCE
-            if plugin_id in factories._LARGE_WORKLOADS
-            else factories.QWEN_SOURCE
-        )
+        assert descriptor.provenance.source_uri == factories.QWEN_SOURCE
         assert descriptor.provenance.license_spdx == "Apache-2.0"
         assert receipt == _qualification()
 
     assert requested == [
-        factories.QWEN_LARGE_ARTIFACT_ID,
         factories.QWEN_ARTIFACT_ID,
         factories.QWEN_ARTIFACT_ID,
-        factories.QWEN_LARGE_ARTIFACT_ID,
+        factories.QWEN_ARTIFACT_ID,
+        factories.QWEN_ARTIFACT_ID,
     ]
     assert qualified == [
         (
@@ -1690,15 +1801,8 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
     lease.touch()
     state = tmp_path / "state"
     state.mkdir()
-    qwen_small = BootstrapArtifact(
-        factories.QWEN_ARTIFACT_ID, "1.0.0", "gguf", "a" * 64, tmp_path / "small.gguf"
-    )
-    qwen_large = BootstrapArtifact(
-        factories.QWEN_LARGE_ARTIFACT_ID,
-        "1.0.0",
-        "gguf",
-        "b" * 64,
-        tmp_path / "large.gguf",
+    qwen = BootstrapArtifact(
+        factories.QWEN_ARTIFACT_ID, "1.0.0", "gguf", "a" * 64, tmp_path / "qwen.gguf"
     )
     bge_artifact = BootstrapArtifact(
         factories.BGE_ARTIFACT_ID,
@@ -1715,8 +1819,7 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
 
         def require_artifact(self, artifact_id):
             return {
-                qwen_small.id: qwen_small,
-                qwen_large.id: qwen_large,
+                qwen.id: qwen,
                 bge_artifact.id: bge_artifact,
             }[artifact_id]
 

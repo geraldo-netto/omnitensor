@@ -30,7 +30,7 @@
           "additionalProperties": false,
           "required": ["modelId", "artifactSha256", "runtimeVersion", "deviceName"],
           "properties": {
-            "modelId": {"const": "qwen3-0.6b-q8-0"},
+            "modelId": {"const": "qwen3-8b-q4-k-m"},
             "artifactSha256": {"$ref": "#/$defs/digest"},
             "runtimeVersion": {"$ref": "#/$defs/text"},
             "deviceName": {"$ref": "#/$defs/text"}

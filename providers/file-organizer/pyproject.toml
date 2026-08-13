@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnitensor-qwen-file-organizer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pinned Qwen/Vulkan provider for OmniTensor review-only file plans"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["omnitensor-qwen-vulkan-runtime==0.1.4"]
+dependencies = ["omnitensor-qwen-vulkan-runtime==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
 file-organizer = "omnitensor_qwen_file_organizer:create"

@@ -26,6 +26,18 @@ entities and external resources before producing a bounded PNG. The runtime
 does not invoke `ffmpeg`, ImageMagick, LibreOffice, or a shell subprocess.
 Those independent host tools may be used to author acceptance fixtures.
 
+The provider already has a model-oriented preprocessing layer. Raster images,
+sampled video frames, rendered document pages, and presentation images are
+decoded to RGB, resized with a high-quality filter so neither dimension exceeds
+768 pixels, and encoded as PNG before vision inference. SVG, PDF, and TIFF are
+first rendered at no more than 1,600 pixels on their longest side. Audio from
+both audio and video containers is decoded directly to mono 16 kHz float PCM
+before Whisper inference. It is deliberately not transcoded through MP3:
+another lossy encode can erase quiet speech and costs work without reducing the
+in-memory tensor. Video is not transcoded wholesale; the adapter extracts the
+audio stream and samples at most twelve bounded frames, avoiding unnecessary
+decode, storage, and GPU pressure.
+
 ## Vulkan runtime installation
 
 The Whisper extension must be built for Vulkan and must find its bundled

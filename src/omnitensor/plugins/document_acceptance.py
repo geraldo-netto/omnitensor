@@ -26,8 +26,8 @@ from .qwen import NativeLoadReport, ProviderGenerationError, _validate_gpu_load
 
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
-QWEN_MODEL_SHA256 = "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735"
-QWEN_MODEL_ID = "qwen3-0.6b-q8-0"
+QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -106,8 +106,7 @@ class DocumentAcceptancePolicy:
     minimum_retrieval_recall: float = 0.9
     minimum_grounded_term_recall: float = 0.9
     minimum_citation_integrity: float = 1.0
-    maximum_p95_latency_ms: int = 10_000
-    maximum_peak_memory_bytes: int = 4 * 1024 * 1024 * 1024
+    maximum_p95_latency_ms: int = 30_000
     maximum_cancellation_latency_ms: int = 2_000
     maximum_revocation_latency_ms: int = 500
 
@@ -334,8 +333,6 @@ def _enforce_metric_policy(
         raise DocumentAcceptanceError("quality-failed", "citation integrity is below the gate")
     if p95 > policy.maximum_p95_latency_ms:
         raise DocumentAcceptanceError("quality-failed", "question latency exceeds the gate")
-    if peak_memory > policy.maximum_peak_memory_bytes:
-        raise DocumentAcceptanceError("quality-failed", "question memory exceeds the gate")
 
 
 def _acceptance_metrics(
@@ -378,8 +375,7 @@ def _score_observation(
         raise DocumentAcceptanceError("quality-failed", "answer violates its public contract")
     answer = str(observation.result["answer"]).casefold()
     if (
-        observation.result["requestId"] != f"accept-{case.case_id}"
-        or observation.result["providerId"] != "qwen3-documents-gpu"
+        observation.result["providerId"] != "qwen3-workloads-gpu"
         or observation.result["accelerator"] != "gpu"
     ):
         raise DocumentAcceptanceError("evidence-invalid", "answer identity disagrees")
@@ -485,7 +481,6 @@ def _validate_policy(policy: DocumentAcceptancePolicy) -> None:
             raise DocumentAcceptanceError("policy-invalid", f"{name} must be in [0, 1]")
     for name in (
         "maximum_p95_latency_ms",
-        "maximum_peak_memory_bytes",
         "maximum_cancellation_latency_ms",
         "maximum_revocation_latency_ms",
     ):

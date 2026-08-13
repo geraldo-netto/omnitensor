@@ -177,10 +177,10 @@ def test_manifest_is_closed_and_coordinates_manual_private_workload():
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
     assert manifest["plugin"]["artifacts"] == [
         {
-            "id": "qwen3-4b-q4-k-m",
+            "id": "qwen3-8b-q4-k-m",
             "version": "1.0.0",
             "format": "gguf",
-            "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
         }
     ]
 

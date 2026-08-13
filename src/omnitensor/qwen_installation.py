@@ -12,19 +12,12 @@ from .plugins.artifact_installation import ArtifactInstallationError, ArtifactIn
 from .plugins.artifacts import ArtifactReference
 from .preparation import file_digest
 
-QWEN_SIZE_BYTES = 804_753_088
+QWEN_SIZE_BYTES = 5_027_783_488
 QWEN_REFERENCE = ArtifactReference(
-    "qwen3-0-6b-q8-0",
+    "qwen3-8b-q4-k-m",
     "1.0.0",
     "gguf",
-    "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735",
-)
-QWEN_LARGE_SIZE_BYTES = 2_497_280_256
-QWEN_LARGE_REFERENCE = ArtifactReference(
-    "qwen3-4b-q4-k-m",
-    "1.0.0",
-    "gguf",
-    "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
 )
 BGE_REFERENCE = ArtifactReference(
     "bge-small-en-v1-5-ask-gpu",
@@ -51,7 +44,6 @@ class QwenInstallationError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class QwenArtifactSources:
     qwen_model: Path
-    qwen_large_model: Path
     bge_param: Path
     bge_bin: Path
     bge_tokenizer: Path
@@ -69,11 +61,6 @@ def install_qwen_artifacts(
         raise QwenInstallationError("license acceptance must explicitly name Apache-2.0 and MIT")
     expected = (
         (sources.qwen_model, QWEN_REFERENCE.sha256, QWEN_SIZE_BYTES),
-        (
-            sources.qwen_large_model,
-            QWEN_LARGE_REFERENCE.sha256,
-            QWEN_LARGE_SIZE_BYTES,
-        ),
         (sources.bge_param, BGE_REFERENCE.sha256, None),
         (
             sources.bge_bin,
@@ -90,7 +77,6 @@ def install_qwen_artifacts(
         _verify_source(path, digest, exact_size)
     installer = ArtifactInstaller(Path(artifact_root))
     qwen = installer.install(QWEN_REFERENCE, sources.qwen_model)
-    qwen_large = installer.install(QWEN_LARGE_REFERENCE, sources.qwen_large_model)
     bge = installer.install(
         BGE_REFERENCE,
         sources.bge_param,
@@ -103,7 +89,6 @@ def install_qwen_artifacts(
         "version": 1,
         "artifacts": [
             _installed_document(QWEN_REFERENCE, qwen.path),
-            _installed_document(QWEN_LARGE_REFERENCE, qwen_large.path),
             _installed_document(BGE_REFERENCE, bge.path),
         ],
         "licensesAccepted": {"bge": "MIT", "qwen": "Apache-2.0"},
@@ -141,7 +126,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--qwen-model", type=Path, required=True)
-    parser.add_argument("--qwen-large-model", type=Path, required=True)
     parser.add_argument("--bge-param", type=Path, required=True)
     parser.add_argument("--bge-bin", type=Path, required=True)
     parser.add_argument("--bge-tokenizer", type=Path, required=True)
@@ -157,7 +141,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             arguments.artifact_root,
             QwenArtifactSources(
                 arguments.qwen_model,
-                arguments.qwen_large_model,
                 arguments.bge_param,
                 arguments.bge_bin,
                 arguments.bge_tokenizer,

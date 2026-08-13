@@ -46,9 +46,9 @@ fixture. It rejects source commands, invalid dates/zones, ambiguous local times,
 backward ranges, partial matches, and multiple matches. Ambiguous or incomplete
 text gets neither fallback and retains the existing refusal path.
 
-The 12 August 2026 installed-provider recheck used runtime 0.1.4 through the
+The 13 August 2026 installed-provider recheck used runtime 0.2.0 through the
 session D-Bus API on the qualified RX 6600 XT. The frozen English event fixture
-completed in 10.016 seconds with one pending candidate, exact title, start, end,
+completed in 16.7 seconds with one pending candidate, exact title, start, end,
 timezone, location, and canonical full-fragment evidence hashes. Its public job
 result contained no raw fragment field or absolute source path.
 
@@ -62,33 +62,24 @@ wheel. All four depend on one implementation wheel:
 | Wheel | Responsibility | Pinned model |
 | --- | --- | --- |
 | `omnitensor-qwen-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the four factories | runtime only |
-| `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3-4B Q4_K_M |
-| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3-0.6B Q8_0 plus BGE-small-en-v1.5 |
-| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-0.6B Q8_0 |
-| `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3-4B Q4_K_M |
+| `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3-8B Q4_K_M |
+| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3-8B Q4_K_M plus BGE-small-en-v1.5 |
+| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-8B Q4_K_M |
+| `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3-8B Q4_K_M |
 
-The smaller generation artifact is the official
-`Qwen/Qwen3-0.6B-GGUF` `Qwen3-0.6B-Q8_0.gguf` at upstream revision
-`1208e45d782fe18602c5eaf10e5758d5b0f24c03`. It is Apache-2.0,
-804,753,088 bytes, and has SHA-256
-`12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735`.
-The checked-in [generation catalog](../generation-models/qwen3-0.6b.json)
-records its source and license terms.
-
-Event extraction and file organizer use the larger official
-`Qwen/Qwen3-4B-GGUF` `Qwen3-4B-Q4_K_M.gguf` at revision
-`bc640142c66e1fdd12af0bd68f40445458f3869b`. It is also Apache-2.0,
-2,497,280,256 bytes, and has SHA-256
-`7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`.
-The checked-in [4B generation catalog](../generation-models/qwen3-4b.json)
+The single shared generation artifact is the official
+`Qwen/Qwen3-8B-GGUF` `Qwen3-8B-Q4_K_M.gguf` at upstream revision
+`7c41481f57cb95916b40956ab2f0b139b296d974`. It is Apache-2.0,
+5,027,783,488 bytes, and has SHA-256
+`d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785`.
+The checked-in [generation catalog](../generation-models/qwen3-8b.json)
 binds those bytes to their license, provider, and deliberately narrow
-qualification scope.
-Review the pinned [Qwen3-4B Apache-2.0 license](https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/bc640142c66e1fdd12af0bd68f40445458f3869b/LICENSE)
-before downloading it.
-The split is deliberate: Ask and selected-text tools retain the smaller
-accepted pin, while the two tasks currently needing stronger structured
-generation pay the larger GPU memory and load cost. No checkout, package
-install, or catalog entry is by itself a live readiness or quality claim;
+qualification scope. Review the pinned
+[Qwen3-8B Apache-2.0 license](https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/7c41481f57cb95916b40956ab2f0b139b296d974/LICENSE)
+before downloading it. Sharing one immutable artifact removes duplicate model
+selection and installation paths; every workload retains an independent worker,
+task contract, grant set, and acceptance status. No checkout, package install,
+or catalog entry is by itself a live readiness or quality claim;
 final provider qualification and `DescribePlugins` must still pass.
 
 Ask selected files additionally requires the accepted BGE/ncnn graph and its
@@ -118,7 +109,7 @@ ncnn export is not interchangeable with this graph.
 | Access to the selected `/dev/dri/renderD*` device | The sandbox mounts only the device granted to that worker |
 | The exact accepted `llama-cpp-python==0.3.34` Vulkan wheel | In-process Qwen execution inside the seccomp worker; startup verifies its native-library hashes, so an arbitrary rebuild or ordinary CPU wheel is not acceptable |
 | All five provider wheels | The runtime implementation and all four independently discoverable workload identities |
-| Both pinned Qwen GGUFs when installing all four workloads | 0.6B generation for Ask/selected text; 4B generation for events/file plans |
+| The pinned Qwen3-8B Q4_K_M GGUF | One digest-locked generation artifact shared by all four workload providers |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
 | A user D-Bus session | The OmniTensor control and job-result surface |
 
@@ -232,11 +223,11 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
-  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.1.4-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.1.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.1.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.1.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.1.0-*.whl
+  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl
 ```
 
 Install optional document/media parsing only when needed:
@@ -252,28 +243,17 @@ in the generation catalog before running:
 
 ```sh
 OMNI_MODELS=~/.local/share/omnitensor/provider-sources
-mkdir -p "$OMNI_MODELS/qwen3-0.6b"
+mkdir -p "$OMNI_MODELS/qwen3-8b"
 
 curl --fail --location \
-  'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/1208e45d782fe18602c5eaf10e5758d5b0f24c03/Qwen3-0.6B-Q8_0.gguf' \
-  --output "$OMNI_MODELS/qwen3-0.6b/Qwen3-0.6B-Q8_0.gguf"
+  'https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf' \
+  --output "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf"
 
 printf '%s  %s\n' \
-  '12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735' \
-  "$OMNI_MODELS/qwen3-0.6b/Qwen3-0.6B-Q8_0.gguf" | sha256sum --check --strict
-test "$(stat --format=%s "$OMNI_MODELS/qwen3-0.6b/Qwen3-0.6B-Q8_0.gguf")" \
-  -eq 804753088
-
-mkdir -p "$OMNI_MODELS/qwen3-4b"
-curl --fail --location \
-  'https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf' \
-  --output "$OMNI_MODELS/qwen3-4b/Qwen3-4B-Q4_K_M.gguf"
-
-printf '%s  %s\n' \
-  '7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5' \
-  "$OMNI_MODELS/qwen3-4b/Qwen3-4B-Q4_K_M.gguf" | sha256sum --check --strict
-test "$(stat --format=%s "$OMNI_MODELS/qwen3-4b/Qwen3-4B-Q4_K_M.gguf")" \
-  -eq 2497280256
+  'd98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785' \
+  "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" | sha256sum --check --strict
+test "$(stat --format=%s "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf")" \
+  -eq 5027783488
 ```
 
 Produce BGE in a separate producer venv as described in
@@ -289,9 +269,9 @@ BGE_TOKENIZER=/absolute/path/to/qualified-bge/tokenizer.json
 sha256sum "$BGE_PARAM" "$BGE_BIN" "$BGE_TOKENIZER"
 ```
 
-The one-shot installer uses one `Apache-2.0` acknowledgement for both official
-Qwen artifacts and requires both license identifiers literally. It verifies
-all five source files, including both Qwen byte counts and every declared digest,
+The one-shot installer uses one `Apache-2.0` acknowledgement for the official
+Qwen artifact and requires both license identifiers literally. It verifies
+all four source files, including the Qwen byte count and every declared digest,
 before importing immutable versions into the artifact store:
 
 ```sh
@@ -299,8 +279,7 @@ OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
 
 "$OMNI_SERVICE/omnitensor-install-qwen-artifacts" \
   --artifact-root "$OMNI_ARTIFACTS" \
-  --qwen-model "$OMNI_MODELS/qwen3-0.6b/Qwen3-0.6B-Q8_0.gguf" \
-  --qwen-large-model "$OMNI_MODELS/qwen3-4b/Qwen3-4B-Q4_K_M.gguf" \
+  --qwen-model "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" \
   --bge-param "$BGE_PARAM" \
   --bge-bin "$BGE_BIN" \
   --bge-tokenizer "$BGE_TOKENIZER" \
@@ -402,7 +381,8 @@ checks.
 ## Acceptance and what is not claimed
 
 Ask selected files has a frozen six-case CC0 corpus and quantitative retrieval,
-grounding, citation, latency, memory, cancellation, and grant-revocation gates.
+grounding, citation, latency, cancellation, and grant-revocation gates. Peak
+GPU memory is measured and published but is not an eligibility limit.
 The archived full-corpus report covers the pinned Qwen/BGE bytes and the native
 runtime named inside that report; it must not be transferred to different
 llama.cpp bytes. Verify a newly collected evidence document with:
@@ -413,17 +393,19 @@ llama.cpp bytes. Verify a newly collected evidence document with:
   --output /absolute/path/to/document-question-acceptance.json
 ```
 
-Event extraction, selected-text tools, and file organizer currently have
+Event extraction and file organizer currently have
 closed schemas, privacy/safety regression coverage, worker startup checks, and
 representative integration tests, but no declared model-quality acceptance
-metrics. Their manifest `acceptance` arrays are intentionally empty. Keep them
-disabled until an operator has reviewed representative results for the intended
-language and document domain; installation must not be presented as a quality
-qualification.
+metrics. Their manifest `acceptance` arrays are intentionally empty. Selected
+text remains below the Cinnamon readiness floor because the 8B model still
+fails the Hebrew semantic-translation probe even though its structural schema
+and task-separation probes pass. Do not present installation as selected-text
+quality qualification.
 
 The provider wheel contains `qualification.json`. It binds the exact task
 contract hashes, Qwen hashes, `llama-cpp-python` version and native-library
-hashes, Vulkan-reported RX 6600 XT name, full 29/29 and 37/37 layer offload, and the four
+hashes, Vulkan-reported RX 6600 XT name, full 37/37 layer offload, Q8_0 key/value
+caches, and the four
 representative closed-contract results run for this release. Startup verifies
 that receipt before advertising a worker as ready. This receipt is a runtime
 compatibility and representative-behavior gate; it does not replace the Ask
@@ -451,21 +433,18 @@ undeclared quality metrics for the other tasks.
   cancellation, or error. Event recovery state contains request/stage data, not
   source contents. File organizer exposes no filesystem mutation port.
 
-## Larger GPU models and NPU providers
+## Future GPU models and NPU providers
 
-The current event and file-organizer manifests select the separately identified
-Qwen3-4B Q4_K_M artifact; they do not replace the 0.6B bytes used by Ask and
-selected-text tools. The same rule applies to a future larger or differently
-quantized GPU model: it must be a new provider release rather than a
-replacement under either existing identity. Such a release must:
+The four current manifests select one shared Qwen3-8B Q4_K_M artifact. A future
+larger or differently quantized GPU model must be a new provider release rather
+than a replacement under the existing identity. Such a release must:
 
 1. pin the upstream revision, filename, byte count, SHA-256, quantization, SPDX
    license, and attribution in a reviewed catalog and manifest;
-2. give the artifact a distinct ID/version and, when necessary, increase the
-   current finite 3 GiB artifact-size bound to another finite tested value
-   instead of making it unlimited;
-3. update only the thin workload wheels that select the larger model, leaving
-   unrelated workloads on their accepted pin;
+2. give the artifact a distinct ID/version and retain finite byte-count and
+   digest verification;
+3. update only the thin workload wheels selecting that model, leaving unrelated
+   workloads on their accepted pin;
 4. prove complete layer offload, bounded context/output, peak GPU/system memory,
    quality on that workload's frozen corpus, cancellation, revocation, and
    recovery on every advertised GPU; and

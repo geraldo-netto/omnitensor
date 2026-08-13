@@ -958,7 +958,7 @@ def _qualification_document(qualified=True, evidence_sha256="evidence"):
             "speech": "AMD Radeon RX 6600 XT",
             "vision": "AMD Radeon RX 6600 XT",
         },
-        "providerVersion": "0.1.0",
+        "providerVersion": "0.2.0",
         "runtimes": {"llama-cpp-python": "0.3.34", "pywhispercpp": "1.5.0"},
         "artifacts": {
             provider.VISION_ARTIFACT_ID: "vision",
@@ -978,7 +978,7 @@ def test_qualification_requires_exact_accepted_versions(monkeypatch, tmp_path):
     evidence_digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
     monkeypatch.setattr(provider.importlib.resources, "files", lambda _name: package)
     versions = {
-        "omnitensor-media-transcription": "0.1.0",
+        "omnitensor-media-transcription": "0.2.0",
         "llama-cpp-python": "0.3.34",
         "pywhispercpp": "1.5.0",
     }

@@ -22,8 +22,8 @@ fixed pooling graph, semantic parity, compiler evidence, and named-device runs
 pass the recipe gates.
 
 Qwen generation uses the same provider-neutral worker boundary as private event
-extraction. The pinned text model for this workflow is the official Apache-2.0
-`Qwen/Qwen3-0.6B-GGUF` Q8_0 artifact at an immutable upstream revision. GPU through
+extraction. All four Qwen workloads share the official Apache-2.0
+`Qwen/Qwen3-8B-GGUF` Q4_K_M artifact at an immutable upstream revision. GPU through
 llama.cpp/Vulkan is the default. An NPU through
 OpenVINO GenAI is used only after explicit configuration and local
 qualification; it may fall back to GPU only before generation starts. There is
@@ -94,7 +94,8 @@ grounding, a changed configuration, and a document-borne prompt injection.
 `omnitensor-qualify-document-questions` validates one bounded evidence document
 against that exact corpus, the pinned Qwen3 digest, the digest-locked BGE
 source/native report, exact answer citations, all mandatory safety probes, and
-the declared quality, memory, cancellation, revocation, and latency gates:
+the declared quality, cancellation, revocation, and latency gates. Peak memory
+is still measured and reported, but it is not an eligibility ceiling:
 
 ```sh
 omnitensor-qualify-document-questions \
@@ -102,21 +103,21 @@ omnitensor-qualify-document-questions \
   --output /tmp/document-question-acceptance.json
 ```
 
-The archived run used BGE-small/ncnn plus Qwen3-0.6B-Q8_0/llama.cpp on the named
-`AMD Radeon RX 6600 XT (RADV NAVI23)`. llama.cpp reported all 29 model layers on
-Vulkan with CPU fallback forbidden. The holdout recorded 1.0 retrieval recall,
-1.0 grounded-term recall, 1.0 citation integrity, 2,386 ms p95 end-to-end
-latency, and 1,415,577,600 peak model/runtime bytes. Regression and integration
+The 13 August 2026 archived run used BGE-small/ncnn plus
+Qwen3-8B-Q4_K_M/llama.cpp on the named
+`AMD Radeon RX 6600 XT (RADV NAVI23)`. llama.cpp reported all 37 model layers on
+Vulkan with CPU fallback forbidden and Q8_0 key/value caches. The six cases ran
+through the installed session D-Bus service and recorded 1.0 retrieval recall,
+1.0 grounded-term recall, 1.0 citation integrity, 21,907 ms p95 end-to-end
+latency, and 7,637,553,152 peak observed GPU bytes. Regression and integration
 probes require malicious and mutated documents to fail closed, revoked grants
 to refuse queued work, changed source digests to suppress stale results, an
 ephemeral index to recover on the next request, cancellation to terminate, and
 private fragments to be discarded on every terminal path.
 
-The 12 August 2026 installed-provider recheck used runtime 0.1.2 through the
-session D-Bus API on the same RX 6600 XT. A synthetic Mars fixture completed as
-`job-succeeded`; its citation retained `omni-0242-mars.txt`, canonical page/span
-and both SHA-256 values. The owner-scoped public result contained no absolute
-source path or raw fragment field.
+The same live run measured 269 ms cancellation and 83 ms active-grant
+revocation. Every grant was restored after the probe. The owner-scoped public
+results contained no absolute source path or raw fragment field.
 
 The accepted report is deliberately narrow: it qualifies this frozen public
 holdout on that GPU. It does not claim quality for arbitrary private corpora,

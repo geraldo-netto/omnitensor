@@ -53,7 +53,7 @@ def load_qualification(
         "workloads",
     }:
         raise RuntimeError("Qwen qualification receipt fields are invalid")
-    if document["version"] != 1 or document["recordedAt"] != "2026-08-12":
+    if document["version"] != 1 or document["recordedAt"] != "2026-08-13":
         raise RuntimeError("Qwen qualification receipt version is invalid")
     device = document["device"]
     if not isinstance(device, str) or not device:
@@ -105,10 +105,23 @@ def _model(value: object, model_id: str, digest: str) -> int:
     if not isinstance(value, dict) or model_id not in value:
         raise RuntimeError("Qwen model has no qualification")
     model = value[model_id]
-    if not isinstance(model, dict) or set(model) != {"sha256", "fullyOffloadedLayers"}:
+    if not isinstance(model, dict) or set(model) != {
+        "sha256",
+        "fullyOffloadedLayers",
+        "contextTokens",
+        "keyCache",
+        "valueCache",
+    }:
         raise RuntimeError("Qwen model qualification is invalid")
     layers = model["fullyOffloadedLayers"]
-    if model["sha256"] != digest or isinstance(layers, bool) or not isinstance(layers, int):
+    if (
+        model["sha256"] != digest
+        or model["contextTokens"] != 32_768
+        or model["keyCache"] != "q8_0"
+        or model["valueCache"] != "q8_0"
+        or isinstance(layers, bool)
+        or not isinstance(layers, int)
+    ):
         raise RuntimeError("Qwen model differs from qualification")
     if layers < 1:
         raise RuntimeError("Qwen layer qualification is invalid")

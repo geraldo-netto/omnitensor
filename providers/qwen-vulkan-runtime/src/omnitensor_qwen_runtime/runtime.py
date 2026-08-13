@@ -138,12 +138,13 @@ class LlamaVulkanRuntime:
             raise ProviderGenerationError(
                 "model-load-failed", "Qwen model was not loaded", generation_started=False
             )
-        if self._llama is None:
-            await self.load((self._model_path,), "gpu")
-        cancellation.raise_if_cancelled()
-        self._active_request = request.request_id
-        await progress.report(_generation_progress(request.request_id, 0.15))
         try:
+            cancellation.raise_if_cancelled()
+            if self._llama is None:
+                await self.load((self._model_path,), "gpu")
+            cancellation.raise_if_cancelled()
+            self._active_request = request.request_id
+            await progress.report(_generation_progress(request.request_id, 0.15))
             raw = await asyncio.to_thread(self._generate_sync, task, request, cancellation)
             cancellation.raise_if_cancelled()
             await progress.report(_generation_progress(request.request_id, 0.95))
@@ -193,6 +194,8 @@ class LlamaVulkanRuntime:
             offload_kqv=True,
             op_offload=True,
             flash_attn=True,
+            type_k=llama_cpp.GGML_TYPE_Q8_0,
+            type_v=llama_cpp.GGML_TYPE_Q8_0,
             verbose=False,
         )
         match = _OFFLOAD.search("".join(logs))
@@ -443,6 +446,8 @@ def _bind_grounding_metadata(
     ):
         return raw
     _normalize_bound_document(document, task.task_id)
+    if task.task_id == "file-organizer":
+        _normalize_organizer_name_extensions(document, request, store)
     return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -495,11 +500,19 @@ def _organizer_evidence(document: object) -> tuple[object, ...]:
 
 
 def _normalize_bound_document(document: object, task_id: str) -> None:
-    if task_id == "ask-selected-files":
+    if task_id == "selected-text-tools":
+        _normalize_selected_text_tasks(document)
+    elif task_id == "ask-selected-files":
         _deduplicate_document_citations(document)
     elif task_id == "file-organizer":
         _merge_organizer_suggestions(document)
         _normalize_organizer_tags(document)
+
+
+def _normalize_selected_text_tasks(document: object) -> None:
+    """Remove a model's non-action placeholders from non-extraction results."""
+    if isinstance(document, dict) and document.get("operation") != "extract-tasks":
+        document["tasks"] = []
 
 
 def _merge_organizer_suggestions(document: object) -> None:
@@ -581,6 +594,59 @@ def _normalize_organizer_tags(document: object) -> None:
             if len(normalized) == 16:
                 break
         suggestion["tags"] = normalized
+
+
+def _normalize_organizer_name_extensions(
+    document: object,
+    request: GenerationRequest,
+    store: MemoryFragmentStore,
+) -> None:
+    """Complete a safe extensionless suggestion from trusted file metadata."""
+    suggestions = document.get("suggestions") if isinstance(document, dict) else None
+    if not isinstance(suggestions, list):
+        return
+    suffixes = _organizer_suffixes(request, store)
+    if suffixes is None:
+        return
+    for suggestion in suggestions:
+        if isinstance(suggestion, dict):
+            suggestion["proposedName"] = _completed_organizer_name(
+                suggestion.get("proposedName"), suffixes.get(suggestion.get("fileId"))
+            )
+
+
+def _organizer_suffixes(
+    request: GenerationRequest, store: MemoryFragmentStore
+) -> dict[str, str] | None:
+    suffixes: dict[str, str] = {}
+    for reference in request.content_references:
+        if ":metadata:" not in reference:
+            continue
+        try:
+            metadata = json.loads(store.resolve(request.request_id, reference).text)
+        except (EventWorkloadError, UnicodeError, json.JSONDecodeError):
+            return
+        if not isinstance(metadata, dict) or set(metadata) != {"fileId", "fileName"}:
+            return
+        file_id = metadata.get("fileId")
+        file_name = metadata.get("fileName")
+        if not isinstance(file_id, str) or not isinstance(file_name, str):
+            return None
+        suffixes[file_id] = Path(file_name).suffix
+    return suffixes
+
+
+def _completed_organizer_name(value: object, suffix: object) -> object:
+    if not isinstance(value, str) or not isinstance(suffix, str) or not suffix:
+        return value
+    safe_extensionless = (
+        Path(value).suffix == ""
+        and Path(value).name == value
+        and value not in {".", ".."}
+        and not value.startswith(".")
+        and len(value) + len(suffix) <= 255
+    )
+    return value + suffix if safe_extensionless else value
 
 
 def _deduplicate_document_citations(document: object) -> None:
@@ -692,7 +758,9 @@ def _selected_operation_hint(
         "summarize": "Summarize the selection concisely in result; tasks must be empty.",
         "rewrite": "Rewrite the selection while preserving its meaning; tasks must be empty.",
         "translate": (
-            f"Translate the selection into {json.dumps(language)} in result; tasks must be empty."
+            f"Translate the selection into {json.dumps(language)} in result; preserve the exact "
+            "meaning of every noun, verb, number, and name; use only the target language and its "
+            "script; transliterate proper names; do not add a label; tasks must be empty."
             if isinstance(language, str) and language
             else ""
         ),

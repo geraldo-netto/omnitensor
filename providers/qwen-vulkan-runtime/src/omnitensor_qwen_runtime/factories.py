@@ -34,18 +34,12 @@ from .bge import BgeVulkanEmbedder
 from .qualification import Qualification, load_qualification, verify_native_runtime
 from .runtime import LlamaVulkanRuntime
 
-QWEN_ARTIFACT_ID = "qwen3-0-6b-q8-0"
-QWEN_LARGE_ARTIFACT_ID = "qwen3-4b-q4-k-m"
+QWEN_ARTIFACT_ID = "qwen3-8b-q4-k-m"
 BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
 QWEN_SOURCE = (
-    "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/"
-    "1208e45d782fe18602c5eaf10e5758d5b0f24c03/Qwen3-0.6B-Q8_0.gguf"
+    "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/"
+    "7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
 )
-QWEN_LARGE_SOURCE = (
-    "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/"
-    "bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf"
-)
-_LARGE_WORKLOADS = frozenset({"event-extraction", "file-organizer"})
 
 
 class QualifiedWorkload:
@@ -105,8 +99,7 @@ def _generation(plugin_id: str):
     bootstrap = current_plugin_bootstrap(plugin_id)
     if bootstrap.accelerator_lease_path is None:
         raise RuntimeError("GPU accelerator grant is unavailable")
-    model_id = QWEN_LARGE_ARTIFACT_ID if plugin_id in _LARGE_WORKLOADS else QWEN_ARTIFACT_ID
-    model = bootstrap.require_artifact(model_id)
+    model = bootstrap.require_artifact(QWEN_ARTIFACT_ID)
     qualification = load_qualification(
         plugin_id,
         model.id,
@@ -121,10 +114,10 @@ def _generation(plugin_id: str):
         runtime="llama.cpp-vulkan",
         qualified=True,
         provenance=ArtifactProvenance(
-            model_id,
+            model.id,
             model.version,
             model.sha256,
-            QWEN_LARGE_SOURCE if plugin_id in _LARGE_WORKLOADS else QWEN_SOURCE,
+            QWEN_SOURCE,
             "Apache-2.0",
         ),
     )

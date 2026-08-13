@@ -1,7 +1,7 @@
 {
   "reportVersion": 1,
   "kind": "document-question-operational-acceptance",
-  "evidenceSha256": "22747c56e7019a08fb137f4175a7fa905ed1626312e81554c1619d191c55f994",
+  "evidenceSha256": "9e1997dc1eb6a2bc9d15b328c86d3b16c14153c4680e6a2da5ad6ec33c66e3f4",
   "corpusSha256": "da58477462f26065d23813727e96349ed104171210685051f6c3ca851bfd05d4",
   "models": {
     "embedding": {
@@ -10,9 +10,9 @@
       "deviceName": "AMD Radeon RX 6600 XT (RADV NAVI23)"
     },
     "generation": {
-      "modelId": "qwen3-0.6b-q8-0",
-      "artifactSha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735",
-      "runtimeVersion": "llama.cpp-d654a8ee8ad70bf10c678c199e99049ced60a955",
+      "modelId": "qwen3-8b-q4-k-m",
+      "artifactSha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "runtimeVersion": "llama-cpp-python-0.3.34",
       "deviceName": "AMD Radeon RX 6600 XT (RADV NAVI23)"
     }
   },
@@ -20,10 +20,10 @@
     "retrievalRecall": 1.0,
     "groundedTermRecall": 1.0,
     "citationIntegrity": 1.0,
-    "p95LatencyMs": 2386,
-    "peakMemoryBytes": 1415577600,
-    "cancellationLatencyMs": 1,
-    "revocationLatencyMs": 2
+    "p95LatencyMs": 21907,
+    "peakMemoryBytes": 7637553152,
+    "cancellationLatencyMs": 269,
+    "revocationLatencyMs": 83
   },
   "safety": {
     "maliciousDocumentRefused": true,

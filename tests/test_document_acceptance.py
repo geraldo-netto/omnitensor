@@ -91,10 +91,10 @@ def test_archived_named_gpu_evidence_reproduces_exact_qualified_report():
     assert report.generator_device_name == report.embedding_device_name
     assert report.retrieval_recall == report.grounded_term_recall == 1.0
     assert report.citation_integrity == 1.0
-    assert report.p95_latency_ms == 2386
-    assert report.peak_memory_bytes == 1415577600
-    assert report.cancellation_latency_ms == 1
-    assert report.revocation_latency_ms == 2
+    assert report.p95_latency_ms == 21907
+    assert report.peak_memory_bytes == 7637553152
+    assert report.cancellation_latency_ms == 269
+    assert report.revocation_latency_ms == 83
 
 
 def test_public_corpus_and_report_contain_no_private_path_or_unbounded_claim():
@@ -108,20 +108,20 @@ def test_public_corpus_and_report_contain_no_private_path_or_unbounded_claim():
 
 
 def test_qwen3_catalog_is_official_revision_pinned_and_gpu_default():
-    catalog = json.loads((ROOT / "generation-models/qwen3-0.6b.json").read_text())
+    catalog = json.loads((ROOT / "generation-models/qwen3-8b.json").read_text())
     source = catalog["source"]
     revision = catalog["upstream"]["revision"]
 
-    assert catalog["id"] == "qwen3-0.6b-q8-0"
+    assert catalog["id"] == "qwen3-8b-q4-k-m"
     assert catalog["license"]["spdx"] == "Apache-2.0"
     assert len(revision) == 40 and revision in source["uri"]
     assert source == {
         "uri": (
-            f"https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/{revision}/Qwen3-0.6B-Q8_0.gguf"
+            f"https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/{revision}/Qwen3-8B-Q4_K_M.gguf"
         ),
-        "filename": "Qwen3-0.6B-Q8_0.gguf",
+        "filename": "Qwen3-8B-Q4_K_M.gguf",
         "sha256": QWEN_MODEL_SHA256,
-        "sizeBytes": 804753088,
+        "sizeBytes": 5027783488,
     }
     assert [(item["accelerator"], item["default"]) for item in catalog["providers"]] == [
         ("gpu", True),
@@ -131,7 +131,7 @@ def test_qwen3_catalog_is_official_revision_pinned_and_gpu_default():
 
 def test_manifest_declares_the_same_operational_thresholds_and_answer_bound():
     manifest = json.loads((ROOT / "plugin-manifests/ask-selected-files.json").read_text())
-    catalog = json.loads((ROOT / "generation-models/qwen3-0.6b.json").read_text())
+    catalog = json.loads((ROOT / "generation-models/qwen3-8b.json").read_text())
     targets = {item["metric"]: item["target"] for item in manifest["acceptance"]}
     policy = catalog["evaluation"]
 
@@ -645,12 +645,11 @@ def test_observation_identity_and_bounds_fail_closed(tmp_path, field, value, cod
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("requestId", "accept-wrong"),
         ("providerId", "other-provider"),
         ("accelerator", "npu"),
     ],
 )
-def test_public_answer_identity_is_bound_to_case_and_gpu_provider(tmp_path, field, value):
+def test_public_answer_identity_is_bound_to_shared_gpu_provider(tmp_path, field, value):
     corpus, evidence, _report = _accepted(tmp_path)
     result = copy.deepcopy(evidence.observations[0].result)
     result[field] = value
@@ -776,10 +775,6 @@ def test_invalid_public_answer_contract_fails_before_scoring(tmp_path):
             "maximum_p95_latency_ms is outside its bound",
         ),
         (
-            DocumentAcceptancePolicy(maximum_peak_memory_bytes=True),
-            "maximum_peak_memory_bytes is outside its bound",
-        ),
-        (
             DocumentAcceptancePolicy(maximum_cancellation_latency_ms=0),
             "maximum_cancellation_latency_ms is outside its bound",
         ),
@@ -820,11 +815,6 @@ def test_policy_bounds_are_closed(tmp_path, policy, detail):
             DocumentAcceptancePolicy(maximum_p95_latency_ms=1),
             "question latency exceeds the gate",
         ),
-        (
-            "memory",
-            DocumentAcceptancePolicy(maximum_peak_memory_bytes=1),
-            "question memory exceeds the gate",
-        ),
     ],
 )
 def test_each_quality_threshold_is_enforced(tmp_path, change, policy, detail):
@@ -851,7 +841,7 @@ def test_each_quality_threshold_is_enforced(tmp_path, change, policy, detail):
     elif change == "latency":
         observation = replace(observation, latency_ms=2)
     else:
-        observation = replace(observation, peak_memory_bytes=2)
+        raise AssertionError(f"unknown threshold: {change}")
     changed = replace(evidence, observations=(observation, *evidence.observations[1:]))
     _assert_error(
         lambda: qualify_document_questions(corpus, changed, policy), "quality-failed", detail

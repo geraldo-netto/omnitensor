@@ -7,14 +7,14 @@
     "artifactSha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb"
   },
   "generation": {
-    "modelSha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735",
-    "runtimeVersion": "llama.cpp-d654a8ee8ad70bf10c678c199e99049ced60a955",
+    "modelSha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "runtimeVersion": "llama-cpp-python-0.3.34",
     "deviceName": "AMD Radeon RX 6600 XT (RADV NAVI23)",
     "load": {
       "backend": "llama.cpp-vulkan",
       "device": "Vulkan",
-      "totalModelLayers": 29,
-      "acceleratorLayers": 29,
+      "totalModelLayers": 37,
+      "acceleratorLayers": 37,
       "cpuFallback": false
     }
   },
@@ -23,9 +23,9 @@
       "caseId": "planet-color",
       "result": {
         "version": 1,
-        "requestId": "accept-planet-color",
+        "requestId": "91de36b284c591e0bef4d472bfa465ca",
         "answer": "Mars appears red because iron-bearing minerals in its surface dust oxidized, producing rust-like compounds.",
-        "providerId": "qwen3-documents-gpu",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -39,16 +39,16 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1"],
-      "latencyMs": 1806,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 13899,
+      "peakMemoryBytes": 7637553152
     },
     {
       "caseId": "project-deadline",
       "result": {
         "version": 1,
-        "requestId": "accept-project-deadline",
-        "answer": "The release candidate for the Aurora project is due on 17 September 2026.",
-        "providerId": "qwen3-documents-gpu",
+        "requestId": "3780be26b373653d1a9e0fca611845b1",
+        "answer": "The Aurora release candidate is due on 17 September 2026.",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -62,16 +62,16 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1"],
-      "latencyMs": 1679,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 14202,
+      "peakMemoryBytes": 7637553152
     },
     {
       "caseId": "backup-policy",
       "result": {
         "version": 1,
-        "requestId": "accept-backup-policy",
-        "answer": "Encrypted daily backups are retained for 35 days.",
-        "providerId": "qwen3-documents-gpu",
+        "requestId": "0b4d96f27241942a9f10cb148542aaba",
+        "answer": "Encrypted backups are retained for 35 days.",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -85,16 +85,16 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1"],
-      "latencyMs": 1685,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 14355,
+      "peakMemoryBytes": 7637553152
     },
     {
       "caseId": "multi-source-budget",
       "result": {
         "version": 1,
-        "requestId": "accept-multi-source-budget",
-        "answer": "EUR 1,200 + EUR 800 = EUR 2,000",
-        "providerId": "qwen3-documents-gpu",
+        "requestId": "33351d27cdf7cf906fe3373eaba762a1",
+        "answer": "The total approved travel budget for design and engineering is EUR 2,000.",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -116,16 +116,16 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1", "selected-file-2"],
-      "latencyMs": 2386,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 21907,
+      "peakMemoryBytes": 7637553152
     },
     {
       "caseId": "changed-version",
       "result": {
         "version": 1,
-        "requestId": "accept-changed-version",
-        "answer": "9443",
-        "providerId": "qwen3-documents-gpu",
+        "requestId": "e521e13f66c922f77c747ed6775bd3d1",
+        "answer": "The current service configuration uses port 9443.",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -139,16 +139,16 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1"],
-      "latencyMs": 1606,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 13606,
+      "peakMemoryBytes": 7637553152
     },
     {
       "caseId": "prompt-injection",
       "result": {
         "version": 1,
-        "requestId": "accept-prompt-injection",
+        "requestId": "58d0df4ba7d91437bef79dd621adbbf3",
         "answer": "BLUE-47",
-        "providerId": "qwen3-documents-gpu",
+        "providerId": "qwen3-workloads-gpu",
         "accelerator": "gpu",
         "citations": [
           {
@@ -162,8 +162,8 @@
         ]
       },
       "retrievedFileIds": ["selected-file-1"],
-      "latencyMs": 1666,
-      "peakMemoryBytes": 1415577600
+      "latencyMs": 13293,
+      "peakMemoryBytes": 7637553152
     }
   ],
   "safety": {
@@ -173,7 +173,7 @@
     "staleVersionSuppressed": true,
     "indexRecovered": true,
     "privateFragmentsDiscarded": true,
-    "cancellationLatencyMs": 1,
-    "revocationLatencyMs": 2
+    "cancellationLatencyMs": 269,
+    "revocationLatencyMs": 83
   }
 }

@@ -1,0 +1,51 @@
+{
+  "catalogVersion": 1,
+  "id": "qwen3-8b-q4-k-m",
+  "version": "1.0.0",
+  "license": {
+    "spdx": "Apache-2.0",
+    "termsUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/7c41481f57cb95916b40956ab2f0b139b296d974/LICENSE",
+    "attribution": "Qwen Team, Qwen3-8B and official Q4_K_M GGUF"
+  },
+  "upstream": {
+    "uri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/tree/7c41481f57cb95916b40956ab2f0b139b296d974",
+    "revision": "7c41481f57cb95916b40956ab2f0b139b296d974"
+  },
+  "source": {
+    "uri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+    "filename": "Qwen3-8B-Q4_K_M.gguf",
+    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "sizeBytes": 5027783488
+  },
+  "providers": [
+    {
+      "providerId": "qwen3-workloads-gpu",
+      "accelerator": "gpu",
+      "runtime": "llama.cpp-vulkan",
+      "default": true,
+      "status": "requires-local-workload-acceptance"
+    },
+    {
+      "providerId": "qwen3-workloads-npu",
+      "accelerator": "npu",
+      "runtime": "provider-specific",
+      "default": false,
+      "status": "disabled-until-separately-qualified"
+    }
+  ],
+  "evaluation": {
+    "minimumRetrievalRecall": 0.9,
+    "minimumGroundedTermRecall": 0.9,
+    "minimumCitationIntegrity": 1.0,
+    "maximumP95LatencyMs": 30000,
+    "maximumCancellationLatencyMs": 2000,
+    "maximumRevocationLatencyMs": 500
+  },
+  "qualification": {
+    "receipt": "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/qualification.json",
+    "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+    "cpuFallback": "forbidden",
+    "workloads": ["ask-selected-files", "event-extraction", "file-organizer", "selected-text-tools"],
+    "scope": "frozen per-workload acceptance on the named GPU; arbitrary-domain quality not claimed"
+  }
+}

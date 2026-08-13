@@ -11,7 +11,7 @@ import omnitensor.qwen_installation as installation
 from omnitensor.plugins import PluginMetadata, PluginSource, resolve_plugin_identities
 from omnitensor.plugins.artifacts import ArtifactReference
 from omnitensor.qwen_installation import (
-    QWEN_LARGE_REFERENCE,
+    QWEN_REFERENCE,
     QwenArtifactSources,
     QwenInstallationError,
     install_qwen_artifacts,
@@ -41,15 +41,13 @@ def _reference(artifact_id: str, model_format: str, content: bytes, companions=(
 
 def _small_sources(tmp_path: Path):
     content = {
-        "qwen": b"small-qwen",
-        "large": b"large-qwen",
+        "qwen": b"shared-qwen",
         "param": b"bge-param",
         "bin": b"bge-bin",
         "tokenizer": b"bge-tokenizer",
     }
     paths = {name: _source(tmp_path, f"{name}.bin", value) for name, value in content.items()}
-    qwen = _reference("qwen-small", "gguf", content["qwen"])
-    large = _reference("qwen-large", "gguf", content["large"])
+    qwen = _reference("qwen-shared", "gguf", content["qwen"])
     bge = _reference(
         "bge-ask",
         "ncnn",
@@ -59,19 +57,15 @@ def _small_sources(tmp_path: Path):
             ("tokenizer.json", hashlib.sha256(content["tokenizer"]).hexdigest()),
         ),
     )
-    sources = QwenArtifactSources(
-        paths["qwen"], paths["large"], paths["param"], paths["bin"], paths["tokenizer"]
-    )
-    return content, paths, sources, qwen, large, bge
+    sources = QwenArtifactSources(paths["qwen"], paths["param"], paths["bin"], paths["tokenizer"])
+    return content, paths, sources, qwen, bge
 
 
-def test_installer_verifies_and_atomically_installs_both_qwen_models_and_bge(tmp_path, monkeypatch):
-    content, _paths, sources, qwen, large, bge = _small_sources(tmp_path)
+def test_installer_verifies_and_atomically_installs_shared_qwen_and_bge(tmp_path, monkeypatch):
+    content, _paths, sources, qwen, bge = _small_sources(tmp_path)
     monkeypatch.setattr(installation, "QWEN_REFERENCE", qwen)
-    monkeypatch.setattr(installation, "QWEN_LARGE_REFERENCE", large)
     monkeypatch.setattr(installation, "BGE_REFERENCE", bge)
     monkeypatch.setattr(installation, "QWEN_SIZE_BYTES", len(content["qwen"]))
-    monkeypatch.setattr(installation, "QWEN_LARGE_SIZE_BYTES", len(content["large"]))
 
     document = install_qwen_artifacts(
         tmp_path / "artifacts",
@@ -82,11 +76,10 @@ def test_installer_verifies_and_atomically_installs_both_qwen_models_and_bge(tmp
 
     assert document["licensesAccepted"] == {"bge": "MIT", "qwen": "Apache-2.0"}
     assert [item["id"] for item in document["artifacts"]] == [
-        "qwen-small",
-        "qwen-large",
+        "qwen-shared",
         "bge-ask",
     ]
-    assert document["artifacts"][2]["companions"] == bge.declared_companions
+    assert document["artifacts"][1]["companions"] == bge.declared_companions
     for item in document["artifacts"]:
         assert Path(item["path"]).is_file()
 
@@ -96,7 +89,7 @@ def test_installer_verifies_and_atomically_installs_both_qwen_models_and_bge(tmp
     [("", "MIT"), ("Apache-2.0", ""), ("MIT", "Apache-2.0")],
 )
 def test_installer_requires_exact_explicit_license_acceptance(tmp_path, qwen_license, bge_license):
-    sources = QwenArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d", "e")))
+    sources = QwenArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d")))
 
     with pytest.raises(QwenInstallationError, match="explicitly name Apache-2.0 and MIT"):
         install_qwen_artifacts(
@@ -108,13 +101,11 @@ def test_installer_requires_exact_explicit_license_acceptance(tmp_path, qwen_lic
 
 
 def test_installer_verifies_every_source_before_creating_the_store(tmp_path, monkeypatch):
-    content, paths, sources, qwen, large, bge = _small_sources(tmp_path)
+    content, paths, sources, qwen, bge = _small_sources(tmp_path)
     paths["tokenizer"].write_bytes(b"substituted")
     monkeypatch.setattr(installation, "QWEN_REFERENCE", qwen)
-    monkeypatch.setattr(installation, "QWEN_LARGE_REFERENCE", large)
     monkeypatch.setattr(installation, "BGE_REFERENCE", bge)
     monkeypatch.setattr(installation, "QWEN_SIZE_BYTES", len(content["qwen"]))
-    monkeypatch.setattr(installation, "QWEN_LARGE_SIZE_BYTES", len(content["large"]))
 
     class UnexpectedInstaller:
         def __init__(self, _root):
@@ -189,7 +180,6 @@ def test_parser_exposes_the_exact_required_path_and_license_contract():
     assert actions == {
         "artifact_root": (("--artifact-root",), Path, True),
         "qwen_model": (("--qwen-model",), Path, True),
-        "qwen_large_model": (("--qwen-large-model",), Path, True),
         "bge_param": (("--bge-param",), Path, True),
         "bge_bin": (("--bge-bin",), Path, True),
         "bge_tokenizer": (("--bge-tokenizer",), Path, True),
@@ -206,23 +196,19 @@ def test_cli_passes_all_sources_and_prints_stable_receipt(tmp_path, monkeypatch,
         return {"version": 1, "artifacts": []}
 
     monkeypatch.setattr(installation, "install_qwen_artifacts", fake_install)
-    values = [
-        str((tmp_path / name).resolve()) for name in ("small", "large", "param", "bin", "tok")
-    ]
+    values = [str((tmp_path / name).resolve()) for name in ("qwen", "param", "bin", "tok")]
     installation.main(
         [
             "--artifact-root",
             str(tmp_path / "artifacts"),
             "--qwen-model",
             values[0],
-            "--qwen-large-model",
-            values[1],
             "--bge-param",
-            values[2],
+            values[1],
             "--bge-bin",
-            values[3],
+            values[2],
             "--bge-tokenizer",
-            values[4],
+            values[3],
             "--accept-qwen-license",
             "Apache-2.0",
             "--accept-bge-license",
@@ -244,7 +230,7 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
         "install_qwen_artifacts",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(QwenInstallationError("refused")),
     )
-    repeated = ["--qwen-model", "--qwen-large-model", "--bge-param", "--bge-bin", "--bge-tokenizer"]
+    repeated = ["--qwen-model", "--bge-param", "--bge-bin", "--bge-tokenizer"]
     argv = ["--artifact-root", str(tmp_path)]
     for option in repeated:
         argv.extend((option, str(tmp_path / option[2:])))
@@ -257,20 +243,20 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("directory", "plugin_id", "module", "artifact_ids"),
     [
-        ("event-extraction", "event-extraction", "omnitensor_qwen_event", ["qwen3-4b-q4-k-m"]),
+        ("event-extraction", "event-extraction", "omnitensor_qwen_event", ["qwen3-8b-q4-k-m"]),
         (
             "ask-selected-files",
             "ask-selected-files",
             "omnitensor_qwen_ask",
-            ["qwen3-0-6b-q8-0", "bge-small-en-v1-5-ask-gpu"],
+            ["qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
         ),
         (
             "selected-text-tools",
             "selected-text-tools",
             "omnitensor_qwen_selected_text",
-            ["qwen3-0-6b-q8-0"],
+            ["qwen3-8b-q4-k-m"],
         ),
-        ("file-organizer", "file-organizer", "omnitensor_qwen_file_organizer", ["qwen3-4b-q4-k-m"]),
+        ("file-organizer", "file-organizer", "omnitensor_qwen_file_organizer", ["qwen3-8b-q4-k-m"]),
     ],
 )
 def test_provider_distribution_manifest_and_entry_point_identity_agree(
@@ -286,13 +272,15 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(
     assert entry_points == {plugin_id: f"{module}:create"}
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == plugin_id
     assert [item["id"] for item in manifest["plugin"]["artifacts"]] == artifact_ids
-    if plugin_id == "event-extraction":
-        assert manifest["plugin"]["artifacts"] == [
+    qwen_artifacts = [
+        artifact for artifact in manifest["plugin"]["artifacts"] if artifact["format"] == "gguf"
+    ]
+    assert qwen_artifacts == [
             {
-                "id": QWEN_LARGE_REFERENCE.id,
-                "version": QWEN_LARGE_REFERENCE.version,
-                "format": QWEN_LARGE_REFERENCE.format,
-                "sha256": QWEN_LARGE_REFERENCE.sha256,
+                "id": QWEN_REFERENCE.id,
+                "version": QWEN_REFERENCE.version,
+                "format": QWEN_REFERENCE.format,
+                "sha256": QWEN_REFERENCE.sha256,
             }
         ]
     assert "accelerator:gpu" in manifest["plugin"]["permissions"]
@@ -320,25 +308,32 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(
     assert catalog.rejections == ()
 
 
-def test_qwen4b_catalog_pins_official_source_and_narrow_qualification():
-    catalog = json.loads((ROOT / "generation-models/qwen3-4b.json").read_text())
+def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
+    catalog = json.loads((ROOT / "generation-models/qwen3-8b.json").read_text())
 
-    assert catalog["id"] == "qwen3-4b-q4-k-m"
+    assert catalog["id"] == "qwen3-8b-q4-k-m"
     assert catalog["license"]["spdx"] == "Apache-2.0"
     assert catalog["source"] == {
         "uri": (
-            "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/"
-            "bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf"
+            "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/"
+            "7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
         ),
-        "filename": "Qwen3-4B-Q4_K_M.gguf",
-        "sha256": installation.QWEN_LARGE_REFERENCE.sha256,
-        "sizeBytes": installation.QWEN_LARGE_SIZE_BYTES,
+        "filename": "Qwen3-8B-Q4_K_M.gguf",
+        "sha256": installation.QWEN_REFERENCE.sha256,
+        "sizeBytes": installation.QWEN_SIZE_BYTES,
     }
     assert catalog["qualification"] == {
         "receipt": ("providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/qualification.json"),
         "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
-        "fullyOffloadedLayers": 37,
         "cpuFallback": "forbidden",
-        "workloads": ["event-extraction", "file-organizer"],
-        "scope": ("representative closed-contract checks; production-domain quality not claimed"),
+        "workloads": [
+            "ask-selected-files",
+            "event-extraction",
+            "file-organizer",
+            "selected-text-tools",
+        ],
+        "scope": (
+            "frozen per-workload acceptance on the named GPU; "
+            "arbitrary-domain quality not claimed"
+        ),
     }

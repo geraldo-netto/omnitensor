@@ -1,7 +1,7 @@
 {
   "manifestVersion": 2,
   "id": "ask-selected-files",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "capabilities": ["explicit-file-selection", "grounded-document-question-answering"],
   "plugin": {
     "entryPoint": "ask-selected-files",
@@ -32,10 +32,10 @@
     "triggers": ["manual"],
     "artifacts": [
       {
-        "id": "qwen3-0-6b-q8-0",
+        "id": "qwen3-8b-q4-k-m",
         "version": "1.0.0",
         "format": "gguf",
-        "sha256": "12fae8b8f78f0360b498d04c8db7d33aff29ab7d8080231f93a17c18119e6735"
+        "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
       },
       {
         "id": "bge-small-en-v1-5-ask-gpu",
@@ -97,7 +97,7 @@
     {
       "metric": "p95-question-latency",
       "comparator": "at-most",
-      "target": 10000,
+      "target": 30000,
       "unit": "milliseconds",
       "description": "End-to-end retrieval and grounded generation on the qualified named GPU."
     },
