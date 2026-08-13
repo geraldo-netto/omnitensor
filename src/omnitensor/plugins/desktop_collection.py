@@ -108,6 +108,7 @@ def _geometry_error(sample: WindowSample) -> str:
 class DesktopContextCollector(BoundedCollector[WindowSample]):
     """Emit consented, content-free window metadata for one session."""
 
+    plugin_id = DESKTOP_PLUGIN_ID
     metadata_permission = DESKTOP_METADATA_PERMISSION
     label = "desktop context metadata"
     source_name = "cinnamon-window-metadata"

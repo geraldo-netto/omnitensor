@@ -203,6 +203,7 @@ def test_cancellation_token_exposes_its_stable_job_identity():
 
 
 class SampleCollector(BoundedCollector):
+    plugin_id = "sample-plugin"
     label = "sample"
 
     def identity_of(self, item):
@@ -210,6 +211,23 @@ class SampleCollector(BoundedCollector):
 
     def document_of(self, item):
         return {"id": item.identity}
+
+
+def test_base_collector_requires_each_subclass_to_declare_a_plugin_id():
+    class ValidCollector(BoundedCollector):
+        plugin_id = "valid-plugin"
+
+    assert ValidCollector.plugin_id == "valid-plugin"
+    for plugin_id in (None, ""):
+        with pytest.raises(TypeError) as caught:
+
+            class InvalidCollector(BoundedCollector):
+                if plugin_id is not None:
+                    locals()["plugin_id"] = plugin_id
+
+        assert str(caught.value) == (
+            "BoundedCollector subclasses must declare a non-empty plugin_id"
+        )
 
 
 def test_base_collector_hooks_fail_explicitly_and_default_churn_is_stable():

@@ -109,6 +109,7 @@ def storage_sample_error(sample: object) -> str:
 class StorageIntelligenceCollector(BoundedCollector[StorageSample]):
     """Emit allowlisted, granted devices with stable serial-derived identity."""
 
+    plugin_id = STORAGE_PLUGIN_ID
     metadata_permission = STORAGE_METADATA_PERMISSION
     label = "storage metadata"
     source_name = "smart-nvme-io"

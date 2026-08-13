@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.collection import (
     MAX_COLLECTED_ITEMS,
@@ -12,6 +14,7 @@ from omnitensor.plugins.collection import (
     validated_allowlist,
 )
 from omnitensor.plugins.hardware_collection import (
+    HARDWARE_HEALTH_PLUGIN_ID,
     HARDWARE_METADATA_PERMISSION,
     HardwareHealthCollector,
     HardwareSample,
@@ -59,9 +62,9 @@ def collector(*samples, allowed=(CPU,), granted=(CPU,), **changes):
     )
 
 
-def trigger(payload=None):
+def trigger(payload=None, *, plugin_id=HARDWARE_HEALTH_PLUGIN_ID):
     return Trigger(
-        HARDWARE_METADATA_PERMISSION and "hardware-health",
+        plugin_id,
         "hardware-sample-1",
         TriggerKind.MANUAL,
         payload or {},
@@ -267,8 +270,27 @@ def test_a_malformed_sample_field_is_refused(changes):
 
 
 def test_a_non_trigger_is_refused():
-    with pytest.raises(CollectionError, match="trigger-invalid"):
+    with pytest.raises(CollectionError) as caught:
         asyncio.run(collector().collect("not-a-trigger"))
+
+    assert caught.value.code == "trigger-invalid"
+    assert caught.value.detail == "hardware health metadata requires a Trigger"
+
+
+def test_a_trigger_for_another_plugin_is_refused():
+    with pytest.raises(CollectionError) as caught:
+        asyncio.run(collector().collect(trigger(plugin_id="other-plugin")))
+
+    assert caught.value.code == "trigger-invalid"
+    assert caught.value.detail == (
+        "hardware health metadata requires a hardware-health trigger"
+    )
+
+
+@given(plugin_id=st.text().filter(lambda value: value != HARDWARE_HEALTH_PLUGIN_ID))
+def test_every_foreign_plugin_identity_is_refused(plugin_id):
+    with pytest.raises(CollectionError, match="trigger-invalid"):
+        asyncio.run(collector().collect(trigger(plugin_id=plugin_id)))
 
 
 def test_an_invalid_snapshot_timestamp_is_refused():

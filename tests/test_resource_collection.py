@@ -8,6 +8,7 @@ from omnitensor.plugins.collection import CollectionError, ReplaySource, SourceS
 from omnitensor.plugins.kernel_telemetry import parse_aggregate
 from omnitensor.plugins.resource_collection import (
     RESOURCE_METADATA_PERMISSION,
+    RESOURCE_PLUGIN_ID,
     PressureStall,
     ResourceSample,
     ResourceSchedulerCollector,
@@ -70,8 +71,8 @@ class KernelSource:
         })
 
 
-def trigger():
-    return Trigger("resource-scheduler", "resource-1", TriggerKind.PERIODIC, {}, 1)
+def trigger(plugin_id=RESOURCE_PLUGIN_ID):
+    return Trigger(plugin_id, "resource-1", TriggerKind.PERIODIC, {}, 1)
 
 
 def collect(subject):
@@ -164,6 +165,14 @@ def test_collection_without_the_metadata_grant_is_refused():
     )
     with pytest.raises(CollectionError, match="permission-denied"):
         collect(subject)
+
+
+def test_a_trigger_for_another_plugin_is_refused():
+    with pytest.raises(CollectionError) as caught:
+        asyncio.run(collector().collect(trigger("other-plugin")))
+
+    assert caught.value.code == "trigger-invalid"
+    assert caught.value.detail == "resource metadata requires a resource-scheduler trigger"
 
 
 def test_emission_is_bounded():

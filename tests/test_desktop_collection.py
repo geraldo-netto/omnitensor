@@ -9,6 +9,7 @@ from omnitensor.plugins.collection import CollectionError, ReplaySource, SourceS
 from omnitensor.plugins.desktop_collection import (
     DESKTOP_CONSENT_PERMISSION,
     DESKTOP_METADATA_PERMISSION,
+    DESKTOP_PLUGIN_ID,
     DesktopContextCollector,
     DesktopSession,
     WindowRole,
@@ -59,8 +60,8 @@ def collector(*snapshots, session=SESSION, **changes):
     return DesktopContextCollector(source, permissions(**changes), session, ())
 
 
-def trigger():
-    return Trigger("desktop-context", "desktop-1", TriggerKind.EVENT, {}, 1)
+def trigger(plugin_id=DESKTOP_PLUGIN_ID):
+    return Trigger(plugin_id, "desktop-1", TriggerKind.EVENT, {}, 1)
 
 
 def collect(subject):
@@ -121,6 +122,16 @@ def test_collection_without_the_metadata_grant_is_refused():
     )
     with pytest.raises(CollectionError, match="permission-denied"):
         collect(subject)
+
+
+def test_a_trigger_for_another_plugin_is_refused():
+    with pytest.raises(CollectionError) as caught:
+        asyncio.run(collector().collect(trigger("other-plugin")))
+
+    assert caught.value.code == "trigger-invalid"
+    assert caught.value.detail == (
+        "desktop context metadata requires a desktop-context trigger"
+    )
 
 
 def test_identities_are_per_session_so_they_cannot_be_correlated():

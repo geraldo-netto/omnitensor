@@ -13,6 +13,7 @@ from omnitensor.plugins.collection import (
 )
 from omnitensor.plugins.storage_collection import (
     STORAGE_METADATA_PERMISSION,
+    STORAGE_PLUGIN_ID,
     StorageBus,
     StorageCounters,
     StorageHealth,
@@ -82,8 +83,8 @@ def collector(*snapshots, allowed=(NVME,), granted=(NVME,), **changes):
     return StorageIntelligenceCollector(source, permissions(*granted), allowed, **changes)
 
 
-def trigger():
-    return Trigger("storage-intelligence", "storage-1", TriggerKind.MANUAL, {}, 1)
+def trigger(plugin_id=STORAGE_PLUGIN_ID):
+    return Trigger(plugin_id, "storage-1", TriggerKind.MANUAL, {}, 1)
 
 
 def collect(subject):
@@ -179,6 +180,16 @@ def test_collection_without_the_metadata_grant_is_refused():
     )
     with pytest.raises(CollectionError, match="permission-denied"):
         collect(subject)
+
+
+def test_a_trigger_for_another_plugin_is_refused():
+    with pytest.raises(CollectionError) as caught:
+        asyncio.run(collector().collect(trigger("other-plugin")))
+
+    assert caught.value.code == "trigger-invalid"
+    assert caught.value.detail == (
+        "storage metadata requires a storage-intelligence trigger"
+    )
 
 
 def test_emission_is_bounded_and_truncation_is_reported():

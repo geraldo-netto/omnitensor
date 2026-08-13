@@ -104,6 +104,14 @@ class ReplaySource:
         return snapshot
 
 
+def _check_declared_plugin_id(collector_type: type) -> None:
+    plugin_id = collector_type.__dict__.get("plugin_id")
+    if not isinstance(plugin_id, str) or not plugin_id:
+        raise TypeError(
+            "BoundedCollector subclasses must declare a non-empty plugin_id"
+        )
+
+
 class BoundedCollector(Generic[Sample]):
     """Consent, allowlisting, bounding, and churn for one host source.
 
@@ -112,12 +120,18 @@ class BoundedCollector(Generic[Sample]):
     enforced here so it cannot be omitted per profile.
     """
 
+    #: Plugin identity accepted by :meth:`collect`; every subclass must declare it.
+    plugin_id: str
     #: Permission that must be granted before the source is read at all.
     metadata_permission: str = ""
     #: Human label used in readiness and health details.
     label: str = "source"
     #: Schema identifier written into every emitted document.
     source_name: str = "source"
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        _check_declared_plugin_id(cls)
 
     def __init__(
         self,
@@ -246,6 +260,11 @@ class BoundedCollector(Generic[Sample]):
     def _validate_trigger(self, trigger: Trigger) -> None:
         if not isinstance(trigger, Trigger):
             raise CollectionError("trigger-invalid", f"{self.label} requires a Trigger")
+        if trigger.plugin_id != self.plugin_id:
+            raise CollectionError(
+                "trigger-invalid",
+                f"{self.label} requires a {self.plugin_id} trigger",
+            )
 
     def _validate_snapshot(self, snapshot: object) -> None:
         if not isinstance(snapshot, SourceSnapshot):

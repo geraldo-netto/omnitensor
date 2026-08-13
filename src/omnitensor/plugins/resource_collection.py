@@ -108,6 +108,7 @@ def resource_sample_error(sample: object) -> str:
 class ResourceSchedulerCollector(BoundedCollector[ResourceSample]):
     """Emit only allowlisted, granted units and queues."""
 
+    plugin_id = RESOURCE_PLUGIN_ID
     metadata_permission = RESOURCE_METADATA_PERMISSION
     label = "resource metadata"
     source_name = "cgroup-systemd-pressure"

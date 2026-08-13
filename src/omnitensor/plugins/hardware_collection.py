@@ -112,6 +112,7 @@ def _sample_shape_error(sample: object) -> str:
 class HardwareHealthCollector(BoundedCollector[HardwareSample]):
     """Emit only allowlisted, granted sensors with stable units."""
 
+    plugin_id = HARDWARE_HEALTH_PLUGIN_ID
     metadata_permission = HARDWARE_METADATA_PERMISSION
     label = "hardware health metadata"
     source_name = "hwmon-edac-power-service"
