@@ -411,6 +411,19 @@ def test_svg_text_reads_only_text_nodes_and_normalizes_whitespace(tmp_path):
     assert formats._svg_text(source) == "שלום עולם\nПривет   мир"
 
 
+def test_svg_text_accepts_an_unnamespaced_text_element(tmp_path):
+    source = tmp_path / "plain.svg"
+    source.write_text("<svg><text>plain text</text></svg>", encoding="utf-8")
+
+    assert formats._svg_text(source) == "plain text"
+
+    source.write_text(
+        "<svg><title>ignored</title><text>עברית plain</text></svg>",
+        encoding="utf-8",
+    )
+    assert formats._svg_text(source) == "עברית plain"
+
+
 def test_svg_url_fetcher_only_delegates_embedded_images(monkeypatch):
     calls = []
     import cairosvg.url
