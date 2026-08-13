@@ -20,9 +20,9 @@ from omnitensor.service import BUS_METHODS
 
 def decorated_bus_methods() -> set[str]:
     """The names actually exported on the bus, read from the interface."""
-    from omnitensor import service
+    from omnitensor import dbus_transport
 
-    tree = ast.parse(inspect.getsource(service))
+    tree = ast.parse(inspect.getsource(dbus_transport))
     interface = next(
         node
         for node in ast.walk(tree)

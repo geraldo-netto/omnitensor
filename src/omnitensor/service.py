@@ -7,8 +7,8 @@ Entry point ``omnitensor`` runs an asyncio loop that
   ``ApplyCommand``, ``SubmitJob``, and ``CancelJob`` through a versioned facade.
 
 :class:`OmniTensorService` depends on the ports in :mod:`omnitensor.ports`;
-the filesystem, sysfs, and D-Bus adapters defined here are only the default
-wiring and can be replaced through constructor injection.
+the filesystem, sysfs, and D-Bus adapters live in dedicated host modules and
+are supplied through an explicit port bundle or constructor injection.
 
 Configuration comes from environment variables:
 ``OMNITENSOR_STATE_PATH`` (snapshot the applet reads),
@@ -24,32 +24,73 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 import secrets
 import time
 from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 
-from dbus_fast import BusType, RequestNameReply
-from dbus_fast.aio import MessageBus
-from dbus_fast.service import ServiceInterface, method
-
-from .callers import CallerIdentityResolver, caller_capture_handler, unix_user_lookup
+from .callers import CallerIdentityResolver
+from .composition import (
+    DEFAULT_ARTIFACT_ROOT as DEFAULT_ARTIFACT_ROOT,
+)
+from .composition import (
+    DEFAULT_GRANTS_PATH,
+)
+from .composition import (
+    DEFAULT_MODEL_BINDINGS_PATH as DEFAULT_MODEL_BINDINGS_PATH,
+)
+from .composition import (
+    DEFAULT_POLICY_PATH as DEFAULT_POLICY_PATH,
+)
+from .composition import (
+    DEFAULT_STATE_PATH as DEFAULT_STATE_PATH,
+)
+from .composition import (
+    DEFAULT_WORKLOADS_PATH as DEFAULT_WORKLOADS_PATH,
+)
+from .composition import (
+    _env_accelerator_device_ids as _env_accelerator_device_ids,
+)
+from .composition import (
+    _env_path as _env_path,
+)
+from .composition import (
+    _env_paths as _env_paths,
+)
+from .composition import (
+    build_service_from_env as build_service_from_env,
+)
 from .contract import contract_document_text
 from .control import ControlService
-from .discovery import BACKENDS, Device, DiscoveryPaths, detect_devices, device_utilization
+from .dbus_transport import (
+    BUS_METHODS as BUS_METHODS,
+)
+from .dbus_transport import (
+    BUS_NAME as BUS_NAME,
+)
+from .dbus_transport import (
+    OBJECT_PATH as OBJECT_PATH,
+)
+from .dbus_transport import (
+    DbusControlTransport as DbusControlTransport,
+)
+from .dbus_transport import (
+    OmniTensorInterface as OmniTensorInterface,
+)
+from .discovery import DiscoveryPaths
 from .dispatch import (
     InferenceJobDispatcher,
     declared_artifact_reference,
     inference_result_payload,
 )
-from .executors.gpu import CompositeGpuExecutor, GpuExecutor
-from .executors.npu import NpuExecutor
-from .executors.tpu import TpuExecutor
-from .executors.vulkan import VulkanGpuExecutor
+from .execution import _build_executor as _build_executor
+from .execution import build_executors
 from .forecastresult import parse_forecast_reading
 from .guard import BusGuard, GuardRefusedError, guarded
+from .host import FileSnapshotPublisher as FileSnapshotPublisher
+from .host import SysfsDeviceDiscovery as SysfsDeviceDiscovery
+from .host import build_host_ports
 from .inspection import PLUGIN_INVENTORY_VERSION, build_plugin_inventory
 from .jobs import (
     JobAdmission,
@@ -80,28 +121,18 @@ from .ports import (
     DeviceDiscovery,
     PluginRuntime,
     PolicyStorage,
-    RuntimeHandler,
     SnapshotPublisher,
 )
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .scheduler import Scheduler, runnable_model, select_backend
-from .snapshot import build_snapshot, input_roots_document, remove_snapshot, write_snapshot
+from .snapshot import build_snapshot, input_roots_document
 from .state import PolicyState, PolicyStore
 from .tensorref import OptedInInputRoots
 
 LOGGER = logging.getLogger(__name__)
 
-BUS_NAME = "org.cinnamon.OmniTensor1"
-OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 PUBLISH_INTERVAL_S = 2.0
 DISCOVERY_INTERVAL_S = 10.0
-
-DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
-DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
-DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
-DEFAULT_MODEL_BINDINGS_PATH = "~/.local/share/omnitensor/model-bindings"
-DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
-DEFAULT_GRANTS_PATH = "~/.local/state/omnitensor/grants.json"
 
 
 def _no_inventory() -> str:
@@ -242,19 +273,6 @@ class RuntimeAPI:
             return refusal.text()
 
 
-# Named once, here, because the handshake announces exactly this list and a
-# second hand-kept copy is how a method comes to exist unannounced.
-# ``test_contract.py`` asserts it against the decorated methods below.
-BUS_METHODS = (
-    "ApplyCommand",
-    "SubmitJob",
-    "CancelJob",
-    "GetJobResult",
-    "DescribePlugins",
-    "DescribeContract",
-)
-
-
 class TelemetryJobObserver:
     """Adapter from the job lifecycle onto per-profile telemetry counters.
 
@@ -302,151 +320,6 @@ class TelemetryJobObserver:
             call(workload_id)
         except (KeyError, ValueError) as error:
             LOGGER.debug("plugin telemetry not updated for %s: %s", workload_id, error)
-
-
-class OmniTensorInterface(ServiceInterface):
-    """Transport-only D-Bus shim; all logic stays in the injected handler."""
-
-    def __init__(self, runtime: RuntimeAPI):
-        super().__init__(BUS_NAME)
-        self._runtime = runtime
-
-    @method()
-    async def ApplyCommand(self, command: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return await self._runtime.apply_command_text(command)
-
-    @method()
-    async def SubmitJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return await self._runtime.submit_job_text(request)
-
-    @method()
-    async def CancelJob(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return await self._runtime.cancel_job_text(request)
-
-    @method()
-    async def GetJobResult(self, request: s) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return await self._runtime.job_result_text(request)
-
-    @method()
-    def DescribePlugins(self) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return self._runtime.describe_plugins_text()
-
-    @method()
-    def DescribeContract(self) -> s:  # noqa: F821, N802 - D-Bus contract names
-        return self._runtime.describe_contract_text()
-
-
-class SysfsDeviceDiscovery:
-    """:class:`~omnitensor.ports.DeviceDiscovery` over kernel device nodes."""
-
-    def __init__(
-        self,
-        paths: DiscoveryPaths | None = None,
-        selected_ids: dict[str, str] | None = None,
-    ):
-        self._paths = paths or DiscoveryPaths()
-        self._selected_ids = dict(selected_ids or {})
-
-    def detect(self) -> list[Device]:
-        return detect_devices(self._paths, self._selected_ids)
-
-    def utilization(self, device: Device) -> float | None:
-        return device_utilization(self._paths, device)
-
-
-class FileSnapshotPublisher:
-    """:class:`~omnitensor.ports.SnapshotPublisher` writing atomically to a path."""
-
-    def __init__(self, path: Path):
-        self._path = path
-
-    def publish(self, snapshot: dict) -> None:
-        write_snapshot(self._path, snapshot)
-
-    def retract(self) -> None:
-        remove_snapshot(self._path)
-
-
-class DbusControlTransport:
-    """:class:`~omnitensor.ports.ControlTransport` over the session bus."""
-
-    def __init__(
-        self,
-        bus_type: BusType = BusType.SESSION,
-        *,
-        bus_factory=None,
-        bus_name: str = BUS_NAME,
-        callers: CallerIdentityResolver | None = None,
-    ):
-        self._bus_type = bus_type
-        self._bus_factory = bus_factory
-        self._bus_name = bus_name
-        self._callers = callers
-        self._bus = None
-
-    async def start(self, handler: RuntimeHandler) -> None:
-        if self._bus_factory is not None:
-            bus = await self._bus_factory()
-        else:
-            bus = await MessageBus(bus_type=self._bus_type).connect()
-        try:
-            # Installed before the interface is exported so no message can be
-            # dispatched with an unbound — that is, inherited — sender.
-            bus.add_message_handler(caller_capture_handler())
-            if self._callers is not None:
-                self._callers.attach(unix_user_lookup(bus))
-            bus.export(OBJECT_PATH, OmniTensorInterface(handler))
-            reply = await bus.request_name(self._bus_name)
-            if reply != RequestNameReply.PRIMARY_OWNER:
-                # Without primary ownership another instance is serving the
-                # bus name and publishing to the same snapshot path; running
-                # anyway would double-write. Fail startup loudly instead.
-                raise RuntimeError(
-                    f"{self._bus_name} is already owned"
-                    f" (request_name reply: {reply.name});"
-                    " another omnitensor instance is running",
-                )
-        except BaseException:
-            bus.disconnect()
-            raise
-        self._bus = bus
-
-    async def stop(self) -> None:
-        if self._bus is not None:
-            self._bus.disconnect()
-            self._bus = None
-
-
-def _build_executor(backend: str, device_present: bool):
-    if backend == "tpu":
-        return TpuExecutor(device_present)
-    if backend == "npu":
-        return NpuExecutor(device_present)
-    return CompositeGpuExecutor([
-        # Vulkan (ncnn) first so any Mesa/RADV/ANV driver serves GPU work;
-        # ONNX Runtime with CUDA/ROCm providers is the optional second lane.
-        VulkanGpuExecutor(device_present),
-        GpuExecutor(device_present),
-    ])
-
-
-def build_executors(
-    devices,
-    *,
-    previous_devices=None,
-    previous_executors: dict | None = None,
-) -> dict:
-    """Build changed backend adapters and preserve unchanged runtime state."""
-    current = {device.backend: device for device in devices}
-    previous = {device.backend: device for device in previous_devices or []}
-    existing = previous_executors or {}
-    can_reuse = previous_devices is not None and previous_executors is not None
-    return {
-        backend: existing[backend]
-        if can_reuse and backend in existing and previous.get(backend) == current.get(backend)
-        else _build_executor(backend, backend in current)
-        for backend in BACKENDS
-    }
 
 
 def profile_statuses(
@@ -584,14 +457,21 @@ class OmniTensorService:
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
         accelerator_device_ids: dict[str, str] | None = None,
     ):
-        self._discovery = discovery or SysfsDeviceDiscovery(
-            discovery_paths, accelerator_device_ids
+        self._callers = CallerIdentityResolver()
+        host = build_host_ports(
+            snapshot_path=snapshot_path,
+            callers=self._callers,
+            discovery_paths=discovery_paths,
+            accelerator_device_ids=accelerator_device_ids,
+            discovery=discovery,
+            publisher=publisher,
+            transport=transport,
         )
-        self._publisher_port = publisher or FileSnapshotPublisher(snapshot_path)
+        self._discovery = host.discovery
+        self._publisher_port = host.publisher
+        self._transport = host.transport
         self._input_roots = tuple(input_roots)
         self._kernel_telemetry_source = kernel_telemetry_source or UnixSocketAggregateSource()
-        self._callers = CallerIdentityResolver()
-        self._transport = transport or DbusControlTransport(callers=self._callers)
         # Consent has a home now.  The ledger was written, tested, and never
         # constructed, so `active_permissions` came from a deny-all stub: every
         # declared permission read as ungranted and nothing could change that.
@@ -1146,47 +1026,6 @@ class OmniTensorService:
         plugins = getattr(plugin_catalog, "plugins", ())
         for plugin in plugins:
             self.plugin_telemetry.register(plugin.plugin_id)
-
-
-def _env_path(name: str, fallback: str) -> Path:
-    return Path(os.environ.get(name, fallback)).expanduser()
-
-
-def _env_paths(name: str) -> tuple[Path, ...]:
-    """Colon-separated roots a caller may reference inputs from.
-
-    Empty by default: reading a file a caller names is a capability, and one
-    that is on unless configured off is one nobody chose.
-    """
-    raw = os.environ.get(name, "")
-    return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
-
-
-def _env_accelerator_device_ids() -> dict[str, str]:
-    names = {
-        "gpu": "OMNITENSOR_GPU_DEVICE",
-        "npu": "OMNITENSOR_NPU_DEVICE",
-        "tpu": "OMNITENSOR_TPU_DEVICE",
-    }
-    return {
-        backend: value
-        for backend, name in names.items()
-        if (value := os.environ.get(name, "").strip())
-    }
-
-
-def build_service_from_env() -> OmniTensorService:
-    """The production service instance, configured from the environment."""
-    return OmniTensorService(
-        snapshot_path=_env_path("OMNITENSOR_STATE_PATH", DEFAULT_STATE_PATH),
-        policy_path=_env_path("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
-        workloads_path=_env_path("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
-        artifact_root=_env_path("OMNITENSOR_ARTIFACT_ROOT", DEFAULT_ARTIFACT_ROOT),
-        model_bindings_path=_env_path("OMNITENSOR_MODEL_BINDINGS", DEFAULT_MODEL_BINDINGS_PATH),
-        grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH),
-        input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS"),
-        accelerator_device_ids=_env_accelerator_device_ids(),
-    )
 
 
 def main() -> None:  # pragma: no cover - process entry point

@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0236 | in_progress | high | m | — | Qwen3-8B Q4_K_M now loads 37/37 layers at 32K context and separates three explicit actions on the RX 6600 XT, but repeated Hebrew translation remains semantically wrong and can mix scripts despite target-language output. Keep selected text below the applet's Ready floor; finish the frozen per-operation quality gate and qualify a translation-capable GPU route before raising its version. |
-| OMNI-0238 | open | medium | l | — | `service.py` combines the D-Bus facade, environment composition, Linux discovery, snapshot publication, execution wiring, and service lifecycle. Extract host adapters and the composition root behind explicit ports without changing the public service entry point. |
 | OMNI-0239 | open | medium | l | — | The media provider module combines container decoding, audio resampling, Whisper, visual inference, document rendering, and presentation parsing. Split format adapters and model adapters from provider composition so each can evolve and qualify independently. |
 
 ## Blocked
