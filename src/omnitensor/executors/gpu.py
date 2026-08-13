@@ -8,15 +8,18 @@ silently loading the host CPU.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from .base import (
+    DEFAULT_MAX_CACHED_MODELS,
     DEVICE_ABSENT,
     FORMAT_UNSUPPORTED,
     RUNTIME_MISSING,
     RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
+    ModelCache,
     most_actionable,
     require_available,
     supports_model,
@@ -37,9 +40,17 @@ class GpuExecutor:
     backend = "gpu"
     model_formats = frozenset({"onnx"})
 
-    def __init__(self, device_present: bool, runtime=None):
+    def __init__(
+        self,
+        device_present: bool,
+        runtime=None,
+        *,
+        max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+    ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_onnxruntime()
+        self._sessions = ModelCache(max_cached_models)
+        self._sessions_lock = threading.Lock()
 
     def _providers(self) -> list[str]:
         return [
@@ -63,7 +74,7 @@ class GpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        session = self._runtime.InferenceSession(model_path, providers=self._providers())
+        session = self._session_for(model_path)
         feed = {
             session_input.name: value
             for session_input, value in zip(session.get_inputs(), inputs, strict=True)
@@ -72,6 +83,15 @@ class GpuExecutor:
         outputs = session.run(None, feed)
         duration_ms = (time.monotonic() - started) * 1000
         return InferenceResult(outputs=list(outputs), duration_ms=duration_ms)
+
+    def _session_for(self, model_path: str):
+        with self._sessions_lock:
+            return self._sessions.get_or_build(
+                model_path,
+                lambda: self._runtime.InferenceSession(
+                    model_path, providers=self._providers()
+                ),
+            )
 
 
 class CompositeGpuExecutor:

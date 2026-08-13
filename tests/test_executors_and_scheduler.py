@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from conftest import sample_manifest
 
+import omnitensor.executors.gpu as gpu_module
 import omnitensor.executors.npu as npu_module
 import omnitensor.executors.tpu as tpu_module
 from omnitensor.executors.base import Availability, ModelCache, supports_model
@@ -149,6 +150,84 @@ def test_gpu_executor_requires_gpu_provider_and_never_uses_cpu():
     assert cuda.availability().available is True
     result = cuda.run("model.onnx", [[1, 2]])
     assert result.outputs == [[2, 3]]
+
+
+class CountingOrtRuntime:
+    def __init__(self):
+        self.sessions = []
+
+    @staticmethod
+    def get_available_providers():
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+    def InferenceSession(self, model_path, providers):  # noqa: N802
+        self.sessions.append((model_path, tuple(providers)))
+        return FakeOrtSession(model_path, providers)
+
+
+def test_gpu_executor_reuses_one_session_per_model_revision(tmp_path):
+    runtime = CountingOrtRuntime()
+    executor = GpuExecutor(device_present=True, runtime=runtime)
+    model = _model_file(tmp_path, "model.onnx")
+
+    assert executor.run(model, [[1]]).outputs == [[2]]
+    assert executor.run(model, [[2]]).outputs == [[3]]
+
+    assert runtime.sessions == [(model, ("CUDAExecutionProvider",))]
+
+
+def test_gpu_executor_rebuilds_a_replaced_model_session(tmp_path):
+    runtime = CountingOrtRuntime()
+    executor = GpuExecutor(device_present=True, runtime=runtime)
+    model = _model_file(tmp_path, "model.onnx")
+
+    executor.run(model, [[1]])
+    Path(model).write_bytes(b"replacement model with another revision")
+    executor.run(model, [[1]])
+
+    assert runtime.sessions == [
+        (model, ("CUDAExecutionProvider",)),
+        (model, ("CUDAExecutionProvider",)),
+    ]
+
+
+def test_gpu_executor_evicts_the_least_recently_used_session(tmp_path):
+    runtime = CountingOrtRuntime()
+    executor = GpuExecutor(
+        device_present=True, runtime=runtime, max_cached_models=2
+    )
+    alpha = _model_file(tmp_path, "alpha.onnx")
+    beta = _model_file(tmp_path, "beta.onnx")
+    gamma = _model_file(tmp_path, "gamma.onnx")
+
+    for model in (alpha, beta, alpha, gamma, beta):
+        executor.run(model, [[1]])
+
+    assert [model for model, _providers in runtime.sessions] == [
+        alpha,
+        beta,
+        gamma,
+        beta,
+    ]
+    assert executor._sessions.paths() == (gamma, beta)
+
+
+def test_gpu_executor_rejects_wrong_input_count():
+    executor = GpuExecutor(device_present=True, runtime=CountingOrtRuntime())
+
+    with pytest.raises(ValueError, match=r"zip\(\) argument 2 is longer"):
+        executor.run("model.onnx", [[1], [2]])
+
+
+def test_gpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+    ticks = iter([10.0, 10.25])
+    monkeypatch.setattr(gpu_module.time, "monotonic", lambda: next(ticks))
+
+    result = GpuExecutor(
+        device_present=True, runtime=CountingOrtRuntime()
+    ).run("model.onnx", [[1]])
+
+    assert result.duration_ms == 250.0
 
 
 def test_npu_executor_reports_missing_plugin():
