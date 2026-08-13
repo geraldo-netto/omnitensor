@@ -1106,35 +1106,46 @@ class OmniTensorService:
 
     async def run(self) -> None:
         try:
-            plugin_snapshot = await self._plugin_runtime.start()
-            plugin_catalog = getattr(plugin_snapshot, "catalog", None)
-            plugins = getattr(plugin_catalog, "plugins", ())
-            for plugin in plugins:
-                self.plugin_telemetry.register(plugin.plugin_id)
             await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
             self._scheduler.start()
             loop = asyncio.get_running_loop()
-            tasks = [
+            loop_tasks = [
                 loop.create_task(self._publisher()),
                 loop.create_task(self._rediscover()),
             ]
+            loops = asyncio.gather(*loop_tasks)
+            plugin_start = loop.create_task(self._start_plugin_runtime())
             try:
-                # gather raises on the first loop failure; the finally block then
-                # cancels and awaits the sibling, so one crashing loop can never
-                # leave the other running as an orphan — the service crashes
-                # loudly as a whole.
-                await asyncio.gather(*tasks)
+                done, _pending = await asyncio.wait(
+                    (loops, plugin_start), return_when=asyncio.FIRST_COMPLETED
+                )
+                if plugin_start in done:
+                    await plugin_start
+                    await loops
+                else:
+                    await loops
+                    if plugin_start.done():
+                        await plugin_start
             finally:
                 self._stopping.set()
-                for task in tasks:
+                plugin_start.cancel()
+                loops.cancel()
+                for task in loop_tasks:
                     task.cancel()
-                await asyncio.wait(tasks)
+                await asyncio.gather(plugin_start, loops, *loop_tasks, return_exceptions=True)
                 await self._scheduler.stop()
         finally:
             await self.jobs.stop()
             await self._plugin_runtime.stop()
             await self._transport.stop()
+
+    async def _start_plugin_runtime(self) -> None:
+        plugin_snapshot = await self._plugin_runtime.start()
+        plugin_catalog = getattr(plugin_snapshot, "catalog", None)
+        plugins = getattr(plugin_catalog, "plugins", ())
+        for plugin in plugins:
+            self.plugin_telemetry.register(plugin.plugin_id)
 
 
 def _env_path(name: str, fallback: str) -> Path:

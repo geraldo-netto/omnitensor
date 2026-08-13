@@ -233,6 +233,50 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
 
 
+def test_slow_plugin_preflight_does_not_block_control_or_snapshot(tmp_path):
+    publisher = FakePublisher()
+    transport = FakeTransport()
+
+    class SlowPlugins:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.stopped = 0
+
+        async def start(self):
+            self.started.set()
+            await asyncio.Event().wait()
+
+        async def stop(self):
+            self.stopped += 1
+
+        def plugin_ids(self):
+            return frozenset()
+
+    async def scenario():
+        plugins = SlowPlugins()
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            transport=transport,
+            plugin_runtime=plugins,
+            publish_interval_s=0.01,
+            discovery_interval_s=60,
+        )
+        runner = asyncio.create_task(service.run())
+        await asyncio.wait_for(plugins.started.wait(), timeout=1)
+        await asyncio.sleep(0.04)
+        assert transport.started == 1
+        assert publisher.published
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+        return plugins
+
+    plugins = asyncio.run(scenario())
+    assert plugins.stopped == 1
+
+
 def test_service_authorizes_installed_plugins_without_weakening_profile_policy(tmp_path):
     service = build_service(
         tmp_path,
