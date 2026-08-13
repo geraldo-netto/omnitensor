@@ -259,6 +259,7 @@ class Scheduler:
         # still unwinding stay tracked until stop() awaits them.
         self._retired = [task for task in self._retired if not task.done()]
         for backend in removed:
+            self._clear_degradation(backend)
             worker = self._workers.pop(backend, None)
             if worker is not None:
                 worker.cancel()
@@ -385,6 +386,10 @@ class Scheduler:
         """Backends that failed outside job execution, by failure type."""
         return dict(self._degraded)
 
+    def _clear_degradation(self, backend: str) -> None:
+        """Forget stale failure evidence after recovery or device removal."""
+        self._degraded.pop(backend, None)
+
     async def _execute(self, backend: str, queue: _BackendQueue, job: _Job) -> None:
         executor = self._executors[backend]
         self._running[job.workload_id] += 1
@@ -407,6 +412,7 @@ class Scheduler:
             if not isinstance(error, Exception):
                 raise
         else:
+            self._clear_degradation(backend)
             if not job.future.done():
                 job.future.set_result(result)
         finally:

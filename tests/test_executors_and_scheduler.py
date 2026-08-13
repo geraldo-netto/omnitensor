@@ -999,6 +999,50 @@ def test_a_healthy_backend_reports_no_degradation():
     asyncio.run(scenario())
 
 
+def test_a_successful_job_clears_a_previous_scheduler_degradation():
+    async def scenario():
+        explode = [True]
+
+        def weight_of(_profile_id):
+            if explode[0]:
+                raise ZeroDivisionError("private")
+            return 1
+
+        scheduler = Scheduler({"tpu": SlowExecutor()}, weight_of)
+        scheduler.start()
+        failed = scheduler.submit("tpu", "sample-workload", "job-1", [])
+        with pytest.raises(RuntimeError, match="tpu scheduling failed"):
+            await asyncio.wait_for(failed, timeout=2)
+        assert scheduler.degraded_backends() == {"tpu": "ZeroDivisionError"}
+
+        explode[0] = False
+        recovered = scheduler.submit("tpu", "sample-workload", "job-2", [])
+        await asyncio.wait_for(recovered, timeout=2)
+        assert scheduler.degraded_backends() == {}
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+
+def test_removing_a_backend_discards_its_stale_degradation_before_readd():
+    scheduler = Scheduler({"tpu": SlowExecutor()}, lambda _profile: 1)
+    scheduler._degraded["tpu"] = "RuntimeError"
+
+    scheduler.update_executors({})
+    assert scheduler.degraded_backends() == {}
+
+    scheduler.update_executors({"tpu": SlowExecutor()})
+    assert scheduler.degraded_backends() == {}
+
+
+def test_clearing_an_unknown_backend_is_idempotent():
+    scheduler = Scheduler({}, lambda _profile: 1)
+
+    scheduler._clear_degradation("missing")
+
+    assert scheduler.degraded_backends() == {}
+
+
 class _FlakyDelegateRuntime:
     """A delegate that fails a fixed number of times, then loads."""
 
