@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0102 | open | high | s | OMNI-0048, OMNI-0066 | Implement the `low-light-enhancement` 0.2.0 Vulkan input contract: bounded decode, orientation/color normalization, exact RGB float32 `[1,3,256,256]` bicubic preprocessing, and original-geometry metadata preservation. |
 | OMNI-0103 | open | high | s | OMNI-0038, OMNI-0102 | Implement the 0.2.0 Vulkan pipeline against an injected ncnn executor: validate finite enhanced RGB `[1,3,256,256]` in `[0,1]`, reject CPU fallback or contract drift, and reconstruct the declared output deterministically. |
 | OMNI-0104 | open | medium | s | OMNI-0103 | Connect the 0.2.0 enhanced-image pipeline to the existing disjoint-folder, atomic no-overwrite publisher; preserve allowed metadata, expose progress/result evidence, and clean only partial outputs on cancellation or failure. |
 | OMNI-0048 | in_progress | high | s | OMNI-0036 | Produce and publish the `low-light-enhancement` 0.2.0 Retinexformer ncnn artifact with exact graph/weights digests, tensor/output contracts, an idempotently provisioned machine-local `xpuwlm` Ed25519 publisher identity, portable/native parity report, and proof of hardware Vulkan execution with CPU fallback disabled. |

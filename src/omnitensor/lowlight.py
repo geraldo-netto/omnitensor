@@ -1,7 +1,7 @@
 """Low-light workspace configuration and non-destructive output publication.
 
 This module deliberately does not decode images or run a model. It owns the
-filesystem safety boundary that those future stages must use: inputs and
+filesystem safety boundary that those separate stages use: inputs and
 outputs live in disjoint, explicitly configured roots, and publishing creates
 a new output without ever replacing either an input or an earlier result.
 """
@@ -219,6 +219,12 @@ def publish_low_light_output(
         if published:
             _fsync_directory(current.output_folder)
     return destination
+
+
+def resolve_low_light_source(workspace: LowLightWorkspace, source: Path | str) -> Path:
+    """Resolve one regular input under a freshly revalidated workspace."""
+    current = validate_low_light_workspace(workspace.input_folder, workspace.output_folder)
+    return _source_file(current.input_folder, source)
 
 
 def configure_main(argv: list[str] | None = None) -> int:

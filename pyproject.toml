@@ -31,7 +31,7 @@ tpu = ["tflite-runtime>=2.14"]
 # numpy is named explicitly rather than relied on as an ncnn transitive: the
 # Vulkan executor imports it directly, so a future ncnn wheel that dropped it
 # would break inference with an ImportError instead of a clear resolver error.
-gpu = ["ncnn>=1.0.20240102", "numpy>=1.24"]
+gpu = ["ncnn>=1.0.20240102", "numpy>=1.24", "pillow>=10.0"]
 # NOT plain onnxruntime: that wheel ships CPUExecutionProvider only, which
 # executors/gpu.py deliberately refuses, so it can never satisfy the GPU lane.
 # Pick the extra matching the vendor's runtime.
