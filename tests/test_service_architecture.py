@@ -11,6 +11,7 @@ from dbus_fast import BusType, RequestNameReply
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor import dbus_transport as dbus_transport_module
 from omnitensor import host as host_module
 from omnitensor import service
 from omnitensor.callers import CallerIdentityResolver
@@ -161,11 +162,21 @@ class FakeBus:
         self.disconnections += 1
 
 
-def test_dbus_transport_retains_options_and_owns_connection_lifecycle():
+def test_dbus_transport_retains_options_and_owns_connection_lifecycle(monkeypatch):
     import asyncio
 
     bus = FakeBus()
     callers = CallerIdentityResolver()
+    lookups = []
+
+    async def lookup(_name):
+        return None
+
+    def lookup_factory(actual_bus):
+        lookups.append(actual_bus)
+        return lookup
+
+    monkeypatch.setattr(dbus_transport_module, "unix_user_lookup", lookup_factory)
 
     async def factory():
         return bus
@@ -182,13 +193,18 @@ def test_dbus_transport_retains_options_and_owns_connection_lifecycle():
     assert transport._callers is callers
     assert transport._bus is None
 
-    asyncio.run(transport.start(object()))
+    handler = object()
+    asyncio.run(transport.start(handler))
     assert transport._bus is bus
     assert len(bus.handlers) == 1
+    assert callable(bus.handlers[0])
     assert bus.names == ["org.cinnamon.Test"]
+    assert lookups == [bus]
+    assert callers._unix_user is lookup
     [(path, interface)] = bus.exports
     assert path == "/org/cinnamon/OmniTensor1"
     assert isinstance(interface, OmniTensorInterface)
+    assert interface._runtime is handler
     asyncio.run(transport.stop())
     assert bus.disconnections == 1
     assert transport._bus is None
@@ -203,10 +219,35 @@ def test_dbus_transport_disconnects_a_bus_that_cannot_own_the_name():
         return bus
 
     transport = DbusControlTransport(bus_factory=factory)
-    with pytest.raises(RuntimeError, match="already owned"):
+    with pytest.raises(RuntimeError) as excinfo:
         asyncio.run(transport.start(object()))
+    assert str(excinfo.value) == (
+        "org.cinnamon.OmniTensor1 is already owned"
+        " (request_name reply: EXISTS);"
+        " another omnitensor instance is running"
+    )
     assert bus.disconnections == 1
     assert transport._bus is None
+
+
+def test_dbus_transport_connects_the_requested_bus_type(monkeypatch):
+    import asyncio
+
+    connected = object()
+    seen = []
+
+    class FakeMessageBus:
+        def __init__(self, *, bus_type):
+            seen.append(bus_type)
+
+        async def connect(self):
+            return connected
+
+    monkeypatch.setattr(dbus_transport_module, "MessageBus", FakeMessageBus)
+
+    transport = DbusControlTransport(BusType.SYSTEM)
+    assert asyncio.run(transport._connect()) is connected
+    assert seen == [BusType.SYSTEM]
 
 
 def test_environment_composition_passes_exact_options_to_the_service_factory(tmp_path):
