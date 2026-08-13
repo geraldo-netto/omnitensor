@@ -1,0 +1,120 @@
+{
+  "manifestVersion": 2,
+  "id": "media-transcription",
+  "version": "1.0.0",
+  "capabilities": [
+    "explicit-file-selection",
+    "media-transcription",
+    "multilingual-speech-transcription",
+    "paged-document-transcription",
+    "presentation-transcription",
+    "visual-content-transcription"
+  ],
+  "plugin": {
+    "entryPoint": "media-transcription",
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": ["cancel", "execute", "health", "progress"]
+    },
+    "schemas": {
+      "configuration": {"type": "object", "additionalProperties": false},
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources"],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+          }
+        }
+      },
+      "output": {"$ref": "media-transcription-result.schema.json"}
+    },
+    "triggers": ["manual"],
+    "artifacts": [
+      {
+        "id": "qwen2-5-vl-7b-instruct",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
+        "companions": {
+          "mmproj.gguf": "c24a7f5fcfc68286f0a217023b6738e73bea4f11787a43e8238d4bb1b8604cde"
+        }
+      },
+      {
+        "id": "whisper-small-multilingual",
+        "version": "1.0.0",
+        "format": "ggml-whisper",
+        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+      }
+    ],
+    "permissions": ["accelerator:gpu", "files:read-selected"]
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": ["gpu"],
+    "minimumDevices": 1,
+    "model": null
+  },
+  "ui": {
+    "title": "Media transcription",
+    "group": "Local workflows",
+    "description": "Speech, document pages, slide text, visible text, and visual descriptions from selected media",
+    "icon": "audio-x-generic-symbolic",
+    "order": 95
+  },
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Broker one explicitly selected file into an isolated worker",
+      "Decode bounded audio/image/video without treating host codecs as inference backends",
+      "Safely rasterize SVG and render bounded PDF/TIFF pages without network access",
+      "Parse bounded PPTX and ODP slide archives without office-suite subprocesses",
+      "Run speech and visual inference only on the granted accelerator",
+      "Sample at most twelve video frames and return timestamped text only"
+    ]
+  },
+  "acceptance": [
+    {
+      "metric": "speech-word-error-rate",
+      "comparator": "at-most",
+      "target": 0.2,
+      "unit": "ratio",
+      "description": "Word error rate on frozen multilingual speech fixtures."
+    },
+    {
+      "metric": "visible-text-character-recall",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Expected Latin and Hebrew visible characters retained from frozen image fixtures."
+    },
+    {
+      "metric": "visual-concept-recall",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Expected scene concepts retained from frozen image and sampled-video fixtures."
+    },
+    {
+      "metric": "malformed-media-isolation",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Every malformed fixture is refused without worker or desktop failure."
+    },
+    {
+      "metric": "cancellation-latency",
+      "comparator": "at-most",
+      "target": 2000,
+      "unit": "milliseconds",
+      "description": "Cancelled media work reaches a terminal result within this bound."
+    }
+  ]
+}

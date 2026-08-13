@@ -1,0 +1,26 @@
+{
+  "catalogVersion": 1,
+  "id": "whisper-small-multilingual",
+  "version": "1.0.0",
+  "license": {
+    "spdx": "MIT",
+    "termsUri": "https://github.com/openai/whisper/blob/main/LICENSE",
+    "attribution": "OpenAI Whisper small model and ggml-org whisper.cpp conversion"
+  },
+  "upstream": {
+    "uri": "https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1",
+    "revision": "5359861c739e955e79d9a303bcbc70fb988958b1"
+  },
+  "source": {
+    "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+    "filename": "ggml-small.bin",
+    "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    "sizeBytes": 487601967
+  },
+  "provider": {
+    "providerId": "media-transcription-vulkan",
+    "accelerator": "gpu",
+    "runtime": "whisper.cpp-vulkan",
+    "status": "requires-local-qualification"
+  }
+}

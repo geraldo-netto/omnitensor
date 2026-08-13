@@ -57,6 +57,7 @@ REQUIRED_SCHEMAS = (
     "runtime-refusal.schema.json",
     "runtime-job-result-request.schema.json",
     "runtime-job-result.schema.json",
+    "media-transcription-result.schema.json",
     "event-extraction-result.schema.json",
     "document-question-answer.schema.json",
     "document-question-acceptance.schema.json",

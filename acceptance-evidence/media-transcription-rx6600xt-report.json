@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-13",
+  "result": "passed",
+  "devices": {
+    "speech": "AMD Radeon RX 6600 XT",
+    "vision": "AMD Radeon RX 6600 XT (RADV NAVI23)"
+  },
+  "fixtures": {
+    "generatorSha256": "229191bcab992fef4caca320e971e18c89afec099ca34b68aa5775f382c7ca8e",
+    "manifestSha256": "f99c096a0904275c6beb0d72827c96cf3bda450d7a40b4654aefc20f5f568c7e",
+    "audio": ["wav", "flac", "mp3", "ogg", "opus", "m4a"],
+    "images": ["png", "jpg", "webp", "svg"],
+    "video": ["mp4", "webm", "mkv", "mov", "avi", "m4v"],
+    "documents": ["pdf", "tiff"],
+    "presentations": ["pptx", "odp"],
+    "scripts": ["Hebrew", "Cyrillic from KOI8-R", "Latin"]
+  },
+  "runtimes": {
+    "llama-cpp-python": "0.3.34",
+    "pywhispercpp": "1.5.0",
+    "av": "16.1.0",
+    "Pillow": "12.3.0",
+    "CairoSVG": "2.9.0",
+    "PyMuPDF": "1.28.2",
+    "defusedxml": "0.7.1",
+    "nativeSha256": {
+      "llama_cpp/libggml-vulkan.so": "505fd5f88249babd789a5ef9272617893833526b69616d08e269cd7562b48ccf",
+      "llama_cpp/libllama.so": "dc289c1fe7f93c2433cbc7f5aafc6f72e8b86cc3772a22071b8b33aabf7de2a3",
+      "pywhispercpp/libggml-vulkan.so": "f445dba0de429a4c69a1ac41b19fe280dd815acc08b30fbd1f4ee9d03e20bcc9",
+      "pywhispercpp/libwhisper.so": "33ea616f7de77c665ec59ba486c740d6c3fe298d08df5f3fb5f4c6a1b5202e72"
+    }
+  },
+  "artifacts": {
+    "qwen2-5-vl-7b-instruct": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
+    "qwen2-5-vl-7b-instruct/mmproj": "c24a7f5fcfc68286f0a217023b6738e73bea4f11787a43e8238d4bb1b8604cde",
+    "whisper-small-multilingual": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+  },
+  "metrics": {
+    "speech-word-error-rate": {"targetAtMost": 0.2, "observed": 0.0},
+    "visible-text-character-recall": {"targetAtLeast": 0.9, "observed": 1.0},
+    "visual-concept-recall": {"targetAtLeast": 0.9, "observed": 1.0},
+    "malformed-media-isolation": {"targetEqual": 1.0, "observed": 1.0},
+    "cancellation-latency": {"targetAtMostMs": 2000, "observedMs": 1633}
+  },
+  "caseLatencyMs": {
+    "speech.wav": 467,
+    "speech.flac": 423,
+    "speech.mp3": 432,
+    "speech.ogg": 424,
+    "speech.opus": 433,
+    "speech.m4a": 422,
+    "complex.png": 8386,
+    "complex.jpg": 8059,
+    "complex.webp": 7920,
+    "complex.svg": 7780,
+    "complex.mp4": 8243,
+    "complex.webm": 8183,
+    "complex.mkv": 8433,
+    "complex.mov": 8416,
+    "complex.avi": 8530,
+    "complex.m4v": 7930,
+    "complex.pdf": 13145,
+    "complex.tiff": 25012,
+    "complex.pptx": 8677,
+    "complex.odp": 8401
+  },
+  "operational": {
+    "cinnamonPid": 203494,
+    "cinnamonRestarted": false,
+    "gpuResetCount": 0,
+    "coredumpCount": 0,
+    "kernelAdvisories": ["amdgpu dm_irq_work_func exceeded 10000us once"]
+  }
+}

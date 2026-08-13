@@ -5,7 +5,6 @@
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0236 | open | high | m | — | Live RX 6600 XT selected-text acceptance fails operation semantics: `extract-tasks` merges separate actions, while `translate` can echo English with a Hebrew label. The installed provider is now withheld from Ready; define quality metrics, add a frozen per-operation corpus, qualify a capable provider release, and only then raise its version above the applet's acceptance floor. |
-| OMNI-0237 | open | high | xl | OMNI-0101, OMNI-0122 | Multimedia acceptance is incomplete: image has one unqualified classifier path, generation contracts accept only text/image fragments, and no audio/video pipeline exists. The licensed corpus now covers image, audio, video, UTF-8 multiscript/Hebrew, Windows-1252, Shift-JIS, KOI8-R, and malformed bytes; define qualified audio/video pipelines before publishing those media as ready. |
 
 ## Blocked
 

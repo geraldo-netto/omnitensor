@@ -50,6 +50,7 @@ def install(root: Path, artifact: ArtifactReference, content: bytes = b"model") 
         ("openvino", "model.xml"),
         ("ncnn", "model.param"),
         ("gguf", "model.gguf"),
+        ("ggml-whisper", "model.bin"),
     ],
 )
 def test_artifact_filename_is_stable_for_each_executor_format(model_format, filename):
@@ -62,8 +63,8 @@ def test_artifact_filename_rejects_unknown_formats_exactly():
     assert str(excinfo.value) == "unsupported artifact format: pickle"
 
 
-def test_default_bound_admits_pinned_qwen4b_but_remains_finite():
-    assert 2_497_280_256 < DEFAULT_MAX_ARTIFACT_BYTES == 3 * 1024**3
+def test_default_bound_admits_pinned_qwen_vl_but_remains_finite():
+    assert 4_683_072_032 < DEFAULT_MAX_ARTIFACT_BYTES == 6 * 1024**3
 
 
 def test_resolver_returns_only_a_verified_regular_file(tmp_path):

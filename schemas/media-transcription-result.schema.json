@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/media-transcription-result.schema.json",
+  "title": "Public bounded multimedia transcription",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "providerId", "accelerator", "source", "speech", "visuals"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "accelerator": {"enum": ["gpu", "npu"]},
+    "source": {"$ref": "#/$defs/source"},
+    "speech": {"$ref": "#/$defs/speech"},
+    "visuals": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/visual"}
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileName", "sourceSha256", "modality", "durationMs"],
+      "properties": {
+        "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
+        "sourceSha256": {"$ref": "#/$defs/digest"},
+        "modality": {"enum": ["audio", "document", "image", "video", "presentation"]},
+        "durationMs": {"type": ["integer", "null"], "minimum": 1, "maximum": 600000}
+      }
+    },
+    "speech": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["language", "segments"],
+      "properties": {
+        "language": {"type": ["string", "null"], "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$", "maxLength": 35},
+        "segments": {
+          "type": "array",
+          "maxItems": 2048,
+          "items": {"$ref": "#/$defs/speechSegment"}
+        }
+      }
+    },
+    "speechSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startMs", "endMs", "text"],
+      "properties": {
+        "startMs": {"type": "integer", "minimum": 0, "maximum": 600000},
+        "endMs": {"type": "integer", "minimum": 1, "maximum": 600000},
+        "text": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timestampMs", "slideNumber", "pageNumber", "visibleText", "description"],
+      "properties": {
+        "timestampMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
+        "slideNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
+        "pageNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
+        "visibleText": {"type": "string", "maxLength": 16384},
+        "description": {"type": "string", "minLength": 1, "maxLength": 16384}
+      }
+    }
+  }
+}

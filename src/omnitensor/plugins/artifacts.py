@@ -7,9 +7,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# Qwen3-4B Q4_K_M is 2,497,280,256 bytes. Keep the service-wide bound finite
-# while admitting this pinned local generation model and no unbounded input.
-DEFAULT_MAX_ARTIFACT_BYTES = 3 * 1024 * 1024 * 1024
+# Qwen2.5-VL-7B Q4_K_M is 4,683,072,032 bytes. Keep the service-wide bound
+# finite while admitting that pinned vision model and no unbounded input.
+DEFAULT_MAX_ARTIFACT_BYTES = 6 * 1024 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
@@ -21,6 +21,7 @@ _FILENAMES = {
     "openvino": "model.xml",
     "ncnn": "model.param",
     "gguf": "model.gguf",
+    "ggml-whisper": "model.bin",
 }
 
 
@@ -46,7 +47,7 @@ COMPANION_SOURCE_SUFFIXES: dict[str, dict[str, str]] = {
 # it names — a list that drifted from them renames every result — but nothing
 # about ncnn or OpenVINO says a model must be a classifier.
 OPTIONAL_COMPANION_FILENAMES: frozenset[str] = frozenset(
-    {"labels.txt", "tokenizer.json"}
+    {"labels.txt", "mmproj.gguf", "tokenizer.json"}
 )
 
 
