@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
-| OMNI-0240 | in_progress | medium | l | OMNI-0239 | Broad mutation testing of the extracted media document/format adapters exposes below-80 callables despite 93–97% statement coverage; add focused behavioral, malformed-input, and boundary tests until each applicable callable meets the mutation floor. |
 | OMNI-0236 | in_progress | high | m | — | Qwen3-8B Q4_K_M now loads 37/37 layers at 32K context and separates three explicit actions on the RX 6600 XT, but repeated Hebrew translation remains semantically wrong and can mix scripts despite target-language output. Keep selected text below the applet's Ready floor; finish the frozen per-operation quality gate and qualify a translation-capable GPU route before raising its version. |
 
 ## Blocked
