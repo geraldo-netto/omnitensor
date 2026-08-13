@@ -498,7 +498,68 @@ def _normalize_bound_document(document: object, task_id: str) -> None:
     if task_id == "ask-selected-files":
         _deduplicate_document_citations(document)
     elif task_id == "file-organizer":
+        _merge_organizer_suggestions(document)
         _normalize_organizer_tags(document)
+
+
+def _merge_organizer_suggestions(document: object) -> None:
+    """Merge compatible same-file span suggestions without inventing metadata."""
+    suggestions = document.get("suggestions") if isinstance(document, dict) else None
+    if not isinstance(suggestions, list) or len(suggestions) < 2:
+        return
+    merged: list[dict] = []
+    changed = False
+    for suggestion in suggestions:
+        if not isinstance(suggestion, dict):
+            return
+        if not merged or suggestion.get("fileId") != merged[-1].get("fileId"):
+            merged.append(copy.deepcopy(suggestion))
+            continue
+        previous = merged[-1]
+        if any(
+            suggestion.get(field) != previous.get(field)
+            for field in ("proposedName", "proposedFolder")
+        ):
+            return
+        tags = _unique_strings(previous.get("tags"), suggestion.get("tags"), 16)
+        evidence = _unique_evidence(previous.get("evidence"), suggestion.get("evidence"), 8)
+        reasons = _unique_strings((previous.get("reason"),), (suggestion.get("reason"),), 2)
+        reason = " ".join(reasons) if reasons is not None else ""
+        if tags is None or evidence is None or not 1 <= len(reason) <= 2_048:
+            return
+        previous["tags"] = tags
+        previous["evidence"] = evidence
+        previous["reason"] = reason
+        changed = True
+    if changed:
+        document["suggestions"] = merged
+
+
+def _unique_strings(first: object, second: object, maximum: int) -> list[str] | None:
+    if not isinstance(first, (list, tuple)) or not isinstance(second, (list, tuple)):
+        return None
+    values: list[str] = []
+    for value in (*first, *second):
+        if not isinstance(value, str):
+            return None
+        if value not in values:
+            values.append(value)
+    return values if len(values) <= maximum else None
+
+
+def _unique_evidence(first: object, second: object, maximum: int) -> list[dict] | None:
+    if not isinstance(first, list) or not isinstance(second, list):
+        return None
+    values: list[dict] = []
+    references: set[str] = set()
+    for value in (*first, *second):
+        if not isinstance(value, dict) or not isinstance(value.get("sourceRef"), str):
+            return None
+        reference = value["sourceRef"]
+        if reference not in references:
+            references.add(reference)
+            values.append(copy.deepcopy(value))
+    return values if len(values) <= maximum else None
 
 
 def _normalize_organizer_tags(document: object) -> None:

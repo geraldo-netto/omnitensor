@@ -112,6 +112,106 @@ def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
     bounded = {"suggestions": [{"tags": [f"Tag {index}" for index in range(17)]}]}
     runtime._normalize_organizer_tags(bounded)
     assert bounded["suggestions"][0]["tags"] == [f"tag-{index}" for index in range(16)]
+    assert runtime._unique_strings([], [1], 2) is None
+    assert runtime._unique_evidence([], [None], 2) is None
+
+
+def test_organizer_normalization_merges_compatible_per_span_suggestions():
+    document = {
+        "suggestions": [
+            {
+                "fileId": "selected-file-1",
+                "tags": ["Multilingual", "Hebrew"],
+                "proposedName": "complex.pdf",
+                "proposedFolder": "complex",
+                "reason": "The first page is multilingual.",
+                "evidence": [{"sourceRef": "private:job:source:1:page:1:span:0-39"}],
+            },
+            {
+                "fileId": "selected-file-1",
+                "tags": ["Hebrew", "Chart Bars"],
+                "proposedName": "complex.pdf",
+                "proposedFolder": "complex",
+                "reason": "The second page contains a chart.",
+                "evidence": [{"sourceRef": "private:job:source:1:page:2:span:0-45"}],
+            },
+        ]
+    }
+
+    runtime._normalize_bound_document(document, "file-organizer")
+
+    assert document == {
+        "suggestions": [
+            {
+                "fileId": "selected-file-1",
+                "tags": ["multilingual", "hebrew", "chart-bars"],
+                "proposedName": "complex.pdf",
+                "proposedFolder": "complex",
+                "reason": "The first page is multilingual. The second page contains a chart.",
+                "evidence": [
+                    {"sourceRef": "private:job:source:1:page:1:span:0-39"},
+                    {"sourceRef": "private:job:source:1:page:2:span:0-45"},
+                ],
+            }
+        ]
+    }
+
+
+def test_organizer_normalization_refuses_to_merge_conflicting_move_advice():
+    suggestions = [
+        {
+            "fileId": "selected-file-1",
+            "tags": ["first"],
+            "proposedName": "first.pdf",
+            "proposedFolder": "one",
+            "reason": "First.",
+            "evidence": [{"sourceRef": "private:job:source:1:page:1:span:0-1"}],
+        },
+        {
+            "fileId": "selected-file-1",
+            "tags": ["second"],
+            "proposedName": "second.pdf",
+            "proposedFolder": "two",
+            "reason": "Second.",
+            "evidence": [{"sourceRef": "private:job:source:1:page:2:span:0-1"}],
+        },
+    ]
+    document = {"suggestions": suggestions}
+
+    runtime._normalize_bound_document(document, "file-organizer")
+
+    assert document["suggestions"] == suggestions
+
+
+@given(
+    first=st.lists(st.from_regex(r"[a-z]{1,8}", fullmatch=True), max_size=10),
+    second=st.lists(st.from_regex(r"[a-z]{1,8}", fullmatch=True), max_size=10),
+)
+def test_organizer_same_file_merge_never_exceeds_tag_contract(first, second):
+    document = {
+        "suggestions": [
+            {
+                "fileId": "selected-file-1",
+                "tags": first,
+                "proposedName": "safe.pdf",
+                "proposedFolder": None,
+                "reason": "First.",
+                "evidence": [{"sourceRef": "private:job:source:1:page:1:span:0-1"}],
+            },
+            {
+                "fileId": "selected-file-1",
+                "tags": second,
+                "proposedName": "safe.pdf",
+                "proposedFolder": None,
+                "reason": "Second.",
+                "evidence": [{"sourceRef": "private:job:source:1:page:2:span:0-1"}],
+            },
+        ]
+    }
+
+    runtime._normalize_bound_document(document, "file-organizer")
+
+    assert all(len(suggestion["tags"]) <= 16 for suggestion in document["suggestions"])
 
 
 @given(
