@@ -122,12 +122,25 @@ class BoundedCollector(Generic[Sample]):
 
     #: Plugin identity accepted by :meth:`collect`; every subclass must declare it.
     plugin_id: str
+    #: Error contract retained by profile-specific collector APIs.
+    error_type: type[CollectionError] = CollectionError
     #: Permission that must be granted before the source is read at all.
     metadata_permission: str = ""
     #: Human label used in readiness and health details.
     label: str = "source"
+    #: Profile-specific wording retained for readiness and trigger diagnostics.
+    source_label: str = ""
+    readiness_label: str = ""
+    trigger_label: str = ""
     #: Schema identifier written into every emitted document.
     source_name: str = "source"
+    #: Family-specific collection keys; the rest of the envelope stays shared.
+    items_key: str = "items"
+    truncated_items_key: str = "truncatedItems"
+    #: Privacy-sensitive families require a non-empty explicit allowlist.
+    require_allowlist: bool = False
+    #: Existing collectors sort changed field names in their churn contract.
+    sort_changed_fields: bool = True
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
@@ -175,6 +188,10 @@ class BoundedCollector(Generic[Sample]):
         """A per-item grant this profile requires, or ``None`` for one gate."""
         return None
 
+    def identity_document(self, item: Sample) -> dict[str, object]:
+        """The public churn identity for one eligible item."""
+        return {"id": self.identity_of(item)}
+
     # --- the shared behaviour -----------------------------------------------------
 
     async def readiness(self) -> CollectorReadiness:
@@ -189,12 +206,23 @@ class BoundedCollector(Generic[Sample]):
         except Exception as error:  # noqa: BLE001 - host adapters fail arbitrarily
             return CollectorReadiness(
                 SourceStatus.UNAVAILABLE,
-                f"{self.label} readiness failed: {type(error).__name__}",
+                f"{self.readiness_label or self.label} readiness failed: "
+                f"{type(error).__name__}",
+                self._clock_ms(),
+            )
+        if (
+            not isinstance(readiness, CollectorReadiness)
+            or not isinstance(readiness.status, SourceStatus)
+            or _non_negative_integer_error(readiness.checked_at_ms)
+        ):
+            return CollectorReadiness(
+                SourceStatus.UNAVAILABLE,
+                f"{self.readiness_label or self.label} readiness is invalid",
                 self._clock_ms(),
             )
         return CollectorReadiness(
             readiness.status,
-            source_health_detail(self.label, readiness.status),
+            source_health_detail(self.source_label or self.label, readiness.status),
             readiness.checked_at_ms,
         )
 
@@ -202,13 +230,14 @@ class BoundedCollector(Generic[Sample]):
         """Read the source once and emit only what consent and bounds allow."""
         self._validate_trigger(trigger)
         if not self._permissions.allows(self.metadata_permission):
-            raise CollectionError(
+            raise self.error_type(
                 "permission-denied", f"{self.label} permission is not granted"
             )
         snapshot = await self._source.snapshot()
         self._validate_snapshot(snapshot)
+        items = self._snapshot_items(snapshot)
         eligible = sorted(
-            (item for item in snapshot.items if self._may_emit(self.identity_of(item))),
+            (item for item in items if self._may_emit(self.identity_of(item))),
             key=self.identity_of,
         )
         selected = eligible[: self._max_items]
@@ -222,59 +251,96 @@ class BoundedCollector(Generic[Sample]):
             if self._may_emit(identity)
         }
         churn = self._churn(authorized_previous, current)
-        self._previous = current
-        return CollectedOutput(
-            {
-                "schemaVersion": 1,
-                "source": self.source_name,
-                "sourceHealth": str(snapshot.status),
-                "observedAtMs": snapshot.observed_at_ms,
-                "items": [self.document_of(item) for item in selected],
-                "churn": churn,
-                "truncatedItems": len(eligible) - len(selected),
-            }
+        output = self._collected_output(
+            self._output_document(
+                snapshot,
+                selected,
+                churn,
+                len(eligible) - len(selected),
+            )
         )
+        # Churn is transactional: invalid snapshots or output construction
+        # failures must not replace the last successfully emitted state.
+        self._previous = current
+        return output
+
+    def _snapshot_items(self, snapshot: object) -> Sequence[Sample]:
+        assert isinstance(snapshot, SourceSnapshot)
+        return snapshot.items
+
+    def _output_document(
+        self,
+        snapshot: object,
+        selected: Sequence[Sample],
+        churn: dict[str, list],
+        truncated: int,
+    ) -> dict[str, object]:
+        return {
+            "schemaVersion": 1,
+            "source": self.source_name,
+            "sourceHealth": str(snapshot.status),
+            "observedAtMs": snapshot.observed_at_ms,
+            self.items_key: [self.document_of(item) for item in selected],
+            "churn": churn,
+            self.truncated_items_key: truncated,
+        }
+
+    def _collected_output(self, document: dict[str, object]) -> CollectedOutput:
+        """Single shared emission boundary for canonical validation."""
+        return CollectedOutput(document)
 
     def _churn(
         self, previous: dict[str, Sample], current: dict[str, Sample]
     ) -> dict[str, list]:
-        added = sorted(current.keys() - previous.keys())
-        removed = sorted(previous.keys() - current.keys())
+        added = [
+            self.identity_document(current[identity])
+            for identity in sorted(current.keys() - previous.keys())
+        ]
+        removed = [
+            self.identity_document(previous[identity])
+            for identity in sorted(previous.keys() - current.keys())
+        ]
         changed = []
         for identity in sorted(previous.keys() & current.keys()):
             fields = self.changed_fields(previous[identity], current[identity])
             if fields:
-                changed.append({"id": identity, "fields": sorted(fields)})
+                changed.append(
+                    {
+                        **self.identity_document(current[identity]),
+                        "fields": sorted(fields) if self.sort_changed_fields else fields,
+                    }
+                )
         return {
-            "added": [{"id": identity} for identity in added],
-            "removed": [{"id": identity} for identity in removed],
+            "added": added,
+            "removed": removed,
             "changed": changed,
         }
 
     def _may_emit(self, identity: str) -> bool:
-        if self._allowed_ids and identity not in self._allowed_ids:
+        if (self.require_allowlist or self._allowed_ids) and identity not in self._allowed_ids:
             return False
         permission = self.item_permission(identity)
         return permission is None or self._permissions.allows(permission)
 
     def _validate_trigger(self, trigger: Trigger) -> None:
+        subject = self.trigger_label or self.label
         if not isinstance(trigger, Trigger):
-            raise CollectionError("trigger-invalid", f"{self.label} requires a Trigger")
+            raise self.error_type("trigger-invalid", f"{subject} requires a Trigger")
         if trigger.plugin_id != self.plugin_id:
-            raise CollectionError(
+            raise self.error_type(
                 "trigger-invalid",
-                f"{self.label} requires a {self.plugin_id} trigger",
+                f"{subject} requires a {self.plugin_id} trigger",
             )
 
     def _validate_snapshot(self, snapshot: object) -> None:
         if not isinstance(snapshot, SourceSnapshot):
-            raise CollectionError("source-invalid", f"{self.label} returned no snapshot")
+            raise self.error_type("source-invalid", f"{self.label} returned no snapshot")
         if not isinstance(snapshot.status, SourceStatus):
-            raise CollectionError("source-invalid", f"{self.label} status is invalid")
+            raise self.error_type("source-invalid", f"{self.label} status is invalid")
         if _non_negative_integer_error(snapshot.observed_at_ms):
-            raise CollectionError("source-invalid", f"{self.label} timestamp is invalid")
+            raise self.error_type("source-invalid", f"{self.label} timestamp is invalid")
         if len(snapshot.items) > MAX_COLLECTED_ITEMS:
-            raise CollectionError(
+            raise self.error_type(
                 "source-invalid",
                 f"{self.label} returned more than {MAX_COLLECTED_ITEMS} items",
             )
@@ -284,11 +350,11 @@ class BoundedCollector(Generic[Sample]):
             except (AttributeError, TypeError) as error:
                 # A source that returns the wrong shape is a stable rejection,
                 # not a traceback escaping into orchestration.
-                raise CollectionError(
+                raise self.error_type(
                     "source-invalid", f"{self.label} item has an invalid type"
                 ) from error
             if not isinstance(identity, str) or not STABLE_ID.fullmatch(identity):
-                raise CollectionError(
+                raise self.error_type(
                     "source-invalid", f"{self.label} item identity is invalid"
                 )
 
@@ -323,6 +389,11 @@ def bounded_number(value: object, name: str, maximum: int) -> int:
 
 def _non_negative_integer_error(value: object) -> bool:
     return isinstance(value, bool) or not isinstance(value, int) or value < 0
+
+
+def _strict_non_negative_integer_error(value: object) -> bool:
+    """Reject integer subclasses at the native host-adapter boundary."""
+    return type(value) is not int or value < 0
 
 
 def _now_ms() -> int:

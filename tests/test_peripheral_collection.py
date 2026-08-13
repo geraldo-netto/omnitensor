@@ -14,6 +14,7 @@ from omnitensor.plugins import (
     MAX_PERIPHERAL_ERROR_COUNT,
     MAX_PERIPHERAL_SOURCE_DEVICES,
     PERIPHERAL_METADATA_PERMISSION,
+    BoundedCollector,
     CollectedOutput,
     CollectionStatus,
     Collector,
@@ -117,6 +118,7 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
     outcome = asyncio.run(coordinator.collect_next())
 
     assert isinstance(collector, Collector)
+    assert isinstance(collector, BoundedCollector)
     assert isinstance(source, PeripheralMetadataSource)
     assert outcome.status is CollectionStatus.SUCCEEDED
     assert outcome.output == CollectedOutput(

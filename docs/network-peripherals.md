@@ -9,13 +9,20 @@ collectors do not make the profile operational inference.
 
 `NetworkMetadataCollector` implements the standard async collector contract.
 Before source access it requires the declared `read:network-metadata` grant.
+Each link also requires an explicit stable-identity allowlist entry and the
+matching `read:network-link/<stable-id>` grant. Unlisted and ungranted links
+are neither emitted nor counted.
 Its injected host source supplies typed aggregate NetworkManager and kernel
 link observations: opaque stable identity, link kind/state, connectivity,
 carrier, metering, default-route status, signal percentage, monotonic byte,
 error, and drop counters, source health, and timestamps.
 
 Output is sorted by stable identity and capped at 64 links by default (256 hard maximum).
-Extra links are counted, not emitted. Duplicate or malformed
+Extra eligible links are counted, not emitted. Churn is computed over every
+eligible link, including links past the output cap, using only stable identity
+and link kind for additions and removals. Changes name public aggregate fields;
+poll timestamps alone do not create changes, and a repeated replay snapshot
+produces empty churn. Duplicate or malformed
 identities, invalid counters, and future timestamps fail the collection. The
 trigger payload is never copied into collector output.
 
@@ -39,8 +46,9 @@ serials, Bluetooth addresses and names, HID events, file contents, and traffic.
 
 Eligible output is sorted by stable identity and capped at 32 devices by
 default (64 hard maximum); source input is rejected above 256 devices. Churn is
-computed over the bounded emitted set: additions, removals, and changed public
-fields are stable-sorted. Poll timestamps alone do not create changes, and a
+computed over every eligible device, including devices past the output cap:
+additions, removals, and changed public fields are stable-sorted. Poll timestamps
+alone do not create changes, and a
 repeated replay snapshot produces empty churn.
 
 `ReplayPeripheralMetadataSource` exercises hotplug, removal, health changes,

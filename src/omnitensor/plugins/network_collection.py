@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import re
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from .pipeline import CollectedOutput
-from .triggers import CollectorReadiness, SourceStatus, Trigger
+from .collection import (
+    BoundedCollector,
+    CollectionError,
+    CollectionPermissionGate,
+    _now_ms,  # noqa: F401 - retained private compatibility alias
+)
+from .collection import (
+    _strict_non_negative_integer_error as _non_negative_integer_error,
+)
+from .triggers import CollectorReadiness, SourceStatus
 
 NETWORK_METADATA_PERMISSION = "read:network-metadata"
+NETWORK_LINK_PERMISSION_PREFIX = "read:network-link/"
 NETWORK_PERIPHERALS_PLUGIN_ID = "network-peripherals"
 DEFAULT_MAX_NETWORK_LINKS = 64
 MAX_NETWORK_LINKS = 256
@@ -43,13 +51,8 @@ class NetworkConnectivity(StrEnum):
     UNKNOWN = "unknown"
 
 
-class NetworkCollectionError(ValueError):
+class NetworkCollectionError(CollectionError):
     """Stable network collection rejection."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,13 +90,6 @@ class NetworkSnapshot:
     status: SourceStatus
     observed_at_ms: int
     links: tuple[NetworkLinkSample, ...]
-
-
-@runtime_checkable
-class CollectionPermissionGate(Protocol):
-    """Read-only declared/granted permission intersection."""
-
-    def allows(self, permission: str) -> bool: ...
 
 
 @runtime_checkable
@@ -136,13 +132,27 @@ class ReplayNetworkMetadataSource:
         return snapshot
 
 
-class NetworkMetadataCollector:
-    """Emit deterministic aggregate link features after explicit consent."""
+class NetworkMetadataCollector(BoundedCollector[NetworkLinkSample]):
+    """Emit only explicitly allowlisted links with active per-link grants."""
+
+    plugin_id = NETWORK_PERIPHERALS_PLUGIN_ID
+    error_type = NetworkCollectionError
+    metadata_permission = NETWORK_METADATA_PERMISSION
+    label = "network metadata"
+    source_label = "network metadata source"
+    readiness_label = "network source"
+    trigger_label = "network collector"
+    source_name = "network-manager-link-metadata"
+    items_key = "links"
+    truncated_items_key = "truncatedLinks"
+    require_allowlist = True
+    sort_changed_fields = False
 
     def __init__(
         self,
         source: NetworkMetadataSource,
         permissions: CollectionPermissionGate,
+        allowed_link_ids: Sequence[str],
         *,
         max_links: int = DEFAULT_MAX_NETWORK_LINKS,
         clock_ms: Callable[[], int] | None = None,
@@ -151,75 +161,73 @@ class NetworkMetadataCollector:
             raise TypeError("source must implement NetworkMetadataSource")
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
+        allowed = _validated_link_allowlist(allowed_link_ids)
         if type(max_links) is not int or not 1 <= max_links <= MAX_NETWORK_LINKS:
             raise ValueError(f"max_links must be an integer from 1 to {MAX_NETWORK_LINKS}")
-        if clock_ms is not None and not callable(clock_ms):
-            raise TypeError("clock_ms must be callable")
-        self._source = source
-        self._permissions = permissions
-        self._max_links = max_links
-        self._clock_ms = clock_ms or _now_ms
-
-    async def readiness(self) -> CollectorReadiness:
-        if not self._permissions.allows(NETWORK_METADATA_PERMISSION):
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                "network metadata permission is not granted",
-                self._clock_ms(),
-            )
-        try:
-            readiness = await self._source.readiness()
-        except Exception as error:  # noqa: BLE001 - host adapters can fail arbitrarily
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                f"network source readiness failed: {type(error).__name__}",
-                self._clock_ms(),
-            )
-        if not isinstance(readiness, CollectorReadiness):
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                "network source readiness is invalid",
-                self._clock_ms(),
-            )
-        if not isinstance(readiness.status, SourceStatus) or _non_negative_integer_error(
-            readiness.checked_at_ms
-        ):
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                "network source readiness is invalid",
-                self._clock_ms(),
-            )
-        return CollectorReadiness(
-            readiness.status,
-            _source_health_detail(readiness.status),
-            readiness.checked_at_ms,
+        super().__init__(
+            source,
+            permissions,
+            allowed,
+            max_items=max_links,
+            clock_ms=clock_ms,
         )
 
-    async def collect(self, trigger: Trigger) -> CollectedOutput:
-        if not isinstance(trigger, Trigger) or trigger.plugin_id != NETWORK_PERIPHERALS_PLUGIN_ID:
-            raise NetworkCollectionError(
-                "trigger-invalid", "network collector requires a network-peripherals trigger"
-            )
-        if not self._permissions.allows(NETWORK_METADATA_PERMISSION):
-            raise NetworkCollectionError(
-                "permission-denied", "network metadata permission is not granted"
-            )
-        snapshot = await self._source.snapshot()
+    def identity_of(self, item: NetworkLinkSample) -> str:
+        return item.stable_id
+
+    def item_permission(self, identity: str) -> str:
+        return network_link_permission(identity)
+
+    def identity_document(self, item: NetworkLinkSample) -> dict[str, object]:
+        return {"stableId": item.stable_id, "kind": str(item.kind)}
+
+    def document_of(self, item: NetworkLinkSample) -> dict[str, object]:
+        return _link_document(item)
+
+    def changed_fields(
+        self, previous: NetworkLinkSample, current: NetworkLinkSample
+    ) -> list[str]:
+        fields = (
+            ("kind", previous.kind, current.kind),
+            ("state", previous.state, current.state),
+            ("connectivity", previous.connectivity, current.connectivity),
+            ("carrier", previous.carrier, current.carrier),
+            ("metered", previous.metered, current.metered),
+            ("defaultRoute", previous.default_route, current.default_route),
+            ("signalPercent", previous.signal_percent, current.signal_percent),
+            ("counters", previous.counters, current.counters),
+        )
+        return [name for name, before, after in fields if before != after]
+
+    def _snapshot_items(self, snapshot: object) -> Sequence[NetworkLinkSample]:
+        assert isinstance(snapshot, NetworkSnapshot)
+        return snapshot.links
+
+    def _validate_snapshot(self, snapshot: object) -> None:
         error = network_snapshot_error(snapshot)
         if error:
             raise NetworkCollectionError("source-invalid", error)
-        ordered = sorted(snapshot.links, key=lambda link: link.stable_id)
-        selected = ordered[: self._max_links]
-        return CollectedOutput(
-            {
-                "schemaVersion": 1,
-                "source": "network-manager-link-metadata",
-                "sourceHealth": str(snapshot.status),
-                "observedAtMs": snapshot.observed_at_ms,
-                "links": [_link_document(link) for link in selected],
-                "truncatedLinks": len(ordered) - len(selected),
-            }
-        )
+
+
+def network_link_permission(stable_id: str) -> str:
+    """Return the scoped grant name for one validated stable link identity."""
+    if not isinstance(stable_id, str) or not _STABLE_ID.fullmatch(stable_id):
+        raise ValueError("network link stable identity is invalid")
+    return f"{NETWORK_LINK_PERMISSION_PREFIX}{stable_id}"
+
+
+def _validated_link_allowlist(identities: object) -> frozenset[str]:
+    if isinstance(identities, (str, bytes)) or not isinstance(identities, Sequence):
+        raise TypeError("allowed_link_ids must be a sequence")
+    if len(identities) > MAX_NETWORK_LINKS:
+        raise ValueError(f"at most {MAX_NETWORK_LINKS} link identities may be allowed")
+    validated: set[str] = set()
+    for stable_id in identities:
+        network_link_permission(stable_id)
+        if stable_id in validated:
+            raise ValueError("allowed link identities must be unique")
+        validated.add(stable_id)
+    return frozenset(validated)
 
 
 def network_snapshot_error(snapshot: object) -> str:
@@ -329,11 +337,3 @@ def _source_health_detail(status: SourceStatus) -> str:
     if status is SourceStatus.DEGRADED:
         return "network metadata source is degraded"
     return "network metadata source is unavailable"
-
-
-def _non_negative_integer_error(value: object) -> bool:
-    return type(value) is not int or value < 0
-
-
-def _now_ms() -> int:
-    return time.time_ns() // 1_000_000

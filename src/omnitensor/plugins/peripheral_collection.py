@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import re
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from .network_collection import NETWORK_PERIPHERALS_PLUGIN_ID, CollectionPermissionGate
-from .pipeline import CollectedOutput
-from .triggers import CollectorReadiness, SourceStatus, Trigger
+from .collection import (
+    BoundedCollector,
+    CollectionError,
+    CollectionPermissionGate,
+    _now_ms,  # noqa: F401 - retained private compatibility alias
+)
+from .collection import (
+    _strict_non_negative_integer_error as _non_negative_integer_error,
+)
+from .network_collection import NETWORK_PERIPHERALS_PLUGIN_ID
+from .triggers import CollectorReadiness, SourceStatus
 
 PERIPHERAL_METADATA_PERMISSION = "read:peripheral-metadata"
 PERIPHERAL_DEVICE_PERMISSION_PREFIX = "read:peripheral-device/"
@@ -42,13 +49,8 @@ class PeripheralHealth(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-class PeripheralCollectionError(ValueError):
+class PeripheralCollectionError(CollectionError):
     """Stable peripheral collection rejection."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,8 +119,21 @@ class ReplayPeripheralMetadataSource:
         return snapshot
 
 
-class PeripheralMetadataCollector:
+class PeripheralMetadataCollector(BoundedCollector[PeripheralSample]):
     """Emit only explicitly allowlisted devices with active per-device grants."""
+
+    plugin_id = NETWORK_PERIPHERALS_PLUGIN_ID
+    error_type = PeripheralCollectionError
+    metadata_permission = PERIPHERAL_METADATA_PERMISSION
+    label = "peripheral metadata"
+    source_label = "peripheral metadata source"
+    readiness_label = "peripheral source"
+    trigger_label = "peripheral collector"
+    source_name = "usb-bluetooth-health-metadata"
+    items_key = "devices"
+    truncated_items_key = "truncatedDevices"
+    require_allowlist = True
+    sort_changed_fields = False
 
     def __init__(
         self,
@@ -133,91 +148,42 @@ class PeripheralMetadataCollector:
             raise TypeError("source must implement PeripheralMetadataSource")
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
-        self._allowed_device_ids = _validated_allowlist(allowed_device_ids)
+        allowed = _validated_allowlist(allowed_device_ids)
         if type(max_devices) is not int or not 1 <= max_devices <= MAX_PERIPHERAL_DEVICES:
             raise ValueError(f"max_devices must be an integer from 1 to {MAX_PERIPHERAL_DEVICES}")
-        if clock_ms is not None and not callable(clock_ms):
-            raise TypeError("clock_ms must be callable")
-        self._source = source
-        self._permissions = permissions
-        self._max_devices = max_devices
-        self._clock_ms = clock_ms or _now_ms
-        self._previous: dict[str, PeripheralSample] = {}
-
-    async def readiness(self) -> CollectorReadiness:
-        if not self._permissions.allows(PERIPHERAL_METADATA_PERMISSION):
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                "peripheral metadata permission is not granted",
-                self._clock_ms(),
-            )
-        try:
-            readiness = await self._source.readiness()
-        except Exception as error:  # noqa: BLE001 - host adapters can fail arbitrarily
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                f"peripheral source readiness failed: {type(error).__name__}",
-                self._clock_ms(),
-            )
-        if _readiness_error(readiness):
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE,
-                "peripheral source readiness is invalid",
-                self._clock_ms(),
-            )
-        assert isinstance(readiness, CollectorReadiness)
-        return CollectorReadiness(
-            readiness.status,
-            _source_health_detail(readiness.status),
-            readiness.checked_at_ms,
+        super().__init__(
+            source,
+            permissions,
+            allowed,
+            max_items=max_devices,
+            clock_ms=clock_ms,
         )
 
-    async def collect(self, trigger: Trigger) -> CollectedOutput:
-        if not isinstance(trigger, Trigger) or trigger.plugin_id != NETWORK_PERIPHERALS_PLUGIN_ID:
-            raise PeripheralCollectionError(
-                "trigger-invalid", "peripheral collector requires a network-peripherals trigger"
-            )
-        if not self._permissions.allows(PERIPHERAL_METADATA_PERMISSION):
-            raise PeripheralCollectionError(
-                "permission-denied", "peripheral metadata permission is not granted"
-            )
-        snapshot = await self._source.snapshot()
+    def identity_of(self, item: PeripheralSample) -> str:
+        return item.stable_id
+
+    def item_permission(self, identity: str) -> str:
+        return peripheral_device_permission(identity)
+
+    def identity_document(self, item: PeripheralSample) -> dict[str, object]:
+        return _identity_document(item)
+
+    def document_of(self, item: PeripheralSample) -> dict[str, object]:
+        return _device_document(item)
+
+    def changed_fields(
+        self, previous: PeripheralSample, current: PeripheralSample
+    ) -> list[str]:
+        return _changed_fields(previous, current)
+
+    def _snapshot_items(self, snapshot: object) -> Sequence[PeripheralSample]:
+        assert isinstance(snapshot, PeripheralSnapshot)
+        return snapshot.devices
+
+    def _validate_snapshot(self, snapshot: object) -> None:
         error = peripheral_snapshot_error(snapshot)
         if error:
             raise PeripheralCollectionError("source-invalid", error)
-        eligible = sorted(
-            (device for device in snapshot.devices if self._may_emit(device.stable_id)),
-            key=lambda device: device.stable_id,
-        )
-        selected = eligible[: self._max_devices]
-        # Churn is computed against every eligible device, not the truncated
-        # emission list.  Tracking only what fit reported a device past
-        # max_devices as removed while it was still attached, and as added
-        # again as soon as it fit — churn the user never experienced.
-        current = {device.stable_id: device for device in eligible}
-        authorized_previous = {
-            stable_id: device
-            for stable_id, device in self._previous.items()
-            if self._may_emit(stable_id)
-        }
-        churn = _churn_document(authorized_previous, current)
-        self._previous = current
-        return CollectedOutput(
-            {
-                "schemaVersion": 1,
-                "source": "usb-bluetooth-health-metadata",
-                "sourceHealth": str(snapshot.status),
-                "observedAtMs": snapshot.observed_at_ms,
-                "devices": [_device_document(device) for device in selected],
-                "churn": churn,
-                "truncatedDevices": len(eligible) - len(selected),
-            }
-        )
-
-    def _may_emit(self, stable_id: str) -> bool:
-        return stable_id in self._allowed_device_ids and self._permissions.allows(
-            peripheral_device_permission(stable_id)
-        )
 
 
 def peripheral_device_permission(stable_id: str) -> str:
@@ -310,35 +276,6 @@ def _validated_allowlist(identities: object) -> frozenset[str]:
     return validated
 
 
-def _readiness_error(readiness: object) -> bool:
-    return (
-        not isinstance(readiness, CollectorReadiness)
-        or not isinstance(readiness.status, SourceStatus)
-        or _non_negative_integer_error(readiness.checked_at_ms)
-    )
-
-
-def _churn_document(
-    previous: dict[str, PeripheralSample],
-    current: dict[str, PeripheralSample],
-) -> dict[str, list[dict[str, object]]]:
-    added = [_identity_document(current[key]) for key in sorted(current.keys() - previous.keys())]
-    removed = [
-        _identity_document(previous[key]) for key in sorted(previous.keys() - current.keys())
-    ]
-    changed = []
-    for key in sorted(previous.keys() & current.keys()):
-        fields = _changed_fields(previous[key], current[key])
-        if fields:
-            changed.append(
-                {
-                    **_identity_document(current[key]),
-                    "fields": fields,
-                }
-            )
-    return {"added": added, "removed": removed, "changed": changed}
-
-
 def _changed_fields(previous: PeripheralSample, current: PeripheralSample) -> list[str]:
     fields = (
         ("bus", previous.bus, current.bus),
@@ -379,11 +316,3 @@ def _source_health_detail(status: SourceStatus) -> str:
     if status is SourceStatus.DEGRADED:
         return "peripheral metadata source is degraded"
     return "peripheral metadata source is unavailable"
-
-
-def _non_negative_integer_error(value: object) -> bool:
-    return type(value) is not int or value < 0
-
-
-def _now_ms() -> int:
-    return time.time_ns() // 1_000_000
