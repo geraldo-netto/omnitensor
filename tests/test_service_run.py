@@ -358,6 +358,7 @@ def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
             discovery=discovery,
             publisher=FakePublisher(),
             transport=FakeTransport(),
+            artifact_root=tmp_path / "artifacts",
             publish_interval_s=0.01,
             discovery_interval_s=0.01,
         )
@@ -374,6 +375,8 @@ def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
     # not the dict the scheduler was constructed with.
     assert service._scheduler._executors == service._executors
     assert service._executors["npu"]._device_present is True
+    inference = service.jobs._dispatcher.fallback._inference
+    assert dict(inference._executors()) == service._executors
 
 
 def test_publisher_loop_retracts_once_when_no_devices_are_present(tmp_path, caplog):

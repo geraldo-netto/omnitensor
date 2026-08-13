@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Protocol, runtime_checkable
 
 from .executors.base import Executor, InferenceResult
@@ -42,6 +42,13 @@ MAX_INPUT_TENSORS = 64
 MAX_TENSOR_ELEMENTS = 1 << 20
 
 
+def _executor_snapshot(
+    source: Mapping[str, Executor] | Callable[[], Mapping[str, Executor]],
+) -> dict[str, Executor]:
+    """Resolve one routing snapshot from a static or rediscovery-backed source."""
+    return dict(source() if callable(source) else source)
+
+
 @runtime_checkable
 class ArtifactSource(Protocol):
     """The artifact store, narrowed to what dispatch is allowed to ask it."""
@@ -58,7 +65,7 @@ class InferenceJobDispatcher:
         self,
         workloads: Mapping[str, Workload],
         scheduler: Scheduler,
-        executors: Mapping[str, Executor],
+        executors: Mapping[str, Executor] | Callable[[], Mapping[str, Executor]],
         artifacts: ArtifactSource,
         *,
         max_input_tensors: int = MAX_INPUT_TENSORS,
@@ -139,7 +146,7 @@ class InferenceJobDispatcher:
         """Admit, resolve, route, and queue one job; never run it inline."""
         workload = self._runnable(workload_id)
         inputs = self._inputs(payload)
-        executors = dict(self._executors)
+        executors = _executor_snapshot(self._executors)
         choice = select_backend(workload, executors)
         if choice.backend is None:
             # No CPU fallback exists by design, so an unroutable job is refused

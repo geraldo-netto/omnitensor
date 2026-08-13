@@ -594,7 +594,7 @@ class OmniTensorService:
         return InferenceJobDispatcher(
             self._workloads,
             self._scheduler,
-            self._executors,
+            lambda: self._executors,
             self._artifact_store,
             # Referencing a file is a capability the operator grants, so the
             # roots come from configuration and default to none.

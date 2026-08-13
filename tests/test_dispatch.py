@@ -9,6 +9,7 @@ from conftest import sample_manifest
 
 from omnitensor.dispatch import (
     InferenceJobDispatcher,
+    _executor_snapshot,
     declared_artifact_reference,
     inference_result_payload,
 )
@@ -92,6 +93,18 @@ class FakeArtifacts:
         return self._resolution
 
 
+def test_executor_snapshot_resolves_static_and_live_sources():
+    original = {"gpu": FakeExecutor()}
+    current = [original]
+
+    assert _executor_snapshot(original) == original
+    assert _executor_snapshot(lambda: current[0]) == original
+    assert _executor_snapshot(original) is not original
+
+    replacement = {"tpu": FakeExecutor()}
+    current[0] = replacement
+    assert _executor_snapshot(lambda: current[0]) == replacement
+
 def dispatcher(workloads, executors=None, artifacts=None, scheduler=None, input_roots=None):
     executor = executors if executors is not None else {"gpu": FakeExecutor()}
     return InferenceJobDispatcher(
@@ -164,6 +177,61 @@ def test_an_unavailable_backend_is_refused_with_its_reason():
         )
     assert excinfo.value.code == "no-backend-available"
     assert "No Vulkan device" in excinfo.value.message
+
+
+def test_dispatch_uses_the_latest_executor_provider_after_replacement():
+    original = FakeExecutor()
+    replacement = FakeExecutor()
+    current = [{"gpu": original}]
+    scheduler = Scheduler(current[0], lambda _profile: 1)
+    subject = InferenceJobDispatcher(
+        {"sample-workload": workload(model=MODEL)},
+        scheduler,
+        lambda: current[0],
+        FakeArtifacts(),
+    )
+
+    async def scenario():
+        scheduler.start()
+        current[0] = {"gpu": replacement}
+        scheduler.update_executors(current[0])
+        await asyncio.wait_for(
+            subject.dispatch("job-1", "sample-workload", {"inputs": [[1.0]]}),
+            timeout=5,
+        )
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+    assert original.ran == []
+    assert replacement.ran == [("/models/sample.ncnn.param", [[1.0]])]
+
+
+def test_removed_preferred_executor_is_refused_before_submission():
+    tpu = FakeExecutor(model_formats=("ncnn",))
+    tpu.backend = "tpu"
+    current = [{"tpu": tpu}]
+    scheduler = Scheduler(current[0], lambda _profile: 1)
+    subject = InferenceJobDispatcher(
+        {
+            "sample-workload": workload(
+                model=MODEL,
+                accelerator="tpu",
+                preference=("tpu",),
+            )
+        },
+        scheduler,
+        lambda: current[0],
+        FakeArtifacts(),
+    )
+    current[0] = {"gpu": FakeExecutor()}
+    scheduler.update_executors(current[0])
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch("job-1", "sample-workload", {"inputs": [[1.0]]})
+
+    assert failure.value.code == "no-backend-available"
+    assert failure.value.message == "tpu: no executor"
 
 
 def test_an_unresolvable_artifact_is_refused_before_queueing():
