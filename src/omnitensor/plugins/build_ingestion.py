@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
+from .. import telemetry_types as _telemetry_types
 from .collection import CollectionPermissionGate
 from .ingestion import (
     IngestionError,
@@ -29,27 +29,11 @@ from .ingestion import (
 
 BUILD_PLUGIN_ID = "build-advisor"
 BUILD_METADATA_PERMISSION = "read:build-metadata"
-DEFAULT_MAX_BUILD_RECORDS = 5_000
-MAX_DURATION_MS = 30 * 24 * 60 * 60 * 1000
-
-
-class BuildOutcome(StrEnum):
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True, slots=True)
-class BuildRecord:
-    """One exported build result; never a log body, never source content."""
-
-    build_id: str
-    outcome: BuildOutcome
-    duration_ms: int
-    started_at_ms: int
-    changed_paths: tuple[str, ...]
-    failed_checks: tuple[str, ...]
+DEFAULT_MAX_BUILD_RECORDS = _telemetry_types.DEFAULT_MAX_BUILD_RECORDS
+MAX_DURATION_MS = _telemetry_types.MAX_BUILD_DURATION_MS
+BuildOutcome = _telemetry_types.BuildOutcome
+BuildRecord = _telemetry_types.BuildRecord
+build_record_error = _telemetry_types.build_record_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,36 +45,6 @@ class RepositoryProfile:
     total_bytes: int
     suffix_counts: dict[str, int]
     truncated: bool
-
-
-def build_record_error(record: object) -> str:
-    """One stable validation failure for an untrusted exported record."""
-    if not isinstance(record, BuildRecord):
-        return "build record has an invalid type"
-    if not isinstance(record.outcome, BuildOutcome):
-        return "build outcome is invalid"
-    if not isinstance(record.build_id, str) or not 1 <= len(record.build_id) <= 120:
-        return "build identity is invalid"
-    timing = _timing_error(record)
-    if timing:
-        return timing
-    for field, name in (
-        (record.changed_paths, "changed paths"),
-        (record.failed_checks, "failed checks"),
-    ):
-        if not isinstance(field, tuple) or any(not isinstance(item, str) for item in field):
-            return f"build {name} are invalid"
-    return ""
-
-
-def _timing_error(record: BuildRecord) -> str:
-    for value, name in ((record.duration_ms, "duration"), (record.started_at_ms, "start")):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            return f"build {name} is invalid"
-    if record.duration_ms > MAX_DURATION_MS:
-        return "build duration is implausible"
-    return ""
-
 
 class BuildMetadataIngestor:
     """Profile configured repositories and validate exported build history."""

@@ -18,10 +18,15 @@ from pathlib import Path
 from typing import Protocol
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..plugins.artifact_installation import ArtifactInstaller
-from ..plugins.artifact_trust import ArtifactProvenance, ArtifactTrustVerifier
-from ..plugins.artifacts import ArtifactReference
-from ..preparation import PreparedArtifact, file_digest, prepare_artifact
+from ..preparation import (
+    ArtifactProvenance,
+    ArtifactReference,
+    ArtifactTrustVerifier,
+    PreparedArtifact,
+    file_digest,
+    prepare_artifact,
+    trusted_prepared_installer,
+)
 from ..registry import bundled_workloads_path, load_workloads, validate_workload_document
 from .binding import binding_manifest, model_fragment, native_evidence, publish_binding
 from .compilers import (
@@ -229,16 +234,14 @@ def promote_numeric_training(
         evidence = parity_verifier.verify(report, compiled)
         _validate_parity(report, artifact, evidence)
         prepared.append((compiled, artifact, evidence))
-    installer = ArtifactInstaller(Path(artifact_root), trust_verifier=trust_verifier)
+    install_trusted = trusted_prepared_installer(
+        artifact_root,
+        trust_verifier=trust_verifier,
+    )
     installed = []
     for compiled, artifact, evidence in prepared:
         provenance = signer(artifact.reference, report.report_sha256)
-        landed = installer.install(
-            artifact.reference,
-            artifact.source,
-            companions=artifact.companions,
-            provenance=provenance,
-        ).path
+        landed = install_trusted(artifact, provenance)
         fragment = _numeric_model_fragment(report, artifact, compiled, evidence)
         installed.append(
             InstalledVariant(

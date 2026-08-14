@@ -25,16 +25,27 @@ import argparse
 import hashlib
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
+from .plugins.artifact_installation import (
+    ArtifactInstallationError as _ArtifactInstallationError,
+)
 from .plugins.artifact_installation import ArtifactInstaller
+from .plugins.artifact_trust import ArtifactProvenance
 from .plugins.artifacts import (
     COMPANION_SOURCE_SUFFIXES,
     ArtifactReference,
     companion_filenames,
 )
+from .plugins.artifacts import (
+    artifact_reference_error as _artifact_reference_error,
+)
+
+ArtifactInstallationError = _ArtifactInstallationError
+artifact_reference_error = _artifact_reference_error
 
 READ_CHUNK_BYTES = 1024 * 1024
 SUPPORTED_FORMATS = ("ncnn", "onnx", "openvino", "tflite-edgetpu")
@@ -64,6 +75,29 @@ class FileDigestTooLargeError(OSError):
         self.max_bytes = max_bytes
         self.observed_bytes = observed_bytes
         super().__init__(f"file exceeds {max_bytes} bytes")
+
+
+class ArtifactTrustDecision(Protocol):
+    """Result shape consumed by artifact trust publication."""
+
+    trusted: bool
+    reason: str
+
+
+class ArtifactTrustVerifier(Protocol):
+    """Structural producer boundary accepted by the canonical artifact store."""
+
+    def verify(
+        self,
+        reference: ArtifactReference,
+        provenance: ArtifactProvenance | None,
+    ) -> ArtifactTrustDecision: ...
+
+    def verify_installed(
+        self,
+        reference: ArtifactReference,
+        version_root: Path,
+    ) -> ArtifactTrustDecision: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +259,27 @@ def install_prepared(prepared: PreparedArtifact, root: Path | str) -> Path:
         prepared.reference, prepared.source, companions=dict(prepared.companions)
     )
     return Path(getattr(installation, "path", root))
+
+
+def trusted_prepared_installer(
+    root: Path | str,
+    *,
+    trust_verifier: ArtifactTrustVerifier,
+) -> Callable[[PreparedArtifact, ArtifactProvenance], Path]:
+    """Bind the canonical signed store once for a producer publication batch."""
+    destination = Path(root)
+    installer = ArtifactInstaller(destination, trust_verifier=trust_verifier)
+
+    def install(prepared: PreparedArtifact, provenance: ArtifactProvenance) -> Path:
+        installation = installer.install(
+            prepared.reference,
+            prepared.source,
+            companions=dict(prepared.companions),
+            provenance=provenance,
+        )
+        return Path(getattr(installation, "path", destination))
+
+    return install
 
 
 def main(argv: list[str] | None = None) -> int:

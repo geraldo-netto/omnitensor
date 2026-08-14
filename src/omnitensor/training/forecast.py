@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..plugins.forecasting import LinearForecaster, fit_forecaster
-from ..plugins.recorder import FeatureRow, TelemetryRecorder
+from ..forecasting import fit_forecaster
 from ..preparation import file_digest
+from ..telemetry_recorder import TelemetryRecorder
+from ..telemetry_types import FeatureRow, LinearForecaster
 from .contracts import TrainingError, TrainingReport, TrainingSpec, write_training_report
 
 SUPPORTED_PROFILES = frozenset({"resource-scheduler"})

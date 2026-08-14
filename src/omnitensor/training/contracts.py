@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..plugins.artifacts import ArtifactReference, artifact_reference_error
-from ..preparation import file_digest
+from ..preparation import ArtifactReference, artifact_reference_error, file_digest
 from ..registry import validate_document
 
 TRAINING_REPORT_VERSION = 1

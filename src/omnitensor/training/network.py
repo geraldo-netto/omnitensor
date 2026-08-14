@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..plugins.network_collection import (
+from ..preparation import file_digest
+from ..telemetry_types import (
     MAX_NETWORK_COUNTER,
     NetworkConnectivity,
     NetworkCounters,
@@ -22,10 +23,9 @@ from ..plugins.network_collection import (
     NetworkLinkSample,
     NetworkLinkState,
     NetworkSnapshot,
+    SourceStatus,
     network_snapshot_error,
 )
-from ..plugins.triggers import SourceStatus
-from ..preparation import file_digest
 from .contracts import TrainingError, write_training_report
 from .tabular import (
     JsonlPolicy,

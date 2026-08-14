@@ -9,15 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..plugins.collection import STABLE_ID
-from ..plugins.hardware_collection import (
+from ..preparation import file_digest
+from ..telemetry_types import (
+    STABLE_ID,
     HardwareSample,
     SensorHealth,
     SensorKind,
+    SourceStatus,
     hardware_sample_error,
 )
-from ..plugins.triggers import SourceStatus
-from ..preparation import file_digest
 from .build import _fit_output
 from .contracts import MAX_INPUT_WIDTH, TrainingError, write_training_report
 from .tabular import (

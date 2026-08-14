@@ -10,11 +10,11 @@ import sys
 from pathlib import Path
 
 from ..conversion import ConversionError
+from ..forecasting import ForecastError
 from ..forecastresult import parse_forecast_reading
-from ..plugins.artifact_installation import ArtifactInstallationError
-from ..plugins.forecasting import ForecastError
-from ..plugins.recorder import RecorderError, TelemetryRecorder
-from ..preparation import PreparationError
+from ..preparation import ArtifactInstallationError, PreparationError
+from ..telemetry_recorder import TelemetryRecorder
+from ..telemetry_types import RecorderError
 from .build import (
     BUILD_PROVENANCE_CONFIRMATION,
     BuildAdvisorTrainer,

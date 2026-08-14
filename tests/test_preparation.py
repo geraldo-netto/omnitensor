@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import tempfile
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 from hypothesis import given
@@ -11,6 +13,8 @@ from hypothesis import strategies as st
 
 from omnitensor.preparation import (
     FORMAT_ACCELERATORS,
+    ArtifactTrustDecision,
+    ArtifactTrustVerifier,
     FileDigestTooLargeError,
     PreparationError,
     file_digest,
@@ -18,6 +22,22 @@ from omnitensor.preparation import (
     main,
     prepare_artifact,
 )
+
+
+def test_trusted_installer_protocol_covers_pre_and_post_publication_checks():
+    assert ArtifactTrustDecision.__annotations__ == {"trusted": "bool", "reason": "str"}
+    assert set(inspect.signature(ArtifactTrustVerifier.verify).parameters) == {
+        "self",
+        "reference",
+        "provenance",
+    }
+    assert set(inspect.signature(ArtifactTrustVerifier.verify_installed).parameters) == {
+        "self",
+        "reference",
+        "version_root",
+    }
+    assert get_type_hints(ArtifactTrustVerifier.verify)["return"] is ArtifactTrustDecision
+    assert get_type_hints(ArtifactTrustVerifier.verify_installed)["return"] is ArtifactTrustDecision
 
 
 def model_file(tmp_path, name="model.onnx", content=b"ONNX-ish bytes"):

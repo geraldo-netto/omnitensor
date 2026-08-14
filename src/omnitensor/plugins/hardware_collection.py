@@ -13,56 +13,20 @@ whole point of collecting this at all.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
-
-from .collection import (
-    BoundedCollector,
-    CollectionError,
-    SourceSnapshot,
-    bounded_number,
-)
+from .. import telemetry_types as _telemetry_types
+from .collection import BoundedCollector, CollectionError, SourceSnapshot
 
 HARDWARE_HEALTH_PLUGIN_ID = "hardware-health"
 HARDWARE_METADATA_PERMISSION = "read:hardware-health-metadata"
 HARDWARE_SENSOR_PERMISSION_PREFIX = "read:hardware-sensor/"
 DEFAULT_MAX_SENSORS = 64
-MAX_TEMPERATURE_MILLIDEGREES = 200_000
-MAX_ERROR_COUNT = 2**53
-MAX_PERCENT = 100
-
-
-class SensorKind(StrEnum):
-    """What a reading measures, which decides how it may be interpreted."""
-
-    THERMAL = "thermal"
-    FAN = "fan"
-    VOLTAGE = "voltage"
-    MEMORY_ERRORS = "memory-errors"
-    POWER = "power"
-    SERVICE = "service"
-
-
-class SensorHealth(StrEnum):
-    """Whether the reading itself can be trusted, separate from its value."""
-
-    OK = "ok"
-    DEGRADED = "degraded"
-    CRITICAL = "critical"
-    MISSING = "missing"
-
-
-@dataclass(frozen=True, slots=True)
-class HardwareSample:
-    """One bounded reading with its unit stated rather than assumed."""
-
-    stable_id: str
-    kind: SensorKind
-    health: SensorHealth
-    value: int | None
-    unit: str
-    label: str
-    observed_at_ms: int
+MAX_ERROR_COUNT = _telemetry_types.MAX_ERROR_COUNT
+MAX_PERCENT = _telemetry_types.MAX_PERCENT
+MAX_TEMPERATURE_MILLIDEGREES = _telemetry_types.MAX_TEMPERATURE_MILLIDEGREES
+HardwareSample = _telemetry_types.HardwareSample
+SensorHealth = _telemetry_types.SensorHealth
+SensorKind = _telemetry_types.SensorKind
+hardware_sample_error = _telemetry_types.hardware_sample_error
 
 
 def hardware_sensor_permission(stable_id: str) -> str:
@@ -72,42 +36,6 @@ def hardware_sensor_permission(stable_id: str) -> str:
     if not isinstance(stable_id, str) or not STABLE_ID.fullmatch(stable_id):
         raise ValueError("hardware sensor identity is invalid")
     return f"{HARDWARE_SENSOR_PERMISSION_PREFIX}{stable_id}"
-
-
-def hardware_sample_error(sample: object) -> str:
-    """One stable validation failure for an untrusted source sample."""
-    shape = _sample_shape_error(sample)
-    if shape:
-        return shape
-    if sample.health is SensorHealth.MISSING:
-        # A missing sensor must carry no value at all.  Reporting zero for an
-        # absent thermal probe reads as a cool machine, which is the opposite
-        # of what happened.
-        if sample.value is not None:
-            return "a missing hardware sample must not carry a value"
-        return ""
-    if sample.value is None:
-        return "a present hardware sample must carry a value"
-    try:
-        bounded_number(sample.value, "hardware sample value", _ceiling(sample.kind))
-    except CollectionError as error:
-        return error.detail
-    return ""
-
-
-def _sample_shape_error(sample: object) -> str:
-    if not isinstance(sample, HardwareSample):
-        return "hardware sample has an invalid type"
-    if not isinstance(sample.kind, SensorKind):
-        return "hardware sample kind is invalid"
-    if not isinstance(sample.health, SensorHealth):
-        return "hardware sample health is invalid"
-    if not isinstance(sample.unit, str) or len(sample.unit) > 16:
-        return "hardware sample unit is invalid"
-    if not isinstance(sample.label, str) or len(sample.label) > 80:
-        return "hardware sample label is invalid"
-    return ""
-
 
 class HardwareHealthCollector(BoundedCollector[HardwareSample]):
     """Emit only allowlisted, granted sensors with stable units."""
@@ -158,13 +86,3 @@ class HardwareHealthCollector(BoundedCollector[HardwareSample]):
                 if error:
                     raise CollectionError("source-invalid", error)
         super()._validate_snapshot(snapshot)
-
-
-def _ceiling(kind: SensorKind) -> int:
-    if kind is SensorKind.THERMAL:
-        return MAX_TEMPERATURE_MILLIDEGREES
-    if kind is SensorKind.MEMORY_ERRORS:
-        return MAX_ERROR_COUNT
-    if kind in (SensorKind.POWER, SensorKind.SERVICE):
-        return MAX_PERCENT
-    return MAX_ERROR_COUNT

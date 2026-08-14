@@ -4,92 +4,36 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from .. import telemetry_types as _telemetry_types
 from .collection import (
     BoundedCollector,
     CollectionError,
     CollectionPermissionGate,
     _now_ms,  # noqa: F401 - retained private compatibility alias
 )
-from .collection import (
-    _strict_non_negative_integer_error as _non_negative_integer_error,
-)
-from .triggers import CollectorReadiness, SourceStatus
+from .triggers import CollectorReadiness
 
 NETWORK_METADATA_PERMISSION = "read:network-metadata"
 NETWORK_LINK_PERMISSION_PREFIX = "read:network-link/"
 NETWORK_PERIPHERALS_PLUGIN_ID = "network-peripherals"
 DEFAULT_MAX_NETWORK_LINKS = 64
-MAX_NETWORK_LINKS = 256
-MAX_NETWORK_COUNTER = 2**63 - 1
+MAX_NETWORK_COUNTER = _telemetry_types.MAX_NETWORK_COUNTER
+MAX_NETWORK_LINKS = _telemetry_types.MAX_NETWORK_LINKS
+NetworkConnectivity = _telemetry_types.NetworkConnectivity
+NetworkCounters = _telemetry_types.NetworkCounters
+NetworkLinkKind = _telemetry_types.NetworkLinkKind
+NetworkLinkSample = _telemetry_types.NetworkLinkSample
+NetworkLinkState = _telemetry_types.NetworkLinkState
+NetworkSnapshot = _telemetry_types.NetworkSnapshot
+SourceStatus = _telemetry_types.SourceStatus
+network_snapshot_error = _telemetry_types.network_snapshot_error
 _STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
-
-
-class NetworkLinkKind(StrEnum):
-    ETHERNET = "ethernet"
-    WIFI = "wifi"
-    CELLULAR = "cellular"
-    VPN = "vpn"
-    OTHER = "other"
-
-
-class NetworkLinkState(StrEnum):
-    UP = "up"
-    DOWN = "down"
-    DEGRADED = "degraded"
-    UNKNOWN = "unknown"
-
-
-class NetworkConnectivity(StrEnum):
-    FULL = "full"
-    LIMITED = "limited"
-    PORTAL = "portal"
-    NONE = "none"
-    UNKNOWN = "unknown"
 
 
 class NetworkCollectionError(CollectionError):
     """Stable network collection rejection."""
-
-
-@dataclass(frozen=True, slots=True)
-class NetworkCounters:
-    """Monotonic link counters; never packet contents."""
-
-    received_bytes: int
-    transmitted_bytes: int
-    received_errors: int
-    transmitted_errors: int
-    received_drops: int
-    transmitted_drops: int
-
-
-@dataclass(frozen=True, slots=True)
-class NetworkLinkSample:
-    """One aggregate NetworkManager/link observation."""
-
-    stable_id: str
-    kind: NetworkLinkKind
-    state: NetworkLinkState
-    connectivity: NetworkConnectivity
-    carrier: bool
-    metered: bool
-    default_route: bool
-    signal_percent: int | None
-    counters: NetworkCounters
-    observed_at_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class NetworkSnapshot:
-    """Bounded-source snapshot used by live adapters and replay tests."""
-
-    status: SourceStatus
-    observed_at_ms: int
-    links: tuple[NetworkLinkSample, ...]
 
 
 @runtime_checkable
@@ -228,85 +172,6 @@ def _validated_link_allowlist(identities: object) -> frozenset[str]:
             raise ValueError("allowed link identities must be unique")
         validated.add(stable_id)
     return frozenset(validated)
-
-
-def network_snapshot_error(snapshot: object) -> str:
-    """Return one stable validation failure for an untrusted source snapshot."""
-    error = _network_snapshot_shape_error(snapshot)
-    if error:
-        return error
-    assert isinstance(snapshot, NetworkSnapshot)
-    identities: set[str] = set()
-    for link in snapshot.links:
-        error = _network_link_error(link, snapshot.observed_at_ms)
-        if error:
-            return error
-        if link.stable_id in identities:
-            return f"duplicate network link identity: {link.stable_id}"
-        identities.add(link.stable_id)
-    return ""
-
-
-def _network_snapshot_shape_error(snapshot: object) -> str:
-    if not isinstance(snapshot, NetworkSnapshot):
-        return "network snapshot is not typed"
-    if not isinstance(snapshot.status, SourceStatus):
-        return "network source status is invalid"
-    if _non_negative_integer_error(snapshot.observed_at_ms):
-        return "network snapshot timestamp is invalid"
-    if not isinstance(snapshot.links, tuple):
-        return "network links must be a tuple"
-    if len(snapshot.links) > MAX_NETWORK_LINKS:
-        return f"network snapshot exceeds {MAX_NETWORK_LINKS} links"
-    return ""
-
-
-def _network_link_error(link: object, snapshot_time_ms: int) -> str:
-    if not isinstance(link, NetworkLinkSample):
-        return "network link sample is not typed"
-    if not isinstance(link.stable_id, str) or not _STABLE_ID.fullmatch(link.stable_id):
-        return "network link stable identity is invalid"
-    enum_error = _network_link_enum_error(link)
-    if enum_error:
-        return enum_error
-    if any(type(value) is not bool for value in (link.carrier, link.metered, link.default_route)):
-        return f"network link flags are invalid: {link.stable_id}"
-    if link.signal_percent is not None and (
-        type(link.signal_percent) is not int or not 0 <= link.signal_percent <= 100
-    ):
-        return f"network link signal is invalid: {link.stable_id}"
-    counter_error = _network_counter_error(link.counters)
-    if counter_error:
-        return f"{counter_error}: {link.stable_id}"
-    if _non_negative_integer_error(link.observed_at_ms) or link.observed_at_ms > snapshot_time_ms:
-        return f"network link timestamp is invalid: {link.stable_id}"
-    return ""
-
-
-def _network_link_enum_error(link: NetworkLinkSample) -> str:
-    if not isinstance(link.kind, NetworkLinkKind):
-        return f"network link kind is invalid: {link.stable_id}"
-    if not isinstance(link.state, NetworkLinkState):
-        return f"network link state is invalid: {link.stable_id}"
-    if not isinstance(link.connectivity, NetworkConnectivity):
-        return f"network link connectivity is invalid: {link.stable_id}"
-    return ""
-
-
-def _network_counter_error(counters: object) -> str:
-    if not isinstance(counters, NetworkCounters):
-        return "network counters are not typed"
-    values = (
-        counters.received_bytes,
-        counters.transmitted_bytes,
-        counters.received_errors,
-        counters.transmitted_errors,
-        counters.received_drops,
-        counters.transmitted_drops,
-    )
-    if any(type(value) is not int or not 0 <= value <= MAX_NETWORK_COUNTER for value in values):
-        return "network counters are invalid"
-    return ""
 
 
 def _link_document(link: NetworkLinkSample) -> dict[str, object]:

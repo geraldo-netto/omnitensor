@@ -15,17 +15,16 @@ to validate it, and how it becomes a document.
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 from ..registry import validate_document
+from ..telemetry_types import STABLE_ID
 from .pipeline import CollectedOutput
 from .triggers import CollectorReadiness, SourceStatus, Trigger
 
-STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._:@/-]{0,78}[a-z0-9])?")
 MAX_COLLECTED_ITEMS = 1024
 COLLECTED_OUTPUT_SCHEMA = "collected-output.schema.json"
 

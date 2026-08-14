@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ..atomicio import read_json_bounded
-from ..plugins.recorder import FeatureRow, RecorderError, TelemetryRecorder
 from ..registry import validate_document
+from ..telemetry_recorder import TelemetryRecorder
+from ..telemetry_types import FeatureRow, RecorderError
 
 MAX_RUNTIME_SNAPSHOT_BYTES = 1024 * 1024
 RUNTIME_SNAPSHOT_SELECTORS = (

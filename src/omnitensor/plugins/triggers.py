@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from ..telemetry_types import SourceStatus
 from .pipeline import CollectedOutput
 from .protocol import JsonObject
 
@@ -30,12 +31,6 @@ class TriggerDisposition(StrEnum):
     ACCEPTED = "accepted"
     COALESCED = "coalesced"
     QUEUE_FULL = "queue-full"
-
-
-class SourceStatus(StrEnum):
-    READY = "ready"
-    DEGRADED = "degraded"
-    UNAVAILABLE = "unavailable"
 
 
 class CollectionStatus(StrEnum):

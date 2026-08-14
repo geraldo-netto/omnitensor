@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from ..plugins.build_ingestion import (
+from ..preparation import file_digest
+from ..telemetry_types import (
     DEFAULT_MAX_BUILD_RECORDS,
     BuildOutcome,
     BuildRecord,
     build_record_error,
 )
-from ..preparation import file_digest
 from .contracts import TrainingError, write_training_report
 from .tabular import (
     BuildAdvisorModel,
