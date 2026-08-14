@@ -166,6 +166,24 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         ) == []
 
 
+def test_result_serializers_refuse_non_finite_numbers():
+    with pytest.raises(ValueError, match="Out of range float values"):
+        job_codec._result_reply(
+            "result-1", "job-1", "unknown", "job-not-found", "No such job", math.nan
+        )
+    with pytest.raises(ValueError, match="Out of range float values"):
+        job_codec._record_reply(
+            "result-1",
+            JobRecord(
+                "job-1",
+                PluginProgress("job-1", "infer", math.nan, "Working", 100),
+                None,
+                100.0,
+            ),
+            123,
+        )
+
+
 def test_extracted_codec_preserves_refusal_details_and_identifier_boundaries():
     with pytest.raises(job_codec._RequestError) as caught:
         job_codec._parse_request(
@@ -1146,7 +1164,7 @@ def test_terminal_result_message_truncation_boundary(detail_length):
     assert document["message"] == "d" * min(detail_length, 500)
 
 
-def test_job_result_validation_fails_closed_for_an_invalid_stored_state():
+def test_invalid_stored_state_returns_a_contract_valid_rejection():
     store = JobResultStore()
     store.record_result(
         "job-invalid",
@@ -1155,15 +1173,21 @@ def test_job_result_validation_fails_closed_for_an_invalid_stored_state():
     )
     service = JobSubmissionService(results=store, clock_ms=lambda: 123)
 
-    with pytest.raises(RuntimeError, match="job result reply violates contract"):
+    document = decode_result(
         run_scenario(
             service.job_result_text(
                 json.dumps(result_document("job-invalid")), owner="uid:1000"
             )
         )
+    )
+
+    assert document["state"] == "failed"
+    assert document["code"] == "job-result-invalid"
+    assert document["message"] == "Stored job result is invalid"
+    assert document["output"] is None
 
 
-def test_job_result_validation_fails_closed_for_non_json_output():
+def test_non_finite_stored_output_returns_a_contract_valid_rejection():
     store = JobResultStore()
     store.record_result(
         "job-invalid-json",
@@ -1178,12 +1202,18 @@ def test_job_result_validation_fails_closed_for_non_json_output():
     )
     service = JobSubmissionService(results=store, clock_ms=lambda: 123)
 
-    with pytest.raises(RuntimeError, match="job result reply is not valid JSON"):
+    document = decode_result(
         run_scenario(
             service.job_result_text(
                 json.dumps(result_document("job-invalid-json")), owner="uid:1000"
             )
         )
+    )
+
+    assert document["state"] == "failed"
+    assert document["code"] == "job-result-invalid"
+    assert document["message"] == "Stored job result is invalid"
+    assert document["output"] is None
 
 
 def test_job_result_timestamp_is_clamped_to_the_schema_minimum():

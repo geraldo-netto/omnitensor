@@ -147,6 +147,7 @@ def _result_reply(
             "output": None,
         },
         separators=(",", ":"),
+        allow_nan=False,
     )
 
 
@@ -172,6 +173,7 @@ def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
                 "output": None,
             },
             separators=(",", ":"),
+            allow_nan=False,
         )
     return json.dumps(
         {
@@ -186,4 +188,5 @@ def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
             "output": result.output if isinstance(result.output, dict) else None,
         },
         separators=(",", ":"),
+        allow_nan=False,
     )

@@ -376,7 +376,22 @@ class JobSubmissionService:
                     max(1, int(self._clock_ms())),
                 )
             else:
-                reply = _record_reply(request_id, record, max(1, int(self._clock_ms())))
+                timestamp = max(1, int(self._clock_ms()))
+                try:
+                    return _validated_result_reply(
+                        _record_reply(request_id, record, timestamp)
+                    )
+                except (TypeError, ValueError, RecursionError, RuntimeError):
+                    return _validated_result_reply(
+                        _result_reply(
+                            request_id,
+                            job_id,
+                            "failed",
+                            "job-result-invalid",
+                            "Stored job result is invalid",
+                            timestamp,
+                        )
+                    )
         return _validated_result_reply(reply)
 
     def _lookup(self, job_id: str, owner: str):
