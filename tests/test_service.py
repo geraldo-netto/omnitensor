@@ -371,7 +371,7 @@ SERVING_STATUSES = frozenset({"watching", "running"})
 
 
 class _AvailableExecutor:
-    """The narrowest thing ``pick_backend`` accepts as a working backend."""
+    """The narrowest thing ``select_backend`` accepts as a working backend."""
 
     model_formats = ("tflite-edgetpu",)
 

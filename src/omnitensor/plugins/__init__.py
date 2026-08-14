@@ -267,7 +267,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "JobResultStore": (".job_results", "JobResultStore"),
     "JobRecord": (".job_results", "JobRecord"),
     "JobResultError": (".job_results", "JobResultError"),
-    "StageFailure": (".runner", "StageFailure"),
     "STAGE_ORDER": (".runner", "STAGE_ORDER"),
     "PluginFlowController": (".flow", "PluginFlowController"),
     "JobCancellationRegistry": (".cancellation", "JobCancellationRegistry"),

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 
 from .cancellation import (
     CancellationReason,
@@ -47,14 +46,6 @@ STAGE_ORDER = (
     PipelineStage.POSTPROCESS,
     PipelineStage.DELIVER,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class StageFailure:
-    """Why a job ended before delivering, in a form a consumer can show."""
-
-    code: str
-    detail: str
 
 
 class PipelineRunner:

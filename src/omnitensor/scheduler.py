@@ -115,12 +115,6 @@ def runnable_model(workload: Workload, backend: str, executors: dict[str, Execut
     return None if model is _UNSUPPORTED else model
 
 
-def pick_backend(workload: Workload, executors: dict[str, Executor]) -> tuple[str | None, str]:
-    """The choice above without its code, for callers that only render prose."""
-    choice = select_backend(workload, executors)
-    return choice.backend, choice.reason
-
-
 @dataclass
 class _Job:
     workload_id: str

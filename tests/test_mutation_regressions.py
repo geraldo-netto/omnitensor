@@ -35,7 +35,7 @@ from omnitensor.registry import (
     load_workloads,
     validate_document,
 )
-from omnitensor.scheduler import Scheduler, pick_backend
+from omnitensor.scheduler import Scheduler, select_backend
 from omnitensor.snapshot import build_snapshot, write_snapshot
 from omnitensor.state import PolicyState, PolicyStore, ProfilePolicy
 from omnitensor.tensorcontract import MAX_INPUTS, declared_inputs
@@ -473,20 +473,21 @@ def test_update_executors_before_start_never_spawns_workers():
     asyncio.run(scenario())
 
 
-def test_pick_backend_reason_composition_is_exact():
+def test_select_backend_reason_and_code_composition_is_exact():
     executors = {
         "tpu": TpuExecutor(device_present=False),
         "npu": NpuExecutor(device_present=False),
     }
     manifest = sample_manifest(acceleratorPreference=["tpu", "npu", "gpu"])
     workload = Workload(id=manifest["id"], manifest=manifest)
-    backend, reason = pick_backend(workload, executors)
-    assert backend is None
-    assert reason == (
+    choice = select_backend(workload, executors)
+    assert choice.backend is None
+    assert choice.reason == (
         "tpu: No Coral Edge TPU device detected; "
         "npu: No /dev/accel NPU device detected; "
         "gpu: no executor"
     )
+    assert choice.code == "device-absent"
 
 
 # --------------------------------------------------------------------------

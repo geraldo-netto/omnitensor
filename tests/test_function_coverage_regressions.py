@@ -43,7 +43,6 @@ from omnitensor.plugins.ipc import (
 from omnitensor.plugins.supervisor import _cancel_monitor, _startup_failure
 from omnitensor.plugins.triggers import SourceStatus
 from omnitensor.service import OmniTensorInterface, OmniTensorService
-from omnitensor.tensorref import _digest_of
 from omnitensor.training.cli import _features, _targets, install_main
 from omnitensor.training.contracts import (
     TrainingError,
@@ -362,12 +361,6 @@ def test_service_artifact_lookup_continues_after_nonmatching_workload():
     )
 
     assert service._declared_reference("wanted") == expected
-
-
-def test_tensor_digest_uses_the_same_bounded_reader_as_tensor_loading(tmp_path):
-    path = tmp_path / "tensor.bin"
-    path.write_bytes(b"tensor")
-    assert _digest_of(path, 6) == hashlib.sha256(b"tensor").hexdigest()
 
 
 def test_target_companion_copy_removes_partial_output_on_overflow(tmp_path):

@@ -314,13 +314,6 @@ def _chunks(path: Path, max_bytes: int):
         ) from error
 
 
-def _digest_of(path: Path, max_bytes: int) -> str:
-    digest = hashlib.sha256()
-    for chunk in _chunks(path, max_bytes):
-        digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _unpack(payload: bytes, reference: TensorReference) -> list:
     code = _DTYPE_CODES[reference.dtype]
     values = struct.unpack(f"<{reference.element_count}{code}", payload)

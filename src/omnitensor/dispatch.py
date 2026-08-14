@@ -32,8 +32,8 @@ from .tensorref import (
     InputRootPolicy,
     TensorReference,
     TensorReferenceError,
-    load_referenced_tensor,
     parse_references,
+    referenced_inputs,
     verify_reference,
 )
 
@@ -219,16 +219,18 @@ class InferenceJobDispatcher:
         already verified them, because the file may have changed since; what
         runs is the tensor these bytes contain.
         """
-        references = self._references(payload)
-        if references is None:
-            return self._validated(_inline_inputs(payload, self._max_input_tensors))
+        if not isinstance(payload, dict):
+            raise JobDispatchError("payload-invalid", "Job payload must be an object")
         try:
-            loaded = [
-                load_referenced_tensor(reference, self._input_roots)
-                for reference in references
-            ]
+            loaded = referenced_inputs(
+                payload,
+                self._input_roots,
+                max_tensors=self._max_input_tensors,
+            )
         except TensorReferenceError as error:
             raise JobDispatchError(error.code, error.detail) from error
+        if loaded is None:
+            return self._validated(_inline_inputs(payload, self._max_input_tensors))
         # Already shaped, digest-checked, and bounded on the way in, so it
         # rejoins the inline path here and is validated identically.
         return self._validated(loaded)

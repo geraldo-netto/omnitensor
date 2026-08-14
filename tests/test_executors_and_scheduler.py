@@ -11,6 +11,8 @@ import omnitensor.executors.gpu as gpu_module
 import omnitensor.executors.npu as npu_module
 import omnitensor.executors.tpu as tpu_module
 from omnitensor.executors.base import (
+    DEVICE_ABSENT,
+    FORMAT_UNSUPPORTED,
     Availability,
     InferenceResult,
     ModelCache,
@@ -20,7 +22,15 @@ from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import Workload
-from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job, pick_backend
+from omnitensor.scheduler import (
+    NO_EXECUTOR,
+    NO_PREFERENCE,
+    QueueFullError,
+    Scheduler,
+    _BackendQueue,
+    _Job,
+    select_backend,
+)
 
 
 class FakeTfliteInterpreter:
@@ -255,7 +265,7 @@ def test_model_format_compatibility():
     assert supports_model(tpu, {"format": "onnx"}) is False
 
 
-def test_pick_backend_follows_preference_and_reports_reasons():
+def test_select_backend_follows_preference_and_reports_reasons_and_codes():
     executors = {
         "tpu": TpuExecutor(device_present=False),
         "gpu": GpuExecutor(device_present=True, runtime=FakeOrtRuntime(["CUDAExecutionProvider"])),
@@ -272,22 +282,23 @@ def test_pick_backend_follows_preference_and_reports_reasons():
             "minimumRuntimeVersion": "1",
         },
     )
-    backend, reason = pick_backend(gpu_capable, executors)
-    assert backend == "gpu"
-    assert reason == ""
+    choice = select_backend(gpu_capable, executors)
+    assert (choice.backend, choice.reason, choice.code) == ("gpu", "", "")
 
     tpu_only = workload(acceleratorPreference=["tpu"])
-    backend, reason = pick_backend(tpu_only, executors)
-    assert backend is None
-    assert "No Coral" in reason
+    choice = select_backend(tpu_only, executors)
+    assert choice.backend is None
+    assert "No Coral" in choice.reason
+    assert choice.code == DEVICE_ABSENT
 
     missing_backend = workload(acceleratorPreference=["npu"])
-    backend, reason = pick_backend(missing_backend, executors)
-    assert backend is None
-    assert "npu: no executor" in reason
+    choice = select_backend(missing_backend, executors)
+    assert choice.backend is None
+    assert "npu: no executor" in choice.reason
+    assert choice.code == NO_EXECUTOR
 
 
-def test_pick_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
+def test_select_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
     class Lane:
         backend = "gpu"
 
@@ -315,35 +326,37 @@ def test_pick_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
             "minimumRuntimeVersion": "1",
         },
     )
-    backend, reason = pick_backend(Workload(id=manifest["id"], manifest=manifest), {
+    choice = select_backend(Workload(id=manifest["id"], manifest=manifest), {
         "gpu": gpu, "npu": npu,
     })
-    assert backend == "npu"
-    assert reason == ""
+    assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
 
-    backend, reason = pick_backend(
+    choice = select_backend(
         Workload(id=manifest["id"], manifest=manifest), {"npu": npu},
     )
-    assert backend == "npu"
-    assert reason == ""
+    assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
 
     incompatible_gpu = Lane({"ncnn"}, True)
-    backend, reason = pick_backend(Workload(id=manifest["id"], manifest=manifest), {
+    choice = select_backend(Workload(id=manifest["id"], manifest=manifest), {
         "gpu": incompatible_gpu, "npu": npu,
     })
-    assert backend == "npu"
-    assert reason == ""
-    backend, reason = pick_backend(
+    assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
+    choice = select_backend(
         Workload(id=manifest["id"], manifest=manifest), {"gpu": incompatible_gpu},
     )
-    assert backend is None
-    assert reason == "gpu: model format not supported; npu: no executor"
+    assert choice.backend is None
+    assert choice.reason == "gpu: model format not supported; npu: no executor"
+    assert choice.code == FORMAT_UNSUPPORTED
 
     class NoPreference:
         preference = ()
-        model = None
 
-    assert pick_backend(NoPreference(), {}) == (None, "No backend in preference list")
+    choice = select_backend(NoPreference(), {})
+    assert (choice.backend, choice.reason, choice.code) == (
+        None,
+        "No backend in preference list",
+        NO_PREFERENCE,
+    )
 
 
 class SlowExecutor:
