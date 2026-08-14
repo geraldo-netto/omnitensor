@@ -117,7 +117,9 @@ def declared_inputs(model: Mapping | None) -> tuple[InputSpec, ...] | None:
     declared = contract.get("inputs")
     if not isinstance(declared, Sequence) or not declared:
         return None
-    return tuple(_input_spec(item) for item in declared[:MAX_INPUTS])
+    if len(declared) > MAX_INPUTS:
+        raise ValueError(f"tensor contract exceeds {MAX_INPUTS} inputs")
+    return tuple(_input_spec(item) for item in declared)
 
 
 def _resize_spec(preprocess: Mapping) -> ResizeSpec | None:

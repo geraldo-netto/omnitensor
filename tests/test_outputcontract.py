@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from omnitensor.outputcontract import (
     DEFAULT_TOP_K,
     MAX_LABEL_CHARS,
     MAX_LABELS,
+    MAX_TOP_K,
     OutputSpec,
+    _scores,
     declared_output,
     parse_labels,
     reduce_output,
@@ -24,6 +28,27 @@ def test_a_declared_contract_is_read_with_its_defaults():
     )
 
 
+def test_the_top_k_bound_is_enforced_without_clamping():
+    assert declared_output(model(topK=1)).top_k == 1
+    assert declared_output(model(topK=MAX_TOP_K)).top_k == MAX_TOP_K
+    for invalid in (0, -1, MAX_TOP_K + 1):
+        with pytest.raises(ValueError) as raised:
+            declared_output(model(topK=invalid))
+        assert str(raised.value) == (
+            f"output contract topK must be in [1, {MAX_TOP_K}]"
+        )
+
+
+def test_the_top_k_bound_matches_the_canonical_schema():
+    from omnitensor.registry import workload_model_contract_schemas
+
+    schema = workload_model_contract_schemas()["outputContract"]
+    top_k = schema["properties"]["topK"]
+    assert top_k["type"] == "integer"
+    assert top_k["minimum"] == 1
+    assert top_k["maximum"] == MAX_TOP_K
+
+
 def test_a_model_declaring_no_contract_returns_its_tensors_unchanged():
     """Every profile written before the field behaves exactly as it did."""
     assert declared_output({"id": "sample-model"}) is None
@@ -40,6 +65,26 @@ def test_a_classification_reduces_to_the_highest_scoring_entries():
     assert [entry["index"] for entry in reading["top"]] == [1, 3]
     assert reading["top"][0]["score"] == 0.7
     assert "label" not in reading["top"][0]
+
+
+def test_direct_output_specs_obey_the_same_top_k_bound():
+    scores = [float(index) for index in range(MAX_TOP_K + 1)]
+    reading = reduce_output(OutputSpec("classification", MAX_TOP_K), [scores])
+    assert len(reading["top"]) == MAX_TOP_K
+    assert [entry["index"] for entry in reading["top"][:2]] == [MAX_TOP_K, MAX_TOP_K - 1]
+    assert reading["top"][-1]["index"] == 1
+
+    for invalid in (False, True, "5", 0, MAX_TOP_K + 1):
+        with pytest.raises(ValueError) as raised:
+            reduce_output(OutputSpec("classification", invalid), [scores])
+        assert str(raised.value) == (
+            f"output contract topK must be in [1, {MAX_TOP_K}]"
+        )
+
+    with pytest.raises(ValueError):
+        reduce_output(OutputSpec("classification", MAX_TOP_K + 1), [])
+    with pytest.raises(ValueError):
+        reduce_output(OutputSpec("raw", MAX_TOP_K + 1), [scores])
 
 
 def test_labels_are_attached_where_they_exist_and_never_invented():
@@ -74,6 +119,19 @@ def test_an_output_the_reduction_cannot_describe_is_left_alone():
     assert reduce_output(OutputSpec("classification"), [[]]) is None
     assert reduce_output(OutputSpec("classification"), ["scores"]) is None
     assert reduce_output(OutputSpec("classification"), [[True, False]]) is None
+
+
+@pytest.mark.parametrize(
+    "tensor",
+    [None, [], [[]], [[0.1], [0.2]], "scores", [True], [1.0, "bad"]],
+)
+def test_score_extraction_rejects_every_ambiguous_shape_or_value(tensor):
+    assert _scores(tensor) is None
+
+
+def test_score_extraction_accepts_one_numeric_row_and_normalizes_to_float():
+    assert _scores([1, 2.5]) == [1.0, 2.5]
+    assert _scores([[1, 2.5]]) == [1.0, 2.5]
 
 
 def test_a_kind_that_does_not_reduce_is_returned_whole():

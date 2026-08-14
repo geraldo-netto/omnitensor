@@ -27,6 +27,7 @@ from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.executors.vulkan import VulkanGpuExecutor
+from omnitensor.outputcontract import MAX_TOP_K, OutputSpec, reduce_output
 from omnitensor.registry import (
     MAX_MANIFEST_BYTES,
     ManifestError,
@@ -37,6 +38,27 @@ from omnitensor.registry import (
 from omnitensor.scheduler import Scheduler, pick_backend
 from omnitensor.snapshot import build_snapshot, write_snapshot
 from omnitensor.state import PolicyState, PolicyStore, ProfilePolicy
+from omnitensor.tensorcontract import MAX_INPUTS, declared_inputs
+
+# --------------------------------------------------------------------------
+# contract bounds: exact v1 overflow fate
+
+
+def test_contract_bounds_refuse_instead_of_slicing_or_clamping():
+    item = {"shape": [1], "dtype": "float32"}
+    maximum = {"tensorContract": {"inputs": [item] * MAX_INPUTS}}
+    overflow = {"tensorContract": {"inputs": [item] * (MAX_INPUTS + 1)}}
+    assert len(declared_inputs(maximum)) == MAX_INPUTS
+    with pytest.raises(ValueError, match=f"exceeds {MAX_INPUTS} inputs"):
+        declared_inputs(overflow)
+
+    scores = [float(index) for index in range(MAX_TOP_K + 1)]
+    assert len(
+        reduce_output(OutputSpec("classification", MAX_TOP_K), [scores])["top"]
+    ) == MAX_TOP_K
+    with pytest.raises(ValueError, match=rf"\[1, {MAX_TOP_K}\]"):
+        reduce_output(OutputSpec("classification", MAX_TOP_K + 1), [scores])
+
 
 # --------------------------------------------------------------------------
 # control: exact acknowledgement contents

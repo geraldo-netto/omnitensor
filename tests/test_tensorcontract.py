@@ -7,6 +7,7 @@ import pytest
 
 from omnitensor.registry import bundled_workloads_path, validate_document
 from omnitensor.tensorcontract import (
+    MAX_INPUTS,
     InputSpec,
     PreprocessSpec,
     contract_error,
@@ -72,6 +73,32 @@ def test_a_publisher_may_state_the_shape_without_the_normalisation():
     assert specs[0].document() == {"shape": [1, 4], "dtype": "uint8"}
 
 
+def test_the_input_contract_bound_is_enforced_without_truncation():
+    def contract(count):
+        return model(tensorContract={"inputs": [
+            {"shape": [1, index + 1], "dtype": "float32"}
+            for index in range(count)
+        ]})
+
+    maximum = declared_inputs(contract(MAX_INPUTS))
+    assert len(maximum) == MAX_INPUTS
+    assert tuple(spec.shape for spec in maximum) == tuple(
+        (1, index + 1) for index in range(MAX_INPUTS)
+    )
+    with pytest.raises(ValueError) as raised:
+        declared_inputs(contract(MAX_INPUTS + 1))
+    assert str(raised.value) == f"tensor contract exceeds {MAX_INPUTS} inputs"
+
+
+def test_the_input_bound_matches_the_canonical_schema():
+    from omnitensor.registry import workload_model_contract_schemas
+
+    schema = workload_model_contract_schemas()["tensorContract"]
+    inputs = schema["properties"]["inputs"]
+    assert inputs["minItems"] == 1
+    assert inputs["maxItems"] == MAX_INPUTS
+
+
 def test_agreement_is_silent_and_disagreement_names_both_sides():
     specs = declared_inputs(model())
 
@@ -87,6 +114,15 @@ def test_the_number_of_inputs_is_part_of_the_contract():
     assert "1 input" in contract_error(specs, [])
     assert "2 were supplied" in contract_error(
         specs, [((1, 3, 227, 227), "float32")] * 2
+    )
+
+    many = declared_inputs(model(tensorContract={"inputs": [
+        {"shape": [1], "dtype": "float32"} for _index in range(MAX_INPUTS)
+    ]}))
+    supplied = [((1,), "float32")] * MAX_INPUTS
+    assert contract_error(many, supplied) is None
+    assert contract_error(many, supplied[:-1]) == (
+        f"the model declares {MAX_INPUTS} inputs and {MAX_INPUTS - 1} were supplied"
     )
 
 

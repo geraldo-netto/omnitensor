@@ -29,6 +29,7 @@ DEFAULT_TOP_K = 5
 MAX_TOP_K = 100
 MAX_LABELS = 100_000
 MAX_LABEL_CHARS = 160
+_TOP_K_ERROR = f"output contract topK must be in [1, {MAX_TOP_K}]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +53,13 @@ def declared_output(model: Mapping | None) -> OutputSpec | None:
     if not isinstance(contract, Mapping) or "kind" not in contract:
         return None
     top_k = contract.get("topK", DEFAULT_TOP_K)
+    if isinstance(top_k, bool) or not isinstance(top_k, int):
+        top_k = DEFAULT_TOP_K
+    if not 1 <= top_k <= MAX_TOP_K:
+        raise ValueError(_TOP_K_ERROR)
     return OutputSpec(
         contract["kind"],
-        top_k if isinstance(top_k, int) and not isinstance(top_k, bool) else DEFAULT_TOP_K,
+        top_k,
         contract.get("labels"),
     )
 
@@ -106,13 +111,21 @@ def reduce_output(
     or an output whose shape the reduction cannot honestly describe. The caller
     keeps the raw tensors either way; this only ever adds a reading of them.
     """
-    if spec is None or not spec.reduces or not tensors:
+    if spec is None:
+        return None
+    if (
+        isinstance(spec.top_k, bool)
+        or not isinstance(spec.top_k, int)
+        or not 1 <= spec.top_k <= MAX_TOP_K
+    ):
+        raise ValueError(_TOP_K_ERROR)
+    if not spec.reduces or not tensors:
         return None
     scores = _scores(tensors[0])
     if scores is None:
         return None
     ranked = sorted(range(len(scores)), key=lambda index: (-scores[index], index))
-    top = [index for index in ranked[: min(spec.top_k, MAX_TOP_K)] if math.isfinite(scores[index])]
+    top = [index for index in ranked[:spec.top_k] if math.isfinite(scores[index])]
     return {
         "kind": spec.kind,
         "top": [_entry(index, scores[index], labels) for index in top],

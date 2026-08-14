@@ -36,6 +36,7 @@ from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import JobSubmissionService
+from omnitensor.outputcontract import MAX_TOP_K, OutputSpec, declared_output, reduce_output
 from omnitensor.registry import merge_workloads, validate_document
 from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
@@ -47,6 +48,7 @@ from omnitensor.state import (
     PolicyStore,
     ProfilePolicy,
 )
+from omnitensor.tensorcontract import MAX_INPUTS, declared_inputs
 
 json_values = st.recursive(
     st.none()
@@ -58,6 +60,38 @@ json_values = st.recursive(
     | st.dictionaries(st.text(max_size=8), children, max_size=4),
     max_leaves=25,
 )
+
+
+@given(count=st.integers(min_value=0, max_value=MAX_INPUTS + 2))
+def test_declared_tensor_inputs_are_whole_or_refused(count):
+    model = {"tensorContract": {"inputs": [
+        {"shape": [1, index + 1], "dtype": "float32"}
+        for index in range(count)
+    ]}}
+    if count == 0:
+        assert declared_inputs(model) is None
+    elif count <= MAX_INPUTS:
+        specs = declared_inputs(model)
+        assert len(specs) == count
+        assert tuple(spec.shape[-1] for spec in specs) == tuple(range(1, count + 1))
+    else:
+        with pytest.raises(ValueError):
+            declared_inputs(model)
+
+
+@given(top_k=st.integers(min_value=-2, max_value=MAX_TOP_K + 2))
+def test_output_top_k_is_reduced_whole_or_refused(top_k):
+    model = {"outputContract": {"kind": "classification", "topK": top_k}}
+    scores = [float(index) for index in range(MAX_TOP_K + 1)]
+    if 1 <= top_k <= MAX_TOP_K:
+        spec = declared_output(model)
+        assert spec == OutputSpec("classification", top_k)
+        assert len(reduce_output(spec, [scores])["top"]) == top_k
+    else:
+        with pytest.raises(ValueError):
+            declared_output(model)
+        with pytest.raises(ValueError):
+            reduce_output(OutputSpec("classification", top_k), [scores])
 
 command_like = st.dictionaries(
     st.sampled_from(
