@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
+import io
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -172,6 +175,32 @@ def test_complete_named_gpu_evidence_qualifies_and_emits_the_closed_report(tmp_p
         "arbitrarySelections": "not-claimed",
     }
     assert validate_document("selected-text-acceptance.schema.json", report) == []
+
+
+def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, monkeypatch):
+    _corpus, path = _write_evidence(tmp_path)
+    original = path.read_bytes()
+    replacement = original + b" "
+    staged = tmp_path / "replacement.json"
+    staged.write_bytes(replacement)
+    real_open = Path.open
+
+    class ReplacingStream(io.BytesIO):
+        def read(self, size: int = -1) -> bytes:
+            os.replace(staged, path)
+            return super().read(size)
+
+    def open_once(target: Path, *args, **kwargs):
+        if target == path:
+            return ReplacingStream(original)
+        return real_open(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_once)
+    evidence = load_selected_text_evidence(path)
+
+    assert evidence.evidence_sha256 == hashlib.sha256(original).hexdigest()
+    with real_open(path, "rb") as stream:
+        assert stream.read() == replacement
 
 
 @pytest.mark.parametrize(
@@ -527,6 +556,24 @@ def test_acceptance_parsing_helpers_refuse_malformed_values(tmp_path, monkeypatc
     assert acceptance._corpus_path() == tmp_path / "evaluation-corpora/selected-text-v1.json"
 
 
+def test_corpus_reader_preserves_missing_oversized_and_malformed_errors(tmp_path):
+    missing = tmp_path / "missing"
+    oversized = tmp_path / "oversized"
+    malformed = tmp_path / "malformed"
+    oversized.write_bytes(b"{" + b" " * acceptance.MAX_CORPUS_BYTES)
+    malformed.write_text("{", encoding="utf-8")
+
+    cases = (
+        (missing, "cannot read corpus"),
+        (oversized, "corpus is oversized"),
+        (malformed, "corpus is not JSON"),
+    )
+    for path, detail in cases:
+        with pytest.raises(SelectedTextAcceptanceError) as caught:
+            load_selected_text_corpus(path)
+        assert (caught.value.code, caught.value.detail) == ("corpus-invalid", detail)
+
+
 def test_manifest_thresholds_match_the_selected_text_model_catalog():
     manifest = json.loads((ROOT / "plugin-manifests/selected-text-tools.json").read_text())
     catalog = json.loads((ROOT / "generation-models/dictalm2-hebrew.json").read_text())
@@ -547,16 +594,72 @@ def test_manifest_thresholds_match_the_selected_text_model_catalog():
 
 
 def test_cli_writes_validated_report_and_fails_without_evidence(tmp_path, capsys):
-    _corpus, evidence = _write_evidence(tmp_path)
+    corpus, evidence = _write_evidence(tmp_path)
+    expected = qualify_selected_text(corpus, load_selected_text_evidence(evidence)).document()
     output = tmp_path / "report.json"
 
     assert main(["--evidence", str(evidence), "--output", str(output)]) == 0
     assert validate_document(
         "selected-text-acceptance.schema.json", json.loads(output.read_text())
     ) == []
+    assert output.read_bytes() == json.dumps(expected, separators=(",", ":")).encode("utf-8")
     assert json.loads(capsys.readouterr().out)["qualified"] is True
 
     output.unlink()
     assert main(["--evidence", str(tmp_path / "missing"), "--output", str(output)]) == 1
     assert not output.exists()
     assert "evidence-invalid" in capsys.readouterr().err
+
+
+def test_builder_refuses_an_invalid_generated_report_directly(tmp_path, monkeypatch):
+    corpus, path = _write_evidence(tmp_path)
+    evidence = load_selected_text_evidence(path)
+    real_validate = validate_document
+    monkeypatch.setattr(
+        acceptance,
+        "validate_document",
+        lambda name, value: (
+            ["builder drift"]
+            if name == "selected-text-acceptance.schema.json"
+            else real_validate(name, value)
+        ),
+    )
+
+    with pytest.raises(SelectedTextAcceptanceError) as caught:
+        qualify_selected_text(corpus, evidence)
+    assert (caught.value.code, caught.value.detail) == ("report-invalid", "builder drift")
+
+
+def test_cli_help_and_required_arguments_keep_the_public_contract(capsys):
+    with pytest.raises(SystemExit) as caught:
+        main(["--help"])
+    assert caught.value.code == 0
+    help_text = capsys.readouterr().out
+    assert help_text.startswith("usage: omnitensor-qualify-selected-text")
+    assert "Validate digest-bound selected-text operational evidence" in help_text
+    assert "--evidence" in help_text and "--corpus" in help_text and "--output" in help_text
+
+    with pytest.raises(SystemExit) as missing:
+        main(["--output", "report.json"])
+    assert missing.value.code == 2
+    assert "the following arguments are required" in capsys.readouterr().err
+
+
+def test_cli_preserves_unicode_stdout_and_ascii_safe_report_bytes(tmp_path, monkeypatch, capsys):
+    class Report:
+        @staticmethod
+        def document():
+            return {"text": "שלום"}
+
+    monkeypatch.setattr(acceptance, "load_selected_text_corpus", lambda _path: object())
+    monkeypatch.setattr(acceptance, "load_selected_text_evidence", lambda _path: object())
+    monkeypatch.setattr(acceptance, "qualify_selected_text", lambda _corpus, _evidence: Report())
+    output = tmp_path / "report.json"
+
+    assert main(["--evidence", "evidence.json", "--output", str(output)]) == 0
+    assert capsys.readouterr().out == json.dumps(
+        {"text": "שלום"}, indent=2, ensure_ascii=False
+    ) + "\n"
+    assert output.read_text(encoding="utf-8") == json.dumps(
+        {"text": "שלום"}, separators=(",", ":")
+    )

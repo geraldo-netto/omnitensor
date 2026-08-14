@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_qa import DocumentQuestionPlugin, document_question_task
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
@@ -26,7 +27,7 @@ from omnitensor.plugins.protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
-from omnitensor.plugins.qwen import LlamaCppVulkanQwenWorker, _validate_gpu_load
+from omnitensor.plugins.qwen import LlamaCppVulkanQwenWorker
 from omnitensor.plugins.selected_text import SelectedTextPlugin, selected_text_task
 from omnitensor.sdk import current_plugin_bootstrap
 
@@ -81,7 +82,7 @@ class QualifiedWorkload:
             for runtime, model_path, qualification in self._runtimes:
                 verify_native_runtime(qualification)
                 report = await runtime.load((model_path,), "gpu")
-                _validate_gpu_load(report)
+                validate_gpu_load(report)
                 if (
                     report.total_model_layers != qualification.model_layers
                     or runtime.physical_device != qualification.device

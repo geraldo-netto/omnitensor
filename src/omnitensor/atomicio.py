@@ -23,14 +23,13 @@ class JsonTooLargeError(ValueError):
     """A stored document exceeds the byte ceiling its reader declared."""
 
 
-def read_json_bounded(path: Path, max_bytes: int) -> object:
-    """Parse the JSON document at ``path`` without ever reading past ``max_bytes``.
+def read_bytes_bounded(path: Path, max_bytes: int) -> bytes:
+    """Read ``path`` without ever reading past ``max_bytes`` plus one sentinel byte.
 
     A separate ``stat`` would only describe the file as it was before the read;
     bounding the read itself is what makes the ceiling hold when the file grows
-    or is replaced concurrently.  Raises :class:`JsonTooLargeError` when the
-    document is oversized, ``OSError`` when it cannot be read, and
-    ``ValueError`` when its bytes are not valid UTF-8 JSON.
+    or is replaced concurrently. Raises :class:`JsonTooLargeError` when the
+    document is oversized and ``OSError`` when it cannot be read.
     """
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
         raise ValueError("max_bytes must be a positive integer")
@@ -38,7 +37,12 @@ def read_json_bounded(path: Path, max_bytes: int) -> object:
         payload = stream.read(max_bytes + 1)
     if len(payload) > max_bytes:
         raise JsonTooLargeError(f"{path}: document exceeds {max_bytes} bytes")
-    return json.loads(payload)
+    return payload
+
+
+def read_json_bounded(path: Path, max_bytes: int) -> object:
+    """Parse a bounded UTF-8 JSON document from one descriptor snapshot."""
+    return json.loads(read_bytes_bounded(path, max_bytes))
 
 
 def fsync_directory(directory: Path) -> None:

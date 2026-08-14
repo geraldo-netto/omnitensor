@@ -14,15 +14,28 @@ import hashlib
 import json
 import math
 import re
-import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import file_digest
+from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
 from ..registry import validate_document
-from .qwen import NativeLoadReport, ProviderGenerationError, _validate_gpu_load
+from .acceptance_kit import (
+    JsonDigestMismatchError,
+    NativeLoadReport,
+    discover_resource,
+    read_bounded_json,
+    require_boolean,
+    require_integer,
+    require_mapping,
+    require_match,
+    require_sequence,
+    require_text,
+    run_acceptance_cli,
+    validate_acceptance_report,
+    validate_gpu_load,
+)
+from .generation import ProviderGenerationError
 
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
@@ -181,8 +194,17 @@ def load_document_acceptance_corpus(
     path: Path | str | None = None,
 ) -> DocumentAcceptanceCorpus:
     corpus_path = Path(path) if path is not None else _corpus_path()
-    raw = _bounded_bytes(corpus_path, MAX_CORPUS_BYTES, "corpus")
-    document = _json_object(raw, "corpus")
+    try:
+        snapshot = read_bounded_json(corpus_path, MAX_CORPUS_BYTES)
+    except JsonTooLargeError as error:
+        raise DocumentAcceptanceError(
+            "corpus-invalid", "corpus exceeds its byte limit"
+        ) from error
+    except OSError as error:
+        raise DocumentAcceptanceError("corpus-invalid", "cannot read corpus") from error
+    except (UnicodeError, ValueError) as error:
+        raise DocumentAcceptanceError("corpus-invalid", "corpus is not JSON") from error
+    document = _mapping(snapshot.document, "corpus", "corpus-invalid")
     if (
         set(document) != {"corpusVersion", "id", "license", "provenance", "cases"}
         or document["corpusVersion"] != 1
@@ -200,17 +222,18 @@ def load_document_acceptance_corpus(
         )
     if not any(case.prompt_injection_probe for case in cases):
         raise DocumentAcceptanceError("corpus-invalid", "corpus needs a prompt-injection probe")
-    return DocumentAcceptanceCorpus(corpus_id, hashlib.sha256(raw).hexdigest(), cases)
+    return DocumentAcceptanceCorpus(corpus_id, snapshot.sha256, cases)
 
 
 def load_document_acceptance_evidence(path: Path | str) -> DocumentAcceptanceEvidence:
     evidence_path = Path(path)
     try:
-        document = read_json_bounded(evidence_path, MAX_EVIDENCE_BYTES)
+        snapshot = read_bounded_json(evidence_path, MAX_EVIDENCE_BYTES)
     except (OSError, ValueError, JsonTooLargeError) as error:
         raise DocumentAcceptanceError(
             "evidence-invalid", f"cannot read evidence: {error}"
         ) from error
+    document = snapshot.document
     if (
         not isinstance(document, Mapping)
         or set(document)
@@ -253,7 +276,7 @@ def load_document_acceptance_evidence(path: Path | str) -> DocumentAcceptanceEvi
     if not report_path.is_absolute():
         report_path = evidence_path.parent / report_path
     return DocumentAcceptanceEvidence(
-        file_digest(evidence_path),
+        snapshot.sha256,
         _digest(document["corpusSha256"], "corpus digest"),
         report_path,
         _digest(embedding["reportSha256"], "BGE report digest"),
@@ -286,7 +309,7 @@ def qualify_document_questions(
     _validate_safety(evidence.safety, policy)
     _enforce_metric_policy(metrics, policy)
     retrieval_recall, term_recall, citation_integrity, p95, peak_memory = metrics
-    return DocumentAcceptanceReport(
+    report = DocumentAcceptanceReport(
         evidence.evidence_sha256,
         corpus.sha256,
         evidence.bge_report_sha256,
@@ -303,6 +326,13 @@ def qualify_document_questions(
         evidence.safety.cancellation_latency_ms,
         evidence.safety.revocation_latency_ms,
     )
+    validate_acceptance_report(
+        "document-question-acceptance.schema.json",
+        report.document(),
+        validator=validate_document,
+        error_type=DocumentAcceptanceError,
+    )
+    return report
 
 
 def _validate_acceptance_identity(
@@ -314,7 +344,7 @@ def _validate_acceptance_identity(
         raise DocumentAcceptanceError("evidence-stale", "evidence names another Qwen model")
     embedding_device = _validate_bge_evidence(evidence)
     try:
-        _validate_gpu_load(evidence.generator_load)
+        validate_gpu_load(evidence.generator_load)
     except ProviderGenerationError as error:
         raise DocumentAcceptanceError("device-unqualified", error.detail) from error
     if evidence.generator_device_name.strip().lower() in {"", "vulkan", "cpu", "llvmpipe"}:
@@ -426,15 +456,21 @@ def _validate_citations(case: DocumentAcceptanceCase, citations: Sequence[object
 
 
 def _validate_bge_evidence(evidence: DocumentAcceptanceEvidence) -> str:
-    if (
-        not evidence.bge_report_path.is_file()
-        or file_digest(evidence.bge_report_path) != evidence.bge_report_sha256
-    ):
+    if not evidence.bge_report_path.is_file():
         raise DocumentAcceptanceError("evidence-stale", "BGE report is absent or changed")
     try:
-        report = read_json_bounded(evidence.bge_report_path, MAX_CORPUS_BYTES)
+        snapshot = read_bounded_json(
+            evidence.bge_report_path,
+            MAX_CORPUS_BYTES,
+            expected_sha256=evidence.bge_report_sha256,
+        )
+    except JsonDigestMismatchError as error:
+        raise DocumentAcceptanceError(
+            "evidence-stale", "BGE report is absent or changed"
+        ) from error
     except (OSError, ValueError, JsonTooLargeError) as error:
         raise DocumentAcceptanceError("evidence-invalid", "BGE report cannot be read") from error
+    report = snapshot.document
     if not isinstance(report, Mapping):
         raise DocumentAcceptanceError("evidence-invalid", "BGE report must be an object")
     if validate_document(DOCUMENT_MODEL_REPORT_SCHEMA, report):
@@ -602,12 +638,13 @@ def _parse_safety(value: object) -> DocumentSafetyEvidence:
 
 def _bounded_bytes(path: Path, limit: int, label: str) -> bytes:
     try:
-        raw = path.read_bytes()
+        return read_bytes_bounded(path, limit)
+    except JsonTooLargeError as error:
+        raise DocumentAcceptanceError(
+            f"{label}-invalid", f"{label} exceeds its byte limit"
+        ) from error
     except OSError as error:
         raise DocumentAcceptanceError(f"{label}-invalid", f"cannot read {label}") from error
-    if len(raw) > limit:
-        raise DocumentAcceptanceError(f"{label}-invalid", f"{label} exceeds its byte limit")
-    return raw
 
 
 def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
@@ -619,40 +656,64 @@ def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
 
 
 def _mapping(value: object, label: str, code: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise DocumentAcceptanceError(code, f"{label} must be an object")
-    return value
+    return require_mapping(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be an object",
+    )
 
 
 def _sequence(value: object, label: str, code: str) -> Sequence[object]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-        raise DocumentAcceptanceError(code, f"{label} must be a non-empty sequence")
-    return value
+    return require_sequence(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be a non-empty sequence",
+        allow_empty=False,
+    )
 
 
 def _optional_sequence(value: object, label: str, code: str) -> Sequence[object]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise DocumentAcceptanceError(code, f"{label} must be a sequence")
-    return value
+    return require_sequence(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be a sequence",
+        allow_empty=True,
+    )
 
 
 def _bounded_text(value: object, label: str, limit: int, code: str) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= limit:
-        raise DocumentAcceptanceError(code, f"{label} must be bounded text")
-    return value
+    return require_text(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be bounded text",
+        maximum=limit,
+        allow_whitespace=True,
+    )
 
 
 def _identifier(value: object, label: str, code: str) -> str:
     text = _bounded_text(value, label, 120, code)
-    if _IDENTIFIER.fullmatch(text) is None:
-        raise DocumentAcceptanceError(code, f"{label} must be a kebab-case identifier")
-    return text
+    return require_match(
+        text,
+        _IDENTIFIER,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be a kebab-case identifier",
+    )
 
 
 def _digest(value: object, label: str) -> str:
-    if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
-        raise DocumentAcceptanceError("evidence-invalid", f"{label} must be lowercase SHA-256")
-    return value
+    return require_match(
+        value,
+        _DIGEST,
+        error_type=DocumentAcceptanceError,
+        code="evidence-invalid",
+        detail=f"{label} must be lowercase SHA-256",
+    )
 
 
 def _integer(
@@ -662,24 +723,35 @@ def _integer(
     maximum: int,
     code: str = "evidence-invalid",
 ) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-        raise DocumentAcceptanceError(code, f"{label} is outside its bound")
-    return value
+    return require_integer(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} is outside its bound",
+        minimum=minimum,
+        maximum=maximum,
+    )
 
 
 def _boolean(value: object, label: str, code: str = "evidence-invalid") -> bool:
-    if not isinstance(value, bool):
-        raise DocumentAcceptanceError(code, f"{label} must be boolean")
-    return value
+    return require_boolean(
+        value,
+        error_type=DocumentAcceptanceError,
+        code=code,
+        detail=f"{label} must be boolean",
+    )
 
 
 def _corpus_path() -> Path:
     package = (
         Path(__file__).resolve().parent.parent / "evaluation-corpora" / "document-question-v1.json"
     )
-    if package.is_file():
-        return package
-    return Path(__file__).resolve().parents[3] / "evaluation-corpora" / "document-question-v1.json"
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "evaluation-corpora"
+        / "document-question-v1.json"
+    )
+    return discover_resource(package, source)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -691,19 +763,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--corpus", default=str(_corpus_path()))
     parser.add_argument("--output", required=True)
     arguments = parser.parse_args(argv)
-    try:
-        corpus = load_document_acceptance_corpus(arguments.corpus)
-        evidence = load_document_acceptance_evidence(arguments.evidence)
-        report = qualify_document_questions(corpus, evidence).document()
-        violations = validate_document("document-question-acceptance.schema.json", report)
-        if violations:
-            raise DocumentAcceptanceError("report-invalid", violations[0])
-        write_json_atomic(Path(arguments.output), report, prefix=".document-acceptance-")
-    except (DocumentAcceptanceError, OSError, ValueError) as error:
-        print(f"document acceptance failed: {error}", file=sys.stderr)
-        return 1
-    print(json.dumps(report, indent=2))
-    return 0
+    return run_acceptance_cli(
+        lambda: qualify_document_questions(
+            load_document_acceptance_corpus(arguments.corpus),
+            load_document_acceptance_evidence(arguments.evidence),
+        ).document(),
+        arguments.output,
+        writer=write_json_atomic,
+        output_prefix=".document-acceptance-",
+        failure_prefix="document acceptance",
+        error_types=(DocumentAcceptanceError, OSError, ValueError),
+        ensure_ascii=True,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

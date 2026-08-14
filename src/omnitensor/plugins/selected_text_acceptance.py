@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import re
-import sys
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import file_digest
+from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
 from ..registry import validate_document
-from .qwen import NativeLoadReport, ProviderGenerationError, _validate_gpu_load
+from .acceptance_kit import (
+    BoundedJsonDocument,
+    NativeLoadReport,
+    discover_resource,
+    read_bounded_json,
+    require_boolean,
+    require_integer,
+    require_mapping,
+    require_match,
+    require_sequence,
+    require_text,
+    run_acceptance_cli,
+    validate_acceptance_report,
+    validate_gpu_load,
+)
+from .generation import ProviderGenerationError
 from .selected_text import OPERATIONS
 
 MAX_CORPUS_BYTES = 256 * 1024
@@ -149,8 +161,8 @@ class SelectedTextReport:
 
 def load_selected_text_corpus(path: Path | str | None = None) -> SelectedTextCorpus:
     corpus_path = Path(path) if path is not None else _corpus_path()
-    raw = _bounded_bytes(corpus_path, MAX_CORPUS_BYTES, "corpus")
-    document = _json_object(raw, "corpus")
+    snapshot = _read_corpus(corpus_path)
+    document = _mapping(snapshot.document, "corpus", "corpus-invalid")
     if set(document) != {"corpusVersion", "id", "license", "provenance", "cases"}:
         raise SelectedTextAcceptanceError("corpus-invalid", "corpus fields are invalid")
     if document["corpusVersion"] != 1 or document["license"] != "CC0-1.0":
@@ -164,15 +176,28 @@ def load_selected_text_corpus(path: Path | str | None = None) -> SelectedTextCor
         raise SelectedTextAcceptanceError("corpus-invalid", "every operation must be represented")
     if not any(case.require_hebrew and case.injection_probe for case in cases):
         raise SelectedTextAcceptanceError("corpus-invalid", "Hebrew injection probe is required")
-    return SelectedTextCorpus(corpus_id, hashlib.sha256(raw).hexdigest(), cases)
+    return SelectedTextCorpus(corpus_id, snapshot.sha256, cases)
+
+
+def _read_corpus(corpus_path: Path) -> BoundedJsonDocument:
+    try:
+        snapshot = read_bounded_json(corpus_path, MAX_CORPUS_BYTES)
+    except JsonTooLargeError as error:
+        raise SelectedTextAcceptanceError("corpus-invalid", "corpus is oversized") from error
+    except OSError as error:
+        raise SelectedTextAcceptanceError("corpus-invalid", "cannot read corpus") from error
+    except (UnicodeError, ValueError) as error:
+        raise SelectedTextAcceptanceError("corpus-invalid", "corpus is not JSON") from error
+    return snapshot
 
 
 def load_selected_text_evidence(path: Path | str) -> SelectedTextEvidence:
     evidence_path = Path(path)
     try:
-        document = read_json_bounded(evidence_path, MAX_EVIDENCE_BYTES)
+        snapshot = read_bounded_json(evidence_path, MAX_EVIDENCE_BYTES)
     except (OSError, ValueError, JsonTooLargeError) as error:
         raise SelectedTextAcceptanceError("evidence-invalid", "cannot read evidence") from error
+    document = snapshot.document
     if not isinstance(document, Mapping) or set(document) != {
         "evidenceVersion",
         "corpusSha256",
@@ -190,7 +215,7 @@ def load_selected_text_evidence(path: Path | str) -> SelectedTextEvidence:
         _parse_observation(item) for item in _sequence(document["observations"], "observations")
     )
     return SelectedTextEvidence(
-        file_digest(evidence_path),
+        snapshot.sha256,
         _digest(document["corpusSha256"], "corpus digest"),
         _parse_model(models["primary"]),
         _parse_model(models["hebrewTranslation"]),
@@ -210,7 +235,14 @@ def qualify_selected_text(
     metrics = _score(corpus, evidence.observations)
     _enforce_metrics(metrics, policy)
     _enforce_safety(evidence.safety, policy)
-    return SelectedTextReport(evidence, corpus.sha256, *metrics)
+    report = SelectedTextReport(evidence, corpus.sha256, *metrics)
+    validate_acceptance_report(
+        "selected-text-acceptance.schema.json",
+        report.document(),
+        validator=validate_document,
+        error_type=SelectedTextAcceptanceError,
+    )
+    return report
 
 
 def _enforce_metrics(
@@ -295,7 +327,7 @@ def _validate_identity(corpus: SelectedTextCorpus, evidence: SelectedTextEvidenc
         raise SelectedTextAcceptanceError("evidence-stale", "Hebrew model bytes changed")
     for model, layers in ((evidence.primary, 37), (evidence.hebrew, 33)):
         try:
-            _validate_gpu_load(model.load)
+            validate_gpu_load(model.load)
         except ProviderGenerationError as error:
             raise SelectedTextAcceptanceError("device-unqualified", error.detail) from error
         if model.load.total_model_layers != layers or model.device_name.strip().lower() in {
@@ -433,12 +465,11 @@ def _valid_hebrew(value: str) -> bool:
 
 def _bounded_bytes(path: Path, maximum: int, label: str) -> bytes:
     try:
-        raw = Path(path).read_bytes()
+        return read_bytes_bounded(Path(path), maximum)
+    except JsonTooLargeError as error:
+        raise SelectedTextAcceptanceError(f"{label}-invalid", f"{label} is oversized") from error
     except OSError as error:
         raise SelectedTextAcceptanceError(f"{label}-invalid", f"cannot read {label}") from error
-    if len(raw) > maximum:
-        raise SelectedTextAcceptanceError(f"{label}-invalid", f"{label} is oversized")
-    return raw
 
 
 def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
@@ -450,15 +481,22 @@ def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
 
 
 def _mapping(value: object, label: str, code: str = "evidence-invalid") -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise SelectedTextAcceptanceError(code, f"{label} must be an object")
-    return value
+    return require_mapping(
+        value,
+        error_type=SelectedTextAcceptanceError,
+        code=code,
+        detail=f"{label} must be an object",
+    )
 
 
 def _sequence(value: object, label: str) -> Sequence[object]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise SelectedTextAcceptanceError("evidence-invalid", f"{label} must be an array")
-    return value
+    return require_sequence(
+        value,
+        error_type=SelectedTextAcceptanceError,
+        code="evidence-invalid",
+        detail=f"{label} must be an array",
+        allow_empty=True,
+    )
 
 
 def _texts(value: object, label: str) -> tuple[str, ...]:
@@ -470,40 +508,60 @@ def _texts(value: object, label: str) -> tuple[str, ...]:
 
 
 def _text(value: object, label: str, maximum: int, code: str) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
-        raise SelectedTextAcceptanceError(code, f"{label} must be bounded text")
-    return value
+    return require_text(
+        value,
+        error_type=SelectedTextAcceptanceError,
+        code=code,
+        detail=f"{label} must be bounded text",
+        maximum=maximum,
+        allow_whitespace=False,
+    )
 
 
 def _identifier(value: object, label: str, code: str) -> str:
-    if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
-        raise SelectedTextAcceptanceError(code, f"{label} must be a kebab-case identifier")
-    return value
+    return require_match(
+        value,
+        _IDENTIFIER,
+        error_type=SelectedTextAcceptanceError,
+        code=code,
+        detail=f"{label} must be a kebab-case identifier",
+    )
 
 
 def _digest(value: object, label: str) -> str:
-    if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
-        raise SelectedTextAcceptanceError("evidence-invalid", f"{label} is invalid")
-    return value
+    return require_match(
+        value,
+        _DIGEST,
+        error_type=SelectedTextAcceptanceError,
+        code="evidence-invalid",
+        detail=f"{label} is invalid",
+    )
 
 
 def _integer(value: object, label: str, minimum: int, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-        raise SelectedTextAcceptanceError("evidence-invalid", f"{label} is invalid")
-    return value
+    return require_integer(
+        value,
+        error_type=SelectedTextAcceptanceError,
+        code="evidence-invalid",
+        detail=f"{label} is invalid",
+        minimum=minimum,
+        maximum=maximum,
+    )
 
 
 def _boolean(value: object, label: str) -> bool:
-    if not isinstance(value, bool):
-        raise SelectedTextAcceptanceError("evidence-invalid", f"{label} must be boolean")
-    return value
+    return require_boolean(
+        value,
+        error_type=SelectedTextAcceptanceError,
+        code="evidence-invalid",
+        detail=f"{label} must be boolean",
+    )
 
 
 def _corpus_path() -> Path:
     packaged = Path(__file__).resolve().parent.parent / "evaluation-corpora/selected-text-v1.json"
-    if packaged.is_file():
-        return packaged
-    return Path(__file__).resolve().parents[3] / "evaluation-corpora/selected-text-v1.json"
+    source = Path(__file__).resolve().parents[3] / "evaluation-corpora/selected-text-v1.json"
+    return discover_resource(packaged, source)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -515,19 +573,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--corpus", default=str(_corpus_path()))
     parser.add_argument("--output", required=True)
     arguments = parser.parse_args(argv)
-    try:
-        corpus = load_selected_text_corpus(arguments.corpus)
-        evidence = load_selected_text_evidence(arguments.evidence)
-        report = qualify_selected_text(corpus, evidence).document()
-        violations = validate_document("selected-text-acceptance.schema.json", report)
-        if violations:
-            raise SelectedTextAcceptanceError("report-invalid", violations[0])
-        write_json_atomic(Path(arguments.output), report, prefix=".selected-text-report-")
-    except (OSError, SelectedTextAcceptanceError) as error:
-        print(f"selected-text acceptance failed: {error}", file=sys.stderr)
-        return 1
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0
+    return run_acceptance_cli(
+        lambda: qualify_selected_text(
+            load_selected_text_corpus(arguments.corpus),
+            load_selected_text_evidence(arguments.evidence),
+        ).document(),
+        arguments.output,
+        writer=write_json_atomic,
+        output_prefix=".selected-text-report-",
+        failure_prefix="selected-text acceptance",
+        error_types=(OSError, SelectedTextAcceptanceError),
+        ensure_ascii=False,
+    )
 
 
 __all__ = [

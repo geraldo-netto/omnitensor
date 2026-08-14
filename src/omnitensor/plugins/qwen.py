@@ -9,16 +9,25 @@ GPU/NPU is not accepted as proof that the model actually stayed off CPU.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from ..atomicio import JsonTooLargeError, read_json_bounded
+from ..atomicio import JsonTooLargeError
 from ..preparation import file_digest
+from .acceptance_kit import (
+    NativeLoadReport,
+    discover_resource,
+    read_bounded_json,
+    require_integer,
+    require_mapping,
+    require_sequence,
+    require_text,
+    validate_gpu_load,
+    validate_npu_load,
+)
 from .events import EventResultError, parse_grounded_event_result
 from .generation import (
     GenerationProviderDescriptor,
@@ -65,15 +74,6 @@ class QwenCatalog:
     sources: tuple[QwenSource, ...]
     providers: tuple[tuple[str, str, str, bool, str], ...]
     evaluation: QwenEvaluation
-
-
-@dataclass(frozen=True, slots=True)
-class NativeLoadReport:
-    backend: str
-    device: str
-    total_model_layers: int
-    accelerator_layers: int
-    cpu_fallback: bool
 
 
 @runtime_checkable
@@ -353,15 +353,16 @@ def load_qwen_catalog(path: Path | str | None = None) -> QwenCatalog:
 def load_event_corpus(path: Path | str | None = None) -> FrozenEventCorpus:
     corpus_path = Path(path) if path is not None else _corpus_path()
     try:
-        raw = corpus_path.read_bytes()
+        snapshot = read_bounded_json(corpus_path, MAX_CORPUS_BYTES)
+    except JsonTooLargeError as error:
+        raise QwenProviderError(
+            "corpus-invalid", "evaluation corpus exceeds its byte limit"
+        ) from error
     except OSError as error:
         raise QwenProviderError("corpus-invalid", "cannot read evaluation corpus") from error
-    if len(raw) > MAX_CORPUS_BYTES:
-        raise QwenProviderError("corpus-invalid", "evaluation corpus exceeds its byte limit")
-    try:
-        document = json.loads(raw)
-    except (UnicodeError, json.JSONDecodeError) as error:
+    except (UnicodeError, ValueError) as error:
         raise QwenProviderError("corpus-invalid", "evaluation corpus is not JSON") from error
+    document = snapshot.document
     if (
         not isinstance(document, dict)
         or set(document)
@@ -386,7 +387,7 @@ def load_event_corpus(path: Path | str | None = None) -> FrozenEventCorpus:
         raise QwenProviderError("corpus-invalid", "evaluation case ids must be unique")
     if not any(item.prompt_injection_probe for item in cases):
         raise QwenProviderError("corpus-invalid", "evaluation corpus needs an injection probe")
-    return FrozenEventCorpus(corpus_id, hashlib.sha256(raw).hexdigest(), cases)
+    return FrozenEventCorpus(corpus_id, snapshot.sha256, cases)
 
 
 def qualify_event_provider(
@@ -523,34 +524,8 @@ def _validate_policy(policy: EventQualificationPolicy) -> None:
         _positive_integer(getattr(policy, name), name, "policy-invalid")
 
 
-def _validate_gpu_load(report: NativeLoadReport) -> None:
-    if (
-        not isinstance(report, NativeLoadReport)
-        or report.backend != "llama.cpp-vulkan"
-        or report.device != "Vulkan"
-        or report.cpu_fallback
-        or report.total_model_layers < 1
-        or report.accelerator_layers != report.total_model_layers
-    ):
-        raise ProviderGenerationError(
-            "model-load-failed",
-            "llama.cpp did not prove complete Vulkan model-layer offload",
-            generation_started=False,
-        )
-
-
-def _validate_npu_load(report: NativeLoadReport) -> None:
-    if (
-        not isinstance(report, NativeLoadReport)
-        or report.backend != "openvino-genai"
-        or report.device != "NPU"
-        or report.cpu_fallback
-    ):
-        raise ProviderGenerationError(
-            "model-load-failed",
-            "OpenVINO GenAI did not prove NPU-only execution",
-            generation_started=False,
-        )
+_validate_gpu_load = validate_gpu_load
+_validate_npu_load = validate_npu_load
 
 
 def _event_key(event) -> tuple[str, str, str, str]:
@@ -564,7 +539,7 @@ def _event_key(event) -> tuple[str, str, str, str]:
 
 def _read_document(path: Path | str, limit: int, label: str) -> dict:
     try:
-        document = read_json_bounded(Path(path), limit)
+        document = read_bounded_json(Path(path), limit).document
     except (OSError, ValueError, JsonTooLargeError) as error:
         raise QwenProviderError(f"{label}-invalid", f"cannot read {label}: {error}") from error
     if not isinstance(document, dict):
@@ -673,43 +648,63 @@ def _expected_event(document: object) -> tuple[str, str, str, str]:
 
 
 def _mapping(value: object, label: str, code: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise QwenProviderError(code, f"{label} must be an object")
-    return value
+    return require_mapping(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be an object",
+    )
 
 
 def _sequence(value: object, label: str, code: str) -> Sequence[object]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-        raise QwenProviderError(code, f"{label} must be a non-empty sequence")
-    return value
+    return require_sequence(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be a non-empty sequence",
+        allow_empty=False,
+    )
 
 
 def _positive_integer(value: object, label: str, code: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise QwenProviderError(code, f"{label} must be a positive integer")
-    return value
+    return require_integer(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be a positive integer",
+        minimum=1,
+    )
 
 
 def _text(value: object, label: str, code: str, limit: int) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= limit:
-        raise QwenProviderError(code, f"{label} must be bounded text")
-    return value
+    return require_text(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be bounded text",
+        maximum=limit,
+        allow_whitespace=True,
+    )
 
 
 def _catalog_path() -> Path:
     packaged = _PACKAGED_MODELS / "qwen2-5-vl-7b.json"
-    if packaged.is_file():
-        return packaged
-    assert _SOURCE_ROOT is not None
-    return _SOURCE_ROOT / "generation-models/qwen2-5-vl-7b.json"
+    if _SOURCE_ROOT is None:
+        if packaged.is_file():
+            return packaged
+        assert _SOURCE_ROOT is not None
+    return discover_resource(packaged, _SOURCE_ROOT / "generation-models/qwen2-5-vl-7b.json")
 
 
 def _corpus_path() -> Path:
     packaged = _PACKAGED_CORPORA / "event-extraction-v1.json"
-    if packaged.is_file():
-        return packaged
-    assert _SOURCE_ROOT is not None
-    return _SOURCE_ROOT / "evaluation-corpora/event-extraction-v1.json"
+    if _SOURCE_ROOT is None:
+        if packaged.is_file():
+            return packaged
+        assert _SOURCE_ROOT is not None
+    return discover_resource(
+        packaged, _SOURCE_ROOT / "evaluation-corpora/event-extraction-v1.json"
+    )
 
 
 __all__ = [

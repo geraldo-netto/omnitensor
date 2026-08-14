@@ -1111,6 +1111,30 @@ def test_packaged_paths_win_and_source_paths_are_exact(tmp_path, monkeypatch):
     assert qwen_module._corpus_path() == packaged_corpus
 
 
+def test_packaged_paths_remain_usable_without_a_source_checkout(tmp_path, monkeypatch):
+    packaged_models = tmp_path / "package-models"
+    packaged_corpora = tmp_path / "package-corpora"
+    packaged_models.mkdir()
+    packaged_corpora.mkdir()
+    catalog = packaged_models / "qwen2-5-vl-7b.json"
+    corpus = packaged_corpora / "event-extraction-v1.json"
+    catalog.touch()
+    corpus.touch()
+    monkeypatch.setattr(qwen_module, "_PACKAGED_MODELS", packaged_models)
+    monkeypatch.setattr(qwen_module, "_PACKAGED_CORPORA", packaged_corpora)
+    monkeypatch.setattr(qwen_module, "_SOURCE_ROOT", None)
+
+    assert qwen_module._catalog_path() == catalog
+    assert qwen_module._corpus_path() == corpus
+    catalog.unlink()
+    corpus.unlink()
+    with pytest.raises(AssertionError) as missing_catalog:
+        qwen_module._catalog_path()
+    with pytest.raises(AssertionError) as missing_corpus:
+        qwen_module._corpus_path()
+    assert str(missing_catalog.value) == str(missing_corpus.value) == ""
+
+
 @pytest.mark.parametrize(
     "policy",
     [

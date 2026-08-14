@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -75,6 +77,32 @@ def _accepted(tmp_path: Path | None = None):
         EVIDENCE if tmp_path is None else _write_evidence(tmp_path)
     )
     return corpus, evidence, qualify_document_questions(corpus, evidence)
+
+
+def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, monkeypatch):
+    path = _write_evidence(tmp_path)
+    original = path.read_bytes()
+    replacement = original + b" "
+    staged = tmp_path / "replacement.json"
+    staged.write_bytes(replacement)
+    real_open = Path.open
+
+    class ReplacingStream(io.BytesIO):
+        def read(self, size: int = -1) -> bytes:
+            os.replace(staged, path)
+            return super().read(size)
+
+    def open_once(target: Path, *args, **kwargs):
+        if target == path:
+            return ReplacingStream(original)
+        return real_open(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_once)
+    evidence = load_document_acceptance_evidence(path)
+
+    assert evidence.evidence_sha256 == hashlib.sha256(original).hexdigest()
+    with real_open(path, "rb") as stream:
+        assert stream.read() == replacement
 
 
 def test_archived_named_gpu_evidence_reproduces_exact_qualified_report():
@@ -157,6 +185,7 @@ def test_cli_writes_the_exact_validated_report(tmp_path, capsys):
     )
     expected = json.loads(REPORT.read_text())
     assert json.loads(output.read_text()) == expected
+    assert output.read_bytes() == json.dumps(expected, separators=(",", ":")).encode("utf-8")
     assert capsys.readouterr().out == json.dumps(expected, indent=2) + "\n"
 
 
@@ -182,6 +211,27 @@ def test_cli_refuses_an_invalid_generated_report(tmp_path, monkeypatch, capsys):
     assert main(["--evidence", str(EVIDENCE), "--output", str(output)]) == 1
     assert not output.exists()
     assert "report-invalid: drift" in capsys.readouterr().err
+
+
+def test_builder_refuses_an_invalid_generated_report_directly(tmp_path, monkeypatch):
+    corpus = load_document_acceptance_corpus()
+    evidence = load_document_acceptance_evidence(_write_evidence(tmp_path))
+    real_validate = validate_document
+    monkeypatch.setattr(
+        acceptance_module,
+        "validate_document",
+        lambda name, value: (
+            ["builder drift"]
+            if name == "document-question-acceptance.schema.json"
+            else real_validate(name, value)
+        ),
+    )
+
+    _assert_error(
+        lambda: qualify_document_questions(corpus, evidence),
+        "report-invalid",
+        "builder drift",
+    )
 
 
 def test_cli_help_names_inputs_and_output(capsys):
@@ -922,6 +972,24 @@ def test_contract_helpers_accept_exact_boundaries(tmp_path):
     assert _integer(1, "integer", 1, 2) == 1
     assert _integer(2, "integer", 1, 2) == 2
     assert _boolean(False, "flag") is False
+
+
+def test_bounded_byte_facade_preserves_missing_and_oversized_errors(tmp_path):
+    with pytest.raises(DocumentAcceptanceError) as missing:
+        _bounded_bytes(tmp_path / "missing", 2, "value")
+    assert (missing.value.code, missing.value.detail) == (
+        "value-invalid",
+        "cannot read value",
+    )
+
+    oversized = tmp_path / "oversized"
+    oversized.write_bytes(b"123")
+    with pytest.raises(DocumentAcceptanceError) as too_large:
+        _bounded_bytes(oversized, 2, "value")
+    assert (too_large.value.code, too_large.value.detail) == (
+        "value-invalid",
+        "value exceeds its byte limit",
+    )
 
 
 def test_corpus_path_prefers_the_packaged_copy(tmp_path, monkeypatch):
