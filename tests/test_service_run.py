@@ -21,8 +21,10 @@ from conftest import (
 from omnitensor.discovery import Device
 from omnitensor.dispatch_routing import PluginAwareDispatcher, admit_plugin_job
 from omnitensor.plugins.artifacts import ArtifactResolution
+from omnitensor.plugins.loading import InstalledPluginRuntime
 from omnitensor.registry import validate_document
 from omnitensor.service import (
+    GRANT_REFRESH_INTERVAL_S,
     FileSnapshotPublisher,
     OmniTensorInterface,
     OmniTensorService,
@@ -186,6 +188,14 @@ def build_service(tmp_path, manifests=(), **kwargs):
     workloads_root.mkdir(exist_ok=True)
     for manifest in manifests:
         write_workload(workloads_root, manifest)
+    kwargs.setdefault(
+        "plugin_runtime",
+        InstalledPluginRuntime(
+            workloads_root,
+            entry_points_provider=lambda **_kwargs: (),
+            require_worker_cgroup=False,
+        ),
+    )
     return OmniTensorService(
         snapshot_path=tmp_path / "state/runtime-snapshot.json",
         policy_path=tmp_path / "state/policy.json",
@@ -445,7 +455,7 @@ def test_publisher_persistence_runs_off_the_event_loop(tmp_path):
         )
         loop_thread = threading.get_ident()
         task = asyncio.create_task(service._publisher())
-        assert await asyncio.to_thread(publisher.started.wait, 0.5)
+        await wait_until(publisher.started.is_set, timeout=0.5)
         publisher.release.set()
         service._stopping.set()
         await asyncio.wait_for(task, timeout=1)
@@ -482,7 +492,7 @@ def test_snapshot_construction_runs_off_the_event_loop(tmp_path):
         service._build_runtime_snapshot = blocking_snapshot
         loop_thread = threading.get_ident()
         task = asyncio.create_task(service._publisher())
-        assert await asyncio.to_thread(started.wait, 0.5)
+        await wait_until(started.is_set, timeout=0.5)
         release.set()
         service._stopping.set()
         await asyncio.wait_for(task, timeout=1)
@@ -523,7 +533,7 @@ def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
         service._grants = grants
         loop_thread = threading.get_ident()
         task = asyncio.create_task(service._publisher())
-        assert await asyncio.to_thread(grants.started.wait, 0.5)
+        await wait_until(grants.started.is_set, timeout=0.5)
         grants.release.set()
         service._stopping.set()
         await asyncio.wait_for(task, timeout=1)
@@ -532,6 +542,47 @@ def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
     loop_thread = asyncio.run(scenario())
     assert grants.reloads == 1
     assert grants.reload_thread != loop_thread
+
+
+def test_grant_refresh_interval_includes_the_exact_boundary(tmp_path, monkeypatch):
+    class Grants:
+        def __init__(self):
+            self.reloads = 0
+
+        def reload(self):
+            self.reloads += 1
+
+    class Loop:
+        current = 10.0
+
+        def time(self):
+            return self.current
+
+    observed = []
+
+    async def run(callback, *args):
+        observed.append((callback, args))
+        return callback(*args)
+
+    service = build_service(tmp_path, discovery=FakeDiscovery([tpu_device()]))
+    grants = Grants()
+    service._grants = grants
+    service._next_grant_refresh = 10.0
+    loop = Loop()
+    monkeypatch.setattr("omnitensor.service.asyncio.get_running_loop", lambda: loop)
+    monkeypatch.setattr("omnitensor.service.run_off_loop", run)
+
+    asyncio.run(service._refresh_grants())
+    assert grants.reloads == 1
+    assert service._next_grant_refresh == 10.0 + GRANT_REFRESH_INTERVAL_S
+    assert observed == [(grants.reload, ())]
+
+    asyncio.run(service._refresh_grants())
+    assert grants.reloads == 1
+    loop.current = service._next_grant_refresh
+    asyncio.run(service._refresh_grants())
+    assert grants.reloads == 2
+    assert service._next_grant_refresh == 10.0 + 2 * GRANT_REFRESH_INTERVAL_S
 
 
 def test_snapshot_retraction_runs_off_the_event_loop(tmp_path):
@@ -608,6 +659,10 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
         await wait_until(lambda: publisher.published)
         published_before_loss = len(publisher.published)
         assert published_before_loss >= 1
+        assert all(
+            validate_document("runtime-snapshot.schema.json", snapshot) == []
+            for snapshot in publisher.published
+        )
         discovery.devices.clear()
         await wait_until(lambda: publisher.retracted == 1)
         assert publisher.retracted == 1
@@ -1353,7 +1408,11 @@ def test_publisher_survives_an_io_failure_and_retries_next_tick(tmp_path, caplog
         asyncio.run(scenario())
 
     assert len(publisher.published) > 2, "publishing never resumed after the failure"
-    assert "Could not publish the runtime snapshot" in caplog.text
+    assert {
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "omnitensor.service"
+    } == {"Could not publish the runtime snapshot; retrying next tick"}
 
 
 def test_publisher_survives_an_invalid_snapshot_and_retries_next_tick(tmp_path, caplog):

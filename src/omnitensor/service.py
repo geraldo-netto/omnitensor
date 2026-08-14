@@ -85,6 +85,7 @@ from .plugins.grants import GrantLedger
 from .plugins.job_results import JobResultStore
 from .plugins.kernel_telemetry import UnixSocketAggregateSource
 from .plugins.loading import InstalledPluginRuntime
+from .plugins.offloop import run_off_loop
 from .plugins.orchestration import (
     RunnerBackedDispatcher,
     RunnerSet,
@@ -464,10 +465,10 @@ class OmniTensorService:
                     if self._snapshot_retracted:
                         LOGGER.info("Accelerator devices returned; publishing snapshots again")
                         self._snapshot_retracted = False
-                    snapshot = await asyncio.to_thread(self._build_runtime_snapshot)
-                    await asyncio.to_thread(self._publisher_port.publish, snapshot)
+                    snapshot = await run_off_loop(self._build_runtime_snapshot)
+                    await run_off_loop(self._publisher_port.publish, snapshot)
                 elif not self._snapshot_retracted:
-                    await asyncio.to_thread(self._publisher_port.retract)
+                    await run_off_loop(self._publisher_port.retract)
                     self._snapshot_retracted = True
                     LOGGER.warning(
                         "No accelerator devices present; retracted the runtime snapshot"
@@ -484,7 +485,7 @@ class OmniTensorService:
         now = asyncio.get_running_loop().time()
         if now < self._next_grant_refresh:
             return
-        await asyncio.to_thread(self._grants.reload)
+        await run_off_loop(self._grants.reload)
         self._next_grant_refresh = now + GRANT_REFRESH_INTERVAL_S
 
     async def _rediscover(self) -> None:

@@ -2477,7 +2477,17 @@ class _Transport:
         return None
 
 
-def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path):
+def test_installed_wheel_is_discovered_and_loaded_after_service_restart(
+    tmp_path, monkeypatch
+):
+    # This regression owns service restart and real worker IPC. Namespace
+    # enforcement has dedicated integration tests and nested bwrap is not
+    # available in every test runner (including the managed CI sandbox).
+    monkeypatch.setattr(
+        loading_module.FilesystemSandbox,
+        "wrap",
+        lambda _sandbox, argv: tuple(argv),
+    )
     wheel = tmp_path / "third_party_omnitensor-1.0.0-py3-none-any.whl"
     site = tmp_path / "site"
     workloads = tmp_path / "workloads"
@@ -2545,7 +2555,10 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
                     )
                 )
             )
-            assert accepted["status"] == "accepted"
+            assert accepted["status"] == "accepted", (
+                json.dumps(accepted, sort_keys=True),
+                runtime.snapshot.workers,
+            )
             for attempt in range(200):
                 result = json.loads(
                     await service.jobs.job_result_text(
