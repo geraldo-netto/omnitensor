@@ -15,6 +15,16 @@ from .registry import Workload
 from .tensorref import OptedInInputRoots
 
 
+class CachedArtifactSource:
+    """Adapt the dispatch artifact port to the service's stamp cache."""
+
+    def __init__(self, resolve: Callable) -> None:
+        self._resolve = resolve
+
+    def resolve(self, reference):
+        return self._resolve(reference.id, reference)
+
+
 def admit_plugin_job(
     inference: JobDispatcher,
     plugins: PluginRuntime,
@@ -88,14 +98,19 @@ def default_dispatcher(
     executors: Callable[[], dict],
     artifact_store,
     input_roots: Sequence[Path | str],
+    *,
+    resolve_artifact=None,
 ) -> JobDispatcher:
     if artifact_store is None:
         return UnavailableJobDispatcher()
+    artifacts = (
+        CachedArtifactSource(resolve_artifact) if resolve_artifact is not None else artifact_store
+    )
     return InferenceJobDispatcher(
         workloads,
         scheduler,
         executors,
-        artifact_store,
+        artifacts,
         input_roots=OptedInInputRoots(input_roots),
     )
 
@@ -155,6 +170,7 @@ def profile_permitted(
 
 
 __all__ = [
+    "CachedArtifactSource",
     "PluginAwareDispatcher",
     "admit_plugin_job",
     "build_runners",

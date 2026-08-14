@@ -33,6 +33,7 @@ from omnitensor.composition import (
 )
 from omnitensor.dbus_transport import DbusControlTransport, OmniTensorInterface
 from omnitensor.discovery import Device, DiscoveryPaths
+from omnitensor.dispatch import InferenceJobDispatcher
 from omnitensor.execution import _build_executor, build_executors
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
@@ -43,6 +44,7 @@ from omnitensor.host import (
     SysfsDeviceDiscovery,
     build_host_ports,
 )
+from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
 from omnitensor.ports import (
     PluginCatalogSnapshot,
@@ -136,6 +138,47 @@ def test_artifact_resolution_cache_preserves_the_primary_stamp_contract(tmp_path
     assert store.calls == 1
     assert call() is expected
     assert store.calls == 2
+
+
+def test_dispatch_artifact_source_uses_the_stamp_cached_resolver():
+    reference = ArtifactReference("model", "1.0.0", "onnx", "0" * 64)
+    expected = ArtifactResolution(True, Path("/models/cached.onnx"), "", 7)
+    calls = []
+    source = dispatch_routing.CachedArtifactSource(
+        lambda artifact_id, actual: calls.append((artifact_id, actual)) or expected
+    )
+
+    assert source.resolve(reference) is expected
+    assert calls == [("model", reference)]
+
+
+def test_default_dispatcher_wraps_only_a_configured_store_with_the_cache():
+    raw_store = object()
+    workloads = {}
+    scheduler = object()
+    executors = {}
+
+    def cached(_artifact_id, _reference):
+        return None
+
+    unavailable = dispatch_routing.default_dispatcher({}, None, {}, None, ())
+    direct = dispatch_routing.default_dispatcher(
+        workloads, scheduler, executors, raw_store, ("/allowed",)
+    )
+    wrapped = dispatch_routing.default_dispatcher(
+        {}, None, {}, raw_store, (), resolve_artifact=cached
+    )
+
+    assert isinstance(unavailable, UnavailableJobDispatcher)
+    assert isinstance(direct, InferenceJobDispatcher)
+    assert direct._workloads is workloads
+    assert direct._scheduler is scheduler
+    assert direct._executors is executors
+    assert direct._artifacts is raw_store
+    assert direct._input_roots.roots == (Path("/allowed"),)
+    assert isinstance(wrapped, InferenceJobDispatcher)
+    assert isinstance(wrapped._artifacts, dispatch_routing.CachedArtifactSource)
+    assert wrapped._artifacts._resolve is cached
 
 
 def test_artifact_owner_builds_plugin_references_in_canonical_companion_order():

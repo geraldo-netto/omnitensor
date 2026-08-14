@@ -286,6 +286,7 @@ class OmniTensorService:
             lambda: self._executors,
             self._artifact_store,
             self._input_roots,
+            resolve_artifact=self._cached_resolution,
         )
 
     def _build_runners(self) -> RunnerSet:
