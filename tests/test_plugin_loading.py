@@ -6,12 +6,16 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from conftest import sample_plugin_manifest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.discovery import Device
 from omnitensor.plugins import (
@@ -838,8 +842,134 @@ def test_external_runtime_cancels_active_work_and_stops_worker_on_live_grant_cha
         ]
         assert plugin.plugin_id in runtime._revoked_workers
         assert grants.reloads >= 1
+        assert runtime._grant_changes == {}
 
     asyncio.run(scenario())
+
+
+@given(refreshes=st.integers(min_value=1, max_value=8))
+def test_external_runtime_repeats_grant_refreshes_off_the_event_loop(
+    refreshes,
+):
+    loop_thread = threading.get_ident()
+    refresh_threads = []
+
+    class Grants:
+        def reload(self):
+            refresh_threads.append(threading.current_thread())
+
+        def active_permissions(self, _plugin_id, _declared):
+            return frozenset()
+
+    with tempfile.TemporaryDirectory() as root:
+        runtime = InstalledPluginRuntime(Path(root), grant_source=Grants())
+
+        async def scenario():
+            for _ in range(refreshes):
+                await runtime._refresh_permission_grants()
+
+        asyncio.run(scenario())
+
+    assert len(refresh_threads) == refreshes
+    assert all(thread.ident != loop_thread for thread in refresh_threads)
+    assert all(thread.name == "omnitensor-loading" for thread in refresh_threads)
+    assert all(thread.daemon for thread in refresh_threads)
+
+
+def test_loading_off_loop_propagates_failure_and_remains_cancellable():
+    started = threading.Event()
+    release = threading.Event()
+
+    def fail():
+        raise ValueError("blocked operation failed")
+
+    def block():
+        started.set()
+        release.wait()
+
+    async def scenario():
+        with pytest.raises(ValueError, match="blocked operation failed"):
+            await loading_module._run_off_loop(fail)
+
+        task = asyncio.create_task(loading_module._run_off_loop(block))
+        while not started.is_set():
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        await asyncio.sleep(0)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+
+
+def test_loading_stage_payload_contract_and_repeated_cancellation(tmp_path, monkeypatch):
+    permission = "files:read-selected"
+    runtime = InstalledPluginRuntime(tmp_path)
+    payload = {"value": 1}
+
+    unchanged, staged = asyncio.run(runtime._stage_payload("job-1", "plugin", payload))
+    assert unchanged == payload
+    assert unchanged is not payload
+    assert staged is None
+
+    runtime._granted["plugin"] = frozenset({permission})
+    with pytest.raises(PluginWorkerError) as unavailable:
+        asyncio.run(runtime._stage_payload("job-1", "plugin", payload))
+    assert (unavailable.value.code, unavailable.value.detail) == (
+        "selected-files-unavailable",
+        "selected-file broker is not configured",
+    )
+
+    broker = tmp_path / "broker"
+    broker.mkdir()
+    runtime._selected_files_root = broker
+    abandoned = broker / "plugin" / "abandoned"
+    abandoned.mkdir(parents=True)
+    started = threading.Event()
+    release = threading.Event()
+    cleanup_started = asyncio.Event()
+    real_cleanup = loading_module._cleanup_abandoned_staging
+    real_rmtree = loading_module.shutil.rmtree
+    removed = []
+
+    def stage(*_args):
+        started.set()
+        release.wait()
+        return {"sources": []}, abandoned
+
+    async def cleanup(staging_task):
+        cleanup_started.set()
+        await real_cleanup(staging_task)
+
+    def remove(path, ignore_errors):
+        removed.append((path, ignore_errors))
+        real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(loading_module, "_stage_selected_sources", stage)
+    monkeypatch.setattr(loading_module, "_cleanup_abandoned_staging", cleanup)
+    monkeypatch.setattr(loading_module.shutil, "rmtree", remove)
+
+    async def scenario():
+        task = asyncio.create_task(runtime._stage_payload("job-1", "plugin", payload))
+        while not started.is_set():
+            await asyncio.sleep(0)
+        task.cancel()
+        await cleanup_started.wait()
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+    assert not abandoned.exists()
+    assert removed == [(abandoned, True)]
 
 
 def test_external_runtime_idle_monitor_revokes_once_and_admission_stays_closed(tmp_path):
@@ -945,6 +1075,11 @@ def test_external_runtime_rechecks_exact_grants_after_worker_completion(tmp_path
         ("reload",),
         ("active", plugin.plugin_id, {permission}),
     ]
+    assert calls[3] == (
+        "revoke",
+        plugin.plugin_id,
+        "worker stopped because its permission grant changed",
+    )
 
 
 def test_external_runtime_rechecks_grants_when_execution_is_already_done(tmp_path, monkeypatch):
@@ -984,8 +1119,8 @@ def test_external_runtime_rechecks_grants_when_execution_is_already_done(tmp_pat
         "consent-revoked",
         "Plugin permission changed while work was active",
     )
-    assert calls.count(("reload",)) == 2
-    assert calls.count(("active", plugin.plugin_id, {permission})) == 2
+    assert calls.count(("reload",)) == 1
+    assert calls.count(("active", plugin.plugin_id, {permission})) == 1
 
 
 def test_external_runtime_admission_compares_live_and_worker_grants_exactly(tmp_path):

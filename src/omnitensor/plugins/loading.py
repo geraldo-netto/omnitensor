@@ -11,6 +11,7 @@ import shutil
 import stat as stat
 import sys
 import tempfile as tempfile
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from collections.abc import Collection as Collection
@@ -78,6 +79,38 @@ _import_paths = _specs.worker_import_paths_tuple
 _trusted_runtime_paths = _specs.trusted_runtime_paths
 LOGGER = logging.getLogger(__name__)
 GRANT_REFRESH_SECONDS = 0.25
+OFF_LOOP_POLL_SECONDS = 0.001
+
+
+async def _run_off_loop(callback: Callable[..., object], *args: object) -> object:
+    """Run one blocking loading operation without asyncio's shared executor."""
+    completed = threading.Event()
+    outcome: list[object] = []
+    errors: list[BaseException] = []
+
+    def invoke() -> None:
+        try:
+            outcome.append(callback(*args))
+        except BaseException as caught:
+            errors.append(caught)
+        finally:
+            completed.set()
+
+    worker = threading.Thread(
+        target=invoke,
+        name="omnitensor-loading",
+        daemon=True,
+    )
+    worker.start()
+    try:
+        while not completed.is_set():
+            await asyncio.sleep(OFF_LOOP_POLL_SECONDS)
+    finally:
+        if not worker.is_alive():
+            worker.join()
+    if errors:
+        raise errors[0]
+    return outcome[0]
 
 
 async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
@@ -85,7 +118,7 @@ async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
         _worker_payload, abandoned = await asyncio.shield(staging)
     except BaseException:
         return
-    await asyncio.to_thread(shutil.rmtree, abandoned, True)
+    await _run_off_loop(shutil.rmtree, abandoned, True)
 
 
 class PermissionGrantSource(Protocol):
@@ -239,7 +272,7 @@ class InstalledPluginRuntime:
             )
         finally:
             if staged is not None:
-                await asyncio.to_thread(shutil.rmtree, staged, True)
+                await _run_off_loop(shutil.rmtree, staged, True)
         if result.status is PluginResultStatus.SUCCEEDED:
             return dict(result.output)
         if result.status is PluginResultStatus.CANCELLED:
@@ -256,7 +289,7 @@ class InstalledPluginRuntime:
                 "selected-files-unavailable", "selected-file broker is not configured"
             )
         staging = asyncio.create_task(
-            asyncio.to_thread(
+            _run_off_loop(
                 _stage_selected_sources,
                 self._selected_files_root,
                 plugin_id,
@@ -287,7 +320,8 @@ class InstalledPluginRuntime:
         changes = self._grant_changes.setdefault(request.plugin_id, set())
         changes.add(change)
         local_monitor = None
-        if self._grant_monitor is None and isinstance(
+        await asyncio.sleep(0)
+        if not execution.done() and self._grant_monitor is None and isinstance(
             self._grant_source, ReloadablePermissionGrantSource
         ):
             local_monitor = asyncio.ensure_future(self._monitor_permission_grants())
@@ -366,7 +400,7 @@ class InstalledPluginRuntime:
 
     async def _refresh_permission_grants(self) -> None:
         if isinstance(self._grant_source, ReloadablePermissionGrantSource):
-            await asyncio.to_thread(self._grant_source.reload)
+            await _run_off_loop(self._grant_source.reload)
 
     def _current_permissions(self, plugin_id: str, declared: set[str]) -> frozenset[str]:
         if isinstance(self._grant_source, _DenyAllGrants):
