@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +99,5 @@ def build_service_from_env(
 ):
     """Build the production service while allowing a factory-boundary test."""
     if service_factory is None:
-        from .service import OmniTensorService
-
-        service_factory = OmniTensorService
+        service_factory = import_module(".service", __package__).OmniTensorService
     return service_factory(**ServiceEnvironment.read(environ).service_options())

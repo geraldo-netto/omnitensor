@@ -7,20 +7,14 @@ from dbus_fast.aio import MessageBus
 from dbus_fast.service import ServiceInterface, method
 
 from .callers import CallerIdentityResolver, caller_capture_handler, unix_user_lookup
+from .contract import RUNTIME_METHODS
 from .ports import RuntimeHandler
 
 BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 
 # Named once because the handshake announces exactly what the adapter exports.
-BUS_METHODS = (
-    "ApplyCommand",
-    "SubmitJob",
-    "CancelJob",
-    "GetJobResult",
-    "DescribePlugins",
-    "DescribeContract",
-)
+BUS_METHODS = RUNTIME_METHODS
 
 
 class OmniTensorInterface(ServiceInterface):

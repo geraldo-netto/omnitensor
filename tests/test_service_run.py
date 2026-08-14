@@ -19,6 +19,7 @@ from conftest import (
 )
 
 from omnitensor.discovery import Device
+from omnitensor.dispatch_routing import PluginAwareDispatcher, admit_plugin_job
 from omnitensor.plugins.artifacts import ArtifactResolution
 from omnitensor.registry import validate_document
 from omnitensor.service import (
@@ -26,8 +27,6 @@ from omnitensor.service import (
     OmniTensorInterface,
     OmniTensorService,
     SysfsDeviceDiscovery,
-    _admit_plugin_job,
-    _PluginAwareDispatcher,
 )
 
 
@@ -69,7 +68,7 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
 
     inference = Inference()
     plugins = Plugins()
-    dispatcher = _PluginAwareDispatcher(inference, plugins)
+    dispatcher = PluginAwareDispatcher(inference, plugins)
 
     dispatcher.admit("events", {"sources": ["selected"]})
     dispatcher.admit("profile", {"value": 1})
@@ -90,7 +89,7 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
     incomplete_plugins = type(
         "Plugins", (), {"plugin_ids": lambda _self: {"events"}}
     )()
-    incomplete = _PluginAwareDispatcher(inference, incomplete_plugins)
+    incomplete = PluginAwareDispatcher(inference, incomplete_plugins)
     with pytest.raises(RuntimeError) as missing_admission:
         incomplete.admit("events", {})
     assert str(missing_admission.value) == "plugin runtime does not implement admission"
@@ -98,7 +97,7 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
         incomplete.dispatch("job", "events", {})
     assert str(missing_dispatch.value) == "plugin runtime does not implement dispatch"
 
-    no_inventory = _PluginAwareDispatcher(inference, object())
+    no_inventory = PluginAwareDispatcher(inference, object())
     assert no_inventory._plugin_ids() == frozenset()
 
 
@@ -128,15 +127,15 @@ def test_plugin_admission_helper_routes_exact_ports_directly():
         provider_calls.append(True)
         return frozenset({"events"})
 
-    _admit_plugin_job(inference, plugins, plugin_ids, "events", {"source": 1})
-    _admit_plugin_job(inference, plugins, plugin_ids, "profile", {"value": 2})
+    admit_plugin_job(inference, plugins, plugin_ids, "events", {"source": 1})
+    admit_plugin_job(inference, plugins, plugin_ids, "profile", {"value": 2})
 
     assert provider_calls == [True, True]
     assert plugins.calls == [("events", {"source": 1})]
     assert inference.calls == [("profile", {"value": 2})]
 
     with pytest.raises(RuntimeError) as incomplete:
-        _admit_plugin_job(inference, object(), plugin_ids, "events", {})
+        admit_plugin_job(inference, object(), plugin_ids, "events", {})
     assert str(incomplete.value) == "plugin runtime does not implement admission"
 
 
@@ -1072,7 +1071,7 @@ def test_profile_statuses_do_not_leak_running_state_across_profiles():
 
 
 def test_env_path_prefers_environment_and_expands_home(monkeypatch):
-    from omnitensor.service import _env_path
+    from omnitensor.composition import _env_path
 
     monkeypatch.delenv("OMNITENSOR_TEST_PATH", raising=False)
     assert _env_path("OMNITENSOR_TEST_PATH", "~/fallback") == Path.home() / "fallback"

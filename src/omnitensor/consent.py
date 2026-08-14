@@ -43,6 +43,7 @@ import sys
 import time
 from pathlib import Path
 
+from .composition import DEFAULT_GRANTS_PATH
 from .plugins.discovery import discover_plugin_metadata
 from .plugins.grants import (
     GrantError,
@@ -53,7 +54,6 @@ from .plugins.grants import (
 from .plugins.identity import resolve_plugin_identities
 from .plugins.manifest_compatibility import resolve_plugin_compatibility
 from .registry import bundled_workloads_path
-from .service import DEFAULT_GRANTS_PATH
 
 MAX_REASON_CHARS = 200
 

@@ -27,6 +27,14 @@ from .registry import load_schema, schema_names, validate_document
 
 RUNTIME_CONTRACT_VERSION = 1
 CONTRACT_SCHEMA = "runtime-contract.schema.json"
+RUNTIME_METHODS = (
+    "ApplyCommand",
+    "SubmitJob",
+    "CancelJob",
+    "GetJobResult",
+    "DescribePlugins",
+    "DescribeContract",
+)
 # Only the documents that cross the bus.  A workload manifest and a plugin
 # manifest are read from disk by the service itself; announcing them would
 # describe an agreement this handshake is not part of.

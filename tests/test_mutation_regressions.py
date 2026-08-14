@@ -970,7 +970,7 @@ def test_build_service_from_env_defaults_expand_home(monkeypatch):
 
 
 def test_env_path_defaults_expand_the_home_directory(monkeypatch):
-    from omnitensor.service import (
+    from omnitensor.composition import (
         DEFAULT_POLICY_PATH,
         DEFAULT_STATE_PATH,
         DEFAULT_WORKLOADS_PATH,

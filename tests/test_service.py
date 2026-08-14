@@ -15,11 +15,11 @@ from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins import ArtifactInstaller, ArtifactReference, ArtifactResolution
 from omnitensor.plugins.kernel_telemetry import parse_aggregate
+from omnitensor.profile_selection import profile_status
 from omnitensor.registry import _schema_path, validate_document
 from omnitensor.scheduler import select_backend
 from omnitensor.service import (
     OmniTensorService,
-    _profile_status,
     build_executors,
     profile_statuses,
 )
@@ -532,7 +532,7 @@ def test_a_profile_that_needs_consent_says_so_before_a_job_is_submitted(fake_nod
 
     # A backend that resolves, so the status reaches the consent branch rather
     # than stopping at a lane this host does not have.
-    entry = _profile_status(
+    entry = profile_status(
         declaring,
         {"tpu": _AvailableExecutor()},
         {"queued": 0, "running": 0},
