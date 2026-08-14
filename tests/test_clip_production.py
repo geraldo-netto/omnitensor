@@ -20,6 +20,7 @@ from omnitensor.training.clip_production import (
     ClipGateEvidence,
     ClipHoldout,
     TorchScriptClipOnnxExporter,
+    _dot,
     _validate_clip_graph,
     clip_resize_geometry,
     evaluate_clip_gate,
@@ -115,6 +116,11 @@ def test_clip_normalization_is_exact_chw_and_bounded():
     assert result[-1] == result[plane * 2]
     with pytest.raises(ValueError, match="^CLIP RGB crop must contain exactly 150528 bytes$"):
         normalize_clip_rgb(b"short")
+
+
+def test_clip_dot_refuses_mismatched_width_instead_of_truncating():
+    with pytest.raises(ValueError, match="^CLIP vector widths disagree$"):
+        _dot((1.0,), (1.0, 2.0))
 
 
 @pytest.mark.parametrize(
@@ -322,6 +328,48 @@ def test_produce_clip_source_emits_private_safe_report(tmp_path, monkeypatch):
     )
     report = json.loads(produced.report_path.read_text())
     assert produced.evidence.accepted
+    assert produced.model_path.read_bytes() == b"portable-clip"
+    assert produced.report_path.read_bytes() == json.dumps(
+        report, separators=(",", ":")
+    ).encode()
+    assert tuple(report) == (
+        "reportVersion",
+        "kind",
+        "recipeId",
+        "recipeVersion",
+        "recipeSha256",
+        "sourceReceiptSha256",
+        "sourceModelSha256",
+        "portableModel",
+        "holdout",
+        "portableSourceGate",
+        "nativeTargets",
+        "cpuFallback",
+    )
+    assert tuple(report["portableModel"]) == (
+        "format",
+        "sha256",
+        "tensorContract",
+        "outputContract",
+        "producer",
+    )
+    assert tuple(report["holdout"]) == (
+        "licenseId",
+        "corpusSha256",
+        "imageCount",
+        "labelCount",
+    )
+    assert tuple(report["portableSourceGate"]) == (
+        "minimumCosineSimilarity",
+        "zeroShotTop1Agreement",
+        "nonfiniteOutputRate",
+        "accepted",
+    )
+    assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
+    assert all(
+        tuple(claim) == ("status", "reason")
+        for claim in report["nativeTargets"].values()
+    )
     assert open_calls == [("recipe", "source")]
     assert source_calls == [fetched]
     assert portable_calls == [produced.model_path]

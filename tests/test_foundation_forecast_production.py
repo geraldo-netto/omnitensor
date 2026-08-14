@@ -368,6 +368,46 @@ def test_produce_foundation_forecast_emits_private_safe_report(tmp_path, monkeyp
         FakeExporter(),
     )
     report = json.loads(produced.report_path.read_text())
+    assert produced.model_path.read_bytes() == b"portable-forecast"
+    assert produced.report_path.read_bytes() == json.dumps(
+        report, separators=(",", ":")
+    ).encode()
+    assert tuple(report) == (
+        "reportVersion",
+        "kind",
+        "recipeId",
+        "recipeVersion",
+        "recipeSha256",
+        "sourceReceiptSha256",
+        "sourceDigests",
+        "portableModel",
+        "holdout",
+        "portableSourceGate",
+        "nativeTargets",
+        "cpuFallback",
+    )
+    assert tuple(report["portableModel"]) == (
+        "format",
+        "sha256",
+        "tensorContract",
+        "outputContract",
+        "producer",
+    )
+    assert tuple(report["holdout"]) == ("corpusSha256", "sampleCount", "timeOrdered")
+    assert tuple(report["portableSourceGate"]) == (
+        "candidateMae",
+        "sourceMae",
+        "repeatLastMae",
+        "localLinearMae",
+        "repeatLastSkill",
+        "portableExportMaxError",
+        "accepted",
+    )
+    assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
+    assert all(
+        tuple(claim) == ("status", "reason")
+        for claim in report["nativeTargets"].values()
+    )
     assert produced.evidence == FoundationForecastEvidence(
         0.0, 0.0, 1.0, 0.5, 1.0, 0.0, 32, True
     )

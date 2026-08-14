@@ -427,6 +427,43 @@ def test_produce_retinexformer_emits_private_evidence_report(tmp_path, monkeypat
         produced.model_path, produced.report_path, evidence
     )
     report = json.loads(produced.report_path.read_text())
+    assert produced.model_path.read_bytes() == b"portable-retinexformer"
+    assert produced.report_path.read_bytes() == json.dumps(
+        report, separators=(",", ":")
+    ).encode()
+    assert tuple(report) == (
+        "reportVersion",
+        "kind",
+        "recipeId",
+        "recipeVersion",
+        "recipeSha256",
+        "sourceReceiptSha256",
+        "sourceDigests",
+        "portableModel",
+        "holdout",
+        "portableSourceGate",
+        "nativeTargets",
+        "cpuFallback",
+    )
+    assert tuple(report["portableModel"]) == (
+        "format",
+        "sha256",
+        "tensorContract",
+        "outputContract",
+        "producer",
+    )
+    assert tuple(report["holdout"]) == ("licenseId", "corpusSha256", "pairCount")
+    assert tuple(report["portableSourceGate"]) == (
+        "minimumPortableSourceSsim",
+        "minimumPairedHoldoutSsim",
+        "outputRangeViolationRate",
+        "accepted",
+    )
+    assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
+    assert all(
+        tuple(claim) == ("status", "reason")
+        for claim in report["nativeTargets"].values()
+    )
     generic = {
         "status": "unqualified",
         "reason": "no target compiler, native parity, or named-device evidence was run",

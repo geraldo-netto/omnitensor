@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import math
-import os
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from ..atomicio import write_json_atomic
+from .production_pipeline import (
+    export_torch_onnx_atomic,
+    production_report,
+    run_production_pipeline,
+    validate_onnx_io,
+)
 from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
 
 RETINEXFORMER_RECIPE_ID = "retinexformer-lol-v1"
@@ -162,29 +165,22 @@ class TorchRetinexformerOnnxExporter:
             def forward(self, image):
                 return torch.clamp(self.candidate(image), min=0.0, max=1.0)
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, staged_name = tempfile.mkstemp(
-            prefix=".retinexformer-", suffix=".onnx", dir=destination.parent
-        )
-        os.close(descriptor)
-        staged = Path(staged_name)
-        try:
-            torch.onnx.export(
+        def build_arguments() -> tuple[object, object]:
+            return (
                 ClampedRetinexformer(model).eval(),
                 torch.zeros((1, 3, 256, 256), dtype=torch.float32),
-                staged,
-                input_names=["image"],
-                output_names=["enhanced"],
-                opset_version=17,
-                do_constant_folding=True,
-                dynamo=False,
             )
-            graph = onnx.load(staged, load_external_data=False)
-            onnx.checker.check_model(graph)
-            _validate_retinexformer_graph(graph)
-            os.replace(staged, destination)
-        finally:
-            staged.unlink(missing_ok=True)
+
+        export_torch_onnx_atomic(
+            destination,
+            prefix=".retinexformer-",
+            build_arguments=build_arguments,
+            input_names=("image",),
+            output_names=("enhanced",),
+            validate=_validate_retinexformer_graph,
+            torch=torch,
+            onnx=onnx,
+        )
 
 
 def structural_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -260,28 +256,29 @@ def produce_retinexformer_source(
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / "retinexformer-lol-v1.onnx"
     report_path = output / "retinexformer-lol-v1-production-report.json"
-    if model_path.exists() or report_path.exists():
-        raise ModelRecipeError("producer-conflict", "Retinexformer production output exists")
-    try:
-        (exporter or TorchRetinexformerOnnxExporter()).export(fetched, model_path)
-        evidence = evaluate_retinexformer_gate(
+    return run_production_pipeline(
+        model_path,
+        report_path,
+        conflict_detail="Retinexformer production output exists",
+        export=lambda: (exporter or TorchRetinexformerOnnxExporter()).export(
+            fetched, model_path
+        ),
+        evaluate=lambda: evaluate_retinexformer_gate(
             holdout,
             source_runner_factory(fetched),
             portable_runner_factory(model_path),
             target_loader,
-        )
-        if not evidence.accepted:
-            raise ModelRecipeError("quality-gate-failed", "Retinexformer did not pass gates")
-        write_json_atomic(
-            report_path,
-            _retinexformer_report(fetched, model_path, holdout, evidence),
-            prefix=".retinexformer-report-",
-        )
-    except BaseException:
-        model_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
-        raise
-    return ProducedRetinexformerSource(model_path, report_path, evidence)
+        ),
+        accepted=lambda evidence: evidence.accepted,
+        rejection_code="quality-gate-failed",
+        rejection_detail="Retinexformer did not pass gates",
+        report=lambda evidence: _retinexformer_report(
+            fetched, model_path, holdout, evidence
+        ),
+        report_prefix=".retinexformer-report-",
+        result=ProducedRetinexformerSource,
+        writer=write_json_atomic,
+    )
 
 
 def _source_path(source: FetchedModelSource, role: str) -> Path:
@@ -322,17 +319,16 @@ def _image_values(values: Sequence[float]) -> tuple[tuple[float, ...], int]:
 
 
 def _validate_retinexformer_graph(model: object) -> None:
-    inputs = list(model.graph.input)
-    outputs = list(model.graph.output)
-    if len(inputs) != 1 or inputs[0].name != "image":
-        raise ModelRecipeError("producer-invalid", "Retinexformer ONNX needs one image input")
-    if len(outputs) != 1 or outputs[0].name != "enhanced":
-        raise ModelRecipeError("producer-invalid", "Retinexformer ONNX needs one enhanced output")
-    expected = [1, 3, 256, 256]
-    input_shape = [dimension.dim_value for dimension in inputs[0].type.tensor_type.shape.dim]
-    output_shape = [dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim]
-    if input_shape != expected or output_shape != expected:
-        raise ModelRecipeError("producer-invalid", "Retinexformer ONNX shapes disagree with recipe")
+    validate_onnx_io(
+        model,
+        input_name="image",
+        input_shape=(1, 3, 256, 256),
+        input_detail="Retinexformer ONNX needs one image input",
+        output_name="enhanced",
+        output_shape=(1, 3, 256, 256),
+        output_detail="Retinexformer ONNX needs one enhanced output",
+        shape_detail="Retinexformer ONNX shapes disagree with recipe",
+    )
 
 
 def _retinexformer_report(
@@ -342,33 +338,25 @@ def _retinexformer_report(
     evidence: RetinexformerGateEvidence,
 ) -> dict:
     generic_reason = "no target compiler, native parity, or named-device evidence was run"
-    return {
-        "reportVersion": 1,
-        "kind": "retinexformer-source-production",
-        "recipeId": source.recipe.id,
-        "recipeVersion": source.recipe.version,
-        "recipeSha256": source.recipe.document_sha256,
-        "sourceReceiptSha256": _digest(source.receipt_path),
-        "sourceDigests": {item.role: item.sha256 for item in source.recipe.sources},
-        "portableModel": {
-            "format": "onnx",
-            "sha256": _digest(model_path),
-            "tensorContract": source.recipe.tensor_contract,
-            "outputContract": source.recipe.output_contract,
-            "producer": source.recipe.producer,
+    return production_report(
+        source,
+        model_path,
+        kind="retinexformer-source-production",
+        source_identity={
+            "sourceDigests": {item.role: item.sha256 for item in source.recipe.sources}
         },
-        "holdout": {
+        holdout={
             "licenseId": holdout.license_id,
             "corpusSha256": holdout.corpus_sha256,
             "pairCount": evidence.pair_count,
         },
-        "portableSourceGate": {
+        portable_source_gate={
             "minimumPortableSourceSsim": evidence.minimum_portable_source_ssim,
             "minimumPairedHoldoutSsim": evidence.minimum_paired_holdout_ssim,
             "outputRangeViolationRate": evidence.output_range_violation_rate,
             "accepted": evidence.accepted,
         },
-        "nativeTargets": {
+        native_targets={
             "gpu": {"status": "unqualified", "reason": generic_reason},
             "npu": {"status": "unqualified", "reason": generic_reason},
             "tpu": {
@@ -379,10 +367,4 @@ def _retinexformer_report(
                 ),
             },
         },
-        "cpuFallback": "forbidden",
-    }
-
-
-def _digest(path: Path) -> str:
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+    )

@@ -458,6 +458,49 @@ def test_produce_sentence_embedding_emits_provenance_without_native_claims(
     )
     report = json.loads(produced.report_path.read_text())
     assert produced.evidence.accepted
+    assert produced.model_path.read_bytes() == b"portable"
+    assert produced.report_path.read_bytes() == json.dumps(
+        report, separators=(",", ":")
+    ).encode()
+    assert tuple(report) == (
+        "reportVersion",
+        "kind",
+        "recipeId",
+        "recipeVersion",
+        "recipeSha256",
+        "sourceReceiptSha256",
+        "sourceDigests",
+        "portableModel",
+        "holdout",
+        "portableSourceGate",
+        "nativeTargets",
+        "cpuFallback",
+    )
+    assert tuple(report["portableModel"]) == (
+        "format",
+        "sha256",
+        "tensorContract",
+        "outputContract",
+        "producer",
+    )
+    assert tuple(report["holdout"]) == (
+        "licenseId",
+        "corpusSha256",
+        "queryCount",
+        "documentCount",
+    )
+    assert tuple(report["portableSourceGate"]) == (
+        "minimumCosineSimilarity",
+        "minimumTop10Overlap",
+        "nonfiniteOutputRate",
+        "vectorCount",
+        "accepted",
+    )
+    assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
+    assert all(
+        tuple(claim) == ("status", "reason")
+        for claim in report["nativeTargets"].values()
+    )
     assert opened == [("recipe", "sources")]
     assert source_calls == [fetched]
     assert portable_calls == [(produced.model_path, fetched)]

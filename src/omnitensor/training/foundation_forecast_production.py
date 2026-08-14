@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
-import os
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from ..atomicio import write_json_atomic
+from .production_pipeline import (
+    export_torch_onnx_atomic,
+    production_report,
+    run_production_pipeline,
+    validate_onnx_io,
+)
 from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
 
 FORECAST_RECIPE_IDS = frozenset({"amazon-chronos-bolt-tiny", "ibm-granite-ttm-r2"})
@@ -173,29 +176,22 @@ class TorchFoundationForecastOnnxExporter:
                     return values[:, 0, 0].reshape(1, 1)
                 return values[:, 4, 0].reshape(1, 1)
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, staged_name = tempfile.mkstemp(
-            prefix=".foundation-forecast-", suffix=".onnx", dir=destination.parent
-        )
-        os.close(descriptor)
-        staged = Path(staged_name)
-        try:
-            torch.onnx.export(
+        def build_arguments() -> tuple[object, object]:
+            return (
                 ScalarForecastWrapper(model).eval(),
                 torch.zeros((1, FORECAST_CONTEXT_WIDTH), dtype=torch.float32),
-                staged,
-                input_names=["context"],
-                output_names=["forecast"],
-                opset_version=17,
-                do_constant_folding=True,
-                dynamo=False,
             )
-            graph = onnx.load(staged, load_external_data=False)
-            onnx.checker.check_model(graph)
-            _validate_forecast_graph(graph)
-            os.replace(staged, destination)
-        finally:
-            staged.unlink(missing_ok=True)
+
+        export_torch_onnx_atomic(
+            destination,
+            prefix=".foundation-forecast-",
+            build_arguments=build_arguments,
+            input_names=("context",),
+            output_names=("forecast",),
+            validate=_validate_forecast_graph,
+            torch=torch,
+            onnx=onnx,
+        )
 
 
 def produce_foundation_forecast(
@@ -216,28 +212,25 @@ def produce_foundation_forecast(
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / f"{fetched.recipe.id}.onnx"
     report_path = output / f"{fetched.recipe.id}-production-report.json"
-    if model_path.exists() or report_path.exists():
-        raise ModelRecipeError("producer-conflict", "forecast production output already exists")
-    try:
-        exporter.export(fetched, model_path)
-        evidence = evaluate_foundation_forecast(
+    return run_production_pipeline(
+        model_path,
+        report_path,
+        conflict_detail="forecast production output already exists",
+        export=lambda: exporter.export(fetched, model_path),
+        evaluate=lambda: evaluate_foundation_forecast(
             holdout,
             source_runner_factory(fetched),
             portable_runner_factory(model_path),
             local_linear_runner,
-        )
-        if not evidence.accepted:
-            raise ModelRecipeError("quality-gate-failed", "foundation forecast did not pass gates")
-        write_json_atomic(
-            report_path,
-            _forecast_report(fetched, model_path, holdout, evidence),
-            prefix=".foundation-report-",
-        )
-    except BaseException:
-        model_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
-        raise
-    return ProducedFoundationForecast(model_path, report_path, evidence)
+        ),
+        accepted=lambda evidence: evidence.accepted,
+        rejection_code="quality-gate-failed",
+        rejection_detail="foundation forecast did not pass gates",
+        report=lambda evidence: _forecast_report(fetched, model_path, holdout, evidence),
+        report_prefix=".foundation-report-",
+        result=ProducedFoundationForecast,
+        writer=write_json_atomic,
+    )
 
 
 def _validate_context(context: Sequence[float]) -> None:
@@ -282,16 +275,16 @@ def _mae(predictions: Sequence[float], targets: Sequence[float]) -> float:
 
 
 def _validate_forecast_graph(model: object) -> None:
-    inputs = list(model.graph.input)
-    outputs = list(model.graph.output)
-    if len(inputs) != 1 or inputs[0].name != "context":
-        raise ModelRecipeError("producer-invalid", "forecast ONNX must have one context input")
-    if len(outputs) != 1 or outputs[0].name != "forecast":
-        raise ModelRecipeError("producer-invalid", "forecast ONNX must have one scalar output")
-    input_shape = [dimension.dim_value for dimension in inputs[0].type.tensor_type.shape.dim]
-    output_shape = [dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim]
-    if input_shape != [1, 512] or output_shape != [1, 1]:
-        raise ModelRecipeError("producer-invalid", "forecast ONNX shapes disagree with recipe")
+    validate_onnx_io(
+        model,
+        input_name="context",
+        input_shape=(1, 512),
+        input_detail="forecast ONNX must have one context input",
+        output_name="forecast",
+        output_shape=(1, 1),
+        output_detail="forecast ONNX must have one scalar output",
+        shape_detail="forecast ONNX shapes disagree with recipe",
+    )
 
 
 def _forecast_report(
@@ -300,27 +293,19 @@ def _forecast_report(
     holdout: ForecastHoldout,
     evidence: FoundationForecastEvidence,
 ) -> dict:
-    return {
-        "reportVersion": 1,
-        "kind": "foundation-forecast-source-production",
-        "recipeId": source.recipe.id,
-        "recipeVersion": source.recipe.version,
-        "recipeSha256": source.recipe.document_sha256,
-        "sourceReceiptSha256": _digest(source.receipt_path),
-        "sourceDigests": {item.role: item.sha256 for item in source.recipe.sources},
-        "portableModel": {
-            "format": "onnx",
-            "sha256": _digest(model_path),
-            "tensorContract": source.recipe.tensor_contract,
-            "outputContract": source.recipe.output_contract,
-            "producer": source.recipe.producer,
+    return production_report(
+        source,
+        model_path,
+        kind="foundation-forecast-source-production",
+        source_identity={
+            "sourceDigests": {item.role: item.sha256 for item in source.recipe.sources}
         },
-        "holdout": {
+        holdout={
             "corpusSha256": holdout.corpus_sha256,
             "sampleCount": evidence.sample_count,
             "timeOrdered": True,
         },
-        "portableSourceGate": {
+        portable_source_gate={
             "candidateMae": evidence.candidate_mae,
             "sourceMae": evidence.source_mae,
             "repeatLastMae": evidence.repeat_last_mae,
@@ -329,17 +314,4 @@ def _forecast_report(
             "portableExportMaxError": evidence.portable_export_max_error,
             "accepted": evidence.accepted,
         },
-        "nativeTargets": {
-            target: {
-                "status": "unqualified",
-                "reason": "no target compiler, native parity, or named-device evidence was run",
-            }
-            for target in ("gpu", "npu", "tpu")
-        },
-        "cpuFallback": "forbidden",
-    }
-
-
-def _digest(path: Path) -> str:
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+    )

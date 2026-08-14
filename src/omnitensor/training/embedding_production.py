@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
 import os
 import tempfile
@@ -12,6 +11,11 @@ from pathlib import Path
 from typing import Protocol
 
 from ..atomicio import write_json_atomic
+from .production_pipeline import (
+    production_report,
+    run_production_pipeline,
+    width_checked_dot,
+)
 from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
 
 EMBEDDING_RECIPE_IDS = frozenset({"all-minilm-l6-v2", "bge-small-en-v1-5"})
@@ -221,28 +225,30 @@ def produce_sentence_embedding(
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / f"{fetched.recipe.id}.onnx"
     report_path = output / f"{fetched.recipe.id}-production-report.json"
-    if model_path.exists() or report_path.exists():
-        raise ModelRecipeError("producer-conflict", "embedding output already exists")
-    adapter = exporter or SentenceEmbeddingOnnxExporter()
-    try:
-        adapter.export(fetched, model_path)
-        evidence = evaluate_embedding_gate(
+
+    def prepare_export() -> Callable[[], None]:
+        adapter = exporter or SentenceEmbeddingOnnxExporter()
+        return lambda: adapter.export(fetched, model_path)
+
+    return run_production_pipeline(
+        model_path,
+        report_path,
+        conflict_detail="embedding output already exists",
+        export=None,
+        evaluate=lambda: evaluate_embedding_gate(
             holdout,
             source_runner_factory(fetched),
             portable_runner_factory(model_path, fetched),
-        )
-        if not evidence.accepted:
-            raise ModelRecipeError("portable-parity-failed", "embedding gate did not pass")
-        write_json_atomic(
-            report_path,
-            _embedding_report(fetched, model_path, holdout, evidence),
-            prefix=".embedding-report-",
-        )
-    except BaseException:
-        model_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
-        raise
-    return ProducedEmbeddingSource(model_path, report_path, evidence)
+        ),
+        accepted=lambda evidence: evidence.accepted,
+        rejection_code="portable-parity-failed",
+        rejection_detail="embedding gate did not pass",
+        report=lambda evidence: _embedding_report(fetched, model_path, holdout, evidence),
+        report_prefix=".embedding-report-",
+        result=ProducedEmbeddingSource,
+        writer=write_json_atomic,
+        prepare_export=prepare_export,
+    )
 
 
 def _validate_texts(texts: tuple[str, ...]) -> None:
@@ -265,9 +271,7 @@ def _runner_vector(runner: EmbeddingRunner, text: str) -> tuple[float, ...]:
 
 
 def _dot(left: Sequence[float], right: Sequence[float]) -> float:
-    if len(left) != len(right):
-        raise ValueError("embedding widths disagree")
-    return sum(a * b for a, b in zip(left, right))  # noqa: B905 - lengths checked above
+    return width_checked_dot(left, right, mismatch_detail="embedding widths disagree")
 
 
 def _top_k(
@@ -410,48 +414,22 @@ def _embedding_report(
     evidence: EmbeddingGateEvidence,
 ) -> dict:
     source_digests = {item.role: item.sha256 for item in source.recipe.sources}
-    return {
-        "reportVersion": 1,
-        "kind": "sentence-embedding-source-production",
-        "recipeId": source.recipe.id,
-        "recipeVersion": source.recipe.version,
-        "recipeSha256": source.recipe.document_sha256,
-        "sourceReceiptSha256": _sha256_file(source.receipt_path),
-        "sourceDigests": source_digests,
-        "portableModel": {
-            "format": "onnx",
-            "sha256": _sha256_file(model_path),
-            "tensorContract": source.recipe.tensor_contract,
-            "outputContract": source.recipe.output_contract,
-            "producer": source.recipe.producer,
-        },
-        "holdout": {
+    return production_report(
+        source,
+        model_path,
+        kind="sentence-embedding-source-production",
+        source_identity={"sourceDigests": source_digests},
+        holdout={
             "licenseId": holdout.license_id,
             "corpusSha256": holdout.corpus_sha256,
             "queryCount": evidence.query_count,
             "documentCount": evidence.document_count,
         },
-        "portableSourceGate": {
+        portable_source_gate={
             "minimumCosineSimilarity": evidence.minimum_cosine_similarity,
             "minimumTop10Overlap": evidence.minimum_top10_overlap,
             "nonfiniteOutputRate": evidence.nonfinite_output_rate,
             "vectorCount": evidence.vector_count,
             "accepted": evidence.accepted,
         },
-        "nativeTargets": {
-            target: {
-                "status": "unqualified",
-                "reason": "no target compiler, native parity, or named-device evidence was run",
-            }
-            for target in ("gpu", "npu", "tpu")
-        },
-        "cpuFallback": "forbidden",
-    }
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    )

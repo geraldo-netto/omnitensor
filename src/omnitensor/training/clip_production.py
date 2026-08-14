@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
-import os
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +10,13 @@ from typing import Protocol
 
 from ..atomicio import write_json_atomic
 from .embedding_production import l2_normalize
+from .production_pipeline import (
+    export_torch_onnx_atomic,
+    production_report,
+    run_production_pipeline,
+    validate_onnx_io,
+    width_checked_dot,
+)
 from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
 
 CLIP_RECIPE_ID = "clip-vit-b-32-image"
@@ -172,30 +176,20 @@ class TorchScriptClipOnnxExporter:
                 embedding = self.model.encode_image(image)
                 return torch.nn.functional.normalize(embedding, p=2, dim=1, eps=1e-12)
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, staged_name = tempfile.mkstemp(
-            prefix=".clip-image-", suffix=".onnx", dir=destination.parent
-        )
-        os.close(descriptor)
-        staged = Path(staged_name)
-        try:
+        def build_arguments() -> tuple[object, object]:
             dummy = torch.zeros((1, 3, CLIP_IMAGE_SIZE, CLIP_IMAGE_SIZE), dtype=torch.float32)
-            torch.onnx.export(
-                ImageOnlyWrapper(encoder).eval(),
-                dummy,
-                staged,
-                input_names=["image"],
-                output_names=["embedding"],
-                opset_version=17,
-                do_constant_folding=True,
-                dynamo=False,
-            )
-            model = onnx.load(staged, load_external_data=False)
-            onnx.checker.check_model(model)
-            _validate_clip_graph(model)
-            os.replace(staged, destination)
-        finally:
-            staged.unlink(missing_ok=True)
+            return ImageOnlyWrapper(encoder).eval(), dummy
+
+        export_torch_onnx_atomic(
+            destination,
+            prefix=".clip-image-",
+            build_arguments=build_arguments,
+            input_names=("image",),
+            output_names=("embedding",),
+            validate=_validate_clip_graph,
+            torch=torch,
+            onnx=onnx,
+        )
 
 
 def produce_clip_source(
@@ -216,28 +210,30 @@ def produce_clip_source(
     output.mkdir(parents=True, exist_ok=True)
     model_path = output / "clip-vit-b-32-image.onnx"
     report_path = output / "clip-vit-b-32-image-production-report.json"
-    if model_path.exists() or report_path.exists():
-        raise ModelRecipeError("producer-conflict", "CLIP production output already exists")
-    adapter = exporter or TorchScriptClipOnnxExporter()
-    try:
-        adapter.export(fetched, model_path)
-        evidence = evaluate_clip_gate(
+
+    def prepare_export() -> Callable[[], None]:
+        adapter = exporter or TorchScriptClipOnnxExporter()
+        return lambda: adapter.export(fetched, model_path)
+
+    return run_production_pipeline(
+        model_path,
+        report_path,
+        conflict_detail="CLIP production output already exists",
+        export=None,
+        evaluate=lambda: evaluate_clip_gate(
             holdout,
             source_runner_factory(fetched),
             portable_runner_factory(model_path),
-        )
-        if not evidence.accepted:
-            raise ModelRecipeError("portable-parity-failed", "CLIP portable-source gate failed")
-        write_json_atomic(
-            report_path,
-            _clip_report(fetched, model_path, holdout, evidence),
-            prefix=".clip-report-",
-        )
-    except BaseException:
-        model_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
-        raise
-    return ProducedClipSource(model_path, report_path, evidence)
+        ),
+        accepted=lambda evidence: evidence.accepted,
+        rejection_code="portable-parity-failed",
+        rejection_detail="CLIP portable-source gate failed",
+        report=lambda evidence: _clip_report(fetched, model_path, holdout, evidence),
+        report_prefix=".clip-report-",
+        result=ProducedClipSource,
+        writer=write_json_atomic,
+        prepare_export=prepare_export,
+    )
 
 
 def _clip_vector(vector: Sequence[float]) -> tuple[float, ...]:
@@ -255,7 +251,7 @@ def _validate_label_embeddings(labels: tuple[tuple[float, ...], ...]) -> None:
 
 
 def _dot(left: Sequence[float], right: Sequence[float]) -> float:
-    return sum(a * b for a, b in zip(left, right))  # noqa: B905 - fixed widths validated
+    return width_checked_dot(left, right, mismatch_detail="CLIP vector widths disagree")
 
 
 def _best_label(vector: Sequence[float], labels: Sequence[Sequence[float]]) -> int:
@@ -263,16 +259,16 @@ def _best_label(vector: Sequence[float], labels: Sequence[Sequence[float]]) -> i
 
 
 def _validate_clip_graph(model: object) -> None:
-    inputs = list(model.graph.input)
-    outputs = list(model.graph.output)
-    if len(inputs) != 1 or inputs[0].name != "image":
-        raise ModelRecipeError("producer-invalid", "CLIP ONNX must have one image input")
-    if len(outputs) != 1 or outputs[0].name != "embedding":
-        raise ModelRecipeError("producer-invalid", "CLIP ONNX must have one embedding output")
-    input_shape = [dimension.dim_value for dimension in inputs[0].type.tensor_type.shape.dim]
-    output_shape = [dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim]
-    if input_shape != [1, 3, 224, 224] or output_shape != [1, 512]:
-        raise ModelRecipeError("producer-invalid", "CLIP ONNX shapes disagree with recipe")
+    validate_onnx_io(
+        model,
+        input_name="image",
+        input_shape=(1, 3, 224, 224),
+        input_detail="CLIP ONNX must have one image input",
+        output_name="embedding",
+        output_shape=(1, 512),
+        output_detail="CLIP ONNX must have one embedding output",
+        shape_detail="CLIP ONNX shapes disagree with recipe",
+    )
 
 
 def _clip_report(
@@ -281,44 +277,21 @@ def _clip_report(
     holdout: ClipHoldout,
     evidence: ClipGateEvidence,
 ) -> dict:
-    return {
-        "reportVersion": 1,
-        "kind": "clip-image-source-production",
-        "recipeId": source.recipe.id,
-        "recipeVersion": source.recipe.version,
-        "recipeSha256": source.recipe.document_sha256,
-        "sourceReceiptSha256": _digest(source.receipt_path),
-        "sourceModelSha256": source.recipe.model_source.sha256,
-        "portableModel": {
-            "format": "onnx",
-            "sha256": _digest(model_path),
-            "tensorContract": source.recipe.tensor_contract,
-            "outputContract": source.recipe.output_contract,
-            "producer": source.recipe.producer,
-        },
-        "holdout": {
+    return production_report(
+        source,
+        model_path,
+        kind="clip-image-source-production",
+        source_identity={"sourceModelSha256": source.recipe.model_source.sha256},
+        holdout={
             "licenseId": holdout.license_id,
             "corpusSha256": holdout.corpus_sha256,
             "imageCount": evidence.image_count,
             "labelCount": len(holdout.label_embeddings),
         },
-        "portableSourceGate": {
+        portable_source_gate={
             "minimumCosineSimilarity": evidence.minimum_cosine_similarity,
             "zeroShotTop1Agreement": evidence.zero_shot_top1_agreement,
             "nonfiniteOutputRate": evidence.nonfinite_output_rate,
             "accepted": evidence.accepted,
         },
-        "nativeTargets": {
-            target: {
-                "status": "unqualified",
-                "reason": "no target compiler, native parity, or named-device evidence was run",
-            }
-            for target in ("gpu", "npu", "tpu")
-        },
-        "cpuFallback": "forbidden",
-    }
-
-
-def _digest(path: Path) -> str:
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+    )
