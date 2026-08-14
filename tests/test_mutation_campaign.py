@@ -5,6 +5,7 @@ import importlib.metadata
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,7 +55,17 @@ def _source_root(tmp_path: Path) -> Path:
 
 def _document() -> dict:
     return {
-        "version": 1,
+        "version": 2,
+        "scope": {
+            "status": "partial",
+            "blockedBy": "OMNI-0297",
+            "onlyMutate": ["src/omnitensor/subject.py"],
+            "expansionPriority": [
+                "src/omnitensor/training/",
+                "src/omnitensor/plugins/qwen.py",
+                "src/omnitensor/plugins/document_acceptance.py",
+            ],
+        },
         "shards": [
             {
                 "name": "subject",
@@ -100,11 +111,12 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         12,
     ]
     assert sum(len(shard.selectors) for shard in manifest.shards) == 162
-    assert {
+    modules = {
         selector.split(".x", 1)[0]
         for shard in manifest.shards
         for selector in shard.selectors
-    } == {
+    }
+    assert modules == {
         "omnitensor.contract",
         "omnitensor.executors.base",
         "omnitensor.executors.gpu",
@@ -119,6 +131,18 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.tensorcontract",
         "omnitensor.training.binding",
     }
+    assert manifest.scope.status == "partial"
+    assert manifest.scope.blocked_by == "OMNI-0297"
+    assert manifest.scope.expansion_priority == (
+        "src/omnitensor/training/",
+        "src/omnitensor/plugins/qwen.py",
+        "src/omnitensor/plugins/document_acceptance.py",
+    )
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert tuple(project["tool"]["mutmut"]["only_mutate"]) == manifest.scope.only_mutate
+    assert manifest.scope.only_mutate == tuple(
+        sorted(f"src/{module.replace('.', '/')}.py" for module in modules)
+    )
     expected_hotspots = {
         "acceptance": {
             "omnitensor.plugins.acceptance_kit",
@@ -216,8 +240,8 @@ def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        (lambda document: document.update(extra=True), "only version and shards"),
-        (lambda document: document.update(version=True), "version must be 1"),
+        (lambda document: document.update(extra=True), "only version, scope, and shards"),
+        (lambda document: document.update(version=True), "version must be 2"),
         (lambda document: document.update(shards=[]), "nonempty array"),
         (
             lambda document: document["shards"][0].update(name="Bad Name"),
@@ -248,6 +272,51 @@ def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
     ],
 )
 def test_manifest_refuses_open_ambiguous_or_stale_scope(tmp_path, change, message):
+    root = _source_root(tmp_path)
+    document = _document()
+    change(document)
+    with pytest.raises(ValueError, match=message):
+        load_mutation_manifest(_write_manifest(tmp_path, document), source_root=root)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda document: document["scope"].update(extra=True),
+            "must contain only status",
+        ),
+        (
+            lambda document: document["scope"].update(status="complete"),
+            "status must be partial",
+        ),
+        (
+            lambda document: document["scope"].update(blockedBy="OMNI-9999"),
+            "blocked by OMNI-0297",
+        ),
+        (
+            lambda document: document["scope"].update(
+                onlyMutate=["src/omnitensor/*.py"]
+            ),
+            "exact Python paths",
+        ),
+        (
+            lambda document: document["scope"].update(onlyMutate=[]),
+            "nonempty array",
+        ),
+        (
+            lambda document: document["scope"].update(expansionPriority=[]),
+            "nonempty array",
+        ),
+        (
+            lambda document: document["scope"].update(
+                onlyMutate=["src/omnitensor/missing.py"]
+            ),
+            "exactly match selector modules",
+        ),
+    ],
+)
+def test_manifest_requires_a_closed_partial_corpus_scope(tmp_path, change, message):
     root = _source_root(tmp_path)
     document = _document()
     change(document)

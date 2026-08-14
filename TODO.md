@@ -18,8 +18,7 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0296 | open | medium | l | OMNI-0264, OMNI-0295 | Re-measure and burn down remaining acceptance, event-workload, document-binding, and grounded-answer survivor hotspots until every changed callable meets the 80% mutation threshold; do not re-add already-fixed low-light hotspots without fresh evidence. |
-| OMNI-0302 | open | medium | m | OMNI-0297 | Rescope the generated mutant corpus to the selector manifest, record that the scope is partial until OMNI-0297 expands it, and prioritize training, Qwen, and document-acceptance callables in later expansion. |
-| OMNI-0303 | open | low | s | OMNI-0296 | Re-baseline survivor statistics after operator and assertion cleanup before further burn-down; do not chase prose survivors removed by the operator change. |
+| OMNI-0303 | open | low | s | OMNI-0296 | Once mutation execution is re-enabled, re-baseline survivor statistics after operator and assertion cleanup before further burn-down; do not chase prose survivors removed by the operator change. |
 
 ## Blocked
 

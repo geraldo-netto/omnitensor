@@ -130,6 +130,13 @@ the shards, then reproduce any one locally with the same runner CI uses:
   --shard scheduler --report /tmp/omnitensor-mutmut-scheduler.txt
 ```
 
+The manifest currently records a partial scope blocked on OMNI-0297. Mutmut's
+`only_mutate` list is the same closed set of modules named by the selector
+shards, so an interim corpus cannot generate ungated mutants. Expand training,
+Qwen, and document-acceptance callables in the manifest first when OMNI-0297
+resumes; regenerate `mutants/` only after that reviewed expansion or when the
+reorganized mutation campaign is re-enabled.
+
 The post-split operational-acceptance shards use the same fail-closed runner;
 each shard contains every mutation-bearing callable in its named owner modules:
 

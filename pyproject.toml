@@ -144,6 +144,21 @@ packages = ["src/omnitensor"]
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
+only_mutate = [
+    "src/omnitensor/contract.py",
+    "src/omnitensor/executors/base.py",
+    "src/omnitensor/executors/gpu.py",
+    "src/omnitensor/forecastresult.py",
+    "src/omnitensor/outputcontract.py",
+    "src/omnitensor/plugins/acceptance_kit.py",
+    "src/omnitensor/plugins/document_acceptance.py",
+    "src/omnitensor/plugins/document_qa.py",
+    "src/omnitensor/plugins/event_workload.py",
+    "src/omnitensor/scheduler.py",
+    "src/omnitensor/snapshot.py",
+    "src/omnitensor/tensorcontract.py",
+    "src/omnitensor/training/binding.py",
+]
 pytest_add_cli_args_test_selection = ["tests/"]
 also_copy = [
     "schemas/",

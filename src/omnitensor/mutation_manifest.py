@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 MUTMUT_VERSION = "3.7.0"
 _SHARD_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _WILDCARDS = frozenset("*?[")
@@ -22,8 +22,17 @@ class MutationShard:
 
 
 @dataclass(frozen=True, slots=True)
+class MutationScope:
+    status: str
+    blocked_by: str
+    only_mutate: tuple[str, ...]
+    expansion_priority: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MutationManifest:
     version: int
+    scope: MutationScope
     shards: tuple[MutationShard, ...]
 
     def shard(self, name: str) -> MutationShard:
@@ -147,9 +156,67 @@ def _manifest_document(path: Path) -> dict:
         )
     except json.JSONDecodeError as error:
         raise ValueError(f"mutation manifest is not JSON: {error}") from error
-    if not isinstance(document, dict) or set(document) != {"version", "shards"}:
-        raise ValueError("mutation manifest must contain only version and shards")
+    if not isinstance(document, dict) or set(document) != {"version", "scope", "shards"}:
+        raise ValueError("mutation manifest must contain only version, scope, and shards")
     return document
+
+
+def _string_tuple(
+    label: str,
+    value: object,
+    *,
+    sorted_values: bool,
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"mutation scope {label} must be a nonempty array")
+    if any(not isinstance(entry, str) or not entry for entry in value):
+        raise ValueError(f"mutation scope {label} must contain nonempty strings")
+    entries = tuple(value)
+    if sorted_values and entries != tuple(sorted(entries)):
+        raise ValueError(f"mutation scope {label} must be sorted")
+    if len(set(entries)) != len(entries):
+        raise ValueError(f"mutation scope {label} must be unique")
+    return entries
+
+
+def _mutation_scope(raw: object) -> MutationScope:
+    expected = {"status", "blockedBy", "onlyMutate", "expansionPriority"}
+    if not isinstance(raw, dict) or set(raw) != expected:
+        raise ValueError(
+            "mutation scope must contain only status, blockedBy, onlyMutate, "
+            "and expansionPriority"
+        )
+    if raw["status"] != "partial":
+        raise ValueError("mutation scope status must be partial")
+    if raw["blockedBy"] != "OMNI-0297":
+        raise ValueError("partial mutation scope must be blocked by OMNI-0297")
+    only_mutate = _string_tuple("onlyMutate", raw["onlyMutate"], sorted_values=True)
+    if any(not path.endswith(".py") or _WILDCARDS.intersection(path) for path in only_mutate):
+        raise ValueError("mutation scope onlyMutate must contain exact Python paths")
+    expansion_priority = _string_tuple(
+        "expansionPriority",
+        raw["expansionPriority"],
+        sorted_values=False,
+    )
+    return MutationScope("partial", "OMNI-0297", only_mutate, expansion_priority)
+
+
+def _scoped_module_paths(source_root: Path | str, modules: frozenset[str]) -> tuple[str, ...]:
+    root = Path(source_root)
+    return tuple(
+        sorted(_module_path(root, module).relative_to(root.parent).as_posix() for module in modules)
+    )
+
+
+def _validated_scope(
+    raw: object,
+    source_root: Path | str,
+    modules: frozenset[str],
+) -> MutationScope:
+    scope = _mutation_scope(raw)
+    if scope.only_mutate != _scoped_module_paths(source_root, modules):
+        raise ValueError("mutation scope onlyMutate must exactly match selector modules")
+    return scope
 
 
 def _selector_tuple(name: str, value: object, inventory: frozenset[str]) -> tuple[str, ...]:
@@ -205,6 +272,7 @@ def load_mutation_manifest(
     if len(set(selectors)) != len(selectors):
         raise ValueError("mutation selector appears in multiple shards")
     modules = frozenset(selector.split(".x", 1)[0] for selector in selectors)
+    scope = _validated_scope(document["scope"], source_root, modules)
     mutable = mutable_selector_inventory(source_root, modules)
     unexecutable = sorted(set(selectors) - mutable)
     if unexecutable:
@@ -212,4 +280,4 @@ def load_mutation_manifest(
     missing = sorted(mutable - set(selectors))
     if missing:
         raise ValueError(f"mutation manifest omits mutable callable: {missing[0]}")
-    return MutationManifest(version, shards)
+    return MutationManifest(version, scope, shards)
