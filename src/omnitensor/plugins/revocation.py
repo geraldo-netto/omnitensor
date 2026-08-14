@@ -100,6 +100,11 @@ class ConsentGuard:
             permission for permission in sorted(permissions) if not self._view.allows(permission)
         )
 
+    async def revoked_async(self, permissions: Collection[str]) -> tuple[str, ...]:
+        """Refresh grants without blocking the caller's event loop."""
+        required = tuple(permissions)
+        return await asyncio.to_thread(self.revoked, required)
+
     async def run(
         self,
         operation: Callable[[], Awaitable],
@@ -114,14 +119,14 @@ class ConsentGuard:
         if not callable(operation):
             raise TypeError("operation must be callable")
         required = set(permissions)
-        self._raise_if_revoked(required)
+        await self._raise_if_revoked(required)
         task = asyncio.ensure_future(operation())
         try:
             while True:
                 done, _pending = await asyncio.wait((task,), timeout=self._poll_seconds)
                 if done:
                     return await task
-                missing = self.revoked(required)
+                missing = await self.revoked_async(required)
                 if missing:
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
@@ -134,8 +139,8 @@ class ConsentGuard:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
 
-    def _raise_if_revoked(self, permissions: Collection[str]) -> None:
-        missing = self.revoked(permissions)
+    async def _raise_if_revoked(self, permissions: Collection[str]) -> None:
+        missing = await self.revoked_async(permissions)
         if missing:
             raise RevocationError(
                 "permission-denied",

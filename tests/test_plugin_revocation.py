@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 
@@ -96,6 +97,29 @@ def test_guarded_work_runs_to_completion_while_consent_holds(tmp_path):
         return "collected"
 
     assert asyncio.run(guard.run(work, {READ_SENSOR})) == "collected"
+
+
+def test_guard_refreshes_grants_away_from_the_event_loop(monkeypatch, tmp_path):
+    path = tmp_path / "grants.json"
+    grant(GrantLedger(path))
+    guard = ConsentGuard(view(path), poll_seconds=0.005)
+    event_loop_thread = threading.get_ident()
+    refresh_threads = []
+    revoked = guard.revoked
+
+    def record_refresh(permissions):
+        refresh_threads.append(threading.get_ident())
+        return revoked(permissions)
+
+    monkeypatch.setattr(guard, "revoked", record_refresh)
+
+    async def work():
+        await asyncio.sleep(0.02)
+        return "collected"
+
+    assert asyncio.run(guard.run(work, {READ_SENSOR})) == "collected"
+    assert len(refresh_threads) >= 2, "the polling refresh did not run"
+    assert all(thread != event_loop_thread for thread in refresh_threads)
 
 
 def test_guarded_work_is_refused_when_consent_was_never_given(tmp_path):
