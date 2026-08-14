@@ -149,6 +149,7 @@ only_mutate = [
     "src/omnitensor/executors/base.py",
     "src/omnitensor/executors/gpu.py",
     "src/omnitensor/forecastresult.py",
+    "src/omnitensor/mutation_engine.py",
     "src/omnitensor/outputcontract.py",
     "src/omnitensor/plugins/acceptance_kit.py",
     "src/omnitensor/plugins/document_acceptance.py",

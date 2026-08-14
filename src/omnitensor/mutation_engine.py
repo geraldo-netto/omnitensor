@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import sys
+from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 
 
@@ -15,6 +16,14 @@ def disable_string_literal_mutations() -> None:
         for entry in mutators.mutation_operators
         if entry[1] is not mutators.operator_string
     ]
+
+
+def _detach_project_imports(modules: MutableMapping[str, object] | None = None) -> None:
+    """Let Mutmut's sandbox import a fresh OmniTensor package."""
+    loaded = sys.modules if modules is None else modules
+    for name in tuple(loaded):
+        if name == "omnitensor" or name.startswith("omnitensor."):
+            loaded.pop(name, None)
 
 
 @contextmanager
@@ -33,6 +42,7 @@ def without_string_literal_mutations() -> Iterator[None]:
 def main() -> None:
     """Invoke mutmut after applying the project operator policy."""
     disable_string_literal_mutations()
+    _detach_project_imports()
     from mutmut.__main__ import cli  # noqa: PLC0415
 
     cli()

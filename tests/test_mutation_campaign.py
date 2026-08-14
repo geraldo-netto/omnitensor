@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from omnitensor import mutation_campaign
+from omnitensor import mutation_campaign, mutation_engine
 from omnitensor.mutation_campaign import (
     DEFAULT_MUTMUT_EXECUTABLE,
     execute_mutation_shard,
@@ -19,6 +19,7 @@ from omnitensor.mutation_campaign import (
     mutation_patterns,
 )
 from omnitensor.mutation_engine import (
+    _detach_project_imports,
     disable_string_literal_mutations,
     without_string_literal_mutations,
 )
@@ -94,6 +95,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "event-workload",
         "executors",
         "grounded-answer",
+        "mutation-launcher",
         "runtime-contract",
         "scheduler",
         "snapshot-forecast",
@@ -105,12 +107,13 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         30,
         21,
         15,
+        2,
         5,
         24,
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 162
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 164
     modules = {
         selector.split(".x", 1)[0]
         for shard in manifest.shards
@@ -121,6 +124,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.executors.base",
         "omnitensor.executors.gpu",
         "omnitensor.forecastresult",
+        "omnitensor.mutation_engine",
         "omnitensor.outputcontract",
         "omnitensor.plugins.acceptance_kit",
         "omnitensor.plugins.document_acceptance",
@@ -151,6 +155,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "document-binding": {"omnitensor.training.binding"},
         "event-workload": {"omnitensor.plugins.event_workload"},
         "grounded-answer": {"omnitensor.plugins.document_qa"},
+        "mutation-launcher": {"omnitensor.mutation_engine"},
     }
     for name, modules in expected_hotspots.items():
         shard = manifest.shard(name)
@@ -222,6 +227,28 @@ def test_project_mutation_engine_disables_only_string_literals():
         disable_string_literal_mutations()
         assert mutators.mutation_operators == expected
     assert mutators.mutation_operators == original
+
+
+def test_project_mutation_launcher_detaches_original_package_before_cli(monkeypatch):
+    modules = {
+        "omnitensor": object(),
+        "omnitensor.mutation_engine": object(),
+        "omnitensorx": object(),
+        "mutmut": object(),
+    }
+    _detach_project_imports(modules)
+    assert set(modules) == {"omnitensorx", "mutmut"}
+
+    calls = []
+    monkeypatch.setattr(
+        mutation_engine, "disable_string_literal_mutations", lambda: calls.append("policy")
+    )
+    monkeypatch.setattr(
+        mutation_engine, "_detach_project_imports", lambda: calls.append("detach")
+    )
+    monkeypatch.setattr("mutmut.__main__.cli", lambda: calls.append("cli"))
+    mutation_engine.main()
+    assert calls == ["policy", "detach", "cli"]
 
 
 def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
@@ -444,6 +471,7 @@ def test_campaign_cli_lists_manifest_shards_without_running_mutmut(capsys):
         "event-workload",
         "executors",
         "grounded-answer",
+        "mutation-launcher",
         "runtime-contract",
         "scheduler",
         "snapshot-forecast",
