@@ -194,6 +194,12 @@ def build_service(tmp_path, manifests=(), **kwargs):
     )
 
 
+async def wait_until(predicate, *, timeout: float = 2.0) -> None:
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0)
+
+
 def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     discovery = FakeDiscovery([tpu_device()])
     publisher = FakePublisher()
@@ -599,19 +605,20 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
         )
         assert service._snapshot_retracted is False
         runner = asyncio.get_running_loop().create_task(service.run())
-        await asyncio.sleep(0.05)
+        await wait_until(lambda: publisher.published)
         published_before_loss = len(publisher.published)
         assert published_before_loss >= 1
         discovery.devices.clear()
-        await asyncio.sleep(0.06)
+        await wait_until(lambda: publisher.retracted == 1)
         assert publisher.retracted == 1
         stale_count = len(publisher.published)
-        await asyncio.sleep(0.03)
+        absent_detect_calls = discovery.detect_calls
+        await wait_until(lambda: discovery.detect_calls >= absent_detect_calls + 2)
         # No devices: nothing new is published and the retract is not repeated.
         assert len(publisher.published) == stale_count
         assert publisher.retracted == 1
         discovery.devices.append(tpu_device())
-        await asyncio.sleep(0.06)
+        await wait_until(lambda: len(publisher.published) > stale_count)
         assert len(publisher.published) > stale_count
         assert service._snapshot_retracted is False
         service._stopping.set()
