@@ -13,7 +13,7 @@ import math
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol  # noqa: F401
 
 from omnitensor.telemetry_recorder import TelemetryRecorder
 from omnitensor.telemetry_types import FeatureRow
@@ -27,9 +27,9 @@ from ..registry import (
     load_workloads,
     validate_document,
 )
+from .forecast_client import BUS_NAME, OBJECT_PATH, DbusForecastClient  # noqa: F401
+from .forecast_contracts import ForecastClient, ForecastRunError
 
-BUS_NAME = "org.cinnamon.OmniTensor1"
-OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 MAX_WIRE_BYTES = 1024 * 1024
 REQUIRED_METHODS = frozenset({"DescribeContract", "SubmitJob", "GetJobResult"})
 REQUIRED_SCHEMAS = (
@@ -38,25 +38,6 @@ REQUIRED_SCHEMAS = (
     "runtime-job-result-request",
     "runtime-job-result",
 )
-
-
-class ForecastRunError(ValueError):
-    """Stable refusal from the trusted forecast path."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
-
-
-class ForecastClient(Protocol):
-    async def describe_contract(self) -> str: ...
-
-    async def submit_job(self, request: str) -> str: ...
-
-    async def get_job_result(self, request: str) -> str: ...
-
-    def close(self) -> None: ...
 
 
 def load_forecast_binding(
@@ -276,47 +257,3 @@ class TrustedForecastRunner:
             if attempt + 1 < self._attempts:
                 await self._sleep(self._poll_interval)
         raise ForecastRunError("forecast-timeout", "forecast did not finish within the poll limit")
-
-
-class DbusForecastClient:
-    """Thin async adapter over the local session-bus interface."""
-
-    def __init__(self, bus, interface) -> None:
-        self._bus = bus
-        self._interface = interface
-
-    @classmethod
-    async def connect(cls) -> DbusForecastClient:  # pragma: no cover - needs live bus
-        from dbus_fast import BusType
-        from dbus_fast.aio import MessageBus
-
-        try:
-            bus = await MessageBus(bus_type=BusType.SESSION).connect()
-            introspection = await bus.introspect(BUS_NAME, OBJECT_PATH)
-            proxy = bus.get_proxy_object(BUS_NAME, OBJECT_PATH, introspection)
-            return cls(bus, proxy.get_interface(BUS_NAME))
-        except Exception as error:
-            if "bus" in locals():
-                bus.disconnect()
-            raise ForecastRunError("runtime-unavailable", str(error)) from error
-
-    def close(self) -> None:
-        self._bus.disconnect()
-
-    async def describe_contract(self) -> str:
-        try:
-            return await self._interface.call_describe_contract()
-        except Exception as error:
-            raise ForecastRunError("runtime-unavailable", str(error)) from error
-
-    async def submit_job(self, request: str) -> str:
-        try:
-            return await self._interface.call_submit_job(request)
-        except Exception as error:
-            raise ForecastRunError("runtime-unavailable", str(error)) from error
-
-    async def get_job_result(self, request: str) -> str:
-        try:
-            return await self._interface.call_get_job_result(request)
-        except Exception as error:
-            raise ForecastRunError("runtime-unavailable", str(error)) from error
