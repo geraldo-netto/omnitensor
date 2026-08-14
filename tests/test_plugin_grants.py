@@ -60,6 +60,25 @@ def test_missing_ledger_is_empty_and_does_not_create_state(tmp_path):
     assert not path.exists()
 
 
+@given(directory_name=st.from_regex(r"[A-Za-z0-9_-]{1,24}", fullmatch=True))
+def test_ledger_expands_user_paths_before_persistence(directory_name):
+    with tempfile.TemporaryDirectory() as root_text:
+        root = Path(root_text)
+        home = root / "home"
+        working = root / "working"
+        home.mkdir()
+        working.mkdir()
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setenv("HOME", str(home))
+            monkeypatch.chdir(working)
+
+            ledger = GrantLedger(f"~/{directory_name}/grants.json")
+            grant_once(ledger)
+
+        assert (home / directory_name / "grants.json").is_file()
+        assert not (working / "~").exists()
+
+
 def test_declared_grant_persists_active_provenance_and_audit(tmp_path):
     path = tmp_path / "grants.json"
     ledger = GrantLedger(path)

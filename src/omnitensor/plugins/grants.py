@@ -79,14 +79,14 @@ class GrantLedger:
 
     def __init__(
         self,
-        path: Path,
+        path: Path | str,
         *,
         max_bytes: int = DEFAULT_MAX_GRANTS_BYTES,
         audit_limit: int = DEFAULT_AUDIT_EVENTS,
     ):
         _validate_positive_integer(max_bytes, "max_bytes")
         _validate_positive_integer(audit_limit, "audit_limit")
-        self._path = Path(path)
+        self._path = Path(path).expanduser()
         self._max_bytes = max_bytes
         self._audit_limit = audit_limit
         self._state_lock = threading.RLock()
