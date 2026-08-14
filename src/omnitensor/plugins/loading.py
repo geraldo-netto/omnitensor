@@ -11,7 +11,6 @@ import shutil
 import stat as stat
 import sys
 import tempfile as tempfile
-import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from collections.abc import Collection as Collection
@@ -32,6 +31,7 @@ from .budgets import current_process_cgroup
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
+from .offloop import run_off_loop as _run_off_loop
 from .protocol import PluginProgress, PluginRequest, PluginResultStatus
 from .sandbox import SELECTED_FILES_PERMISSION
 from .sandbox import FilesystemSandbox as FilesystemSandbox
@@ -79,38 +79,6 @@ _import_paths = _specs.worker_import_paths_tuple
 _trusted_runtime_paths = _specs.trusted_runtime_paths
 LOGGER = logging.getLogger(__name__)
 GRANT_REFRESH_SECONDS = 0.25
-OFF_LOOP_POLL_SECONDS = 0.001
-
-
-async def _run_off_loop(callback: Callable[..., object], *args: object) -> object:
-    """Run one blocking loading operation without asyncio's shared executor."""
-    completed = threading.Event()
-    outcome: list[object] = []
-    errors: list[BaseException] = []
-
-    def invoke() -> None:
-        try:
-            outcome.append(callback(*args))
-        except BaseException as caught:
-            errors.append(caught)
-        finally:
-            completed.set()
-
-    worker = threading.Thread(
-        target=invoke,
-        name="omnitensor-loading",
-        daemon=True,
-    )
-    worker.start()
-    try:
-        while not completed.is_set():
-            await asyncio.sleep(OFF_LOOP_POLL_SECONDS)
-    finally:
-        if not worker.is_alive():
-            worker.join()
-    if errors:
-        raise errors[0]
-    return outcome[0]
 
 
 async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:

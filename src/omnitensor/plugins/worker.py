@@ -37,6 +37,7 @@ from .ipc import (
     ready_frame,
     result_frame,
 )
+from .offloop import run_off_loop
 from .protocol import PluginContext, PluginProgress, PluginRequest, WorkloadPlugin
 from .seccomp import confinement_error, install_filter
 
@@ -157,7 +158,7 @@ async def serve_worker_requests(
         maximum_protocol,
         WORKER_CAPABILITIES,
     )
-    service = parse_handshake(await asyncio.to_thread(_read_frame, reader))
+    service = parse_handshake(await run_off_loop(_read_frame, reader))
     agreement = negotiate_handshake(service, offer)
     _write_frame(writer, handshake_frame(offer))
     await plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
@@ -166,7 +167,7 @@ async def serve_worker_requests(
     try:
         while True:
             try:
-                frame = await asyncio.to_thread(_read_frame, reader)
+                frame = await run_off_loop(_read_frame, reader)
             except EOFError:
                 break
             if not await _handle_request_frame(

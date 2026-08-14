@@ -872,7 +872,7 @@ def test_external_runtime_repeats_grant_refreshes_off_the_event_loop(
 
     assert len(refresh_threads) == refreshes
     assert all(thread.ident != loop_thread for thread in refresh_threads)
-    assert all(thread.name == "omnitensor-loading" for thread in refresh_threads)
+    assert all(thread.name == "omnitensor-plugin-io" for thread in refresh_threads)
     assert all(thread.daemon for thread in refresh_threads)
 
 
@@ -2188,6 +2188,13 @@ def test_worker_default_protocol_and_eof_shutdown():
 
 
 def test_executable_worker_streams_progress_and_one_terminal_result():
+    reads = []
+
+    class RecordingReader(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(threading.current_thread())
+            return super().read(size)
+
     class ExecutablePlugin(TrackingPlugin):
         async def execute(self, request, cancellation, progress):
             cancellation.raise_if_cancelled()
@@ -2208,7 +2215,8 @@ def test_executable_worker_streams_progress_and_one_terminal_result():
         10,
         None,
     )
-    reader = io.BytesIO(
+    loop_thread = threading.get_ident()
+    reader = RecordingReader(
         encode_frame(handshake_frame(service_offer)) + encode_frame(execute_frame(request))
     )
     writer = io.BytesIO()
@@ -2241,6 +2249,44 @@ def test_executable_worker_streams_progress_and_one_terminal_result():
         frozenset(),
     )
     assert frames[1].payload == {"pluginId": "external-example"}
+    assert reads
+    assert all(thread.ident != loop_thread for thread in reads)
+    assert all(thread.name == "omnitensor-plugin-io" for thread in reads)
+    assert all(thread.daemon for thread in reads)
+
+
+def test_worker_blocking_frame_read_keeps_the_event_loop_responsive():
+    service_offer = HandshakeOffer("external-example", 1, 1, frozenset())
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingReader(io.BytesIO):
+        blocked = False
+
+        def read(self, size=-1):
+            if not self.blocked:
+                self.blocked = True
+                entered.set()
+                release.wait()
+            return super().read(size)
+
+    async def scenario():
+        reader = BlockingReader(encode_frame(handshake_frame(service_offer)))
+        task = asyncio.create_task(serve_worker_requests(TrackingPlugin(), reader, io.BytesIO()))
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        observed = []
+        asyncio.get_running_loop().call_soon(observed.append, "responsive")
+        await asyncio.sleep(0)
+        assert observed == ["responsive"]
+        assert not task.done()
+        release.set()
+        await task
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
 
 
 def test_executable_worker_receives_cancel_while_request_is_running():
