@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from .atomicio import JsonTooLargeError, read_json_bounded
+from .atomicio import write_bytes_atomic as _write_bytes_atomic
 from .plugins.event_workload import EventWorkloadError, confirmed_ics, select_sources
 from .plugins.events import EventResultError, parse_grounded_event_result
 from .plugins.qwen import QwenProviderError, load_qwen_catalog
@@ -158,16 +158,13 @@ def _write_new(path: Path, content: bytes) -> None:
     target = Path(path)
     if not target.is_absolute():
         raise EventClientError("output-invalid", "output path must be absolute")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        target.unlink(missing_ok=True)
-        raise
+    _write_bytes_atomic(
+        target,
+        content,
+        0o600,
+        replace=False,
+        prefix=".event-export-",
+    )
 
 
 def _print_json(document: object) -> None:

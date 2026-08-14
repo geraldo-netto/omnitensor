@@ -182,12 +182,11 @@ def test_export_requires_absolute_path_and_removes_partial_output(tmp_path, monk
 
     output = tmp_path / "partial.ics"
 
-    def interrupted(_descriptor):
-        output.unlink()
-        raise OSError
+    def interrupted(*_args, **_kwargs):
+        raise OSError("sync")
 
-    monkeypatch.setattr(event_cli.os, "fsync", interrupted)
-    with pytest.raises(OSError):
+    monkeypatch.setattr(event_cli, "_write_bytes_atomic", interrupted)
+    with pytest.raises(OSError, match="sync"):
         event_cli._write_new(output, b"calendar")
     assert not output.exists()
 

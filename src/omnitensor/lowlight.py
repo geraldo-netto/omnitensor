@@ -9,15 +9,15 @@ a new output without ever replacing either an input or an earlier result.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import os
 import stat
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .atomicio import fsync_directory as _fsync_directory
+from .atomicio import write_bytes_atomic as _write_bytes_atomic
 from .lowlight_settings import LOW_LIGHT_CONFIGURATION_SPEC as LOW_LIGHT_CONFIGURATION_SPEC
 from .lowlight_settings import (
     LOW_LIGHT_CONFIGURATION_VERSION as LOW_LIGHT_CONFIGURATION_VERSION,
@@ -151,38 +151,25 @@ def publish_low_light_output(
     source_path = _source_file(current.input_folder, source)
     name = _output_name(output_name if output_name is not None else source_path.name)
     destination = current.output_folder / name
-    handle, staged_name = tempfile.mkstemp(
-        dir=current.output_folder,
-        prefix=".low-light-output-",
-    )
-    staged = Path(staged_name)
-    published = False
     try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.link(staged, destination, follow_symlinks=False)
-        except FileExistsError as error:
-            raise LowLightWorkspaceError(
-                "output-exists",
-                f"refusing to overwrite existing output: {destination}",
-            ) from error
-        published = True
+        _write_bytes_atomic(
+            destination,
+            encoded,
+            0o600,
+            replace=False,
+            prefix=".low-light-output-",
+        )
         _fsync_directory(current.output_folder)
-    except LowLightWorkspaceError:
-        raise
+    except FileExistsError as error:
+        raise LowLightWorkspaceError(
+            "output-exists",
+            f"refusing to overwrite existing output: {destination}",
+        ) from error
     except OSError as error:
         raise LowLightWorkspaceError(
             "output-unavailable",
             f"cannot publish output in {current.output_folder}",
         ) from error
-    finally:
-        with contextlib.suppress(OSError):
-            staged.unlink()
-        if published:
-            _fsync_directory(current.output_folder)
     return destination
 
 
@@ -290,15 +277,6 @@ def _output_name(name: str) -> str:
             "output name must be one non-empty filename",
         )
     return name
-
-
-def _fsync_directory(directory: Path) -> None:
-    with contextlib.suppress(OSError):
-        descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point owns this path

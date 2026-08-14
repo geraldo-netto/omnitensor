@@ -8,6 +8,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..atomicio import fsync_directory as _fsync_directory
 from ..atomicio import read_json_bounded
 from .artifact_installation import (
     ARTIFACT_STORE_LOCK_FILE,
@@ -346,12 +347,3 @@ def _version_size(version_root: Path) -> int:
             "cache-state-invalid", f"cannot account artifact version: {error}"
         ) from error
     return total
-
-
-def _fsync_directory(directory: Path) -> None:
-    with contextlib.suppress(OSError):
-        descriptor = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)

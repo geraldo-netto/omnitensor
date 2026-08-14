@@ -202,7 +202,7 @@ def test_atomic_key_write_removes_partial_file_on_sync_failure(tmp_path, monkeyp
     def fail_sync(_descriptor):
         raise OSError("sync")
 
-    monkeypatch.setattr(publisher_identity.os, "fsync", fail_sync)
+    monkeypatch.setattr("omnitensor.atomicio.os.fsync", fail_sync)
 
     with pytest.raises(OSError, match="sync"):
         publisher_identity._write_bytes_atomic(destination, b"secret", 0o600)
@@ -220,7 +220,9 @@ def test_keypair_creation_removes_private_half_when_public_write_fails(
         tmp_path / "trust.json",
     )
     original = publisher_identity._write_bytes_atomic
+    original_remove = publisher_identity._remove_durable
     calls = 0
+    removed = []
 
     def fail_second(path, payload, mode):
         nonlocal calls
@@ -229,9 +231,15 @@ def test_keypair_creation_removes_private_half_when_public_write_fails(
             raise OSError("public write")
         original(path, payload, mode)
 
+    def remove_durable(path):
+        removed.append(path)
+        original_remove(path)
+
     monkeypatch.setattr(publisher_identity, "_write_bytes_atomic", fail_second)
+    monkeypatch.setattr(publisher_identity, "_remove_durable", remove_durable)
     with pytest.raises(OSError, match="public write"):
         publisher_identity._create_keypair(paths)
 
+    assert removed == [paths.private_key]
     assert not paths.private_key.exists()
     assert not paths.public_key.exists()

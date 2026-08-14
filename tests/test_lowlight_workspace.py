@@ -438,41 +438,36 @@ def test_staging_and_link_options_keep_atomic_publish_inside_output_root(
     tmp_path, monkeypatch
 ):
     workspace, source = _workspace(tmp_path)
-    real_mkstemp = tempfile.mkstemp
-    real_link = os.link
-    stages = []
-    links = []
+    real_write = lowlight._write_bytes_atomic
+    calls = []
 
-    def tracked_mkstemp(*, dir, prefix):
-        stages.append((dir, prefix))
-        return real_mkstemp(dir=dir, prefix=prefix)
+    def tracked_write(path, payload, mode, **options):
+        calls.append((path, payload, mode, options))
+        return real_write(path, payload, mode, **options)
 
-    def tracked_link(source_path, destination_path, *, follow_symlinks):
-        links.append((Path(source_path), Path(destination_path), follow_symlinks))
-        return real_link(source_path, destination_path, follow_symlinks=follow_symlinks)
-
-    monkeypatch.setattr("omnitensor.lowlight.tempfile.mkstemp", tracked_mkstemp)
-    monkeypatch.setattr("omnitensor.lowlight.os.link", tracked_link)
+    monkeypatch.setattr(lowlight, "_write_bytes_atomic", tracked_write)
 
     destination = publish_low_light_output(workspace, source, b"result")
 
-    assert stages == [(workspace.output_folder, ".low-light-output-")]
-    assert len(links) == 1
-    staged, linked_destination, follows = links[0]
-    assert staged.parent == workspace.output_folder
-    assert linked_destination == destination
-    assert follows is False
+    assert calls == [
+        (
+            destination,
+            b"result",
+            0o600,
+            {"replace": False, "prefix": ".low-light-output-"},
+        )
+    ]
 
 
 def test_directory_sync_uses_read_only_directory_descriptor_and_closes(monkeypatch):
     calls = []
 
     monkeypatch.setattr(
-        "omnitensor.lowlight.os.open",
+        "omnitensor.atomicio.os.open",
         lambda directory, flags: calls.append(("open", directory, flags)) or 17,
     )
-    monkeypatch.setattr("omnitensor.lowlight.os.fsync", lambda fd: calls.append(("fsync", fd)))
-    monkeypatch.setattr("omnitensor.lowlight.os.close", lambda fd: calls.append(("close", fd)))
+    monkeypatch.setattr("omnitensor.atomicio.os.fsync", lambda fd: calls.append(("fsync", fd)))
+    monkeypatch.setattr("omnitensor.atomicio.os.close", lambda fd: calls.append(("close", fd)))
 
     lowlight._fsync_directory(Path("/configured/output"))
 
@@ -489,7 +484,7 @@ def test_directory_sync_uses_read_only_directory_descriptor_and_closes(monkeypat
 
 def test_directory_sync_is_best_effort(monkeypatch):
     monkeypatch.setattr(
-        "omnitensor.lowlight.os.open",
+        "omnitensor.atomicio.os.open",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("unsupported")),
     )
     assert lowlight._fsync_directory(Path("/configured/output")) is None
@@ -499,8 +494,11 @@ def test_publish_failure_cleans_only_its_stage(tmp_path, monkeypatch):
     workspace, source = _workspace(tmp_path)
     original = source.read_bytes()
     monkeypatch.setattr(
-        "omnitensor.lowlight.os.link",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("filesystem refused link")),
+        lowlight,
+        "_write_bytes_atomic",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("filesystem refused link")
+        ),
     )
 
     with pytest.raises(LowLightWorkspaceError) as excinfo:

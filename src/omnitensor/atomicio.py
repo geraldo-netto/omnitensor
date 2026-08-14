@@ -41,20 +41,63 @@ def read_json_bounded(path: Path, max_bytes: int) -> object:
     return json.loads(payload)
 
 
-def write_json_atomic(path: Path, payload: dict, prefix: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle, temp_name = tempfile.mkstemp(dir=path.parent, prefix=prefix)
+def fsync_directory(directory: Path) -> None:
+    """Best-effort durability for a directory entry update."""
+    with contextlib.suppress(OSError):
+        descriptor = os.open(
+            directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def write_bytes_atomic(
+    path: Path,
+    payload: bytes,
+    mode: int,
+    *,
+    replace: bool = True,
+    prefix: str | None = None,
+) -> None:
+    """Durably publish bytes from a synced same-directory staging file.
+
+    Replacement uses :func:`os.replace`. Exclusive publication hard-links the
+    stage into place, so an existing file is refused atomically and never
+    overwritten.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=prefix if prefix is not None else f".{target.name}.",
+    )
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, separators=(",", ":"))
+        os.fchmod(handle, mode)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp_name, path)
+        if replace:
+            os.replace(temporary_name, target)
+        else:
+            os.link(temporary_name, target, follow_symlinks=False)
+            with contextlib.suppress(OSError):
+                os.unlink(temporary_name)
     except BaseException:
         with contextlib.suppress(OSError):
-            os.unlink(temp_name)
+            os.close(handle)
+        with contextlib.suppress(OSError):
+            os.unlink(temporary_name)
         raise
-    _fsync_directory(path.parent)
+    fsync_directory(target.parent)
+
+
+def write_json_atomic(path: Path, payload: dict, prefix: str) -> None:
+    serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    write_bytes_atomic(path, serialized, 0o600, prefix=prefix)
 
 
 def remove_durable(path: Path) -> None:
@@ -62,15 +105,4 @@ def remove_durable(path: Path) -> None:
     so the removal itself survives a power failure."""
     with contextlib.suppress(FileNotFoundError):
         path.unlink()
-        _fsync_directory(path.parent)
-
-
-def _fsync_directory(directory: Path) -> None:
-    # Best effort: some filesystems refuse directory fsync; the data file
-    # itself is already synced.
-    with contextlib.suppress(OSError):
-        directory_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        fsync_directory(path.parent)

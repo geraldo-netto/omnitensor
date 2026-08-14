@@ -18,7 +18,6 @@ import os
 import re
 import stat
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +26,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from .atomicio import remove_durable as _remove_durable
+from .atomicio import write_bytes_atomic as _write_bytes_atomic
 from .plugins.artifact_trust import (
     ArtifactProvenance,
     ArtifactTrustRoot,
@@ -239,24 +240,7 @@ def _create_keypair(paths: PublisherIdentityPaths) -> None:
         _write_bytes_atomic(paths.public_key, public_pem, 0o644)
     except BaseException:
         with contextlib.suppress(OSError):
-            paths.private_key.unlink()
-        raise
-
-
-def _write_bytes_atomic(path: Path, payload: bytes, mode: int) -> None:
-    handle, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    try:
-        os.fchmod(handle, mode)
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.close(handle)
-        with contextlib.suppress(OSError):
-            os.unlink(temporary_name)
+            _remove_durable(paths.private_key)
         raise
 
 

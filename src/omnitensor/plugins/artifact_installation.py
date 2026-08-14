@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from omnitensor.atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from omnitensor.atomicio import fsync_directory as _fsync_directory
 from omnitensor.storelock import store_lock
 
 from .artifact_trust import (
@@ -648,15 +649,6 @@ def _remove_stage(stage: Path) -> None:
             entry.unlink()
     with contextlib.suppress(OSError):
         stage.rmdir()
-
-
-def _fsync_directory(directory: Path) -> None:
-    with contextlib.suppress(OSError):
-        descriptor = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
 
 ARTIFACT_STORE_LOCK_FILE = ".artifact-store.lock"
