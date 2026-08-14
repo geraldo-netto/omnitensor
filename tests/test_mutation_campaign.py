@@ -74,14 +74,28 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     manifest = load_mutation_manifest(MANIFEST, source_root=ROOT / "src")
 
     assert manifest.shard_names() == (
+        "acceptance",
+        "document-binding",
+        "event-workload",
         "executors",
+        "grounded-answer",
         "runtime-contract",
         "scheduler",
         "snapshot-forecast",
         "tensor-output",
     )
-    assert [len(shard.selectors) for shard in manifest.shards] == [21, 5, 24, 10, 12]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 72
+    assert [len(shard.selectors) for shard in manifest.shards] == [
+        42,
+        4,
+        30,
+        21,
+        15,
+        5,
+        24,
+        10,
+        12,
+    ]
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 163
     assert {
         selector.split(".x", 1)[0]
         for shard in manifest.shards
@@ -92,10 +106,34 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.executors.gpu",
         "omnitensor.forecastresult",
         "omnitensor.outputcontract",
+        "omnitensor.plugins.acceptance_kit",
+        "omnitensor.plugins.document_acceptance",
+        "omnitensor.plugins.document_qa",
+        "omnitensor.plugins.event_workload",
         "omnitensor.scheduler",
         "omnitensor.snapshot",
         "omnitensor.tensorcontract",
+        "omnitensor.training.binding",
     }
+    expected_hotspots = {
+        "acceptance": {
+            "omnitensor.plugins.acceptance_kit",
+            "omnitensor.plugins.document_acceptance",
+        },
+        "document-binding": {"omnitensor.training.binding"},
+        "event-workload": {"omnitensor.plugins.event_workload"},
+        "grounded-answer": {"omnitensor.plugins.document_qa"},
+    }
+    for name, modules in expected_hotspots.items():
+        shard = manifest.shard(name)
+        assert {selector.split(".x", 1)[0] for selector in shard.selectors} == modules
+        run_command, results_command = mutation_commands(shard, executable="mutmut")
+        assert run_command == (
+            "mutmut",
+            "run",
+            *(f"{selector}__mutmut_*" for selector in shard.selectors),
+        )
+        assert results_command == ("mutmut", "results", "--all", "true")
     with pytest.raises(ValueError, match="no shard named unknown"):
         manifest.shard("unknown")
 
@@ -313,7 +351,11 @@ def test_campaign_refuses_tool_failures_and_removes_stale_reports(tmp_path, stag
 def test_campaign_cli_lists_manifest_shards_without_running_mutmut(capsys):
     assert mutation_campaign.main([str(MANIFEST), "--list-shards"]) == 0
     assert json.loads(capsys.readouterr().out) == [
+        "acceptance",
+        "document-binding",
+        "event-workload",
         "executors",
+        "grounded-answer",
         "runtime-contract",
         "scheduler",
         "snapshot-forecast",
@@ -419,3 +461,5 @@ def test_ci_matrix_is_derived_from_manifest_and_runs_the_same_campaign():
     assert '"mutmut==3.7.0",' in project
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "--selector-file mutation-selectors.json --shard scheduler" in readme
+    for shard in ("acceptance", "document-binding", "event-workload", "grounded-answer"):
+        assert f"--shard {shard} --report /tmp/omnitensor-mutmut-{shard}.txt" in readme

@@ -132,6 +132,16 @@ the shards, then reproduce any one locally with the same runner CI uses:
   --shard scheduler --report /tmp/omnitensor-mutmut-scheduler.txt
 ```
 
+The post-split operational-acceptance shards use the same fail-closed runner;
+each shard contains every mutation-bearing callable in its named owner modules:
+
+```sh
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json --shard acceptance --report /tmp/omnitensor-mutmut-acceptance.txt
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json --shard document-binding --report /tmp/omnitensor-mutmut-document-binding.txt
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json --shard event-workload --report /tmp/omnitensor-mutmut-event-workload.txt
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json --shard grounded-answer --report /tmp/omnitensor-mutmut-grounded-answer.txt
+```
+
 The runner passes every `__mutmut_*` pattern directly as an argument, never
 through shell expansion, and gates the resulting report at 80% per callable.
 The development extra pins mutmut 3.7.0 because selector mangling and result
