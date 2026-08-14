@@ -208,12 +208,25 @@ def test_default_dispatcher_wraps_only_a_configured_store_with_the_cache():
     def cached(_artifact_id, _reference):
         return None
 
+    def identity(_profile_id, _backend):
+        return "gpu-renderD128"
+
+    def exact(_backend, _device_id):
+        return None
+
     unavailable = dispatch_routing.default_dispatcher({}, None, {}, None, ())
     direct = dispatch_routing.default_dispatcher(
         workloads, scheduler, executors, raw_store, ("/allowed",)
     )
     wrapped = dispatch_routing.default_dispatcher(
-        {}, None, {}, raw_store, (), resolve_artifact=cached
+        {},
+        None,
+        {},
+        raw_store,
+        (),
+        resolve_artifact=cached,
+        device_identity=identity,
+        executor_for_device=exact,
     )
 
     assert isinstance(unavailable, UnavailableJobDispatcher)
@@ -226,6 +239,90 @@ def test_default_dispatcher_wraps_only_a_configured_store_with_the_cache():
     assert isinstance(wrapped, InferenceJobDispatcher)
     assert isinstance(wrapped._artifacts, dispatch_routing.CachedArtifactSource)
     assert wrapped._artifacts._resolve is cached
+    assert wrapped._device_identity is identity
+    assert wrapped._executor_for_device is exact
+
+
+def test_runner_routing_forwards_every_composition_dependency(monkeypatch):
+    expected = object()
+    dependencies = {
+        name: object()
+        for name in (
+            "workloads",
+            "dispatcher",
+            "resolve_artifact",
+            "cancellations",
+            "is_paused",
+            "is_enabled",
+            "allows_permission",
+            "deliver",
+            "progress",
+        )
+    }
+
+    def build(workloads, **options):
+        assert workloads is dependencies["workloads"]
+        assert options == {
+            "dispatcher": dependencies["dispatcher"],
+            "resolve_artifact": dependencies["resolve_artifact"],
+            "encode_result": dispatch_routing.inference_result_payload,
+            "cancellations": dependencies["cancellations"],
+            "is_paused": dependencies["is_paused"],
+            "is_enabled": dependencies["is_enabled"],
+            "allows_permission": dependencies["allows_permission"],
+            "deliver": dependencies["deliver"],
+            "progress": dependencies["progress"],
+        }
+        return expected
+
+    monkeypatch.setattr(dispatch_routing, "build_plugin_runners", build)
+
+    assert dispatch_routing.build_runners(**dependencies) is expected
+
+
+def test_service_builders_forward_live_runtime_owners(monkeypatch):
+    subject = object.__new__(service.OmniTensorService)
+    subject._workloads = object()
+    subject._scheduler = object()
+    subject._executors = {"gpu": object()}
+    subject._artifact_store = object()
+    subject._input_roots = object()
+    subject._job_dispatcher = object()
+    subject._cancellations = object()
+    subject.control = SimpleNamespace(state=SimpleNamespace(paused=True))
+    dispatcher_result = object()
+    runners_result = object()
+
+    def default_dispatcher(workloads, scheduler, executors, artifact_store, roots, **options):
+        assert workloads is subject._workloads
+        assert scheduler is subject._scheduler
+        assert executors() is subject._executors
+        assert artifact_store is subject._artifact_store
+        assert roots is subject._input_roots
+        assert options["resolve_artifact"].__self__ is subject
+        assert options["executor_view"].__self__ is subject
+        assert options["scheduler_lane"].__self__ is subject
+        assert options["device_identity"].__self__ is subject
+        assert options["executor_for_device"].__self__ is subject
+        return dispatcher_result
+
+    def build_runners(workloads, **options):
+        assert workloads is subject._workloads
+        assert options["dispatcher"] is subject._job_dispatcher
+        assert options["resolve_artifact"].__self__ is subject
+        assert options["cancellations"] is subject._cancellations
+        assert options["is_paused"]() is True
+        assert options["is_enabled"].__self__ is subject
+        assert options["allows_permission"].__self__ is subject
+        assert options["deliver"].__self__ is subject
+        assert options["progress"].__self__ is subject
+        return runners_result
+
+    monkeypatch.setattr(service.routing, "default_dispatcher", default_dispatcher)
+    monkeypatch.setattr(service.routing, "build_runners", build_runners)
+
+    assert subject._default_dispatcher() is dispatcher_result
+    assert subject._build_runners() is runners_result
 
 
 def test_artifact_owner_builds_plugin_references_in_canonical_companion_order():
@@ -815,6 +912,11 @@ def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():
     assert executors.lane_key("tpu", "gpu-renderD129") == "tpu"
     assert executors.device_id("gpu", "gpu-renderD129") == "gpu-renderD129"
     assert executors.device_id("tpu", None) is None
+    assert executors.executor_for_device("gpu", "gpu-renderD129") is (
+        executors.device_executors["gpu-renderD129"]
+    )
+    assert executors.executor_for_device("gpu", "gpu-renderD999") is None
+    assert executors.executor_for_device("tpu", "tpu-absent") is None
     assert tuple(executors.scheduler_executors()) == (
         "tpu",
         "npu",
@@ -840,6 +942,16 @@ def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():
     )
     assert reused.device_executors == executors.device_executors
 
+
+def test_executor_composition_matches_non_gpu_devices_by_stable_identity():
+    tpu = Device("tpu-pcie-0", "tpu", "Coral", "pcie")
+    npu = Device("npu-accel0", "npu", "Intel NPU", "accel")
+    executors = build_executors([tpu, npu])
+
+    assert executors.executor_for_device("tpu", tpu.id) is executors["tpu"]
+    assert executors.executor_for_device("npu", npu.id) is executors["npu"]
+    assert executors.executor_for_device("tpu", npu.id) is None
+    assert executors.executor_for_device("npu", tpu.id) is None
 
 def test_an_unmatchable_render_identity_is_fail_closed():
     gpu = Device("gpu-renderD128", "gpu", "GPU", "dri")

@@ -27,11 +27,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ..dispatch_lane import PreparedDispatchLane
 from ..forecastresult import forecast_reading
 from ..job_ports import JobDispatcher
 from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
-from .artifacts import ArtifactReference
 from .cancellation import Cancellation, CancellationJournal, CancellationRegistry
 from .flow import PluginFlowController
 from .pipeline import (
@@ -143,12 +143,6 @@ class ArtifactResolver(Protocol):
     def __call__(self, artifact_id: str): ...
 
 
-class ModelSelector(Protocol):
-    """Choose the model belonging to the accelerator lane that will run."""
-
-    def __call__(self, workload: Workload) -> Mapping[str, object] | None: ...
-
-
 class ProgressSink(Protocol):
     """Record where a running job has got to, against its owner."""
 
@@ -163,7 +157,6 @@ def inference_stages(
     encode_result: Callable[[object], dict],
     deliver: Callable[[str, dict], None] | None = None,
     progress: ProgressSink | None = None,
-    select_model: ModelSelector | None = None,
 ) -> dict[PipelineStage, Callable]:
     """Compose the six stages of an inference profile from existing parts."""
     try:
@@ -178,13 +171,21 @@ def inference_stages(
         raise OrchestrationError(
             "profile-has-no-model", f"{workload.id} declares no model and cannot run inference"
         )
-    model_of = select_model or (lambda selected_workload: selected_workload.model)
+    prepare_lane = getattr(dispatcher, "prepare_lane", None)
+    dispatch_prepared = getattr(dispatcher, "dispatch_prepared", None)
+    if not callable(prepare_lane) or not callable(dispatch_prepared):
+        raise OrchestrationError(
+            "prepared-dispatch-unavailable",
+            "inference dispatcher must prepare and consume immutable lanes",
+        )
     read_selected_labels = _selected_label_reader(resolve_artifact)
     stages = {
         PipelineStage.COLLECT: _collect_stage(),
         PipelineStage.PREPROCESS: _preprocess_stage(workload),
-        PipelineStage.RESOLVE: _resolve_stage(workload, resolve_artifact, model_of),
-        PipelineStage.INFER: _infer_stage(workload, dispatcher, encode_result),
+        PipelineStage.RESOLVE: _resolve_stage(workload, resolve_artifact, prepare_lane),
+        PipelineStage.INFER: _infer_stage(
+            workload, dispatch_prepared, encode_result
+        ),
         PipelineStage.POSTPROCESS: _postprocess_stage(
             workload,
             _label_reader(model, resolve_artifact),
@@ -244,37 +245,48 @@ def _preprocess_stage(workload: Workload) -> Callable:
 def _resolve_stage(
     workload: Workload,
     resolve_artifact: ArtifactResolver,
-    select_model: ModelSelector,
+    prepare_lane: Callable[[str], tuple[PreparedDispatchLane, Mapping[str, object]]],
 ) -> Callable:
     async def resolve(preprocessed: PreprocessedOutput) -> ResolvedOutput:
-        model = select_model(workload)
-        if not isinstance(model, Mapping):
+        prepared = prepare_lane(workload.id)
+        if (
+            not isinstance(prepared, tuple)
+            or len(prepared) != 2
+            or not isinstance(prepared[0], PreparedDispatchLane)
+            or not isinstance(prepared[1], Mapping)
+        ):
             raise OrchestrationError(
                 "model-lane-unavailable",
-                f"{workload.id} has no model for an available accelerator lane",
+                f"{workload.id} has no valid prepared accelerator lane",
             )
-        resolution = resolve_artifact(model["id"])
+        lane, model = prepared
+        resolution = resolve_artifact(lane.model_reference.id)
         if not getattr(resolution, "ready", False):
             raise OrchestrationError(
                 "artifact-unavailable", getattr(resolution, "detail", "artifact is not ready")
             )
         return ResolvedOutput(
-            _reference_of(resolution, model),
+            lane.model_reference,
             Path(resolution.path),
             dict(model),
+            lane,
         )
 
     return resolve
 
 
 def _infer_stage(
-    workload: Workload, dispatcher: JobDispatcher, encode_result: Callable[[object], dict]
+    workload: Workload,
+    dispatch_prepared: Callable[[str, str, dict, PreparedDispatchLane], object],
+    encode_result: Callable[[object], dict],
 ) -> Callable:
     async def infer(resolved: ResolvedOutput) -> InferenceOutput:
         job_id, job_payload = _current_job()
-        # The dispatcher owns admission, routing, and queueing; re-deciding any
-        # of that here would let two code paths disagree about the same job.
-        future = dispatcher.dispatch(job_id, workload.id, job_payload)
+        if not isinstance(resolved.lane, PreparedDispatchLane):
+            raise OrchestrationError(
+                "prepared-dispatch-invalid", "resolve stage did not carry a prepared lane"
+            )
+        future = dispatch_prepared(job_id, workload.id, job_payload, resolved.lane)
         return InferenceOutput(encode_result(await future), resolved.model)
 
     return infer
@@ -370,15 +382,6 @@ def _deliver_stage(deliver: Callable[[str, dict], None] | None) -> Callable:
     return deliver_stage
 
 
-def _reference_of(resolution: object, model: Mapping[str, object]):
-    reference = getattr(resolution, "reference", None)
-    if reference is not None:
-        return reference
-    return ArtifactReference(
-        model["id"], model.get("version", "0.0.0"), model.get("format", "unknown"), ""
-    )
-
-
 def build_plugin_runners(
     workloads: Mapping[str, Workload],
     *,
@@ -391,7 +394,6 @@ def build_plugin_runners(
     allows_permission: Callable[[str, str], bool] = lambda _profile, _permission: True,
     deliver: Callable[[str, dict], None] | None = None,
     progress: ProgressSink | None = None,
-    select_model: ModelSelector | None = None,
     flow_options: Mapping[str, object] | None = None,
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> RunnerSet:
@@ -413,7 +415,6 @@ def build_plugin_runners(
                 encode_result=encode_result,
                 deliver=deliver,
                 progress=progress,
-                select_model=select_model,
             )
         except OrchestrationError as error:
             # A profile that cannot run is recorded, not given a runner that

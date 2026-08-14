@@ -57,6 +57,7 @@ class ResolvedOutput:
     artifact: ArtifactReference
     path: Path
     model: JsonObject | None = None
+    lane: object | None = None
 
 
 @dataclass(frozen=True, slots=True)

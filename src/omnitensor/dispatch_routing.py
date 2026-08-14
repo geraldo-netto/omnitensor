@@ -67,6 +67,22 @@ class PluginAwareDispatcher:
             return self._plugins.dispatch(job_id, workload_id, payload)
         return self._inference.dispatch(job_id, workload_id, payload)
 
+    def prepare_lane(self, workload_id: str):
+        if workload_id in self._plugin_ids():
+            raise RuntimeError("plugin jobs do not use prepared inference lanes")
+        prepare = getattr(self._inference, "prepare_lane", None)
+        if not callable(prepare):
+            raise RuntimeError("inference dispatcher does not prepare lanes")
+        return prepare(workload_id)
+
+    def dispatch_prepared(self, job_id: str, workload_id: str, payload: dict, lane):
+        if workload_id in self._plugin_ids():
+            raise RuntimeError("plugin jobs do not use prepared inference lanes")
+        dispatch = getattr(self._inference, "dispatch_prepared", None)
+        if not callable(dispatch):
+            raise RuntimeError("inference dispatcher does not consume prepared lanes")
+        return dispatch(job_id, workload_id, payload, lane)
+
 
 def policy_weight(state, workload_id: str) -> int:
     policy = state.profiles.get(workload_id)
@@ -103,6 +119,8 @@ def default_dispatcher(
     resolve_artifact=None,
     executor_view=None,
     scheduler_lane=None,
+    device_identity=None,
+    executor_for_device=None,
 ) -> JobDispatcher:
     if artifact_store is None:
         return UnavailableJobDispatcher()
@@ -116,6 +134,8 @@ def default_dispatcher(
         artifacts,
         executor_view=executor_view,
         scheduler_lane=scheduler_lane,
+        device_identity=device_identity,
+        executor_for_device=executor_for_device,
         input_roots=OptedInInputRoots(input_roots),
     )
 
@@ -131,7 +151,6 @@ def build_runners(
     allows_permission,
     deliver,
     progress,
-    select_model=None,
 ) -> RunnerSet:
     return build_plugin_runners(
         workloads,
@@ -144,7 +163,6 @@ def build_runners(
         allows_permission=allows_permission,
         deliver=deliver,
         progress=progress,
-        select_model=select_model,
     )
 
 

@@ -88,7 +88,6 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
         {"value": 1},
     )
     assert inference.dispatches == [("job", "profile", {"value": 1})]
-
     incomplete_plugins = type(
         "Plugins", (), {"plugin_ids": lambda _self: {"events"}}
     )()
@@ -102,6 +101,46 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
 
     no_inventory = PluginAwareDispatcher(inference, object())
     assert no_inventory._plugin_ids() == frozenset()
+
+
+def test_plugin_dispatcher_forwards_prepared_inference_lanes_only():
+    class Inference:
+        def __init__(self):
+            self.calls = []
+
+        def prepare_lane(self, workload_id):
+            self.calls.append(("prepare", workload_id))
+            return "lane", {"id": "model"}
+
+        def dispatch_prepared(self, job_id, workload_id, payload, lane):
+            self.calls.append(("dispatch", job_id, workload_id, payload, lane))
+            return "prepared-result"
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"events"})
+
+    inference = Inference()
+    dispatcher = PluginAwareDispatcher(inference, Plugins())
+
+    assert dispatcher.prepare_lane("profile") == ("lane", {"id": "model"})
+    assert dispatcher.dispatch_prepared("job", "profile", {"value": 2}, "lane") == (
+        "prepared-result"
+    )
+    assert inference.calls == [
+        ("prepare", "profile"),
+        ("dispatch", "job", "profile", {"value": 2}, "lane"),
+    ]
+    with pytest.raises(RuntimeError, match="plugin jobs do not use prepared"):
+        dispatcher.prepare_lane("events")
+    with pytest.raises(RuntimeError, match="plugin jobs do not use prepared"):
+        dispatcher.dispatch_prepared("job", "events", {}, "lane")
+
+    no_prepared = PluginAwareDispatcher(object(), object())
+    with pytest.raises(RuntimeError, match="does not prepare lanes"):
+        no_prepared.prepare_lane("profile")
+    with pytest.raises(RuntimeError, match="does not consume prepared lanes"):
+        no_prepared.dispatch_prepared("job", "profile", {}, "lane")
 
 
 def test_plugin_admission_helper_routes_exact_ports_directly():
@@ -203,6 +242,30 @@ def build_service(tmp_path, manifests=(), **kwargs):
         workloads_path=workloads_root,
         **kwargs,
     )
+
+
+def test_service_resolves_prepared_devices_by_exact_physical_identity(tmp_path):
+    gpu_a = Device("gpu-renderD128", "gpu", "GPU A", "dri")
+    gpu_b = Device("gpu-renderD129", "gpu", "GPU B", "dri")
+    tpu = tpu_device()
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([gpu_a, gpu_b, tpu]),
+    )
+    service.control.state.device_choices["profile"] = gpu_b.id
+
+    assert service._device_identity("profile", "gpu") == gpu_b.id
+    assert service._device_identity("profile", "tpu") == tpu.id
+    assert service._executor_for_device("gpu", gpu_b.id) is (
+        service._executors.device_executors[gpu_b.id]
+    )
+    assert service._executor_for_device("gpu", "gpu-renderD999") is None
+    assert service._executor_for_device("tpu", tpu.id) is service._executors["tpu"]
+
+    legacy_gpu = object()
+    service._executors = {"gpu": legacy_gpu}
+    assert service._device_identity("profile", "gpu") == "gpu"
+    assert service._executor_for_device("gpu", gpu_b.id) is legacy_gpu
 
 
 async def wait_until(predicate, *, timeout: float = 2.0) -> None:

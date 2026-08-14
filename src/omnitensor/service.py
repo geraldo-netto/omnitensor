@@ -371,6 +371,22 @@ class OmniTensorService:
             else backend
         )
 
+    def _device_identity(self, profile_id: str, backend: str) -> str | None:
+        selector = getattr(self._executors, "device_id", None)
+        return (
+            selector(backend, self._gpu_device_choice(profile_id))
+            if callable(selector)
+            else backend
+        )
+
+    def _executor_for_device(self, backend: str, device_id: str):
+        selector = getattr(self._executors, "executor_for_device", None)
+        return (
+            selector(backend, device_id)
+            if callable(selector)
+            else self._executors.get(backend)
+        )
+
     def _default_dispatcher(self) -> JobDispatcher:
         return routing.default_dispatcher(
             self._workloads,
@@ -381,6 +397,8 @@ class OmniTensorService:
             resolve_artifact=self._cached_resolution,
             executor_view=self._executor_view,
             scheduler_lane=self._scheduler_lane,
+            device_identity=self._device_identity,
+            executor_for_device=self._executor_for_device,
         )
 
     def _build_runners(self) -> RunnerSet:
@@ -394,9 +412,6 @@ class OmniTensorService:
             allows_permission=self._permitted,
             deliver=self._deliver_job_output,
             progress=self._note_job_progress,
-            select_model=lambda workload: routing.select_runtime_model(
-                workload, self._executor_view(workload.id)
-            ),
         )
 
     def _profile_permissions_missing(self, workload: Workload) -> tuple[str, ...]:

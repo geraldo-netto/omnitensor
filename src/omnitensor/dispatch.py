@@ -21,7 +21,13 @@ import math
 from collections.abc import Callable, Mapping
 from typing import Protocol, runtime_checkable
 
-from .executors.base import Executor, InferenceResult
+from .dispatch_lane import PreparedDispatchLane
+from .executors.base import (
+    Executor,
+    InferenceResult,
+    availability_for_model,
+    supports_model,
+)
 from .job_ports import JobDispatchError
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .registry import Workload
@@ -70,6 +76,8 @@ class InferenceJobDispatcher:
         *,
         executor_view: Callable[[str], Mapping[str, Executor]] | None = None,
         scheduler_lane: Callable[[str, str], str] | None = None,
+        device_identity: Callable[[str, str], str | None] | None = None,
+        executor_for_device: Callable[[str, str], Executor | None] | None = None,
         max_input_tensors: int = MAX_INPUT_TENSORS,
         max_input_elements: int = MAX_TENSOR_ELEMENTS,
         input_roots: InputRootPolicy | None = None,
@@ -84,6 +92,8 @@ class InferenceJobDispatcher:
         self._artifacts = artifacts
         self._executor_view = executor_view
         self._scheduler_lane = scheduler_lane
+        self._device_identity = device_identity
+        self._executor_for_device = executor_for_device
         self._max_input_tensors = max_input_tensors
         self._max_input_elements = max_input_elements
         # Denied by default: referencing a file is a capability, not a default.
@@ -134,7 +144,7 @@ class InferenceJobDispatcher:
         exists to remove.
         """
         for model in workload.models:
-            _refuse_unpinned(workload.id, model, declared_artifact_reference(workload, model))
+            _refuse_unpinned(workload.id, declared_artifact_reference(workload, model))
 
     def _agrees(self, specs, shapes) -> None:
         """Refuse an input the model cannot accept, in the submitting call.
@@ -147,9 +157,20 @@ class InferenceJobDispatcher:
             raise JobDispatchError("input-contract-mismatch", mismatch)
 
     def dispatch(self, job_id: str, workload_id: str, payload: dict) -> asyncio.Future:
-        """Admit, resolve, route, and queue one job; never run it inline."""
+        """Prepare and queue one job in a single non-interleaved call."""
         workload = self._runnable(workload_id)
         inputs = self._inputs(payload)
+        prepared, model = self._prepare_lane(workload_id, workload)
+        return self._queue_prepared(workload_id, workload, inputs, prepared, model)
+
+    def prepare_lane(self, workload_id: str) -> tuple[PreparedDispatchLane, dict]:
+        """Freeze the exact available backend, physical device, and model."""
+        workload = self._runnable(workload_id)
+        return self._prepare_lane(workload_id, workload)
+
+    def _prepare_lane(
+        self, workload_id: str, workload: Workload
+    ) -> tuple[PreparedDispatchLane, dict]:
         executors = (
             dict(self._executor_view(workload_id))
             if self._executor_view is not None
@@ -170,15 +191,64 @@ class InferenceJobDispatcher:
                 f"{workload_id}: {choice.backend} declares no model this profile can run",
             )
         backend = choice.backend
-        lane = (
+        scheduler_lane = (
             self._scheduler_lane(workload_id, backend)
             if self._scheduler_lane is not None
             else backend
         )
-        path = self._model_path(workload, model)
+        device_id = (
+            self._device_identity(workload_id, backend)
+            if self._device_identity is not None
+            else scheduler_lane
+        )
+        if not isinstance(device_id, str) or not device_id:
+            raise JobDispatchError(
+                "prepared-lane-unavailable",
+                f"{workload_id}: {backend} has no stable device identity",
+        )
+        reference = declared_artifact_reference(workload, model)
+        _refuse_unpinned(workload_id, reference)
+        assert reference is not None
+        prepared = PreparedDispatchLane(backend, device_id, reference)
+        if scheduler_lane != prepared.scheduler_lane:
+            raise JobDispatchError(
+                "prepared-lane-unavailable",
+                f"{workload_id}: {backend} queue does not match its stable device identity",
+            )
+        return prepared, model
+
+    def dispatch_prepared(
+        self,
+        job_id: str,
+        workload_id: str,
+        payload: dict,
+        prepared: PreparedDispatchLane,
+    ) -> asyncio.Future:
+        """Validate and enqueue only the lane frozen during preparation."""
+        workload = self._runnable(workload_id)
+        inputs = self._inputs(payload)
+        model = self._prepared_model(workload, prepared)
+        return self._queue_prepared(workload_id, workload, inputs, prepared, model)
+
+    def _queue_prepared(
+        self,
+        workload_id: str,
+        workload: Workload,
+        inputs: list,
+        prepared: PreparedDispatchLane,
+        model: dict,
+    ) -> asyncio.Future:
+        executor = self._prepared_executor(workload_id, prepared)
+        availability = availability_for_model(executor, model)
+        if not availability.available:
+            raise JobDispatchError(
+                "prepared-lane-unavailable",
+                f"{workload_id}: {prepared.device_id} is unavailable: {availability.reason}",
+            )
+        path = self._model_path(workload, model, prepared.model_reference)
         try:
             return self._scheduler.submit(
-                lane,
+                prepared.scheduler_lane,
                 workload_id,
                 path,
                 inputs,
@@ -188,6 +258,46 @@ class InferenceJobDispatcher:
             raise JobDispatchError("backend-queue-full", str(error)) from error
         except RuntimeError as error:
             raise JobDispatchError("scheduler-unavailable", str(error)) from error
+        except KeyError as error:
+            raise JobDispatchError(
+                "prepared-lane-unavailable",
+                f"{workload_id}: prepared scheduler lane {prepared.scheduler_lane} disappeared",
+            ) from error
+
+    def _prepared_model(
+        self, workload: Workload, prepared: PreparedDispatchLane
+    ) -> dict:
+        if not isinstance(prepared, PreparedDispatchLane):
+            raise JobDispatchError(
+                "prepared-lane-invalid", "Prepared dispatch lane is invalid"
+            )
+        for model in workload.models:
+            if declared_artifact_reference(workload, model) == prepared.model_reference:
+                return model
+        raise JobDispatchError(
+            "prepared-lane-invalid",
+            f"{workload.id}: prepared model is not declared by this workload",
+        )
+
+    def _prepared_executor(
+        self, workload_id: str, prepared: PreparedDispatchLane
+    ) -> Executor:
+        if self._executor_for_device is not None:
+            executor = self._executor_for_device(prepared.backend, prepared.device_id)
+        else:
+            executors = (
+                dict(self._executor_view(workload_id))
+                if self._executor_view is not None
+                else _executor_snapshot(self._executors)
+            )
+            executor = executors.get(prepared.backend)
+        declared_format = {"format": prepared.model_reference.format}
+        if executor is None or not supports_model(executor, declared_format):
+            raise JobDispatchError(
+                "prepared-lane-unavailable",
+                f"{workload_id}: prepared device {prepared.device_id} disappeared",
+            )
+        return executor
 
     def _runnable(self, workload_id: str) -> Workload:
         """The profile this job names, if it exists and can run inference."""
@@ -259,11 +369,22 @@ class InferenceJobDispatcher:
         )
         return [validate_input_tensor(tensor, budget) for tensor in inputs]
 
-    def _model_path(self, workload: Workload, model: dict) -> str:
+    def _model_path(
+        self,
+        workload: Workload,
+        model: dict,
+        expected_reference: ArtifactReference,
+    ) -> str:
         """Resolve the model this manifest declares, and only that one."""
         workload_id = workload.id
         reference = declared_artifact_reference(workload, model)
-        _refuse_unpinned(workload_id, model, reference)
+        _refuse_unpinned(workload_id, reference)
+        if reference != expected_reference:
+            raise JobDispatchError(
+                "prepared-lane-invalid",
+                f"{workload_id}: prepared model reference changed before dispatch",
+            )
+        assert reference is not None
         try:
             resolution = self._artifacts.resolve(reference)
         except Exception as error:  # noqa: BLE001 - store failures are arbitrary
@@ -278,7 +399,7 @@ class InferenceJobDispatcher:
         return str(resolution.path)
 
 
-def _refuse_unpinned(workload_id: str, model: dict, reference: ArtifactReference | None) -> None:
+def _refuse_unpinned(workload_id: str, reference: ArtifactReference | None) -> None:
     """Refuse a model whose manifest does not say which files it means."""
     if reference is None:
         # The store's own digest proves the file has not changed since it was

@@ -19,7 +19,6 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0296 | open | medium | l | OMNI-0264, OMNI-0295 | Burn down the fresh partial-scope baseline recorded at `88d9294` on 2026-08-14 with string-literal mutations disabled: 3,299/3,584 detected (92.0% overall), with eight behavioral callables below 80% — `parse_native_load_report` 67.4%, `_parse_safety` 77.8%, `_validate_bge_evidence` 77.0%, `model_fragment` 70.0%, `ModelCache.__init__` 75.0%, `_declared_version` 66.7%, `Scheduler._degrade` 62.5%, and `Scheduler.tick` 79.3%; do not add regressions for equivalent, logging-shape, or prose-only survivors. |
-| OMNI-0329 | open | medium | m | OMNI-0315, OMNI-0328 | Make accelerator selection one immutable prepared-dispatch decision: the pipeline now selects and carries the preferred model through RESOLVE and POSTPROCESS, but the raw dispatcher independently selects the backend/model again during INFER; device rediscovery between those stages can therefore run a different lane than the artifact gate and label reader recorded. Carry a validated lane token (backend, stable device identity, and model reference) into dispatch and fail closed if that exact lane disappears. |
 
 ## Blocked
 

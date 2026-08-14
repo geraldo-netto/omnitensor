@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 from conftest import sample_manifest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.dispatch import (
     InferenceJobDispatcher,
@@ -13,6 +16,7 @@ from omnitensor.dispatch import (
     declared_artifact_reference,
     inference_result_payload,
 )
+from omnitensor.dispatch_lane import PreparedDispatchLane
 from omnitensor.executors.base import Availability, InferenceResult
 from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.jobs import JobDispatchError
@@ -115,7 +119,14 @@ def test_executor_snapshot_resolves_static_and_live_sources():
     current[0] = replacement
     assert _executor_snapshot(lambda: current[0]) == replacement
 
-def dispatcher(workloads, executors=None, artifacts=None, scheduler=None, input_roots=None):
+def dispatcher(
+    workloads,
+    executors=None,
+    artifacts=None,
+    scheduler=None,
+    input_roots=None,
+    **options,
+):
     executor = executors if executors is not None else {"gpu": FakeExecutor()}
     return InferenceJobDispatcher(
         {item.id: item for item in workloads},
@@ -123,6 +134,7 @@ def dispatcher(workloads, executors=None, artifacts=None, scheduler=None, input_
         executor,
         artifacts or FakeArtifacts(),
         input_roots=input_roots,
+        **options,
     )
 
 
@@ -271,6 +283,57 @@ def test_dispatch_submits_to_the_profile_selected_gpu_lane():
             "ncnn",
         )
     ]
+
+
+@given(
+    backend=st.sampled_from(("tpu", "npu", "gpu")),
+    device_id=st.text(min_size=1, max_size=120),
+)
+def test_prepared_lane_is_an_immutable_bounded_value(backend, device_id):
+    reference = ArtifactReference(
+        "sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS
+    )
+    prepared = PreparedDispatchLane(backend, device_id, reference)
+
+    assert prepared.scheduler_lane == (device_id if backend == "gpu" else backend)
+    with pytest.raises(FrozenInstanceError):
+        prepared.device_id = "replacement"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("backend", ""),
+        ("backend", "cpu"),
+        ("backend", "x" * 121),
+        ("device_id", None),
+    ),
+)
+def test_prepared_lane_refuses_invalid_identity_fields(field, value):
+    values = {
+        "backend": "gpu",
+        "device_id": "gpu-renderD128",
+    }
+    values[field] = value
+
+    with pytest.raises(ValueError, match=field):
+        PreparedDispatchLane(
+            **values,
+            model_reference=ArtifactReference(
+                "sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS
+            ),
+        )
+
+
+def test_prepared_lane_refuses_an_invalid_model_reference():
+    with pytest.raises(ValueError, match="model reference is invalid"):
+        PreparedDispatchLane(
+            "gpu",
+            "gpu-renderD128",
+            ArtifactReference("sample-model", "1.2.3", "ncnn", "not-a-digest"),
+        )
+    with pytest.raises(TypeError, match="ArtifactReference"):
+        PreparedDispatchLane("gpu", "gpu-renderD128", object())
 
 
 def test_an_unresolvable_artifact_is_refused_before_queueing():
@@ -946,6 +1009,255 @@ def multi_workload(**overrides):
     return target
 
 
+def prepared_dispatcher(target, scheduler, current, identities, exact):
+    return dispatcher(
+        [target],
+        executors=lambda: current[0],
+        scheduler=scheduler,
+        executor_view=lambda _profile_id: current[0],
+        scheduler_lane=lambda _profile_id, backend: identities[backend],
+        device_identity=lambda _profile_id, backend: identities[backend],
+        executor_for_device=lambda backend, device_id: exact.get((backend, device_id)),
+    )
+
+
+def test_prepared_dispatch_keeps_the_exact_lane_when_preferences_rediscover():
+    target = multi_workload()
+    target.manifest["requirements"]["acceleratorPreference"] = ["gpu", "npu"]
+    gpu_a = FakeExecutor(model_formats=("ncnn",))
+    gpu_b = FakeExecutor(model_formats=("ncnn",))
+    npu = FakeExecutor(model_formats=("openvino",))
+    current = [{"gpu": gpu_a, "npu": npu}]
+    identities = {"gpu": "gpu-renderD128", "npu": "npu-accel0"}
+    exact = {
+        ("gpu", "gpu-renderD128"): gpu_a,
+        ("gpu", "gpu-renderD129"): gpu_b,
+        ("npu", "npu-accel0"): npu,
+    }
+    scheduler = RecordingScheduler()
+    subject = prepared_dispatcher(target, scheduler, current, identities, exact)
+
+    lane, selected = subject.prepare_lane(target.id)
+    target.manifest["requirements"]["acceleratorPreference"] = ["npu", "gpu"]
+    current[0] = {"gpu": gpu_b, "npu": npu}
+    identities["gpu"] = "gpu-renderD129"
+    subject.dispatch_prepared("job-1", target.id, {"inputs": [[1.0]]}, lane)
+
+    assert selected["id"] == MODEL["id"]
+    assert lane == PreparedDispatchLane(
+        "gpu",
+        "gpu-renderD128",
+        ArtifactReference("sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS),
+    )
+    assert scheduler.calls == [
+        (
+            "gpu-renderD128",
+            target.id,
+            "/models/sample.ncnn.param",
+            [[1.0]],
+            "ncnn",
+        )
+    ]
+
+
+def test_scheduler_executes_the_prepared_physical_lane_after_selection_changes():
+    target = workload(model=MODEL)
+    gpu_a = FakeExecutor()
+    gpu_b = FakeExecutor()
+    current = [{"gpu": gpu_a}]
+    selected_id = ["gpu-renderD128"]
+    exact = {
+        ("gpu", "gpu-renderD128"): gpu_a,
+        ("gpu", "gpu-renderD129"): gpu_b,
+    }
+    scheduler = Scheduler(
+        {"gpu-renderD128": gpu_a, "gpu-renderD129": gpu_b}, lambda _profile: 1
+    )
+    subject = InferenceJobDispatcher(
+        {target.id: target},
+        scheduler,
+        lambda: current[0],
+        FakeArtifacts(),
+        executor_view=lambda _profile_id: current[0],
+        scheduler_lane=lambda _profile_id, _backend: selected_id[0],
+        device_identity=lambda _profile_id, _backend: selected_id[0],
+        executor_for_device=lambda backend, device_id: exact.get((backend, device_id)),
+    )
+    lane, _model = subject.prepare_lane(target.id)
+    current[0] = {"gpu": gpu_b}
+    selected_id[0] = "gpu-renderD129"
+
+    async def scenario():
+        scheduler.start()
+        await asyncio.wait_for(
+            subject.dispatch_prepared("job-1", target.id, {"inputs": [[1.0]]}, lane),
+            timeout=5,
+        )
+        await scheduler.stop()
+
+    asyncio.run(scenario())
+
+    assert gpu_a.ran == [("/models/sample.ncnn.param", [[1.0]])]
+    assert gpu_b.ran == []
+
+
+def test_prepared_dispatch_refuses_when_the_exact_device_disappears():
+    target = workload(model=MODEL)
+    gpu_a = FakeExecutor()
+    current = [{"gpu": gpu_a}]
+    identities = {"gpu": "gpu-renderD128"}
+    exact = {("gpu", "gpu-renderD128"): gpu_a}
+    scheduler = RecordingScheduler()
+    artifacts = FakeArtifacts()
+    subject = InferenceJobDispatcher(
+        {target.id: target},
+        scheduler,
+        lambda: current[0],
+        artifacts,
+        executor_view=lambda _profile_id: current[0],
+        scheduler_lane=lambda _profile_id, backend: identities[backend],
+        device_identity=lambda _profile_id, backend: identities[backend],
+        executor_for_device=lambda backend, device_id: exact.get((backend, device_id)),
+    )
+    lane, _model = subject.prepare_lane(target.id)
+    current[0] = {"gpu": FakeExecutor()}
+    identities["gpu"] = "gpu-renderD129"
+    exact.pop(("gpu", "gpu-renderD128"))
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch_prepared("job-1", target.id, {"inputs": [[1.0]]}, lane)
+
+    assert failure.value.code == "prepared-lane-unavailable"
+    assert "gpu-renderD128" in failure.value.message
+    assert scheduler.calls == []
+    assert artifacts.resolved == []
+
+
+def test_preparation_refuses_a_lane_without_stable_device_identity():
+    target = workload(model=MODEL)
+    subject = dispatcher(
+        [target],
+        device_identity=lambda _profile_id, _backend: None,
+    )
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.prepare_lane(target.id)
+
+    assert failure.value.code == "prepared-lane-unavailable"
+    assert failure.value.message.endswith("gpu has no stable device identity")
+
+
+def test_preparation_refuses_a_queue_that_does_not_match_the_physical_lane():
+    target = workload(model=MODEL)
+    subject = dispatcher(
+        [target],
+        device_identity=lambda _profile_id, _backend: "gpu-renderD128",
+        scheduler_lane=lambda _profile_id, _backend: "gpu-renderD129",
+    )
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.prepare_lane(target.id)
+
+    assert failure.value.code == "prepared-lane-unavailable"
+    assert failure.value.message.endswith(
+        "gpu queue does not match its stable device identity"
+    )
+
+
+def test_prepared_dispatch_rechecks_exact_executor_availability():
+    target = workload(model=MODEL)
+    executor = FakeExecutor()
+    subject = dispatcher(
+        [target],
+        executor_for_device=lambda _backend, _device_id: executor,
+    )
+    lane, _model = subject.prepare_lane(target.id)
+    executor._availability = Availability(False, "device lease was revoked")
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch_prepared("job-1", target.id, {"inputs": []}, lane)
+
+    assert failure.value.code == "prepared-lane-unavailable"
+    assert failure.value.message.endswith("gpu is unavailable: device lease was revoked")
+
+
+def test_prepared_dispatch_refuses_foreign_and_malformed_tokens():
+    target = workload(model=MODEL)
+    subject = dispatcher([target])
+    foreign = PreparedDispatchLane(
+        "gpu",
+        "gpu",
+        ArtifactReference("foreign-model", "1.0.0", "ncnn", "a" * 64),
+    )
+
+    with pytest.raises(JobDispatchError) as foreign_failure:
+        subject.dispatch_prepared("job-1", target.id, {"inputs": []}, foreign)
+    assert foreign_failure.value.code == "prepared-lane-invalid"
+
+    with pytest.raises(JobDispatchError) as malformed_failure:
+        subject.dispatch_prepared("job-1", target.id, {"inputs": []}, object())
+    assert malformed_failure.value.code == "prepared-lane-invalid"
+
+
+def test_prepared_dispatch_translates_a_vanished_scheduler_lane():
+    class MissingLaneScheduler(RecordingScheduler):
+        def submit(self, *_args, **_kwargs):
+            raise KeyError("gpu-renderD128")
+
+    target = workload(model=MODEL)
+    executor = FakeExecutor()
+    subject = dispatcher(
+        [target],
+        scheduler=MissingLaneScheduler(),
+        device_identity=lambda _profile_id, _backend: "gpu-renderD128",
+        scheduler_lane=lambda _profile_id, _backend: "gpu-renderD128",
+        executor_for_device=lambda _backend, _device_id: executor,
+    )
+    lane, _model = subject.prepare_lane(target.id)
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject.dispatch_prepared("job-1", target.id, {"inputs": []}, lane)
+
+    assert failure.value.code == "prepared-lane-unavailable"
+    assert "scheduler lane gpu-renderD128 disappeared" in failure.value.message
+
+
+def test_direct_dispatch_prepares_each_routing_input_once():
+    target = workload(model=MODEL)
+    executor = FakeExecutor()
+    scheduler = RecordingScheduler()
+    calls = {"view": 0, "lane": 0, "identity": 0, "exact": 0}
+
+    def view(_profile_id):
+        calls["view"] += 1
+        return {"gpu": executor}
+
+    def lane(_profile_id, _backend):
+        calls["lane"] += 1
+        return "gpu-renderD128"
+
+    def identity(_profile_id, _backend):
+        calls["identity"] += 1
+        return "gpu-renderD128"
+
+    def exact(_backend, _device_id):
+        calls["exact"] += 1
+        return executor
+
+    subject = dispatcher(
+        [target],
+        scheduler=scheduler,
+        executor_view=view,
+        scheduler_lane=lane,
+        device_identity=identity,
+        executor_for_device=exact,
+    )
+
+    subject.dispatch("job-1", target.id, {"inputs": [[1.0]]})
+
+    assert calls == {"view": 1, "lane": 1, "identity": 1, "exact": 1}
+
+
 def test_the_lane_is_chosen_first_and_the_artifact_follows_it():
     """`acceleratorPreference` means nothing if one format decides the lane."""
     resolved = []
@@ -1053,3 +1365,36 @@ def test_every_declared_lane_must_be_pinned_not_just_the_first():
         dispatcher([target]).admit("sample-workload", {"inputs": [[1]]})
 
     assert excinfo.value.code == "model-unpinned"
+
+
+def test_model_path_reports_the_exact_workload_for_an_unpinned_reference():
+    target = workload(model=UNPINNED)
+    subject = dispatcher([target])
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject._model_path(
+            target,
+            UNPINNED,
+            ArtifactReference("sample-model", "1.2.3", "ncnn", "f" * 64),
+        )
+
+    assert failure.value.code == "model-unpinned"
+    assert failure.value.message.startswith(f"{target.id}: the manifest")
+
+
+def test_model_path_refuses_a_reference_changed_after_preparation():
+    target = workload(model=MODEL)
+    artifacts = FakeArtifacts()
+    subject = dispatcher([target], artifacts=artifacts)
+    foreign = ArtifactReference(
+        "sample-model", "1.2.3", "ncnn", "a" * 64, COMPANIONS
+    )
+
+    with pytest.raises(JobDispatchError) as failure:
+        subject._model_path(target, MODEL, foreign)
+
+    assert failure.value.code == "prepared-lane-invalid"
+    assert failure.value.message == (
+        f"{target.id}: prepared model reference changed before dispatch"
+    )
+    assert artifacts.resolved == []

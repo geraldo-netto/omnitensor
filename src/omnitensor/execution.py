@@ -76,6 +76,14 @@ class ExecutorSet(dict):
             None,
         )
 
+    def executor_for_device(self, backend: str, device_id: str):
+        """The executor still bound to this exact physical identity, if any."""
+        if backend == "gpu":
+            return self.device_executors.get(device_id)
+        if self.device_id(backend, None) != device_id:
+            return None
+        return self.get(backend)
+
 
 def _vulkan_request(device) -> VulkanDeviceRequest:
     try:

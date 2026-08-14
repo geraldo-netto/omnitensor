@@ -8,12 +8,15 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor.dispatch_lane import PreparedDispatchLane
+from omnitensor.plugins.artifacts import ArtifactReference
 from omnitensor.plugins.cancellation import (
     Cancellation,
     CancellationReason,
     JobCancellationRegistry,
 )
 from omnitensor.plugins.orchestration import (
+    _RUNNING_JOB,
     JobSubmission,
     OrchestrationError,
     build_plugin_runners,
@@ -21,7 +24,7 @@ from omnitensor.plugins.orchestration import (
     recover_interrupted_jobs,
     with_recovery,
 )
-from omnitensor.plugins.pipeline import PipelineStage, PreprocessedOutput
+from omnitensor.plugins.pipeline import PipelineStage, PreprocessedOutput, ResolvedOutput
 from omnitensor.plugins.protocol import PluginResultStatus
 from omnitensor.plugins.runner import STAGE_ORDER
 from omnitensor.registry import Workload
@@ -64,13 +67,39 @@ class Resolution:
 
 
 class Dispatcher:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, *, selected_model=None):
         self.calls = []
+        self.prepared = []
         self._result = result if result is not None else {"outputs": [[1.0]], "durationMs": 2.0}
         self._error = error
+        self._selected_model = selected_model
 
-    def dispatch(self, job_id, workload_id, payload):
+    def prepare_lane(self, workload_id):
+        model = dict(
+            self._selected_model
+            or {
+                "id": f"{workload_id}-model",
+                "version": "1.0.0",
+                "format": "ncnn",
+            }
+        )
+        backend = "npu" if model.get("format") == "openvino" else "gpu"
+        lane = PreparedDispatchLane(
+            backend,
+            f"{backend}-device",
+            ArtifactReference(
+                model["id"],
+                model.get("version", "1.0.0"),
+                model.get("format", "ncnn"),
+                "f" * 64,
+            ),
+        )
+        self.prepared.append((workload_id, lane, model))
+        return lane, model
+
+    def dispatch_prepared(self, job_id, workload_id, payload, lane):
         self.calls.append((job_id, workload_id, payload))
+        assert lane is self.prepared[-1][1]
         future = asyncio.get_running_loop().create_future()
         if self._error is not None:
             future.set_exception(self._error)
@@ -145,6 +174,59 @@ def test_stages_can_be_composed_directly_for_a_model_profile():
         encode_result=dict,
     )
     assert tuple(stages) == STAGE_ORDER
+
+
+def test_a_legacy_dispatcher_without_prepared_lanes_is_skipped():
+    class LegacyDispatcher:
+        def dispatch(self, *_arguments):
+            raise AssertionError("an unsafe dispatcher must never receive a job")
+
+    with pytest.raises(OrchestrationError) as failure:
+        inference_stages(
+            workload(),
+            dispatcher=LegacyDispatcher(),
+            resolve_artifact=lambda _artifact_id: Resolution(),
+            encode_result=dict,
+        )
+
+    assert failure.value.code == "prepared-dispatch-unavailable"
+
+
+@pytest.mark.parametrize(
+    "prepared",
+    (
+        None,
+        (),
+        (object(), {}),
+        (
+            PreparedDispatchLane(
+                "gpu",
+                "gpu-device",
+                ArtifactReference("model", "1.0.0", "onnx", "f" * 64),
+            ),
+            object(),
+        ),
+    ),
+)
+def test_resolve_refuses_malformed_prepared_lane_results(prepared):
+    class BrokenDispatcher:
+        def prepare_lane(self, _workload_id):
+            return prepared
+
+        def dispatch_prepared(self, *_arguments):
+            raise AssertionError("a malformed lane must not reach inference")
+
+    stages = inference_stages(
+        workload(),
+        dispatcher=BrokenDispatcher(),
+        resolve_artifact=lambda _artifact_id: Resolution(),
+        encode_result=dict,
+    )
+
+    with pytest.raises(OrchestrationError) as failure:
+        asyncio.run(stages[PipelineStage.RESOLVE](PreprocessedOutput({}, {})))
+
+    assert failure.value.code == "model-lane-unavailable"
 
 
 def test_composing_stages_for_a_profile_without_a_model_is_refused():
@@ -428,12 +510,12 @@ def test_resolve_stage_carries_the_selected_model_lane(index):
     requirements = subject.manifest["requirements"]
     requirements.pop("model")
     requirements["models"] = list(models)
+    dispatch = Dispatcher(selected_model=selected)
     stages = inference_stages(
         subject,
-        dispatcher=Dispatcher(),
+        dispatcher=dispatch,
         resolve_artifact=lambda artifact_id: Resolution(path=f"/models/{artifact_id}"),
         encode_result=dict,
-        select_model=lambda _workload: selected,
     )
 
     resolved = asyncio.run(
@@ -443,6 +525,7 @@ def test_resolve_stage_carries_the_selected_model_lane(index):
     assert resolved.artifact.id == selected["id"]
     assert resolved.path == Path(f"/models/{selected['id']}")
     assert resolved.model == selected
+    assert resolved.lane is dispatch.prepared[0][1]
 
 
 def test_preferred_lane_owns_resolution_and_labels_end_to_end(tmp_path):
@@ -479,9 +562,8 @@ def test_preferred_lane_owns_resolution_and_labels_end_to_end(tmp_path):
     built, _registry = runners(
         tmp_path,
         {subject.id: subject},
-        dispatcher=Dispatcher({"outputs": [[0.1, 0.9]]}),
+        dispatcher=Dispatcher({"outputs": [[0.1, 0.9]]}, selected_model=npu_model),
         resolve=resolve,
-        select_model=lambda _workload: npu_model,
     )
 
     result = run(built)
@@ -509,6 +591,27 @@ def test_a_stage_reached_without_a_bound_job_is_refused():
 
     with pytest.raises(OrchestrationError, match="job-context-missing"):
         asyncio.run(skip_preprocess())
+
+
+def test_infer_refuses_a_resolved_output_without_its_prepared_lane():
+    stages = inference_stages(
+        workload(),
+        dispatcher=Dispatcher(),
+        resolve_artifact=lambda _artifact_id: Resolution(),
+        encode_result=dict,
+    )
+    token = _RUNNING_JOB.set(("job-1", {"inputs": []}))
+    try:
+        with pytest.raises(OrchestrationError) as failure:
+            asyncio.run(
+                stages[PipelineStage.INFER](
+                    ResolvedOutput(None, Path("/var/lib/omnitensor/model.ncnn"))
+                )
+            )
+    finally:
+        _RUNNING_JOB.reset(token)
+
+    assert failure.value.code == "prepared-dispatch-invalid"
 
 
 def test_submitting_to_a_profile_with_no_runner_reports_why(tmp_path):
