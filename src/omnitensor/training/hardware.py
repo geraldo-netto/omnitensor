@@ -347,7 +347,7 @@ class HardwareHealthTrainer:
         if width > MAX_INPUT_WIDTH:
             raise TrainingError("features-too-wide", "hardware window exceeds tensor width")
         examples = _window_examples(dataset.observations, self._window)
-        training, holdout = _time_split(examples)
+        training, holdout = _time_split(examples, self._window)
         _require_classes(training, self._minimum_class_examples, "training")
         _require_classes(holdout, self._minimum_class_examples, "holdout")
         means, scales = _normalization(training)
@@ -424,11 +424,21 @@ def _window_examples(
 
 def _time_split(
     examples: Sequence[BuildExample],
+    window: int = 1,
 ) -> tuple[tuple[BuildExample, ...], tuple[BuildExample, ...]]:
-    return chronological_split(
+    training, holdout = chronological_split(
         examples,
         insufficient_detail="hardware windows cannot be split",
     )
+    purge = window - 1
+    if purge:
+        training = training[:-purge]
+    if not training:
+        raise TrainingError(
+            "insufficient-history",
+            "hardware windows cannot be split after overlap purge",
+        )
+    return training, holdout
 
 
 def _require_classes(examples: Sequence[BuildExample], minimum: int, label: str) -> None:
@@ -483,10 +493,11 @@ def _report(
             "labelsConfirmed": True,
         },
         "split": {
-            "kind": "chronological",
+            "kind": "window-purged",
             "training": len(training),
             "holdout": len(holdout),
             "holdoutFromMs": holdout[0].started_at_ms,
+            "purgedTrainingWindows": window - 1,
         },
         "featureContract": {
             "version": 1,

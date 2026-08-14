@@ -486,8 +486,10 @@ Intake is bounded, rejects truncated/unhealthy snapshots, sensor-set or
 kind/unit drift, duplicate/decreasing timestamps, unknown fields, and
 unreviewed labels. Per role it encodes the log-scaled numeric value plus exact
 degraded, critical, and missing indicators over an oldest-first window. The
-chronological holdout must meet configured ROC-AUC, fault recall, baseline
-false-positive, and class-count gates. Output is `model.onnx` plus
+chronological split drops the final `window - 1` training windows so no source
+observation is shared with the holdout. The holdout must meet configured
+ROC-AUC, fault recall, baseline false-positive, and class-count gates; the
+report records the number of purged training windows. Output is `model.onnx` plus
 `hardware-training-report.json`; neither contains sensor identities or labels.
 
 The portable graph uses common arithmetic, `MatMul`, and `Sigmoid` with one

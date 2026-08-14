@@ -175,10 +175,11 @@ def test_labelled_history_trains_private_portable_hardware_source(tmp_path):
         "labelsConfirmed": True,
     }
     assert report["split"] == {
-        "kind": "chronological",
+        "kind": "window-purged",
         "training": 80,
         "holdout": 20,
         "holdoutFromMs": 1_080_000,
+        "purgedTrainingWindows": 0,
     }
     assert report["featureContract"] == {
         "version": 1,
@@ -240,7 +241,7 @@ def test_labelled_history_trains_private_portable_hardware_source(tmp_path):
         "c1d970b7adc9531dd00246e7ad241fe8ffe9dddedc05f37c196c8c471a1c0d23"
     )
     assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
-        "1d2761aa3bd4df7e75cf18bb9a5b0b310864ff802455852913cc8dcd066e39a6"
+        "e68fa184cff210501bebd32af13c54c6001111e9d83787e54a868891eea538de"
     )
     assert [
         (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
@@ -605,6 +606,22 @@ def test_split_class_and_metric_boundaries():
     assert _unit_metric(1, "metric") == 1.0
 
 
+def test_split_purges_every_training_window_overlapping_holdout():
+    observations = tuple(
+        HardwareObservation(index, index % 2, "observed", (float(index),))
+        for index in range(12)
+    )
+    examples = _window_examples(observations, 4)
+
+    training, holdout = _time_split(examples, 4)
+
+    assert (len(training), len(holdout)) == (4, 2)
+    assert training[-1].features == (3.0, 4.0, 5.0, 6.0)
+    assert holdout[0].features == (7.0, 8.0, 9.0, 10.0)
+    assert set(training[-1].features).isdisjoint(holdout[0].features)
+    assert error_code(lambda: _time_split(examples[:2], 4)) == "insufficient-history"
+
+
 def test_trainer_configuration_and_width_are_bounded(tmp_path):
     for value in (True, 0, MAX_WINDOW + 1, 1.5):
         with pytest.raises(ValueError, match="window"):
@@ -898,6 +915,23 @@ def test_hardware_cli_help_defaults_and_errors(tmp_path, capsys, monkeypatch):
         ]
     ) == 1
     assert capsys.readouterr().err == "hardware training failed: bad binding\n"
+
+
+@given(
+    window=st.integers(min_value=1, max_value=16),
+    extra=st.integers(min_value=0, max_value=32),
+)
+def test_purged_split_never_shares_source_observations(window, extra):
+    observations = tuple(
+        HardwareObservation(index, index % 2, "observed", (float(index),))
+        for index in range((3 * window) + extra)
+    )
+    examples = _window_examples(observations, window)
+
+    training, holdout = _time_split(examples, window)
+
+    assert len(training) + len(holdout) + window - 1 == len(examples)
+    assert max(training[-1].features) < min(holdout[0].features)
 
 
 @given(
