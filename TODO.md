@@ -18,7 +18,6 @@ audit's dependency order without weakening the required status schema.
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0273 | open | high | l | OMNI-0258 | Split training CLI responsibilities into record, train, install, and forecast modules behind stable import paths and a table-driven trainer dispatcher; move the live D-Bus forecast client to its own module. |
 | OMNI-0275 | open | high | l | OMNI-0254, OMNI-0261 | Split document-model runners, export, gate, install, and CLI; reuse the Vulkan executor's device selector, label and guard the producer-only CPU reference runner, and use the recipe tensor contract as the sole truth. |
-| OMNI-0277 | open | high | l | — | Split plugin supervision into process, recovery, session, and diagnostics modules while preserving its state machine and facade. |
 | OMNI-0281 | open | medium | m | — | Split acceptance checks, probes, and CLI behind the current acceptance facade. |
 | OMNI-0282 | open | low | s | — | Route composite GPU execution by declared model format rather than filename suffix and refuse unknown formats before ONNX execution; add mixed-format regression coverage. |
 | OMNI-0284 | open | low | s | — | Split media acceptance fixture generation by format and prefer ImageMagick 7 `magick` before the legacy `convert` executable. |

@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .supervisor import PluginWorkerError
+from .supervisor_session import PluginWorkerError
 
 MAX_SELECTED_SOURCES = 32
 MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024

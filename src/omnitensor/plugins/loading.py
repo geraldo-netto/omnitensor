@@ -32,15 +32,10 @@ from .manifest_compatibility import resolve_plugin_compatibility
 from .protocol import PluginProgress, PluginRequest, PluginResultStatus
 from .sandbox import SELECTED_FILES_PERMISSION
 from .sandbox import FilesystemSandbox as FilesystemSandbox
-from .supervisor import (
-    PluginWorkerError,
-    PluginWorkerSupervisor,
-    WorkerState,
-    WorkerStatus,
-)
-from .supervisor import (
-    WorkerSpec as _WorkerSpec,
-)
+from .supervisor import PluginWorkerSupervisor
+from .supervisor_diagnostics import WorkerState, WorkerStatus
+from .supervisor_process import WorkerSpec as _WorkerSpec
+from .supervisor_session import PluginWorkerError
 
 ArtifactReference = _ArtifactReference
 ArtifactResolution = _ArtifactResolution

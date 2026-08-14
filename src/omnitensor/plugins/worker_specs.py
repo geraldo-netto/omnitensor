@@ -20,7 +20,7 @@ from .loading_accelerator import (
 )
 from .loading_staging import _STAGING_COMPONENT
 from .sandbox import FilesystemSandbox
-from .supervisor import WorkerSpec
+from .supervisor_process import WorkerSpec
 
 MAX_WORKER_IMPORT_PATHS = 16
 WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
