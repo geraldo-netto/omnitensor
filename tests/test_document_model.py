@@ -1333,6 +1333,23 @@ def test_binding_and_report_are_schema_valid_and_do_not_claim_profile_acceptance
     )
     assert validate_manifest(binding) == []
     assert binding["defaults"]["enabled"] is False
+    model = binding["requirements"]["model"]
+    assert tuple(model) == (
+        "id",
+        "version",
+        "format",
+        "sha256",
+        "companions",
+        "fullyQuantized",
+        "minimumCompilerVersion",
+        "minimumRuntimeVersion",
+        "tensorContract",
+        "outputContract",
+        "trainingContract",
+        "nativeEvidence",
+    )
+    assert model["minimumCompilerVersion"] == "20260526"
+    assert model["minimumRuntimeVersion"] == "1.0.20260526"
 
 
 def validate_manifest(document):

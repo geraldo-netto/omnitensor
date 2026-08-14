@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hypothesis import given
 from hypothesis import strategies as st
 
+import omnitensor.training.numeric_promotion as numeric_promotion
 from omnitensor.plugins.artifact_trust import (
     ArtifactProvenance,
     ArtifactTrustRoot,
@@ -139,11 +140,21 @@ def test_common_loader_maps_every_numeric_recipe_and_pins_semantics(tmp_path, re
     }
 
 
-def test_promotion_compiles_parity_gates_signs_and_reloads_restricted_binding(tmp_path):
+def test_promotion_compiles_parity_gates_signs_and_reloads_restricted_binding(
+    tmp_path, monkeypatch
+):
     report_path = write_report(tmp_path / "fit")
     signer, verifier = signing_boundary()
     gpu = FakeCompiler("gpu")
     npu = FakeCompiler("npu")
+    writes = []
+    atomic_write = numeric_promotion.write_json_atomic
+
+    def write(path, document, *, prefix):
+        writes.append((path, document, prefix))
+        atomic_write(path, document, prefix=prefix)
+
+    monkeypatch.setattr(numeric_promotion, "write_json_atomic", write)
 
     installed = promote_numeric_training(
         report_path,
@@ -171,8 +182,24 @@ def test_promotion_compiles_parity_gates_signs_and_reloads_restricted_binding(tm
     assert npu.outputs == [report_path.parent / "compiled/npu"]
     manifest = json.loads(installed.binding_path.read_text())
     models = manifest["requirements"]["models"]
+    assert writes == [(installed.binding_path, manifest, ".numeric-model-binding-")]
     assert manifest["requirements"]["acceleratorPreference"] == ["npu", "gpu"]
     assert [model["version"] for model in models] == ["2.0.0", "3.0.0"]
+    assert all(model["minimumCompilerVersion"] == "0.0.0" for model in models)
+    assert all(model["minimumRuntimeVersion"] == "0.0.0" for model in models)
+    assert all(
+        tuple(model)[-7:]
+        == (
+            "fullyQuantized",
+            "minimumCompilerVersion",
+            "minimumRuntimeVersion",
+            "tensorContract",
+            "outputContract",
+            "trainingContract",
+            "nativeEvidence",
+        )
+        for model in models
+    )
     assert models[0]["trainingContract"] == models[1]["trainingContract"]
     assert all(model["nativeEvidence"]["namedDeviceAccepted"] is False for model in models)
     assert all(model["nativeEvidence"]["samples"] == 8 for model in models)

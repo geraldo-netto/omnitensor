@@ -306,6 +306,14 @@ def test_install_compiles_installs_and_binds_one_logical_model(tmp_path, monkeyp
     assert manifest["requirements"]["accelerator"] == "gpu"
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
     [bound] = manifest["requirements"]["models"]
+    assert tuple(bound)[-6:] == (
+        "fullyQuantized",
+        "minimumCompilerVersion",
+        "minimumRuntimeVersion",
+        "tensorContract",
+        "featureContract",
+        "outputContract",
+    )
     assert bound["format"] == "ncnn"
     assert bound["fullyQuantized"] is False
     assert bound["minimumCompilerVersion"] == "0.0.0"

@@ -27,6 +27,7 @@ from ..registry import (
     validate_document,
     validate_workload_document,
 )
+from .binding import binding_manifest, model_fragment, native_evidence, publish_binding
 from .embedding_production import (
     EmbeddingHoldout,
     SentenceEmbeddingOnnxExporter,
@@ -567,7 +568,12 @@ def install_document_model(
         bundled_root,
     )
     binding_path = Path(bindings_root) / PROFILE_ID / "manifest.json"
-    write_json_atomic(binding_path, binding, prefix=".document-model-binding-")
+    publish_binding(
+        binding_path,
+        binding,
+        prefix=".document-model-binding-",
+        writer=write_json_atomic,
+    )
     return InstalledDocumentModel(installed, binding_path, report_path, evidence)
 
 
@@ -650,45 +656,44 @@ def _write_document_model_report(path: Path, document: dict) -> None:
 def _binding_document(
     source, artifact, portable_sha, report_sha, evidence, bundled_root
 ) -> dict:
-    workloads = load_workloads(bundled_root or bundled_workloads_path())
-    workload = workloads.get(PROFILE_ID)
-    if workload is None:
-        raise DocumentModelError("profile-unknown", f"no bundled profile is named {PROFILE_ID}")
-    manifest = copy.deepcopy(workload.manifest)
-    model = {
-        **artifact,
-        "fullyQuantized": False,
-        "minimumCompilerVersion": "20260526",
-        "minimumRuntimeVersion": "1.0.20260526",
-        "tensorContract": copy.deepcopy(NATIVE_TENSOR_CONTRACT),
-        "outputContract": {"kind": "embedding"},
-        "trainingContract": {
-            "version": 1,
-            "profileId": PROFILE_ID,
-            "recipe": RECIPE_ID,
-            "reportSha256": report_sha,
-            "taskSemanticsSha256": source.recipe.document_sha256,
-        },
-        "nativeEvidence": {
-            "portableSha256": portable_sha,
-            "nativeSha256": artifact["sha256"],
-            "reportSha256": report_sha,
-            "samples": evidence.samples,
-            "maximumAbsoluteError": evidence.maximum_absolute_error,
-            "tolerance": MAX_NATIVE_ABSOLUTE_ERROR,
-            "compilerReportSha256": None,
-            "namedDeviceAccepted": False,
-        },
-    }
-    requirements = manifest["requirements"]
-    requirements["accelerator"] = "gpu"
-    requirements["acceleratorPreference"] = ["gpu"]
-    requirements["model"] = model
-    requirements.pop("models", None)
-    violations = validate_workload_document(manifest)
-    if violations:
-        raise DocumentModelError("binding-invalid", "; ".join(violations))
-    return manifest
+    def variants() -> dict:
+        model = model_fragment(
+            artifact,
+            fully_quantized=False,
+            minimum_compiler_version="20260526",
+            minimum_runtime_version="1.0.20260526",
+            tensor_contract=NATIVE_TENSOR_CONTRACT,
+            output_contract={"kind": "embedding"},
+            training_contract={
+                "version": 1,
+                "profileId": PROFILE_ID,
+                "recipe": RECIPE_ID,
+                "reportSha256": report_sha,
+                "taskSemanticsSha256": source.recipe.document_sha256,
+            },
+            evidence=native_evidence(
+                portable_sha256=portable_sha,
+                native_sha256=artifact["sha256"],
+                report_sha256=report_sha,
+                samples=evidence.samples,
+                maximum_absolute_error=evidence.maximum_absolute_error,
+                tolerance=MAX_NATIVE_ABSOLUTE_ERROR,
+                compiler_report_sha256=None,
+                named_device_accepted=False,
+            ),
+        )
+        return {"gpu": model}
+
+    return binding_manifest(
+        PROFILE_ID,
+        variants,
+        lane_order=("gpu",),
+        plural=False,
+        root=bundled_root or bundled_workloads_path(),
+        load=load_workloads,
+        validate=validate_workload_document,
+        error_type=DocumentModelError,
+    )
 
 
 def _bundled_corpus_path() -> Path:

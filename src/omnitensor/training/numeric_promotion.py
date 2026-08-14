@@ -23,6 +23,7 @@ from ..plugins.artifact_trust import ArtifactProvenance, ArtifactTrustVerifier
 from ..plugins.artifacts import ArtifactReference
 from ..preparation import PreparedArtifact, file_digest, prepare_artifact
 from ..registry import bundled_workloads_path, load_workloads, validate_workload_document
+from .binding import binding_manifest, model_fragment, native_evidence, publish_binding
 from .compilers import (
     CompilationRequest,
     CompiledTarget,
@@ -254,7 +255,12 @@ def promote_numeric_training(
         bundled_root=bundled_root,
     )
     binding_path = Path(bindings_root) / report.profile_id / "manifest.json"
-    write_json_atomic(binding_path, binding, prefix=".numeric-model-binding-")
+    publish_binding(
+        binding_path,
+        binding,
+        prefix=".numeric-model-binding-",
+        writer=write_json_atomic,
+    )
     return InstalledTraining(report.profile_id, binding_path, tuple(installed))
 
 
@@ -308,25 +314,25 @@ def _numeric_model_fragment(
     compiler_report_sha256 = (
         file_digest(compiled.compiler_report) if compiled.compiler_report is not None else None
     )
-    return {
-        **artifact.manifest_fragment(),
-        "fullyQuantized": compiled.fully_quantized,
-        "minimumCompilerVersion": "0.0.0",
-        "minimumRuntimeVersion": "0.0.0",
-        "tensorContract": copy.deepcopy(report.tensor_contract),
-        "outputContract": copy.deepcopy(report.output_contract),
-        "trainingContract": report.training_contract,
-        "nativeEvidence": {
-            "portableSha256": evidence.portable_sha256,
-            "nativeSha256": evidence.native_sha256,
-            "reportSha256": report.report_sha256,
-            "samples": evidence.samples,
-            "maximumAbsoluteError": float(evidence.maximum_absolute_error),
-            "tolerance": MAX_PARITY_ERROR,
-            "compilerReportSha256": compiler_report_sha256,
-            "namedDeviceAccepted": False,
-        },
-    }
+    return model_fragment(
+        artifact.manifest_fragment(),
+        fully_quantized=compiled.fully_quantized,
+        minimum_compiler_version="0.0.0",
+        minimum_runtime_version="0.0.0",
+        tensor_contract=report.tensor_contract,
+        output_contract=report.output_contract,
+        training_contract=report.training_contract,
+        evidence=native_evidence(
+            portable_sha256=evidence.portable_sha256,
+            native_sha256=evidence.native_sha256,
+            report_sha256=report.report_sha256,
+            samples=evidence.samples,
+            maximum_absolute_error=float(evidence.maximum_absolute_error),
+            tolerance=MAX_PARITY_ERROR,
+            compiler_report_sha256=compiler_report_sha256,
+            named_device_accepted=False,
+        ),
+    )
 
 
 def _numeric_binding_manifest(
@@ -335,21 +341,16 @@ def _numeric_binding_manifest(
     *,
     bundled_root: Path | None,
 ) -> dict:
-    workloads = load_workloads(bundled_root or bundled_workloads_path())
-    workload = workloads.get(report.profile_id)
-    if workload is None:
-        raise TrainingError("profile-unknown", f"no bundled profile is named {report.profile_id}")
-    lanes = [target for target in ("npu", "gpu") if target in variants]
-    manifest = copy.deepcopy(workload.manifest)
-    requirements = manifest["requirements"]
-    requirements.pop("model", None)
-    requirements["accelerator"] = lanes[0]
-    requirements["acceleratorPreference"] = lanes
-    requirements["models"] = [copy.deepcopy(variants[target]) for target in lanes]
-    violations = validate_workload_document(manifest)
-    if violations:
-        raise TrainingError("binding-invalid", "; ".join(violations))
-    return manifest
+    return binding_manifest(
+        report.profile_id,
+        variants,
+        lane_order=("npu", "gpu"),
+        plural=True,
+        root=bundled_root or bundled_workloads_path(),
+        load=load_workloads,
+        validate=validate_workload_document,
+        error_type=TrainingError,
+    )
 
 
 def _document_digest(document: object) -> str:

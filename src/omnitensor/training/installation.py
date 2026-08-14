@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import os
 import shutil
 import sys
@@ -17,6 +16,7 @@ from ..registry import (
     load_workloads,
     validate_workload_document,
 )
+from .binding import binding_manifest, model_fragment, publish_binding
 from .compilers import (
     TARGET_ORDER,
     CompilationRequest,
@@ -125,7 +125,12 @@ def install_training(
         bundled_root=bundled_root,
     )
     binding_path = Path(bindings_root) / report.spec.profile_id / "manifest.json"
-    write_json_atomic(binding_path, binding, prefix=".model-binding-")
+    publish_binding(
+        binding_path,
+        binding,
+        prefix=".model-binding-",
+        writer=write_json_atomic,
+    )
     return InstalledTraining(report.spec.profile_id, binding_path, tuple(installed))
 
 
@@ -165,15 +170,15 @@ def _compile_and_prepare(
 def _model_fragment(
     report: TrainingReport, artifact: PreparedArtifact, fully_quantized: bool
 ) -> dict:
-    return {
-        **artifact.manifest_fragment(),
-        "fullyQuantized": fully_quantized,
-        "minimumCompilerVersion": "0.0.0",
-        "minimumRuntimeVersion": "0.0.0",
-        "tensorContract": report.spec.tensor_contract,
-        "featureContract": report.spec.feature_contract,
-        "outputContract": report.spec.output_contract,
-    }
+    return model_fragment(
+        artifact.manifest_fragment(),
+        fully_quantized=fully_quantized,
+        minimum_compiler_version="0.0.0",
+        minimum_runtime_version="0.0.0",
+        tensor_contract=report.spec.tensor_contract,
+        feature_contract=report.spec.feature_contract,
+        output_contract=report.spec.output_contract,
+    )
 
 
 def _binding_manifest(
@@ -182,23 +187,16 @@ def _binding_manifest(
     *,
     bundled_root: Path | None,
 ) -> dict:
-    workloads = load_workloads(bundled_root or bundled_workloads_path())
-    workload = workloads.get(report.spec.profile_id)
-    if workload is None:
-        raise TrainingError(
-            "profile-unknown", f"no bundled profile is named {report.spec.profile_id}"
-        )
-    lanes = [target for target in TARGET_ORDER if target in variants]
-    manifest = copy.deepcopy(workload.manifest)
-    requirements = manifest["requirements"]
-    requirements.pop("model", None)
-    requirements["accelerator"] = lanes[0]
-    requirements["acceleratorPreference"] = lanes
-    requirements["models"] = [copy.deepcopy(variants[target]) for target in lanes]
-    violations = validate_workload_document(manifest)
-    if violations:
-        raise TrainingError("binding-invalid", "; ".join(violations))
-    return manifest
+    return binding_manifest(
+        report.spec.profile_id,
+        variants,
+        lane_order=TARGET_ORDER,
+        plural=True,
+        root=bundled_root or bundled_workloads_path(),
+        load=load_workloads,
+        validate=validate_workload_document,
+        error_type=TrainingError,
+    )
 
 
 def _tool(name: str) -> Path | None:
