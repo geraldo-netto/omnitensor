@@ -180,13 +180,23 @@ class PluginWorkerSupervisor:
             if error.code is not _WorkerBudgetCode.CONCURRENCY:
                 await asyncio.shield(_force_stop(slot.process, self._stop_timeout))
             raise PluginWorkerError(error.code.value, error.detail) from error
-        except PluginWorkerError:
+        except PluginWorkerError as error:
+            await self._stop_protocol_failure(slot, error)
             raise
         except Exception as error:
+            await asyncio.shield(_force_stop(slot.process, self._stop_timeout))
             raise PluginWorkerError(
                 "worker-protocol-failed",
                 f"worker channel failed: {type(error).__name__}",
             ) from error
+
+    async def _stop_protocol_failure(
+        self,
+        slot: _WorkerSlot,
+        error: PluginWorkerError,
+    ) -> None:
+        if error.code == "worker-protocol-failed":
+            await asyncio.shield(_force_stop(slot.process, self._stop_timeout))
 
     async def _run_request(
         self,

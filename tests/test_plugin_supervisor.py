@@ -503,7 +503,7 @@ def test_supervisor_enforces_call_deadline_and_output_budget():
     run_scenario(output_scenario())
 
 
-def test_supervisor_rejects_worker_error_and_response_protocol_drift():
+def test_supervisor_preserves_a_valid_worker_error_without_stopping_the_channel():
     async def scenario():
         events = []
         offer = HandshakeOffer("events", 1, 1, frozenset({"execute", "progress"}))
@@ -541,25 +541,73 @@ def test_supervisor_rejects_worker_error_and_response_protocol_drift():
             "provider-unavailable",
             "bounded",
         )
-        malformed = await refused(
-            IPCFrame(1, WorkerMessageType.ERROR, "job-1", {"code": "", "detail": 1})
-        )
-        assert (malformed.code, malformed.detail) == (
-            "worker-protocol-failed",
+        assert process.returncode is None
+        assert process.writer.closed is False
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+@pytest.mark.parametrize(
+    ("frame", "detail"),
+    (
+        (
+            IPCFrame(1, WorkerMessageType.ERROR, "job-1", {"code": "", "detail": 1}),
             "worker error response is invalid",
-        )
-        unexpected = await refused(IPCFrame(1, WorkerMessageType.HEALTH, "job-1", {}))
-        assert (unexpected.code, unexpected.detail) == (
-            "worker-protocol-failed",
+        ),
+        (
+            IPCFrame(1, WorkerMessageType.HEALTH, "job-1", {}),
             "unexpected worker message: health",
-        )
-        mismatched = await refused(
-            result_frame(PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2))
-        )
-        assert (mismatched.code, mismatched.detail) == (
-            "worker-protocol-failed",
+        ),
+        (
+            result_frame(
+                PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2)
+            ),
             "worker response names another request",
+        ),
+    ),
+)
+def test_supervisor_stops_and_evicts_a_protocol_desynchronised_worker(frame, detail):
+    async def scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"execute", "progress"}))
+        process = FakeProcess("events", offer, events)
+        supervisor = PluginWorkerSupervisor(
+            FakeLauncher({"events": process}),
+            recovery_policy=WorkerRecoveryPolicy(max_restarts=0),
         )
+        await supervisor.start(
+            (
+                WorkerSpec(
+                    "events",
+                    ("python", "worker.py"),
+                    capabilities=frozenset({"execute", "progress"}),
+                ),
+            )
+        )
+
+        pending = asyncio.create_task(
+            supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
+        )
+        await asyncio.sleep(0)
+        process.reader.feed_data(encode_frame(frame))
+        with pytest.raises(PluginWorkerError) as error:
+            await pending
+        assert (error.value.code, error.value.detail) == ("worker-protocol-failed", detail)
+        assert process.writer.closed is True
+        assert process.returncode == 0
+
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if "events" not in supervisor._slots:
+                break
+        assert "events" not in supervisor._slots
+        assert supervisor.statuses()[0].state is WorkerState.EXITED
+        with pytest.raises(PluginWorkerError) as unavailable:
+            await supervisor.execute(
+                PluginRequest("job-2", "events", "manual", {}, 2, None)
+            )
+        assert unavailable.value.code == "worker-unavailable"
         await supervisor.stop()
 
     run_scenario(scenario())
@@ -588,6 +636,8 @@ def test_supervisor_maps_broken_channel_and_forces_unresponsive_cancel(tmp_path)
         with pytest.raises(PluginWorkerError) as channel:
             await pending
         assert channel.value.code == "worker-protocol-failed"
+        assert broken.writer.closed is True
+        assert broken.returncode == 0
         await supervisor.stop()
 
         stuck = FakeProcess(
