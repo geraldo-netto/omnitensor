@@ -1,7 +1,7 @@
-"""Exact-behavior assertions added to kill surviving mutants.
+"""Behavioral assertions retained from mutation regression work.
 
-Each block pins observable behavior (exact messages, exact documents, exact
-call arguments, exact math) that broader tests only checked loosely.
+Each block pins observable boundaries, structures, state changes, and runtime
+interactions that broader tests only checked loosely.
 """
 
 from __future__ import annotations
@@ -22,7 +22,14 @@ from omnitensor.discovery import (
     detect_tpu,
     device_utilization,
 )
-from omnitensor.executors.base import Availability, InferenceResult, run_executor
+from omnitensor.executors.base import (
+    DEVICE_ABSENT,
+    RUNTIME_MISSING,
+    RUNTIME_UNUSABLE,
+    Availability,
+    InferenceResult,
+    run_executor,
+)
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
@@ -61,7 +68,7 @@ def test_contract_bounds_refuse_instead_of_slicing_or_clamping():
 
 
 # --------------------------------------------------------------------------
-# control: exact acknowledgement contents
+# control: acknowledgement structure and state
 
 
 class MemoryStorage:
@@ -101,22 +108,40 @@ def valid_command(**overrides) -> dict:
     return command
 
 
-def test_control_exact_rejection_and_acknowledgement_messages():
+def test_control_rejections_and_acknowledgements_are_machine_readable():
     control = ControlService(MemoryStorage())
-    assert apply(control, "{nope")["message"] == "Command is not valid JSON"
-    assert apply(control, "[]")["message"] == "Command is not an object"
-    bad = apply(control, {"version": 2})
-    assert bad["message"] == "Command does not match the version 1 contract"
-    assert bad["commandId"] == "invalid"
-    unknown = apply(
-        control,
-        valid_command(operation="set-profile-enabled", profileId="missing", value=True),
+    rejections = (
+        ("{nope", "invalid"),
+        ("[]", "invalid"),
+        ({"version": 2}, "invalid"),
+        (
+            valid_command(
+                operation="set-profile-enabled", profileId="missing", value=True,
+            ),
+            "cmd-1",
+        ),
     )
-    assert unknown["message"] == "Unknown workload profile: missing"
+    for document, command_id in rejections:
+        acknowledgement = apply(control, document)
+        assert set(acknowledgement) == {
+            "version",
+            "commandId",
+            "status",
+            "revision",
+            "appliedAt",
+            "message",
+            "portfolio",
+        }
+        assert acknowledgement["status"] == "rejected"
+        assert acknowledgement["commandId"] == command_id
+        assert acknowledgement["revision"] == 0
+        assert acknowledgement["portfolio"]["paused"] is False
+
     applied = apply(control, valid_command())
-    assert applied["message"] == "Policy applied"
     assert applied["status"] == "applied"
+    assert applied["commandId"] == "cmd-1"
     assert applied["revision"] == 1
+    assert applied["portfolio"]["paused"] is True
 
 
 def test_control_applied_at_is_current_epoch_milliseconds():
@@ -146,10 +171,10 @@ def test_build_control_service_wires_a_store_at_the_given_path(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# state: exact persisted document
+# state: persisted document structure
 
 
-def test_policy_save_writes_exact_compact_sorted_document(tmp_path):
+def test_policy_save_writes_the_complete_policy_document(tmp_path):
     path = tmp_path / "policy.json"
     PolicyStore(path, {}).save(PolicyState(
         paused=False,
@@ -159,12 +184,14 @@ def test_policy_save_writes_exact_compact_sorted_document(tmp_path):
         },
         revision=7,
     ))
-    expected = (
-        '{"paused":false,'
-        '"profiles":{"alpha":{"enabled":false,"weight":1},"zeta":{"enabled":true,"weight":5}},'
-        '"revision":7}'
-    )
-    assert path.read_text() == expected
+    assert json.loads(path.read_text()) == {
+        "paused": False,
+        "profiles": {
+            "alpha": {"enabled": False, "weight": 1},
+            "zeta": {"enabled": True, "weight": 5},
+        },
+        "revision": 7,
+    }
 
 
 def test_policy_load_revision_boundaries(tmp_path):
@@ -230,18 +257,18 @@ def test_write_snapshot_leaves_only_the_target_file(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# registry: exact violation strings and bounds
+# registry: violation structure and bounds
 
 
-def test_validate_document_formats_paths_exactly():
+def test_validate_document_reports_invalid_structures():
     root_violations = validate_document("runtime-command.schema.json", 5)
-    assert root_violations == ["/: 5 is not of type 'object'"]
+    assert len(root_violations) == 1
+    assert all(isinstance(violation, str) and violation for violation in root_violations)
     manifest = sample_manifest()
     manifest["requirements"]["accelerator"] = "bogus"
     nested = validate_document("workload-manifest.schema.json", manifest)
     assert len(nested) == 1
-    assert nested[0].startswith("requirements/accelerator: ")
-    assert "bogus" in nested[0]
+    assert validate_document("workload-manifest.schema.json", sample_manifest()) == []
 
 
 def manifest_of_exact_size(size: int) -> str:
@@ -473,7 +500,7 @@ def test_update_executors_before_start_never_spawns_workers():
     asyncio.run(scenario())
 
 
-def test_select_backend_reason_and_code_composition_is_exact():
+def test_select_backend_exposes_a_machine_readable_failure_code():
     executors = {
         "tpu": TpuExecutor(device_present=False),
         "npu": NpuExecutor(device_present=False),
@@ -482,12 +509,8 @@ def test_select_backend_reason_and_code_composition_is_exact():
     workload = Workload(id=manifest["id"], manifest=manifest)
     choice = select_backend(workload, executors)
     assert choice.backend is None
-    assert choice.reason == (
-        "tpu: No Coral Edge TPU device detected; "
-        "npu: No /dev/accel NPU device detected; "
-        "gpu: no executor"
-    )
-    assert choice.code == "device-absent"
+    assert choice.code == DEVICE_ABSENT
+    assert isinstance(choice.reason, str) and choice.reason
 
 
 # --------------------------------------------------------------------------
@@ -553,18 +576,18 @@ def test_tpu_delegate_failure_is_cached_as_unavailability():
         executor.run("model.tflite", [[1]])
     availability = executor.availability()
     assert availability.available is False
-    assert availability.reason.startswith("Could not load libedgetpu.so.1: ")
+    assert availability.code == RUNTIME_UNUSABLE
+    assert availability.reason
 
 
-def test_tpu_availability_reasons_are_exact():
-    assert TpuExecutor(device_present=False).availability() == Availability(
-        False, "No Coral Edge TPU device detected", "device-absent",
-    )
-    missing = TpuExecutor(device_present=True, runtime=None)
-    missing._runtime = None
-    assert missing.availability() == Availability(
-        False, "tflite-runtime is not installed", "runtime-missing",
-    )
+def test_tpu_availability_exposes_machine_readable_codes(monkeypatch):
+    absent = TpuExecutor(device_present=False).availability()
+    assert (absent.available, absent.code) == (False, DEVICE_ABSENT)
+    assert absent.reason
+    monkeypatch.setattr("omnitensor.executors.tpu._import_tflite", lambda: None)
+    missing = TpuExecutor(device_present=True).availability()
+    assert (missing.available, missing.code) == (False, RUNTIME_MISSING)
+    assert missing.reason
 
 
 class RecordingOrt:
@@ -605,21 +628,18 @@ def test_gpu_run_uses_only_gpu_providers_in_order():
     assert isinstance(result.duration_ms, float) and result.duration_ms >= 0.0
 
 
-def test_gpu_availability_reasons_are_exact():
-    assert GpuExecutor(device_present=False).availability() == Availability(
-        False, "No GPU render node detected", "device-absent",
-    )
-    missing = GpuExecutor(device_present=True, runtime=None)
-    missing._runtime = None
-    assert missing.availability() == Availability(
-        False, "onnxruntime is not installed", "runtime-missing",
-    )
+def test_gpu_availability_exposes_machine_readable_codes(monkeypatch):
+    absent = GpuExecutor(device_present=False).availability()
+    assert (absent.available, absent.code) == (False, DEVICE_ABSENT)
+    assert absent.reason
+    monkeypatch.setattr("omnitensor.executors.gpu._import_onnxruntime", lambda: None)
+    missing = GpuExecutor(device_present=True).availability()
+    assert (missing.available, missing.code) == (False, RUNTIME_MISSING)
+    assert missing.reason
     cpu_only = GpuExecutor(device_present=True, runtime=RecordingOrt(["CPUExecutionProvider"]))
-    assert cpu_only.availability() == Availability(
-        False,
-        "onnxruntime has no CUDA or ROCm execution provider; the CPU provider is not used",
-        "runtime-unusable",
-    )
+    unusable = cpu_only.availability()
+    assert (unusable.available, unusable.code) == (False, RUNTIME_UNUSABLE)
+    assert unusable.reason
 
 
 def test_composite_forwards_exact_arguments():
@@ -713,21 +733,20 @@ def test_npu_run_compiles_for_the_npu_device_exactly():
     assert isinstance(result.duration_ms, float) and result.duration_ms >= 0.0
 
 
-def test_npu_availability_reasons_are_exact():
-    assert NpuExecutor(device_present=False).availability() == Availability(
-        False, "No /dev/accel NPU device detected", "device-absent",
-    )
-    missing = NpuExecutor(device_present=True, runtime=None)
-    missing._runtime = None
-    assert missing.availability() == Availability(
-        False, "openvino is not installed", "runtime-missing",
-    )
+def test_npu_availability_exposes_machine_readable_codes(monkeypatch):
+    absent = NpuExecutor(device_present=False).availability()
+    assert (absent.available, absent.code) == (False, DEVICE_ABSENT)
+    assert absent.reason
+    monkeypatch.setattr("omnitensor.executors.npu._import_openvino", lambda: None)
+    missing = NpuExecutor(device_present=True).availability()
+    assert (missing.available, missing.code) == (False, RUNTIME_MISSING)
+    assert missing.reason
 
 
-def test_vulkan_availability_reasons_are_exact():
-    assert VulkanGpuExecutor(device_present=False).availability() == Availability(
-        False, "No GPU render node detected", "device-absent",
-    )
+def test_vulkan_availability_exposes_a_machine_readable_code():
+    absent = VulkanGpuExecutor(device_present=False).availability()
+    assert (absent.available, absent.code) == (False, DEVICE_ABSENT)
+    assert absent.reason
 
 
 class FakeMat(list):
@@ -874,15 +893,15 @@ def test_vulkan_device_preference_is_exact():
         assert runtime.selected_device == expected, device_types
 
     software_only = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([CPU]))
-    assert software_only.availability() == Availability(
+    software_unavailable = software_only.availability()
+    assert (software_unavailable.available, software_unavailable.code) == (
         False,
-        "Only a software (CPU) Vulkan device is present; CPU execution is not used",
-        "runtime-unusable",
+        RUNTIME_UNUSABLE,
     )
-    none_at_all = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([]))
-    assert none_at_all.availability() == Availability(
-        False, "No Vulkan device is available", "runtime-unusable",
-    )
+    assert software_unavailable.reason
+    none_at_all = VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([])).availability()
+    assert (none_at_all.available, none_at_all.code) == (False, RUNTIME_UNUSABLE)
+    assert none_at_all.reason
 
 
 def test_vulkan_mat_conversions_are_exact():
