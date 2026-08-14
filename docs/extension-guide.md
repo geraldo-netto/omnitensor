@@ -68,9 +68,13 @@ intersects declared with granted, and the worker receives only that
 intersection. Undeclared grants are refused outright, so a permission cannot be
 smuggled in from the host side.
 
-Consent is revocable while work runs, not only between runs. Guard any
-long-running operation with `ConsentGuard`, which refuses to start work whose
-grants are missing and cancels promptly when one is withdrawn.
+Consent is revocable while work runs, not only between runs. Use the public
+`PermissionView.require()` at each permission-dependent operation boundary and
+let cancellation propagate promptly. The installed host monitors the live
+grant ledger, cancels active work, and stops the worker when its grant set
+changes; plugin packages must not import the service's ledger or supervisor
+internals. See [plugin-workers.md](plugin-workers.md) for that enforcement
+boundary.
 
 Filesystem, device, network, and execution restrictions are derived from the
 granted set. Free-form permissions do not imply filesystem access; see

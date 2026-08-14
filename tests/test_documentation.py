@@ -75,6 +75,18 @@ def test_extension_guide_covers_the_publishing_lifecycle():
         assert reference in guide, f"the guide must route to {reference}"
 
 
+def test_revocation_guidance_uses_only_the_public_sdk():
+    sdk_guide = (ROOT / "docs/plugin-sdk.md").read_text(encoding="utf-8")
+    extension_guide = (ROOT / "docs/extension-guide.md").read_text(encoding="utf-8")
+    guidance = sdk_guide + extension_guide
+
+    assert "`PermissionView.require()`" in sdk_guide
+    assert "installed host monitors the live" in extension_guide
+    assert "service-side grant monitors" in sdk_guide
+    assert "LiveGrantView" not in guidance
+    assert "ConsentGuard" not in guidance
+
+
 def test_readme_links_the_extension_guide():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "[extension guide](docs/extension-guide.md)" in readme

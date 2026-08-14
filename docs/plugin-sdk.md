@@ -35,20 +35,18 @@ workaround.
 
 ## Consent that keeps applying
 
-`PermissionView` is a snapshot of the grants a plugin held when it started, so
-it cannot show a grant the user withdraws afterwards. Anything already running
-would keep collecting, inferring, and delivering on consent that no longer
-exists, and the withdrawal would only take effect at the next restart.
+`PermissionView` is the public, immutable view of the grants supplied to one
+worker. Call `PermissionView.require()` immediately before each
+permission-dependent unit of work and let cancellation propagate promptly; do
+not cache a successful check as authority for a later operation.
 
-`LiveGrantView` re-reads the grant ledger for every check, so a revocation
-committed by any process — the applet, a CLI, another service instance — is
-visible immediately, and both undeclared and ungranted permissions are refused.
-`ConsentGuard.run()` combines that with prompt cancellation: it refuses to
-start work whose grants are already missing, watches those grants while the
-work runs, and cancels the operation with a `consent-revoked` error the moment
-one disappears. Cancelling the caller cancels the guarded work too, so no
-operation outlives the request that asked for it.
+The installed host owns continuous revocation. It checks the live grant ledger
+before dispatch and while a request runs. If the active set changes, the host
+cancels the request, stops the isolated worker, returns `consent-revoked`, and
+refuses later work until the worker is started with the current grants. Plugin
+packages do not read the host ledger or import service-side grant monitors.
 
-The guard checks before dispatch as well as during execution, because consent
-withdrawn between queueing and dispatch must stop that work, not merely the
-next one.
+This split keeps persistence and process supervision outside the public SDK
+while ensuring consent withdrawn between queueing and dispatch stops the
+current work, not merely the next request. See
+[plugin-workers.md](plugin-workers.md) for the host enforcement boundary.
