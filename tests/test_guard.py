@@ -227,6 +227,22 @@ def test_a_refusal_is_a_stable_versioned_document():
     }
 
 
+def test_a_refusal_is_validated_at_its_emission_boundary(monkeypatch):
+    observed = []
+
+    def validate(schema, document):
+        observed.append((schema, document))
+        return ["broken"]
+
+    monkeypatch.setattr("omnitensor.guard.validate_document", validate)
+    refusal = GuardRefusedError("rate-limit-exceeded", "too fast", method="SubmitJob")
+
+    with pytest.raises(RuntimeError, match="runtime refusal violates contract"):
+        refusal.text()
+
+    assert observed == [("runtime-refusal.schema.json", refusal.document())]
+
+
 @pytest.mark.parametrize(
     "quota",
     [

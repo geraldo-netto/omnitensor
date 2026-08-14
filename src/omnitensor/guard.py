@@ -30,7 +30,10 @@ from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from .registry import validate_document
+
 GUARD_ERROR_VERSION = 1
+RUNTIME_REFUSAL_SCHEMA = "runtime-refusal.schema.json"
 DEFAULT_MAX_TRACKED_CALLERS = 256
 MAX_TRACKED_CALLERS_LIMIT = 4096
 # Fields that would mean the caller is asserting who it is.
@@ -58,7 +61,11 @@ class GuardRefusedError(Exception):
         }
 
     def text(self) -> str:
-        return json.dumps(self.document(), separators=(",", ":"))
+        document = self.document()
+        violations = validate_document(RUNTIME_REFUSAL_SCHEMA, document)
+        if violations:
+            raise RuntimeError(f"runtime refusal violates contract: {violations}")
+        return json.dumps(document, separators=(",", ":"), allow_nan=False)
 
 
 @dataclass(frozen=True, slots=True)
