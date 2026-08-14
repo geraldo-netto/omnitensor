@@ -12,7 +12,7 @@ audit's dependency order without weakening the required status schema.
 - **Audit architecture hygiene:** OMNI-0285–OMNI-0289
 - **Audit regression and mutation gates:** OMNI-0290–OMNI-0297
 - **Mutation signal quality:** OMNI-0298–OMNI-0303
-- **SonarCloud remediation:** OMNI-0333–OMNI-0336
+- **SonarCloud remediation:** OMNI-0333–OMNI-0338
 
 ## Findings
 
@@ -71,3 +71,5 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0334 | wont_fix | medium | xs | OMNI-0333 | Sonar reports missing lock files for the seven separately published provider and external-template library projects. Retain their ranged package metadata: Python library locks are not consumed when downstream applications install wheels, and each deployment environment must resolve those ranges into its own lock. The service and repository CI now use the root `uv.lock`; mark the seven library findings won't-fix after the next scan. |
+| OMNI-0337 | wont_fix | medium | xs | OMNI-0335, OMNI-0336 | Retain the reviewed caller-selected paths behind the remaining Sonar S8705/S8707 reports: mutation manifests and source roots plus media-fixture targets/tool discovery are explicit offline developer CLI inputs; `atomicio` is the generic path-owning persistence boundary; `file_digest` reads operator-selected artifacts; and privileged BPF helpers now receive only installed constants from `main` while tests inject temporary paths. None is reachable from a model, plug-in payload, or service request; mark any surviving reports false-positive after the next scan. |
+| OMNI-0338 | wont_fix | medium | xs | OMNI-0247 | Retain the reviewed semantic hotspots: the reported `tokenizer.json` value is a public SHA-256 digest, bidi controls are the sanitization denylist and its regression fixture, sandbox `/tmp` is a new private tmpfs inside the worker namespace, and `random.Random(seed)` builds a reproducible bounded conformance corpus rather than a secret. Mark those six findings false-positive. Keep the BPF socket-mode finding open under OMNI-0247 until group/ACL/socket-activation ownership is chosen. |
