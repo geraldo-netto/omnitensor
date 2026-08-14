@@ -19,9 +19,16 @@ from pathlib import Path
 from .plugins.offloop import run_off_loop
 from .ports import PolicyStorage
 from .registry import validate_document
-from .state import MAX_WEIGHT, MIN_WEIGHT, PolicyState, PolicyStore, ProfilePolicy
+from .state import (
+    MAX_DEVICE_CHOICES,
+    MAX_WEIGHT,
+    MIN_WEIGHT,
+    PolicyState,
+    PolicyStore,
+    ProfilePolicy,
+)
 
-CONTROL_VERSION = 1
+CONTROL_VERSION = 2
 REVISION_MISMATCH_MESSAGE = "Runtime policy revision changed; refresh and retry"
 PERSIST_FAILURE_MESSAGE = "Could not persist the policy; nothing was applied"
 INTERNAL_ERROR_MESSAGE = "Internal error while applying the command"
@@ -60,9 +67,18 @@ def _sanitized_command_id(command: dict) -> str:
 
 
 class ControlService:
-    def __init__(self, store: PolicyStorage, on_applied=None):
+    def __init__(
+        self,
+        store: PolicyStorage,
+        on_applied=None,
+        *,
+        profile_exists=None,
+        gpu_device_ids=None,
+    ):
         self._store = store
         self._on_applied = on_applied
+        self._profile_exists = profile_exists
+        self._gpu_device_ids = gpu_device_ids or (lambda: ())
         self._state: PolicyState = store.load()
         self._lock = asyncio.Lock()
 
@@ -90,7 +106,7 @@ class ControlService:
         command_id = _sanitized_command_id(command)
         violations = validate_document("runtime-command.schema.json", command)
         if violations:
-            return self._rejection(command_id, "Command does not match the version 1 contract")
+            return self._rejection(command_id, "Command does not match the version 2 contract")
         # The lock spans the revision check, the persist, and the publish.
         # Persisting off the loop means another command can run between the
         # check and the commit, and two commands that both saw revision N
@@ -130,6 +146,10 @@ class ControlService:
             state.paused = command["value"] is True
             return None
         profile_id = command["profileId"]
+        if operation == "set-profile-device":
+            if not self._known_profile(state, profile_id):
+                return f"Unknown workload profile: {profile_id}"
+            return self._set_profile_device(state, profile_id, command["value"])
         policy = state.profiles.get(profile_id)
         if policy is None:
             return f"Unknown workload profile: {profile_id}"
@@ -159,24 +179,74 @@ class ControlService:
             if unknown is not None:
                 return unknown
         for change in changes:
-            policy = state.profiles[change["profileId"]]
-            if "enabled" in change:
-                policy.enabled = change["enabled"] is True
-            if "weight" in change:
-                weight = _integral_weight(change["weight"])
-                if weight is None:  # Contract validation makes this unreachable.
-                    return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
-                policy.weight = weight
+            error = self._apply_batch_change(state, change)
+            if error is not None:
+                return error
+        return None
+
+    def _apply_batch_change(self, state: PolicyState, change: dict) -> str | None:
+        policy = state.profiles.get(change["profileId"])
+        if "enabled" in change:
+            assert policy is not None
+            policy.enabled = change["enabled"] is True
+        if "weight" in change:
+            assert policy is not None
+            weight = _integral_weight(change["weight"])
+            if weight is None:  # Contract validation makes this unreachable.
+                return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
+            policy.weight = weight
+        if "deviceId" in change:
+            return self._set_profile_device(
+                state, change["profileId"], change["deviceId"]
+            )
         return None
 
     def _batch_error(self, state: PolicyState, change: dict) -> str | None:
         profile_id = change["profileId"]
-        if profile_id not in state.profiles:
+        if not self._known_profile(state, profile_id):
             return f"Unknown workload profile: {profile_id}"
-        if "enabled" not in change and "weight" not in change:
+        if "enabled" not in change and "weight" not in change and "deviceId" not in change:
             # A change that changes nothing is a caller mistake worth naming:
             # silently accepting it would spend a revision and alter nothing.
             return f"Change for {profile_id} sets neither enabled nor weight"
+        if ("enabled" in change or "weight" in change) and profile_id not in state.profiles:
+            return f"Profile policy unavailable: {profile_id}"
+        if "deviceId" in change:
+            return self._device_choice_error(change["deviceId"])
+        return None
+
+    def _known_profile(self, state: PolicyState, profile_id: str) -> bool:
+        return (
+            profile_id in state.profiles
+            or profile_id in state.device_choices
+            or (
+                self._profile_exists is not None
+                and self._profile_exists(profile_id) is True
+            )
+        )
+
+    def _device_choice_error(self, device_id: str | None) -> str | None:
+        if device_id is None:
+            return None
+        if device_id not in set(self._gpu_device_ids()):
+            return f"GPU device is unavailable: {device_id}"
+        return None
+
+    def _set_profile_device(
+        self, state: PolicyState, profile_id: str, device_id: str | None
+    ) -> str | None:
+        error = self._device_choice_error(device_id)
+        if error is not None:
+            return error
+        if device_id is None:
+            state.device_choices.pop(profile_id, None)
+        else:
+            if (
+                profile_id not in state.device_choices
+                and len(state.device_choices) >= MAX_DEVICE_CHOICES
+            ):
+                return f"GPU device choices are limited to {MAX_DEVICE_CHOICES} profiles"
+            state.device_choices[profile_id] = device_id
         return None
 
     def _rejection(self, command_id: str, message: str) -> dict:
@@ -194,5 +264,15 @@ class ControlService:
         }
 
 
-def build_control_service(state_path: Path, defaults: dict[str, ProfilePolicy]) -> ControlService:
-    return ControlService(PolicyStore(state_path, defaults))
+def build_control_service(
+    state_path: Path,
+    defaults: dict[str, ProfilePolicy],
+    *,
+    profile_exists=None,
+    gpu_device_ids=None,
+) -> ControlService:
+    return ControlService(
+        PolicyStore(state_path, defaults),
+        profile_exists=profile_exists,
+        gpu_device_ids=gpu_device_ids,
+    )

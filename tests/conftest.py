@@ -51,13 +51,19 @@ def add_npu(paths: DiscoveryPaths, index: int = 0, vendor: str | None = "0x8086"
         (vendor_dir / "vendor").write_text(f"{vendor}\n")
 
 
-def add_gpu(paths: DiscoveryPaths, node: int = 128, vendor: str | None = "0x10de") -> None:
+def add_gpu(
+    paths: DiscoveryPaths,
+    node: int = 128,
+    vendor: str | None = "0x10de",
+    device: str = "0x1234",
+) -> None:
     (paths.dev / "dri").mkdir(exist_ok=True)
     (paths.dev / f"dri/renderD{node}").touch()
     if vendor is not None:
         vendor_dir = paths.sys / f"class/drm/renderD{node}/device"
         vendor_dir.mkdir(parents=True)
         (vendor_dir / "vendor").write_text(f"{vendor}\n")
+        (vendor_dir / "device").write_text(f"{device}\n")
 
 
 def sample_manifest(workload_id: str = "sample-workload", **requirement_overrides) -> dict:

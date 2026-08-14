@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 
+from .execution import ExecutorSet
 from .registry import Workload
 from .scheduler import Scheduler, select_backend
 from .state import PolicyState
@@ -69,7 +70,12 @@ def profile_status(
             "detail": "Profile disabled by policy",
             "reason": _reason("PROFILE_DISABLED", PROFILE_DISABLED),
         }
-    choice = select_backend(workload, executors)
+    routed_executors = (
+        executors.for_device(policy.device_choices.get(workload.id))
+        if isinstance(executors, ExecutorSet)
+        else executors
+    )
+    choice = select_backend(workload, routed_executors)
     if choice.backend is None:
         return {
             "status": "unavailable",

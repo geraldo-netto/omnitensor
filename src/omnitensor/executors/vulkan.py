@@ -36,6 +36,17 @@ class VulkanDevice:
     index: int
     name: str
     kind: int
+    vendor_id: int = -1
+    device_id: int = -1
+
+
+@dataclass(frozen=True, slots=True)
+class VulkanDeviceRequest:
+    """One sysfs hardware identity and its occurrence among identical GPUs."""
+
+    vendor_id: int
+    device_id: int
+    occurrence: int = 0
 
 
 class VulkanSelectionError(RuntimeError):
@@ -47,7 +58,41 @@ class VulkanSelectionError(RuntimeError):
         super().__init__(reason)
 
 
-def select_vulkan_device(runtime, requested: int | None = None) -> VulkanDevice:
+def _numeric_info(info, name: str) -> int:
+    getter = getattr(info, name, None)
+    if not callable(getter):
+        return -1
+    value = getter()
+    return value if isinstance(value, int) and not isinstance(value, bool) else -1
+
+
+def _requested_device(candidates, requested):
+    if isinstance(requested, VulkanDeviceRequest):
+        matching = [
+            item[2]
+            for item in candidates
+            if (item[2].vendor_id, item[2].device_id)
+            == (requested.vendor_id, requested.device_id)
+        ]
+        if requested.occurrence < len(matching):
+            return matching[requested.occurrence]
+        raise VulkanSelectionError(
+            "requested",
+            "Selected DRM GPU is absent from the hardware Vulkan inventory",
+        )
+    matching = [item for item in candidates if item[1] == requested]
+    if not matching:
+        raise VulkanSelectionError(
+            "requested",
+            f"Vulkan device {requested} is absent or software-only",
+        )
+    return matching[0][2]
+
+
+def select_vulkan_device(
+    runtime,
+    requested: int | VulkanDeviceRequest | None = None,
+) -> VulkanDevice:
     """Choose the preferred hardware Vulkan device, never a CPU device."""
     try:
         count = runtime.get_gpu_count()
@@ -58,19 +103,19 @@ def select_vulkan_device(runtime, requested: int | None = None) -> VulkanDevice:
             if kind in _DEVICE_PREFERENCE:
                 name_getter = getattr(info, "device_name", None)
                 name = name_getter() if callable(name_getter) else ""
+                vendor_id = _numeric_info(info, "vendor_id")
+                device_id = _numeric_info(info, "device_id")
                 candidates.append(
-                    (_DEVICE_PREFERENCE[kind], index, VulkanDevice(index, name, kind))
+                    (
+                        _DEVICE_PREFERENCE[kind],
+                        index,
+                        VulkanDevice(index, name, kind, vendor_id, device_id),
+                    )
                 )
     except Exception as error:  # noqa: BLE001 - native loader failures are arbitrary
         raise VulkanSelectionError("enumeration", str(error)) from error
     if requested is not None:
-        matching = [item for item in candidates if item[1] == requested]
-        if not matching:
-            raise VulkanSelectionError(
-                "requested",
-                f"Vulkan device {requested} is absent or software-only",
-            )
-        return matching[0][2]
+        return _requested_device(candidates, requested)
     if not candidates:
         if count > 0:
             raise VulkanSelectionError(
@@ -99,10 +144,12 @@ class VulkanGpuExecutor:
         device_present: bool,
         runtime=None,
         *,
+        requested_device: int | VulkanDeviceRequest | None = None,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
     ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_ncnn()
+        self._requested_device = requested_device
         self._selected: tuple[int | None, str] | None = None
         self._nets = ModelCache(max_cached_models)
         self._net_cache_lock = threading.Lock()
@@ -132,7 +179,7 @@ class VulkanGpuExecutor:
 
     def _enumerate_device(self) -> tuple[int | None, str]:
         try:
-            return select_vulkan_device(self._runtime).index, ""
+            return select_vulkan_device(self._runtime, self._requested_device).index, ""
         except VulkanSelectionError as error:
             if error.kind == "enumeration":
                 return None, f"Vulkan device enumeration failed: {error.reason}"

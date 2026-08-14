@@ -146,6 +146,7 @@ class InstalledPluginRuntime:
         worker_state_root: Path | None = None,
         resolve_artifact: ArtifactProvider | None = None,
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
+        profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
         require_worker_cgroup: bool = True,
     ) -> None:
         self._bundled_root = Path(bundled_root)
@@ -168,6 +169,7 @@ class InstalledPluginRuntime:
         self._worker_state_root = _prepare_worker_state_root(worker_state_root)
         self._resolve_artifact = resolve_artifact
         self._accelerator_devices = accelerator_devices or (lambda: {})
+        self._profile_accelerator_devices = profile_accelerator_devices
         self._granted: dict[str, frozenset[str]] = {}
         self._revoked_workers: set[str] = set()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
@@ -417,6 +419,12 @@ class InstalledPluginRuntime:
         devices = self._accelerator_devices()
         if devices:
             spec_options["accelerator_devices"] = devices
+        if self._profile_accelerator_devices is not None:
+            spec_options["accelerator_devices_by_plugin"] = {
+                plugin.plugin_id: self._profile_accelerator_devices(plugin.plugin_id)
+                for plugin in catalog.plugins
+                if plugin.source is PluginSource.EXTERNAL
+            }
         workers = await self._supervisor.start(
             external_worker_specs(catalog.plugins, **spec_options)
         )
@@ -437,6 +445,11 @@ class InstalledPluginRuntime:
         workers = await self._supervisor.stop()
         self._snapshot = InstalledPluginSnapshot(self._snapshot.catalog, workers)
         return workers
+
+    async def reload_accelerator_devices(self) -> InstalledPluginSnapshot:
+        """Restart workers so a changed profile lease drops the old device."""
+        await self.stop()
+        return await self.start()
 
 
 def _stage_selected_sources(

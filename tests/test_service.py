@@ -6,12 +6,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
+from conftest import add_gpu, add_npu, add_pcie_tpu, sample_manifest, write_workload
 from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor import service as service_module
 from omnitensor.artifact_readiness import plugin_accelerator_devices
+from omnitensor.control import CONTROL_VERSION
 from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
@@ -139,6 +140,140 @@ def test_plugin_accelerator_devices_exposes_only_supported_device_nodes(fake_nod
         "gpu": Path("/dev/dri/renderD128"),
         "npu": Path("/dev/accel/accel0"),
     }
+
+
+def test_profile_gpu_choice_routes_executor_worker_lease_and_published_identities(
+    fake_nodes, tmp_path
+):
+    add_gpu(fake_nodes, node=128, vendor="0x1002", device="0x73ff")
+    add_gpu(fake_nodes, node=129, vendor="0x8086", device="0x46a6")
+    manifest = sample_manifest(
+        accelerator="gpu", acceleratorPreference=["gpu"]
+    )
+    service = build_service(fake_nodes, tmp_path, [manifest])
+
+    acknowledgement = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                json.dumps(
+                    {
+                        "version": CONTROL_VERSION,
+                        "id": "select-gpu",
+                        "issuedAt": 1,
+                        "expectedRevision": 0,
+                        "operation": "set-profile-device",
+                        "profileId": "sample-workload",
+                        "value": "gpu-renderD129",
+                    }
+                )
+            )
+        )
+    )
+
+    assert acknowledgement["status"] == "applied"
+    assert acknowledgement["portfolio"]["deviceChoices"] == {
+        "sample-workload": "gpu-renderD129"
+    }
+    assert [entry["id"] for entry in service.publish_once()["devices"]] == [
+        "gpu-renderD128",
+        "gpu-renderD129",
+    ]
+    assert service._executor_view("sample-workload")["gpu"] is (
+        service._executors.device_executors["gpu-renderD129"]
+    )
+    assert service._scheduler_lane("sample-workload", "gpu") == "gpu-renderD129"
+    assert service._plugin_accelerator_devices("sample-workload")["gpu"] == Path(
+        "/dev/dri/renderD129"
+    )
+    assert service._pending_device_profiles == set()
+
+
+def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(
+    fake_nodes, tmp_path
+):
+    add_gpu(fake_nodes, node=128)
+    add_gpu(fake_nodes, node=129)
+    service = build_service(fake_nodes, tmp_path)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+        async def reload_accelerator_devices(self):
+            started.set()
+            await release.wait()
+            return object()
+
+    service._plugin_runtime = Plugins()
+
+    async def scenario():
+        reply = json.loads(
+            await service.control.apply_command_text(
+                json.dumps(
+                    {
+                        "version": CONTROL_VERSION,
+                        "id": "select-external-gpu",
+                        "issuedAt": 1,
+                        "expectedRevision": 0,
+                        "operation": "set-profile-device",
+                        "profileId": "external-plugin",
+                        "value": "gpu-renderD129",
+                    }
+                )
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert service._admits("external-plugin") is False
+        assert service._job_authorized("submit", "external-plugin") is False
+        release.set()
+        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+        return reply
+
+    acknowledgement = asyncio.run(scenario())
+
+    assert acknowledgement["status"] == "applied"
+    assert service._pending_device_profiles == set()
+    assert service._admits("external-plugin") is True
+
+
+def test_saved_gpu_choice_fails_closed_when_that_device_disappears(fake_nodes, tmp_path):
+    add_gpu(fake_nodes, node=128)
+    add_gpu(fake_nodes, node=129)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+    service.control.state.device_choices["sample-workload"] = "gpu-renderD129"
+    remaining = [
+        device for device in service._devices if device.id != "gpu-renderD129"
+    ]
+    service._devices = remaining
+    service._executors = build_executors(remaining)
+
+    unavailable = service._executor_view("sample-workload")["gpu"].availability()
+
+    assert unavailable.available is False
+    assert unavailable.code == "device-absent"
+    assert "gpu-renderD129" in unavailable.reason
+    assert "gpu" not in service._plugin_accelerator_devices("sample-workload")
+    assert service.control.state.device_choices == {
+        "sample-workload": "gpu-renderD129"
+    }
+
+
+def test_profile_identity_includes_installed_plugins_for_device_selection(
+    fake_nodes, tmp_path
+):
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+    service._plugin_runtime = Plugins()
+
+    assert service._profile_exists("sample-workload") is True
+    assert service._profile_exists("external-plugin") is True
+    assert service._profile_exists("missing") is False
 
 
 @given(index=st.integers(min_value=0, max_value=999_999))

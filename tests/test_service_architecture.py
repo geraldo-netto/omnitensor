@@ -787,6 +787,69 @@ def test_executor_composition_reuses_only_complete_unchanged_history():
     assert changed["tpu"]._device_present is True
 
 
+def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():
+    first_gpu = Device(
+        "gpu-renderD128",
+        "gpu",
+        "GPU A",
+        "dri",
+        vendor="0x1002",
+        hardware_id="0x73ff",
+    )
+    second_gpu = Device(
+        "gpu-renderD129",
+        "gpu",
+        "GPU B",
+        "dri",
+        vendor="0x8086",
+        hardware_id="0x46a6",
+    )
+
+    executors = build_executors([first_gpu, second_gpu])
+
+    assert executors["gpu"] is executors.device_executors["gpu-renderD128"]
+    assert executors.for_device("gpu-renderD129")["gpu"] is (
+        executors.device_executors["gpu-renderD129"]
+    )
+    assert executors.lane_key("gpu", "gpu-renderD129") == "gpu-renderD129"
+    assert executors.lane_key("tpu", "gpu-renderD129") == "tpu"
+    assert executors.device_id("gpu", "gpu-renderD129") == "gpu-renderD129"
+    assert executors.device_id("tpu", None) is None
+    assert tuple(executors.scheduler_executors()) == (
+        "tpu",
+        "npu",
+        "gpu-renderD128",
+        "gpu-renderD129",
+    )
+    assert executors.device_executors["gpu-renderD128"]._executors[
+        0
+    ]._requested_device.vendor_id == 0x1002
+    missing = executors.for_device("gpu-renderD999")["gpu"].availability()
+    assert (missing.available, missing.code, missing.reason) == (
+        False,
+        "device-absent",
+        "Selected GPU gpu-renderD999 is unavailable",
+    )
+    with pytest.raises(RuntimeError, match="gpu-renderD999"):
+        executors.for_device("gpu-renderD999")["gpu"].run("model", [])
+
+    reused = build_executors(
+        [first_gpu, second_gpu],
+        previous_devices=[first_gpu, second_gpu],
+        previous_executors=executors,
+    )
+    assert reused.device_executors == executors.device_executors
+
+
+def test_an_unmatchable_render_identity_is_fail_closed():
+    gpu = Device("gpu-renderD128", "gpu", "GPU", "dri")
+
+    executors = build_executors([gpu])
+    request = executors.device_executors[gpu.id]._executors[0]._requested_device
+
+    assert (request.vendor_id, request.device_id, request.occurrence) == (-1, -1, 0)
+
+
 @given(
     roots=st.lists(
         st.from_regex(r"[A-Za-z0-9_-]{1,24}", fullmatch=True),

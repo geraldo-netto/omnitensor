@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 MAX_PCIE_DEVICES = 8
@@ -51,6 +51,11 @@ class Device:
     load: float | None = None
     available: bool = True
     reason: str = ""
+    # Runtime-only identity used to bind a DRM render node to the matching
+    # Vulkan physical device.  It is deliberately absent from the public
+    # snapshot: ``id`` is the stable user-facing selector.
+    hardware_id: str = ""
+    identity_index: int = 0
 
     def snapshot_entry(self) -> dict:
         return {
@@ -174,14 +179,23 @@ def detect_npu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device 
     return _selected(candidates, selected_id)
 
 
-def detect_gpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
+def detect_gpus(paths: DiscoveryPaths) -> tuple[Device, ...]:
+    """Every DRM render node, with a Vulkan-matchable hardware identity."""
     candidates = []
+    occurrences: dict[tuple[str, str], int] = {}
     for node_number, node in _numbered_nodes(
         paths.dev / "dri", _RENDER_NODE, MAX_RENDER_DEVICES
     ):
+        vendor_file = paths.sys / f"class/drm/renderD{node_number}/device/vendor"
+        hardware_file = paths.sys / f"class/drm/renderD{node_number}/device/device"
+        vendor = _read_trimmed(vendor_file)
+        hardware_id = _read_trimmed(hardware_file)
+        identity = (vendor, hardware_id)
+        identity_index = occurrences.get(identity, 0)
+        occurrences[identity] = identity_index + 1
         device = _detect_node(
             node,
-            paths.sys / f"class/drm/renderD{node_number}/device/vendor",
+            vendor_file,
             GPU_VENDOR_NAMES,
             "GPU (render node)",
             f"gpu-renderD{node_number}",
@@ -189,23 +203,36 @@ def detect_gpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device 
             "dri",
         )
         if device is not None:
-            candidates.append(device)
-    return _selected(candidates, selected_id)
+            candidates.append(
+                replace(
+                    device,
+                    hardware_id=hardware_id,
+                    identity_index=identity_index,
+                )
+            )
+    return tuple(candidates)
+
+
+def detect_gpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
+    return _selected(list(detect_gpus(paths)), selected_id)
 
 
 def detect_devices(
     paths: DiscoveryPaths | None = None,
     selected_ids: dict[str, str] | None = None,
 ) -> list[Device]:
-    """Detect one device per backend, in tpu > npu > gpu hierarchy order."""
+    """Detect TPU/NPU defaults and every selectable GPU in preference order."""
     resolved = paths or DiscoveryPaths()
     selectors = selected_ids or {}
-    found = (
+    found = [
         detect_tpu(resolved, selectors.get("tpu")),
         detect_npu(resolved, selectors.get("npu")),
-        detect_gpu(resolved, selectors.get("gpu")),
-    )
-    return [device for device in found if device is not None]
+    ]
+    gpus = list(detect_gpus(resolved))
+    selected_gpu = selectors.get("gpu")
+    if selected_gpu is not None:
+        gpus.sort(key=lambda device: (device.id != selected_gpu, device.id))
+    return [device for device in found if device is not None] + gpus
 
 
 def device_utilization(paths: DiscoveryPaths, device: Device) -> float | None:

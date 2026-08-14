@@ -10,6 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.control import (
+    CONTROL_VERSION,
     INTERNAL_ERROR_MESSAGE,
     PERSIST_FAILURE_MESSAGE,
     REVISION_MISMATCH_MESSAGE,
@@ -17,7 +18,12 @@ from omnitensor.control import (
     build_control_service,
 )
 from omnitensor.registry import validate_document
-from omnitensor.state import PolicyState, PolicyStore, ProfilePolicy
+from omnitensor.state import (
+    MAX_DEVICE_CHOICES,
+    PolicyState,
+    PolicyStore,
+    ProfilePolicy,
+)
 
 
 @pytest.fixture
@@ -31,7 +37,7 @@ def control(tmp_path):
 
 def command(operation, profile_id, value, revision=0, command_id="xpuwlm-1"):
     return json.dumps({
-        "version": 1,
+        "version": CONTROL_VERSION,
         "id": command_id,
         "issuedAt": 1_700_000_000_000,
         "expectedRevision": revision,
@@ -96,10 +102,10 @@ def test_unknown_profile_and_malformed_commands_reject(control):
     assert not_object["commandId"] == "invalid"
     assert not_object["message"] == "Command is not an object"
 
-    bad_contract = apply(control, json.dumps({"version": 2, "id": "x-1"}))
+    bad_contract = apply(control, json.dumps({"version": 1, "id": "x-1"}))
     assert bad_contract["status"] == "rejected"
     assert bad_contract["commandId"] == "x-1"
-    assert bad_contract["message"] == "Command does not match the version 1 contract"
+    assert bad_contract["message"] == "Command does not match the version 2 contract"
 
 
 def test_rejection_leaves_revision_untouched(control):
@@ -190,7 +196,13 @@ def test_control_service_holds_no_dead_defaults_state():
     import inspect
 
     parameters = list(inspect.signature(ControlService.__init__).parameters)
-    assert parameters == ["self", "store", "on_applied"]
+    assert parameters == [
+        "self",
+        "store",
+        "on_applied",
+        "profile_exists",
+        "gpu_device_ids",
+    ]
 
 
 def test_policy_persistence_does_not_block_the_event_loop(tmp_path):
@@ -298,7 +310,7 @@ def test_a_boolean_is_never_accepted_as_a_weight(tmp_path):
 
 def batch(changes, revision=0, command_id="xpuwlm-batch"):
     return json.dumps({
-        "version": 1,
+        "version": CONTROL_VERSION,
         "id": command_id,
         "issuedAt": 1_700_000_000_000,
         "expectedRevision": revision,
@@ -380,6 +392,139 @@ def test_the_batch_operation_is_bounded_by_the_same_contract_as_the_rest(control
     assert validate_document("runtime-command.schema.json", json.loads(batch([
         {"profileId": "visual-library", "enabled": True},
     ]))) == []
+
+
+def selectable_control(store=None):
+    return ControlService(
+        store or MemoryStore(),
+        profile_exists=lambda profile_id: profile_id == "external-plugin",
+        gpu_device_ids=lambda: ("gpu-renderD128", "gpu-renderD129"),
+    )
+
+
+def test_device_choice_is_validated_persisted_acknowledged_and_cleared():
+    store = MemoryStore()
+    control = selectable_control(store)
+
+    selected = apply(
+        control,
+        command("set-profile-device", "visual-library", "gpu-renderD129"),
+    )
+    assert selected["status"] == "applied"
+    assert selected["portfolio"]["deviceChoices"] == {
+        "visual-library": "gpu-renderD129"
+    }
+    assert store.saved[-1].device_choices == {
+        "visual-library": "gpu-renderD129"
+    }
+
+    cleared = apply(
+        control,
+        command("set-profile-device", "visual-library", None, revision=1),
+    )
+    assert cleared["status"] == "applied"
+    assert cleared["portfolio"]["deviceChoices"] == {}
+
+
+def test_device_choice_refuses_unknown_profile_or_unavailable_gpu_atomically():
+    control = selectable_control()
+
+    missing_profile = apply(
+        control,
+        command("set-profile-device", "missing", "gpu-renderD128"),
+    )
+    missing_gpu = apply(
+        control,
+        command("set-profile-device", "visual-library", "gpu-renderD999"),
+    )
+
+    assert missing_profile["status"] == "rejected"
+    assert missing_profile["message"] == "Unknown workload profile: missing"
+    assert missing_gpu["status"] == "rejected"
+    assert missing_gpu["message"] == "GPU device is unavailable: gpu-renderD999"
+    assert control.state.device_choices == {}
+    assert control.state.revision == 0
+
+
+@pytest.mark.parametrize(
+    "device_id",
+    ["gpu-card0", "gpu-renderD", "gpu-renderD1234567", 128, True, {}],
+)
+def test_device_choice_wire_identity_is_closed_before_policy_lookup(device_id):
+    control = selectable_control()
+
+    acknowledgement = apply(
+        control,
+        command("set-profile-device", "visual-library", device_id),
+    )
+
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == "Command does not match the version 2 contract"
+    assert control.state.device_choices == {}
+
+
+def test_device_choice_count_bound_rejects_new_profile_but_allows_replace_and_clear():
+    store = MemoryStore()
+    control = ControlService(
+        store,
+        profile_exists=lambda _profile_id: True,
+        gpu_device_ids=lambda: ("gpu-renderD128", "gpu-renderD129"),
+    )
+    control.state.device_choices.update(
+        {
+            f"external-{index:03d}": "gpu-renderD128"
+            for index in range(MAX_DEVICE_CHOICES)
+        }
+    )
+
+    rejected = apply(
+        control,
+        command("set-profile-device", "overflow", "gpu-renderD128"),
+    )
+    assert rejected["status"] == "rejected"
+    assert rejected["message"] == "GPU device choices are limited to 128 profiles"
+    assert rejected["revision"] == 0
+
+    replaced = apply(
+        control,
+        command("set-profile-device", "external-000", "gpu-renderD129"),
+    )
+    assert replaced["status"] == "applied"
+    assert replaced["portfolio"]["deviceChoices"]["external-000"] == "gpu-renderD129"
+
+    cleared = apply(
+        control,
+        command("set-profile-device", "external-001", None, revision=1),
+    )
+    assert cleared["status"] == "applied"
+    assert len(cleared["portfolio"]["deviceChoices"]) == MAX_DEVICE_CHOICES - 1
+
+
+def test_external_plugin_device_choice_and_batch_use_the_same_contract():
+    control = selectable_control()
+
+    selected = apply(
+        control,
+        command("set-profile-device", "external-plugin", "gpu-renderD128"),
+    )
+    assert selected["portfolio"]["deviceChoices"] == {
+        "external-plugin": "gpu-renderD128"
+    }
+
+    changed = apply(
+        control,
+        batch(
+            [
+                {"profileId": "visual-library", "weight": 4},
+                {"profileId": "external-plugin", "deviceId": "gpu-renderD129"},
+            ],
+            revision=1,
+        ),
+    )
+    assert changed["status"] == "applied"
+    assert changed["portfolio"]["deviceChoices"] == {
+        "external-plugin": "gpu-renderD129"
+    }
 
 
 def test_a_batch_still_obeys_the_revision_compare_and_swap(control):

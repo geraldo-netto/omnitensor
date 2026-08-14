@@ -13,7 +13,7 @@ import time
 import pytest
 from conftest import sample_manifest, write_workload
 
-from omnitensor.control import ControlService, build_control_service
+from omnitensor.control import CONTROL_VERSION, ControlService, build_control_service
 from omnitensor.discovery import (
     DiscoveryPaths,
     detect_gpu,
@@ -95,7 +95,7 @@ def apply(control: ControlService, document) -> dict:
 
 def valid_command(**overrides) -> dict:
     command = {
-        "version": 1,
+        "version": CONTROL_VERSION,
         "id": "cmd-1",
         "issuedAt": 1,
         "expectedRevision": 0,

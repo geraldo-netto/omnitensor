@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from omnitensor.state import PolicyState, PolicyStore, ProfilePolicy
+from omnitensor.state import MAX_DEVICE_CHOICES, PolicyState, PolicyStore, ProfilePolicy
 
 DEFAULTS = {
     "hardware-health": ProfilePolicy(enabled=True, weight=2),
@@ -74,7 +74,48 @@ def test_save_round_trips_and_leaves_no_temp_files(tmp_path):
     assert raw == {
         "paused": True,
         "profiles": {"hardware-health": {"enabled": False, "weight": 4}},
+        "deviceChoices": {},
         "revision": 3,
     }
     leftovers = [entry for entry in tmp_path.iterdir() if entry.name.startswith(".policy-")]
     assert leftovers == []
+
+
+def test_device_choices_round_trip_and_invalid_entries_are_dropped(tmp_path):
+    choices = {
+        "hardware-health": "gpu-renderD129",
+        "external-plugin": "gpu-renderD2048",
+        "bad-device": "gpu-card0",
+        "": "gpu-renderD128",
+        "x" * 81: "gpu-renderD128",
+    }
+    (tmp_path / "policy.json").write_text(
+        json.dumps({"deviceChoices": choices}), encoding="utf-8"
+    )
+
+    state = store(tmp_path).load()
+
+    assert state.device_choices == {
+        "external-plugin": "gpu-renderD2048",
+        "hardware-health": "gpu-renderD129",
+    }
+    store(tmp_path).save(state)
+    assert json.loads((tmp_path / "policy.json").read_text())["deviceChoices"] == {
+        "external-plugin": "gpu-renderD2048",
+        "hardware-health": "gpu-renderD129",
+    }
+
+
+def test_device_choice_load_is_bounded_deterministically(tmp_path):
+    choices = {
+        f"profile-{index:03d}": f"gpu-renderD{128 + index}"
+        for index in range(MAX_DEVICE_CHOICES + 5)
+    }
+    (tmp_path / "policy.json").write_text(
+        json.dumps({"deviceChoices": choices}), encoding="utf-8"
+    )
+
+    loaded = store(tmp_path).load().device_choices
+
+    assert len(loaded) == MAX_DEVICE_CHOICES
+    assert tuple(loaded) == tuple(sorted(choices)[:MAX_DEVICE_CHOICES])

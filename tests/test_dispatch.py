@@ -94,6 +94,15 @@ class FakeArtifacts:
         return self._resolution
 
 
+class RecordingScheduler:
+    def __init__(self):
+        self.calls = []
+
+    def submit(self, backend, workload_id, model_path, inputs, *, model_format=None):
+        self.calls.append((backend, workload_id, model_path, inputs, model_format))
+        return object()
+
+
 def test_executor_snapshot_resolves_static_and_live_sources():
     original = {"gpu": FakeExecutor()}
     current = [original]
@@ -233,6 +242,35 @@ def test_removed_preferred_executor_is_refused_before_submission():
 
     assert failure.value.code == "no-backend-available"
     assert failure.value.message == "tpu: no executor"
+
+
+def test_dispatch_submits_to_the_profile_selected_gpu_lane():
+    scheduler = RecordingScheduler()
+    selected = {"gpu": FakeExecutor()}
+    subject = InferenceJobDispatcher(
+        {"sample-workload": workload(model=MODEL)},
+        scheduler,
+        {"gpu": FakeExecutor()},
+        FakeArtifacts(),
+        executor_view=lambda profile_id: selected,
+        scheduler_lane=lambda profile_id, backend: (
+            "gpu-renderD129" if (profile_id, backend) == ("sample-workload", "gpu")
+            else backend
+        ),
+    )
+
+    result = subject.dispatch("job-1", "sample-workload", {"inputs": [[1.0]]})
+
+    assert result is not None
+    assert scheduler.calls == [
+        (
+            "gpu-renderD129",
+            "sample-workload",
+            "/models/sample.ncnn.param",
+            [[1.0]],
+            "ncnn",
+        )
+    ]
 
 
 def test_an_unresolvable_artifact_is_refused_before_queueing():

@@ -3,7 +3,13 @@ from __future__ import annotations
 from conftest import add_gpu, add_npu, add_pcie_tpu, add_usb_tpu
 
 from omnitensor import discovery as discovery_module
-from omnitensor.discovery import detect_devices, detect_gpu, detect_npu, detect_tpu
+from omnitensor.discovery import (
+    detect_devices,
+    detect_gpu,
+    detect_gpus,
+    detect_npu,
+    detect_tpu,
+)
 
 
 def test_absence_reports_empty_list(fake_nodes):
@@ -73,6 +79,7 @@ def test_runtime_device_ids_are_enumerated_and_can_be_selected(fake_nodes):
         "tpu-pcie-42",
         "npu-accel23",
         "gpu-renderD2048",
+        "gpu-renderD128",
     ]
 
 
@@ -83,6 +90,34 @@ def test_explicit_device_selection_chooses_a_non_default_gpu(fake_nodes):
     assert detect_gpu(fake_nodes).id == "gpu-renderD301"
     assert detect_gpu(fake_nodes, "gpu-renderD902").id == "gpu-renderD902"
     assert detect_gpu(fake_nodes, "gpu-renderD999") is None
+
+
+def test_all_gpu_identities_are_published_and_identical_hardware_is_disambiguated(
+    fake_nodes,
+):
+    add_gpu(fake_nodes, node=128, vendor="0x1002", device="0x73ff")
+    add_gpu(fake_nodes, node=129, vendor="0x1002", device="0x73ff")
+    add_gpu(fake_nodes, node=130, vendor="0x8086", device="0x46a6")
+
+    gpus = detect_gpus(fake_nodes)
+
+    assert [gpu.id for gpu in gpus] == [
+        "gpu-renderD128",
+        "gpu-renderD129",
+        "gpu-renderD130",
+    ]
+    assert [
+        (gpu.vendor, gpu.hardware_id, gpu.identity_index) for gpu in gpus
+    ] == [
+        ("0x1002", "0x73ff", 0),
+        ("0x1002", "0x73ff", 1),
+        ("0x8086", "0x46a6", 0),
+    ]
+    assert [gpu.id for gpu in detect_devices(fake_nodes)] == [
+        "gpu-renderD128",
+        "gpu-renderD129",
+        "gpu-renderD130",
+    ]
 
 
 def test_device_discovery_ignores_names_that_only_resemble_accelerators(fake_nodes):

@@ -68,6 +68,8 @@ class InferenceJobDispatcher:
         executors: Mapping[str, Executor] | Callable[[], Mapping[str, Executor]],
         artifacts: ArtifactSource,
         *,
+        executor_view: Callable[[str], Mapping[str, Executor]] | None = None,
+        scheduler_lane: Callable[[str, str], str] | None = None,
         max_input_tensors: int = MAX_INPUT_TENSORS,
         max_input_elements: int = MAX_TENSOR_ELEMENTS,
         input_roots: InputRootPolicy | None = None,
@@ -80,6 +82,8 @@ class InferenceJobDispatcher:
         self._scheduler = scheduler
         self._executors = executors
         self._artifacts = artifacts
+        self._executor_view = executor_view
+        self._scheduler_lane = scheduler_lane
         self._max_input_tensors = max_input_tensors
         self._max_input_elements = max_input_elements
         # Denied by default: referencing a file is a capability, not a default.
@@ -146,7 +150,11 @@ class InferenceJobDispatcher:
         """Admit, resolve, route, and queue one job; never run it inline."""
         workload = self._runnable(workload_id)
         inputs = self._inputs(payload)
-        executors = _executor_snapshot(self._executors)
+        executors = (
+            dict(self._executor_view(workload_id))
+            if self._executor_view is not None
+            else _executor_snapshot(self._executors)
+        )
         choice = select_backend(workload, executors)
         if choice.backend is None:
             # No CPU fallback exists by design, so an unroutable job is refused
@@ -162,10 +170,15 @@ class InferenceJobDispatcher:
                 f"{workload_id}: {choice.backend} declares no model this profile can run",
             )
         backend = choice.backend
+        lane = (
+            self._scheduler_lane(workload_id, backend)
+            if self._scheduler_lane is not None
+            else backend
+        )
         path = self._model_path(workload, model)
         try:
             return self._scheduler.submit(
-                backend,
+                lane,
                 workload_id,
                 path,
                 inputs,

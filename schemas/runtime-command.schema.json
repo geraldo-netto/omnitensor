@@ -15,7 +15,7 @@
   ],
   "properties": {
     "version": {
-      "const": 1
+      "const": 2
     },
     "id": {
       "type": "string",
@@ -35,6 +35,7 @@
       "enum": [
         "set-profile-enabled",
         "set-profile-weight",
+        "set-profile-device",
         "set-paused",
         "apply-profiles"
       ]
@@ -54,6 +55,10 @@
         },
         {
           "type": "integer"
+        },
+        {
+          "type": "string",
+          "pattern": "^gpu-renderD[0-9]{1,6}$"
         },
         {
           "type": "null"
@@ -84,12 +89,51 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 5
+          },
+          "deviceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^gpu-renderD[0-9]{1,6}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-profile-device"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^gpu-renderD[0-9]{1,6}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changes": false
+        }
+      }
+    },
     {
       "if": {
         "properties": {

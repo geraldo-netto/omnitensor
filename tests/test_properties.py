@@ -44,6 +44,8 @@ from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
 from omnitensor.snapshot import build_snapshot
 from omnitensor.state import (
+    GPU_DEVICE_ID_PATTERN,
+    MAX_DEVICE_CHOICES,
     MAX_WEIGHT,
     MIN_WEIGHT,
     PolicyState,
@@ -276,6 +278,13 @@ def test_policy_load_never_raises_on_arbitrary_json_documents(document):
     for policy in state.profiles.values():
         assert MIN_WEIGHT <= policy.weight <= MAX_WEIGHT
         assert isinstance(policy.enabled, bool)
+    assert len(state.device_choices) <= MAX_DEVICE_CHOICES
+    assert all(
+        isinstance(profile_id, str)
+        and 1 <= len(profile_id) <= 80
+        and GPU_DEVICE_ID_PATTERN.fullmatch(device_id)
+        for profile_id, device_id in state.device_choices.items()
+    )
 
 
 @given(raw=st.binary(max_size=200))

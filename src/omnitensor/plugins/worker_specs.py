@@ -45,26 +45,40 @@ def external_worker_specs(
     worker_state_root: Path | None = None,
     resolve_artifact: ArtifactProvider | None = None,
     accelerator_devices: Mapping[str, Path] | None = None,
+    accelerator_devices_by_plugin: Mapping[str, Mapping[str, Path]] | None = None,
 ) -> tuple[WorkerSpec, ...]:
     """Build deterministic argv without importing plugin code in the service."""
     executable = executable_path(python_executable)
     import_paths = worker_import_paths_tuple(worker_import_paths)
     permissions_by_plugin = granted_permissions or {}
     device_map = dict(accelerator_devices or {})
-    return tuple(
-        external_worker_spec(
-            plugin,
-            executable=executable,
-            import_paths=import_paths,
-            granted=frozenset(permissions_by_plugin.get(plugin.plugin_id, ())),
-            selected_files_root=selected_files_root,
-            worker_state_root=worker_state_root,
-            resolve_artifact=resolve_artifact,
-            accelerator_devices=device_map,
-        )
-        for plugin in plugins
-        if plugin.source is PluginSource.EXTERNAL
-    )
+    per_plugin = accelerator_devices_by_plugin or {}
+    specs = []
+    for plugin in plugins:
+        if plugin.source is not PluginSource.EXTERNAL:
+            continue
+        try:
+            spec = external_worker_spec(
+                plugin,
+                executable=executable,
+                import_paths=import_paths,
+                granted=frozenset(permissions_by_plugin.get(plugin.plugin_id, ())),
+                selected_files_root=selected_files_root,
+                worker_state_root=worker_state_root,
+                resolve_artifact=resolve_artifact,
+                accelerator_devices=dict(per_plugin.get(plugin.plugin_id, device_map)),
+            )
+        except ValueError as error:
+            if (
+                plugin.plugin_id in per_plugin
+                and str(error).startswith("granted accelerator device is unavailable:")
+            ):
+                # A saved per-profile choice remains saved when the GPU is
+                # unplugged, but no worker may be built on another GPU.
+                continue
+            raise
+        specs.append(spec)
+    return tuple(specs)
 
 
 def external_worker_spec(

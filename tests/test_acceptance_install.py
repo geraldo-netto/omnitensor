@@ -26,6 +26,7 @@ from omnitensor.acceptance import (
     main,
     verify_installation,
 )
+from omnitensor.control import CONTROL_VERSION
 from omnitensor.discovery import detect_devices
 from omnitensor.snapshot import build_snapshot
 
@@ -53,13 +54,13 @@ class StubBus:
 
 def acknowledgement(**changes):
     document = {
-        "version": 1,
+        "version": CONTROL_VERSION,
         "commandId": "invalid",
         "status": "rejected",
         "revision": 4,
         "appliedAt": 1_700_000_000_000,
         "message": "Command is not valid JSON",
-        "portfolio": {"paused": False, "profiles": {}},
+        "portfolio": {"paused": False, "profiles": {}, "deviceChoices": {}},
     }
     document.update(changes)
     return json.dumps(document)

@@ -85,12 +85,11 @@ service is down.
 OmniTensor enumerates the device nodes that exist when the service starts and
 during core-runtime rediscovery; it does not assume `renderD128`, `accel0`, or
 `apex_0`. With no override it chooses the lowest numbered detected node for
-each backend. The active runtime IDs are published as `devices[].id` in the
-snapshot, for example `gpu-renderD129`, `npu-accel3`, or `tpu-pcie-2`.
+each backend. Every selectable GPU and the selected TPU/NPU defaults are
+published as `devices[]` entries. Their host-local selector is `devices[].id`,
+for example `gpu-renderD129`, `npu-accel3`, or `tpu-pcie-2`.
 
-The snapshot intentionally publishes only the active device for each backend.
-List all selectable kernel nodes on a multi-device host and translate each
-basename to its runtime ID with:
+List selectable kernel nodes directly, when troubleshooting discovery, with:
 
 ```sh
 for node in /dev/dri/renderD*; do
@@ -108,8 +107,18 @@ done
 identity. These IDs describe host-local kernel nodes; verify the associated
 device with the host's driver or `udevadm` tooling before choosing one.
 
-To choose a different installed device, set its published runtime ID rather
-than a Vulkan/OpenVINO enumeration index:
+The Cinnamon client can persist a GPU choice per workload profile through the
+runtime control v2 contract. Send `set-profile-device` with that profile ID and
+a currently published `gpu-renderD*` value; send `null` to restore automatic
+selection. Successful acknowledgements publish the complete map at
+`portfolio.deviceChoices`. The service validates the profile and current GPU,
+uses a separate scheduler/Vulkan lane for that render node, and rebuilds an
+external plugin worker with only that node leased into its sandbox. A saved
+choice that disappears stays visible in the portfolio but makes that profile
+unavailable; it never falls through to another GPU.
+
+For a host-wide default, set its published runtime ID rather than a
+Vulkan/OpenVINO enumeration index:
 
 ```sh
 systemctl --user edit omnitensor.service
@@ -121,15 +130,12 @@ systemctl --user daemon-reload
 systemctl --user restart omnitensor.service
 ```
 
-Each setting is optional and independent. A stale, mistyped, or wrong-host ID
-matches no device, so that backend remains unavailable instead of silently
-using another accelerator. Remove the override to restore automatic selection.
-Changing a Linux node number after reboot is harmless when no override is set.
-Automatic discovery derives the selected node again. Core executors follow
-rediscovery, but installed external workers have immutable device mounts:
-restart `omnitensor.service` after accelerator hotplug or a node-number change
-so their sandboxes are rebuilt from the new node, major/minor, and exact
-read-only sysfs identity.
+Each setting is optional and independent. The GPU setting orders the matching
+GPU first while still publishing every detected GPU for per-profile selection;
+a stale, mistyped, or wrong-host ID matches no preferred device. Remove the
+override to restore automatic ordering. Core executors follow rediscovery and
+installed external workers are automatically rebuilt when the selected device
+map or detected device set changes.
 
 Selecting a node does not transfer model qualification to another device
 family or runtime stack. The current Qwen receipt matches the native runtime

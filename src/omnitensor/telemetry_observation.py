@@ -162,7 +162,11 @@ def describe_plugins(
 
 def device_load(discovery, device, stats) -> float | None:
     utilization = discovery.utilization(device)
-    return utilization if utilization is not None else stats["loads"].get(device.backend)
+    return (
+        utilization
+        if utilization is not None
+        else stats["loads"].get(device.id, stats["loads"].get(device.backend))
+    )
 
 
 def runtime_snapshot(

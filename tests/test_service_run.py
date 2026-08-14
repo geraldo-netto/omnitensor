@@ -18,6 +18,7 @@ from conftest import (
     write_workload,
 )
 
+from omnitensor.control import CONTROL_VERSION
 from omnitensor.discovery import Device
 from omnitensor.dispatch_routing import PluginAwareDispatcher, admit_plugin_job
 from omnitensor.plugins.artifacts import ArtifactResolution
@@ -388,7 +389,7 @@ def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
     service = asyncio.run(scenario())
     # Regression (OMNI-0009): dispatch must use the post-rediscovery executors,
     # not the dict the scheduler was constructed with.
-    assert service._scheduler._executors == service._executors
+    assert service._scheduler._executors == service._executors.scheduler_executors()
     assert service._executors["npu"]._device_present is True
     inference = service.jobs._dispatcher.fallback._inference
     assert dict(inference._executors()) == service._executors
@@ -969,7 +970,7 @@ def test_service_control_round_trip_through_injected_ports(tmp_path):
         transport=FakeTransport(),
     )
     acknowledgement = json.loads(asyncio.run(service.control.apply_command_text(json.dumps({
-        "version": 1,
+        "version": CONTROL_VERSION,
         "id": "cmd-1",
         "issuedAt": 1,
         "expectedRevision": 0,
@@ -1045,7 +1046,7 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
 
 def policy_command(operation, value, revision, profile_id=None):
     return json.dumps({
-        "version": 1,
+        "version": CONTROL_VERSION,
         "id": f"cmd-{operation}-{revision}",
         "issuedAt": 1,
         "expectedRevision": revision,
@@ -1569,11 +1570,88 @@ def test_plugin_start_ignores_a_result_without_the_snapshot_port():
 
     service = object.__new__(OmniTensorService)
     service._plugin_runtime = Plugins()
+    service._plugin_lifecycle_lock = asyncio.Lock()
     service.plugin_telemetry = type(
         "Telemetry", (), {"register": lambda *_arguments: pytest.fail("must not register")}
     )()
 
     asyncio.run(service._start_plugin_runtime())
+
+
+def test_plugin_accelerator_reload_coalesces_requests_and_uses_lifecycle_lock():
+    service = object.__new__(OmniTensorService)
+    calls = []
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+        async def reload_accelerator_devices(self):
+            calls.append("reload")
+            if len(calls) == 1:
+                service._plugin_reload_requested = True
+            return object()
+
+    service._plugin_runtime = Plugins()
+    service._plugin_lifecycle_lock = asyncio.Lock()
+    service._pending_device_profiles = set()
+    service._plugin_reload_requested = False
+    service._plugin_reload_task = None
+    service.plugin_telemetry = type(
+        "Telemetry", (), {"register": lambda *_arguments: pytest.fail("must not register")}
+    )()
+
+    async def scenario():
+        service._schedule_plugin_reload()
+        assert service._plugin_reload_task is not None
+        await service._plugin_reload_task
+
+    asyncio.run(scenario())
+
+    assert calls == ["reload", "reload"]
+    assert service._pending_device_profiles == set()
+
+
+def test_plugin_accelerator_reload_scheduling_requires_capability_and_running_loop():
+    service = object.__new__(OmniTensorService)
+    service._plugin_reload_requested = False
+    service._plugin_reload_task = None
+    service._pending_device_profiles = set()
+    service._plugin_runtime = object()
+
+    service._schedule_plugin_reload()
+    assert service._plugin_reload_requested is False
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+        async def reload_accelerator_devices(self):
+            return object()
+
+    service._plugin_runtime = Plugins()
+    service._schedule_plugin_reload()
+    assert service._plugin_reload_requested is True
+    assert service._plugin_reload_task is None
+
+
+def test_plugin_accelerator_reload_failure_is_contained(caplog):
+    class Plugins:
+        async def reload_accelerator_devices(self):
+            raise RuntimeError("worker restart failed")
+
+    service = object.__new__(OmniTensorService)
+    service._plugin_runtime = Plugins()
+    service._plugin_lifecycle_lock = asyncio.Lock()
+    service._plugin_reload_requested = True
+    service._pending_device_profiles = {"external-plugin"}
+    service.plugin_telemetry = object()
+
+    asyncio.run(service._reload_plugin_accelerators())
+
+    assert service._plugin_reload_requested is False
+    assert service._pending_device_profiles == {"external-plugin"}
+    assert "Could not reload plugin accelerator leases" in caplog.text
 
 
 def test_the_dbus_shim_passes_describe_plugins_through():

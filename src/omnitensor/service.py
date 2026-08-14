@@ -94,8 +94,10 @@ from .plugins.orchestration import (
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
+    AcceleratorReloadableRuntime,
     ControlTransport,
     DeviceDiscovery,
+    PluginIdentitySource,
     PluginRuntime,
     PolicyStorage,
     SnapshotPublisher,
@@ -191,6 +193,7 @@ class OmniTensorService:
             worker_state_root=snapshot_path.parent / "plugin-state",
             resolve_artifact=self._resolve_plugin_artifact,
             accelerator_devices=self._plugin_accelerator_devices,
+            profile_accelerator_devices=self._plugin_accelerator_devices,
             progress_sink=lambda progress: self._note_job_progress(
                 progress.job_id,
                 progress.stage,
@@ -209,10 +212,24 @@ class OmniTensorService:
             for workload_id, workload in self._workloads.items()
         }
         storage = policy_storage or PolicyStore(policy_path, defaults)
-        self.control = ControlService(storage, on_applied=self._policy_changed)
+        self.control = ControlService(
+            storage,
+            on_applied=self._policy_changed,
+            profile_exists=self._profile_exists,
+            gpu_device_ids=self._gpu_device_ids,
+        )
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
-        self._scheduler = Scheduler(self._executors, self._weight_of, admits=self._admits)
+        self._scheduler = Scheduler(
+            self._executors.scheduler_executors(),
+            self._weight_of,
+            admits=self._admits,
+        )
+        self._last_device_choices = dict(self.control.state.device_choices)
+        self._pending_device_profiles: set[str] = set()
+        self._plugin_reload_requested = False
+        self._plugin_reload_task: asyncio.Task | None = None
+        self._plugin_lifecycle_lock = asyncio.Lock()
         self._job_dispatcher = routing.PluginAwareDispatcher(
             job_dispatcher or self._default_dispatcher(), self._plugin_runtime
         )
@@ -268,7 +285,10 @@ class OmniTensorService:
         return routing.policy_weight(self.control.state, workload_id)
 
     def _admits(self, workload_id: str) -> bool:
-        return routing.policy_admits(self.control.state, workload_id)
+        return (
+            workload_id not in self._pending_device_profiles
+            and routing.policy_admits(self.control.state, workload_id)
+        )
 
     def _job_authorized(self, action: str, workload_id: str) -> bool:
         return routing.job_authorized(
@@ -281,6 +301,75 @@ class OmniTensorService:
 
     def _policy_changed(self) -> None:
         self._scheduler.kick()
+        choices = dict(self.control.state.device_choices)
+        if choices == self._last_device_choices:
+            return
+        changed_profiles = {
+            profile_id
+            for profile_id in set(choices) | set(self._last_device_choices)
+            if choices.get(profile_id) != self._last_device_choices.get(profile_id)
+        }
+        self._last_device_choices = choices
+        plugin_profiles = changed_profiles & self._plugin_ids()
+        if plugin_profiles:
+            self._schedule_plugin_reload(plugin_profiles)
+
+    def _plugin_ids(self) -> frozenset[str]:
+        return (
+            frozenset(self._plugin_runtime.plugin_ids())
+            if isinstance(self._plugin_runtime, PluginIdentitySource)
+            else frozenset()
+        )
+
+    def _schedule_plugin_reload(
+        self, profile_ids: set[str] | frozenset[str] | None = None
+    ) -> None:
+        if not isinstance(self._plugin_runtime, AcceleratorReloadableRuntime):
+            return
+        affected = self._plugin_ids() if profile_ids is None else frozenset(profile_ids)
+        if not affected:
+            return
+        # A worker's device mount is immutable.  Once policy points elsewhere,
+        # new jobs must wait until the replacement worker owns that exact lease;
+        # a failed replacement remains unavailable rather than using the old GPU.
+        self._pending_device_profiles.update(affected)
+        self._plugin_reload_requested = True
+        if self._plugin_reload_task is None or self._plugin_reload_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            self._plugin_reload_task = loop.create_task(
+                self._reload_plugin_accelerators(),
+                name="omnitensor-plugin-accelerator-reload",
+            )
+
+    def _profile_exists(self, profile_id: str) -> bool:
+        return profile_id in self._workloads or profile_id in self._plugin_ids()
+
+    def _gpu_device_ids(self) -> tuple[str, ...]:
+        return tuple(
+            device.id for device in self._devices if device.backend == "gpu"
+        )
+
+    def _gpu_device_choice(self, profile_id: str) -> str | None:
+        return self.control.state.device_choices.get(profile_id)
+
+    def _executor_view(self, profile_id: str) -> dict:
+        selector = getattr(self._executors, "for_device", None)
+        return (
+            selector(self._gpu_device_choice(profile_id))
+            if callable(selector)
+            else dict(self._executors)
+        )
+
+    def _scheduler_lane(self, profile_id: str, backend: str) -> str:
+        selector = getattr(self._executors, "lane_key", None)
+        return (
+            selector(backend, self._gpu_device_choice(profile_id))
+            if callable(selector)
+            else backend
+        )
 
     def _default_dispatcher(self) -> JobDispatcher:
         return routing.default_dispatcher(
@@ -290,6 +379,8 @@ class OmniTensorService:
             self._artifact_store,
             self._input_roots,
             resolve_artifact=self._cached_resolution,
+            executor_view=self._executor_view,
+            scheduler_lane=self._scheduler_lane,
         )
 
     def _build_runners(self) -> RunnerSet:
@@ -304,7 +395,7 @@ class OmniTensorService:
             deliver=self._deliver_job_output,
             progress=self._note_job_progress,
             select_model=lambda workload: routing.select_runtime_model(
-                workload, self._executors
+                workload, self._executor_view(workload.id)
             ),
         )
 
@@ -367,15 +458,27 @@ class OmniTensorService:
         )
 
     def _profile_artifact_ready(self, workload: Workload) -> tuple[bool, str]:
+        executor_view = getattr(self, "_executor_view", None)
+        executors = (
+            executor_view(workload.id)
+            if callable(executor_view) and hasattr(workload, "id")
+            else self._executors
+        )
         return artifacts.profile_artifact_ready(
             workload,
-            self._executors,
+            executors,
             self._resolve_artifact,
             self._selected_backend,
         )
 
     def _selected_backend(self, workload: Workload) -> str:
-        return artifacts.selected_backend(workload, self._executors)
+        executor_view = getattr(self, "_executor_view", None)
+        executors = (
+            executor_view(workload.id)
+            if callable(executor_view) and hasattr(workload, "id")
+            else self._executors
+        )
+        return artifacts.selected_backend(workload, executors)
 
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
         return artifacts.resolve_artifact(
@@ -391,8 +494,13 @@ class OmniTensorService:
     ) -> ArtifactResolution:
         return artifacts.resolve_plugin_artifact(reference, self._artifact_store)
 
-    def _plugin_accelerator_devices(self) -> dict[str, Path]:
-        return artifacts.plugin_accelerator_devices(self._devices)
+    def _plugin_accelerator_devices(
+        self, profile_id: str | None = None
+    ) -> dict[str, Path]:
+        return artifacts.plugin_accelerator_devices(
+            self._devices,
+            self._gpu_device_choice(profile_id) if profile_id is not None else None,
+        )
 
     def _cached_resolution(
         self,
@@ -494,13 +602,18 @@ class OmniTensorService:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._discovery_interval_s)
             except TimeoutError:
                 devices = self._discovery.detect()
+                devices_changed = devices != self._devices
                 self._executors = build_executors(
                     devices,
                     previous_devices=self._devices,
                     previous_executors=self._executors,
                 )
                 self._devices = devices
-                self._scheduler.update_executors(self._executors)
+                self._scheduler.update_executors(
+                    self._executors.scheduler_executors()
+                )
+                if devices_changed:
+                    self._schedule_plugin_reload()
 
     async def run(self) -> None:
         try:
@@ -535,15 +648,41 @@ class OmniTensorService:
                 await self._scheduler.stop()
         finally:
             await self.jobs.stop()
-            await self._plugin_runtime.stop()
+            reload_task = self._plugin_reload_task
+            if reload_task is not None:
+                reload_task.cancel()
+                await asyncio.gather(reload_task, return_exceptions=True)
+            await self._stop_plugin_runtime()
             await self._transport.stop()
 
     async def _start_plugin_runtime(self) -> None:
-        plugin_snapshot = await self._plugin_runtime.start()
+        async with self._plugin_lifecycle_lock:
+            plugin_snapshot = await self._plugin_runtime.start()
         observation.register_plugin_telemetry(
             plugin_snapshot,
             self.plugin_telemetry,
         )
+
+    async def _stop_plugin_runtime(self) -> None:
+        async with self._plugin_lifecycle_lock:
+            await self._plugin_runtime.stop()
+
+    async def _reload_plugin_accelerators(self) -> None:
+        while self._plugin_reload_requested:
+            self._plugin_reload_requested = False
+            try:
+                async with self._plugin_lifecycle_lock:
+                    plugin_snapshot = (
+                        await self._plugin_runtime.reload_accelerator_devices()
+                    )
+            except Exception:  # noqa: BLE001 - plugin adapters are external
+                LOGGER.exception("Could not reload plugin accelerator leases")
+                return
+            observation.register_plugin_telemetry(
+                plugin_snapshot,
+                self.plugin_telemetry,
+            )
+        self._pending_device_profiles.clear()
 
 
 def main() -> None:  # pragma: no cover - process entry point

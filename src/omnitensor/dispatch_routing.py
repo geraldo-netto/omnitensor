@@ -101,6 +101,8 @@ def default_dispatcher(
     input_roots: Sequence[Path | str],
     *,
     resolve_artifact=None,
+    executor_view=None,
+    scheduler_lane=None,
 ) -> JobDispatcher:
     if artifact_store is None:
         return UnavailableJobDispatcher()
@@ -112,6 +114,8 @@ def default_dispatcher(
         scheduler,
         executors,
         artifacts,
+        executor_view=executor_view,
+        scheduler_lane=scheduler_lane,
         input_roots=OptedInInputRoots(input_roots),
     )
 

@@ -136,3 +136,10 @@ class PluginPermissionSource(Protocol):
     """Permissions captured when an installed plugin worker started."""
 
     def granted_permissions(self, plugin_id: str) -> Collection[str]: ...
+
+
+@runtime_checkable
+class AcceleratorReloadableRuntime(Protocol):
+    """A plugin runtime whose worker sandboxes can adopt new device leases."""
+
+    async def reload_accelerator_devices(self) -> object: ...

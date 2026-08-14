@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["version", "commandId", "status", "revision", "appliedAt", "message", "portfolio"],
   "properties": {
-    "version": {"const": 1},
+    "version": {"const": 2},
     "commandId": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1, "maxLength": 120},
     "status": {"enum": ["applied", "rejected"]},
     "revision": {"type": "integer", "minimum": 0},
@@ -15,7 +15,7 @@
     "portfolio": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["paused", "profiles"],
+      "required": ["paused", "profiles", "deviceChoices"],
       "properties": {
         "paused": {"type": "boolean"},
         "profiles": {
@@ -28,6 +28,19 @@
               "enabled": {"type": "boolean"},
               "weight": {"type": "integer", "minimum": 1, "maximum": 5}
             }
+          }
+        },
+        "deviceChoices": {
+          "type": "object",
+          "maxProperties": 128,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^gpu-renderD[0-9]{1,6}$"
           }
         }
       }

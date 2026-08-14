@@ -6,6 +6,7 @@ from omnitensor.executors.base import Availability, InferenceResult
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.vulkan import (
     VulkanDevice,
+    VulkanDeviceRequest,
     VulkanGpuExecutor,
     VulkanSelectionError,
     select_vulkan_device,
@@ -152,6 +153,43 @@ def test_public_vulkan_selector_contains_enumeration_and_empty_inventory():
         "absent",
         "No Vulkan device is available",
     )
+
+
+def test_vulkan_selector_binds_sysfs_identity_and_identical_gpu_occurrence():
+    class IdentifiedInfo(FakeGpuInfo):
+        def __init__(self, device_type, vendor_id, device_id):
+            super().__init__(device_type)
+            self._vendor_id = vendor_id
+            self._device_id = device_id
+
+        def vendor_id(self):
+            return self._vendor_id
+
+        def device_id(self):
+            return self._device_id
+
+    runtime = FakeNcnn([DISCRETE, DISCRETE, INTEGRATED, CPU])
+    identities = ((0x1002, 0x73FF), (0x1002, 0x73FF), (0x8086, 0x46A6), (0, 0))
+    runtime.get_gpu_info = lambda index: IdentifiedInfo(
+        runtime._device_types[index], *identities[index]
+    )
+
+    assert select_vulkan_device(
+        runtime, VulkanDeviceRequest(0x1002, 0x73FF, 1)
+    ).index == 1
+    assert select_vulkan_device(
+        runtime, VulkanDeviceRequest(0x8086, 0x46A6)
+    ).index == 2
+    with pytest.raises(VulkanSelectionError, match="absent from"):
+        select_vulkan_device(runtime, VulkanDeviceRequest(0x10DE, 0x9999))
+
+    executor = VulkanGpuExecutor(
+        True,
+        runtime=runtime,
+        requested_device=VulkanDeviceRequest(0x1002, 0x73FF, 1),
+    )
+    executor.run("model.param", [[1]])
+    assert runtime.selected_device == 1
 
 
 def test_vulkan_prefers_discrete_and_never_selects_software_devices():

@@ -328,6 +328,9 @@ def test_installed_runtime_initializes_exact_host_owned_provider_boundaries(tmp_
     def devices():
         return {"gpu": Path("/dev/dri/renderD128")}
 
+    def profile_devices(_plugin_id):
+        return {"gpu": Path("/dev/dri/renderD129")}
+
     runtime = InstalledPluginRuntime(
         bundled,
         supervisor=supervisor,
@@ -341,6 +344,7 @@ def test_installed_runtime_initializes_exact_host_owned_provider_boundaries(tmp_
         worker_state_root=state,
         resolve_artifact=resolver,
         accelerator_devices=devices,
+        profile_accelerator_devices=profile_devices,
     )
 
     assert runtime._bundled_root == bundled
@@ -355,10 +359,31 @@ def test_installed_runtime_initializes_exact_host_owned_provider_boundaries(tmp_
     assert runtime._worker_state_root == state.resolve()
     assert runtime._resolve_artifact is resolver
     assert runtime._accelerator_devices is devices
+    assert runtime._profile_accelerator_devices is profile_devices
     assert runtime._granted == {}
     assert runtime._revoked_workers == set()
     assert runtime._snapshot == InstalledPluginSnapshot(PluginCatalog((), ()), ())
     assert runtime._grant_monitor is None
+
+
+def test_installed_runtime_reloads_device_leases_by_stopping_before_starting(tmp_path):
+    runtime = InstalledPluginRuntime(tmp_path, supervisor=object())
+    calls = []
+    expected = InstalledPluginSnapshot(PluginCatalog((), ()), ())
+
+    async def stop():
+        calls.append("stop")
+        return ()
+
+    async def start():
+        calls.append("start")
+        return expected
+
+    runtime.stop = stop
+    runtime.start = start
+
+    assert asyncio.run(runtime.reload_accelerator_devices()) is expected
+    assert calls == ["stop", "start"]
 
 
 def test_external_worker_specs_pass_only_granted_declared_permissions(tmp_path):
@@ -501,6 +526,41 @@ def test_external_worker_refuses_a_granted_accelerator_without_a_device(tmp_path
         )
 
     assert str(excinfo.value) == "granted accelerator device is unavailable: tpu"
+
+
+def test_profile_device_map_overrides_global_gpu_and_unavailable_choice_is_omitted(
+    tmp_path, monkeypatch
+):
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["accelerator:gpu"]
+    first = Path("/dev/dri/renderD128")
+    selected = Path("/dev/dri/renderD129")
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda path: path in {first, selected} or real_exists(path),
+    )
+    monkeypatch.setattr(
+        worker_specs_module,
+        "vulkan_sysfs_resources",
+        lambda _devices: ((), ()),
+    )
+
+    [spec] = external_worker_specs(
+        (plugin,),
+        granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
+        accelerator_devices={"gpu": first},
+        accelerator_devices_by_plugin={plugin.plugin_id: {"gpu": selected}},
+    )
+    assert spec.sandbox.device_paths == (str(selected),)
+
+    assert external_worker_specs(
+        (plugin,),
+        granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
+        accelerator_devices={"gpu": first},
+        accelerator_devices_by_plugin={plugin.plugin_id: {}},
+    ) == ()
 
 
 def test_vulkan_sysfs_mounts_only_selected_render_device_identity(tmp_path, monkeypatch):
@@ -1627,6 +1687,9 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(  # 
         worker_import_paths=(tmp_path,),
         grant_source=Grants(),
         selected_files_root=broker,
+        profile_accelerator_devices=lambda plugin_id: {
+            "gpu": Path(f"/dev/dri/{plugin_id}")
+        },
     )
 
     async def scenario():
@@ -1660,6 +1723,11 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(  # 
                 "worker_import_paths": (str(tmp_path),),
                 "granted_permissions": {"external-example": frozenset({"files:read-selected"})},
                 "selected_files_root": broker.resolve(),
+                "accelerator_devices_by_plugin": {
+                    "external-example": {
+                        "gpu": Path("/dev/dri/external-example")
+                    },
+                },
             },
         ),
         (
