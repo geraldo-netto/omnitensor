@@ -12,6 +12,7 @@ audit's dependency order without weakening the required status schema.
 - **Audit architecture hygiene:** OMNI-0285–OMNI-0289
 - **Audit regression and mutation gates:** OMNI-0290–OMNI-0297
 - **Mutation signal quality:** OMNI-0298–OMNI-0303
+- **SonarCloud remediation:** OMNI-0333–OMNI-0334
 
 ## Findings
 
@@ -69,3 +70,4 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
+| OMNI-0334 | wont_fix | medium | xs | OMNI-0333 | Sonar reports missing lock files for the seven separately published provider and external-template library projects. Retain their ranged package metadata: Python library locks are not consumed when downstream applications install wheels, and each deployment environment must resolve those ranges into its own lock. The service and repository CI now use the root `uv.lock`; mark the seven library findings won't-fix after the next scan. |

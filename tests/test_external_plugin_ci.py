@@ -215,7 +215,8 @@ def test_smoke_cli_prints_stable_json(monkeypatch, capsys):
 def test_external_plugin_workflow_builds_real_wheels_and_runs_outside_checkout():
     workflow = Path(".github/workflows/external-plugin.yml").read_text()
 
-    assert "python -m build --wheel --outdir dist ." in workflow
+    assert "python -m build --wheel --no-isolation --outdir dist ." in workflow
+    assert "python -m build --wheel --no-isolation --outdir examples/" in workflow
     assert "examples/omnitensor-plugin-template" in workflow
     assert "python -m venv" in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow

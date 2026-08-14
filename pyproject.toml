@@ -89,6 +89,8 @@ retinexformer-producers = [
     "einops>=0.7",
 ]
 dev = [
+    "build>=1.2",
+    "hatchling>=1.25",
     "pytest>=8.0",
     "pytest-cov>=4.1",
     "pytest-asyncio>=0.23",
