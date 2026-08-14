@@ -10,11 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..plugins.forecasting import LinearForecaster, fit_forecaster
 from ..plugins.recorder import FeatureRow, TelemetryRecorder
 from ..preparation import file_digest
-from .contracts import TrainingError, TrainingReport, TrainingSpec
+from .contracts import TrainingError, TrainingReport, TrainingSpec, write_training_report
 
 SUPPORTED_PROFILES = frozenset({"resource-scheduler"})
 
@@ -74,7 +73,7 @@ class ForecastTrainer:
             file_digest(model_path),
             model.quality.document(),
         )
-        write_json_atomic(
+        write_training_report(
             destination / "training-report.json",
             report.document(),
             prefix=".training-report-",

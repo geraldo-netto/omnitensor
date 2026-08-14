@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..plugins.network_collection import (
     MAX_NETWORK_COUNTER,
     NetworkConnectivity,
@@ -31,7 +30,7 @@ from ..plugins.network_collection import (
 )
 from ..plugins.triggers import SourceStatus
 from ..preparation import file_digest
-from .contracts import TrainingError
+from .contracts import TrainingError, write_training_report
 
 NETWORK_RECIPE = "aggregate-reconstruction-v1"
 NORMAL_ONLY_CONFIRMATION = "I-confirm-this-replay-is-normal"
@@ -301,10 +300,11 @@ class NetworkAnomalyTrainer:
             "outputContract": {"kind": "raw"},
             "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
         }
-        write_json_atomic(
+        write_training_report(
             destination / "network-training-report.json",
             report,
             prefix=".network-training-report-",
+            numeric=True,
         )
         return report
 

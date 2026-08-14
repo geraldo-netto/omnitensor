@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..plugins.collection import STABLE_ID
 from ..plugins.hardware_collection import (
     HardwareSample,
@@ -24,7 +23,7 @@ from ..plugins.hardware_collection import (
 from ..plugins.triggers import SourceStatus
 from ..preparation import file_digest
 from .build import BuildAdvisorModel, BuildExample, _auc, _fit_output, _normalization
-from .contracts import MAX_INPUT_WIDTH, TrainingError
+from .contracts import MAX_INPUT_WIDTH, TrainingError, write_training_report
 
 HARDWARE_RECIPE = "labelled-sensor-window-v1"
 HARDWARE_LABEL_CONFIRMATION = "I-confirm-hardware-labels-are-reviewed"
@@ -355,10 +354,11 @@ class HardwareHealthTrainer:
         if not model_path.is_file() or model_path.stat().st_size == 0:
             raise TrainingError("export-failed", "exporter produced no portable model")
         report = _report(dataset, training, holdout, self._window, quality, model_path)
-        write_json_atomic(
+        write_training_report(
             destination / "hardware-training-report.json",
             report,
             prefix=".hardware-training-report-",
+            numeric=True,
         )
         return report
 

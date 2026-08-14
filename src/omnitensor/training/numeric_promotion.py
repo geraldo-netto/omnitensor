@@ -30,7 +30,7 @@ from .compilers import (
     TargetCompiler,
     compiler_catalog,
 )
-from .contracts import TrainingError
+from .contracts import TrainingError, validate_training_report_document
 from .installation import InstalledTraining, InstalledVariant, _validated_targets
 
 MAX_NUMERIC_REPORT_BYTES = 1024 * 1024
@@ -70,17 +70,11 @@ class NumericTrainingReport:
     def load(cls, path: Path | str) -> NumericTrainingReport:
         report_path = Path(path)
         document = _load_numeric_document(report_path)
-        recipe = document.get("recipe")
-        profile_id = NUMERIC_RECIPES.get(recipe)
-        if profile_id is None:
-            raise TrainingError("report-invalid", "numeric report recipe is unsupported")
+        recipe = document["recipe"]
+        profile_id = NUMERIC_RECIPES[recipe]
         model_path, observed_model_digest = _portable_model_identity(report_path, document)
-        tensor_contract = document.get("tensorContract")
-        output_contract = document.get("outputContract")
-        _validate_numeric_contract(tensor_contract, output_contract)
-        targets = document.get("targets")
-        if targets != {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"}:
-            raise TrainingError("report-invalid", "numeric report must not claim native targets")
+        tensor_contract = document["tensorContract"]
+        output_contract = document["outputContract"]
         report_digest = file_digest(report_path)
         semantics = {field: document[field] for field in _SEMANTIC_FIELDS if field in document}
         semantics_digest = _document_digest(semantics)
@@ -119,13 +113,36 @@ def _load_numeric_document(report_path: Path) -> dict:
         raise TrainingError("report-invalid", f"cannot read numeric report: {error}") from error
     if not isinstance(document, dict) or document.get("version") != 1:
         raise TrainingError("report-invalid", "numeric report version is unsupported")
+    if document.get("recipe") not in NUMERIC_RECIPES:
+        raise TrainingError("report-invalid", "numeric report recipe is unsupported")
+    model = document.get("model")
+    if (
+        not isinstance(model, dict)
+        or any(name not in model for name in ("format", "filename", "sha256"))
+        or not isinstance(model.get("sha256"), str)
+    ):
+        raise TrainingError("report-invalid", "portable model declaration is invalid")
+    if model.get("format") != "onnx" or model.get("filename") != "model.onnx":
+        raise TrainingError("report-invalid", "numeric report must declare model.onnx")
+    _validate_numeric_contract(document.get("tensorContract"), document.get("outputContract"))
+    if document.get("targets") != {
+        "tpu": "uncompiled",
+        "npu": "uncompiled",
+        "gpu": "uncompiled",
+    }:
+        raise TrainingError("report-invalid", "numeric report must not claim native targets")
+    validate_training_report_document(document, numeric=True)
     return document
 
 
 def _portable_model_identity(report_path: Path, document: dict) -> tuple[Path, str]:
     """Bind one exact local ONNX file to its report declaration."""
     model = document.get("model")
-    if not isinstance(model, dict) or set(model) != {"format", "filename", "sha256"}:
+    if (
+        not isinstance(model, dict)
+        or any(name not in model for name in ("format", "filename", "sha256"))
+        or not isinstance(model.get("sha256"), str)
+    ):
         raise TrainingError("report-invalid", "portable model declaration is invalid")
     if model["format"] != "onnx" or model["filename"] != "model.onnx":
         raise TrainingError("report-invalid", "numeric report must declare model.onnx")
@@ -242,10 +259,9 @@ def promote_numeric_training(
 
 
 def _validate_numeric_contract(tensor_contract: object, output_contract: object) -> None:
-    expected_output = {"kind": "raw"}
-    if output_contract != expected_output:
+    if not isinstance(output_contract, dict) or output_contract.get("kind") != "raw":
         raise TrainingError("report-invalid", "numeric report output contract must be raw")
-    if not isinstance(tensor_contract, dict) or set(tensor_contract) != {"inputs"}:
+    if not isinstance(tensor_contract, dict) or "inputs" not in tensor_contract:
         raise TrainingError("report-invalid", "numeric tensor contract is invalid")
     inputs = tensor_contract["inputs"]
     if not isinstance(inputs, list) or len(inputs) != 1:

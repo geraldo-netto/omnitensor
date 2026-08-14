@@ -23,9 +23,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..preparation import file_digest
-from .contracts import TrainingError
+from .contracts import TrainingError, write_training_report
 
 BACKBLAZE_TERMS = "Backblaze-Drive-Stats"
 BACKBLAZE_CITATION = "Backblaze Drive Stats"
@@ -324,10 +323,11 @@ class StorageTrainer:
             "outputContract": {"kind": "raw"},
             "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
         }
-        write_json_atomic(
+        write_training_report(
             destination / "storage-training-report.json",
             report,
             prefix=".storage-training-report-",
+            numeric=True,
         )
         return report
 

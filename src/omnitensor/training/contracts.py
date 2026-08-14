@@ -7,12 +7,15 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..atomicio import JsonTooLargeError, read_json_bounded
+from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..plugins.artifacts import ArtifactReference, artifact_reference_error
 from ..preparation import file_digest
+from ..registry import validate_document
 
 TRAINING_REPORT_VERSION = 1
 TRAINING_RECIPE = "forecast-v1"
+TRAINING_REPORT_SCHEMA = "training-report.schema.json"
+NUMERIC_TRAINING_REPORT_SCHEMA = "numeric-training-report.schema.json"
 MAX_REPORT_BYTES = 64 * 1024
 MAX_FEATURES = 128
 MAX_FEATURE_NAME = 64
@@ -28,6 +31,27 @@ class TrainingError(ValueError):
         self.code = code
         self.detail = detail
         super().__init__(f"{code}: {detail}")
+
+
+def validate_training_report_document(document: object, *, numeric: bool = False) -> None:
+    """Apply the canonical standalone schema to one training report."""
+    schema = NUMERIC_TRAINING_REPORT_SCHEMA if numeric else TRAINING_REPORT_SCHEMA
+    violations = validate_document(schema, document)
+    if violations:
+        label = "numeric training report" if numeric else "training report"
+        raise TrainingError("report-invalid", f"{label} violates schema: {violations[0]}")
+
+
+def write_training_report(
+    path: Path | str,
+    document: dict,
+    *,
+    prefix: str,
+    numeric: bool = False,
+) -> None:
+    """Validate one report before publishing its unchanged compact JSON document."""
+    validate_training_report_document(document, numeric=numeric)
+    write_json_atomic(Path(path), document, prefix)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +120,7 @@ class TrainingSpec:
     def from_document(cls, document: object) -> TrainingSpec:
         if not isinstance(document, dict):
             raise TrainingError("report-invalid", "training spec must be an object")
-        expected = {
+        required = (
             "profileId",
             "artifactId",
             "artifactVersion",
@@ -104,8 +128,10 @@ class TrainingSpec:
             "targetFeature",
             "window",
             "horizon",
-        }
-        if set(document) != expected or not isinstance(document.get("featureNames"), list):
+        )
+        if any(name not in document for name in required) or not isinstance(
+            document.get("featureNames"), list
+        ):
             raise TrainingError("report-invalid", "training spec fields are invalid")
         return cls(
             document["profileId"],
@@ -214,34 +240,29 @@ class TrainingReport:
             raise TrainingError(
                 "report-invalid", f"cannot read training report: {error}"
             ) from error
-        if not isinstance(document, dict) or set(document) != {
-            "version",
-            "recipe",
-            "spec",
-            "samples",
-            "corpusSha256",
-            "model",
-            "quality",
-            "tensorContract",
-            "outputContract",
-        }:
+        if not isinstance(document, dict):
             raise TrainingError("report-invalid", "training report fields are invalid")
-        if document["version"] != TRAINING_REPORT_VERSION or document["recipe"] != TRAINING_RECIPE:
+        if (
+            document.get("version") != TRAINING_REPORT_VERSION
+            or document.get("recipe") != TRAINING_RECIPE
+        ):
             raise TrainingError(
                 "report-invalid", "training report version or recipe is unsupported"
             )
-        spec = TrainingSpec.from_document(document["spec"])
-        if document["tensorContract"] != spec.tensor_contract:
+        spec = TrainingSpec.from_document(document.get("spec"))
+        if document.get("tensorContract") != spec.tensor_contract:
             raise TrainingError("report-invalid", "tensor contract disagrees with training spec")
-        if document["outputContract"] != spec.output_contract:
+        if document.get("outputContract") != spec.output_contract:
             raise TrainingError("report-invalid", "output contract disagrees with training spec")
-        model = document["model"]
-        if not isinstance(model, dict) or model != {
-            "format": "onnx",
-            "filename": "model.onnx",
-            "sha256": model.get("sha256") if isinstance(model, dict) else None,
-        }:
+        model = document.get("model")
+        if (
+            not isinstance(model, dict)
+            or model.get("format") != "onnx"
+            or model.get("filename") != "model.onnx"
+            or not isinstance(model.get("sha256"), str)
+        ):
             raise TrainingError("report-invalid", "portable model declaration is invalid")
+        validate_training_report_document(document)
         report = cls(
             spec,
             document["samples"],

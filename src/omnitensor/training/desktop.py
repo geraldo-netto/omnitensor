@@ -12,11 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..preparation import file_digest
 from ..storelock import store_lock
 from .build import BuildAdvisorModel, BuildExample, _fit_output, _normalization
-from .contracts import TrainingError
+from .contracts import TrainingError, write_training_report
 
 DESKTOP_RECIPE = "confirmed-layout-suggestion-v1"
 DESKTOP_CONFIRMATION = "user-confirmed"
@@ -244,10 +243,11 @@ class DesktopSuggestionTrainer:
         if not model_path.is_file() or model_path.stat().st_size == 0:
             raise TrainingError("export-failed", "exporter produced no portable model")
         report = _report(dataset, training, holdout, suggestions, quality, model_path)
-        write_json_atomic(
+        write_training_report(
             destination / "desktop-training-report.json",
             report,
             prefix=".desktop-training-report-",
+            numeric=True,
         )
         return report
 

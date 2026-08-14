@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from ..atomicio import write_json_atomic
 from ..plugins.build_ingestion import (
     DEFAULT_MAX_BUILD_RECORDS,
     BuildOutcome,
@@ -21,7 +20,7 @@ from ..plugins.build_ingestion import (
     build_record_error,
 )
 from ..preparation import file_digest
-from .contracts import TrainingError
+from .contracts import TrainingError, write_training_report
 
 BUILD_RECIPE = "metadata-risk-ranking-v1"
 BUILD_PROVENANCE_CONFIRMATION = "I-confirm-build-metadata-is-approved"
@@ -252,10 +251,11 @@ class BuildAdvisorTrainer:
             ranked_records,
             model_path,
         )
-        write_json_atomic(
+        write_training_report(
             destination / "build-training-report.json",
             report,
             prefix=".build-training-report-",
+            numeric=True,
         )
         return report
 

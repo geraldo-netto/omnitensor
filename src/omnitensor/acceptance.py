@@ -53,6 +53,8 @@ REQUIRED_SCHEMAS = (
     "runtime-job-acknowledgement.schema.json",
     "workload-manifest.schema.json",
     "model-recipe.schema.json",
+    "training-report.schema.json",
+    "numeric-training-report.schema.json",
     "low-light-configuration.schema.json",
     "plugin-inventory.schema.json",
     "runtime-refusal.schema.json",
