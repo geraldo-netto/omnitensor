@@ -16,11 +16,14 @@ from omnitensor.acceptance import REQUIRED_SCHEMAS, check_schemas
 from omnitensor.registry import load_schema, validate_document
 from omnitensor.training.document_model import (
     DOCUMENT_MODEL_REPORT_SCHEMA,
+    RECIPE_ID,
     DocumentModelError,
     DocumentModelEvidence,
     _report_document,
     _write_document_model_report,
+    native_tensor_contract,
 )
+from omnitensor.training.recipes import load_model_recipe
 
 ROOT = Path(__file__).parents[1]
 
@@ -33,6 +36,14 @@ def report_document(tmp_path: Path) -> dict:
             id="bge-small-en-v1-5",
             version="1.0.0",
             document_sha256="c" * 64,
+            tensor_contract={
+                "inputs": [
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                ]
+            },
+            producer={"inputNames": ["input_ids", "attention_mask", "token_type_ids"]},
         ),
         receipt_path=receipt,
     )
@@ -78,6 +89,8 @@ def test_archived_measured_report_satisfies_the_canonical_schema():
     accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
     assert report["cpuFallback"] is False
     assert "cpuFallback" not in report["limitations"]
+    recipe = load_model_recipe(ROOT / f"model-recipes/{RECIPE_ID}.json")
+    assert report["tensorContract"] == native_tensor_contract(recipe)
     assert validate_document(DOCUMENT_MODEL_REPORT_SCHEMA, report) == []
     report_digest = document_model.file_digest(report_path)
     assert evidence["embedding"]["reportSha256"] == report_digest

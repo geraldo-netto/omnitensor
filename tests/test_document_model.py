@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from dataclasses import replace
@@ -34,6 +35,10 @@ from omnitensor.training.document_model import (
     install_document_model,
     load_bge_holdout,
     main,
+    native_tensor_contract,
+)
+from omnitensor.training.document_model_cpu_reference import (
+    _producer_cpu_reference_runner,
 )
 from omnitensor.training.embedding_production import EmbeddingGateEvidence
 from omnitensor.training.recipes import FetchedModelSource, load_model_recipe
@@ -120,9 +125,7 @@ def test_bge_tokenizer_contains_invalid_tokenizer_file(monkeypatch, tmp_path):
         def from_file(_path):
             raise ValueError("malformed tokenizer")
 
-    monkeypatch.setitem(
-        sys.modules, "tokenizers", SimpleNamespace(Tokenizer=BrokenTokenizer)
-    )
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=BrokenTokenizer))
     with pytest.raises(DocumentModelError) as caught:
         BgeTokenizer(tmp_path / "tokenizer.json")
 
@@ -165,15 +168,11 @@ def test_bge_tokenizer_accepts_exact_byte_bound_and_rejects_wrong_tensor_length(
         def encode(self, _text):
             return SimpleNamespace(ids=[1] * 127, attention_mask=[1] * 127, type_ids=[0] * 127)
 
-    monkeypatch.setitem(
-        sys.modules, "tokenizers", SimpleNamespace(Tokenizer=ShortTokenizer)
-    )
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=ShortTokenizer))
     tokenizer = BgeTokenizer(tmp_path / "short.json")
     with pytest.raises(DocumentModelError) as caught:
         tokenizer.encode("text")
-    _assert_document_error(
-        caught.value, "tokenizer-invalid", "tokenizer did not emit fixed inputs"
-    )
+    _assert_document_error(caught.value, "tokenizer-invalid", "tokenizer did not emit fixed inputs")
 
 
 def test_bge_holdout_is_bundled_versioned_and_has_exact_retrieval_targets(tmp_path):
@@ -406,9 +405,7 @@ class _StaticTokenizer:
 
 def test_native_runner_uses_mixed_dtypes_precise_vulkan_and_normalizes(tmp_path):
     runtime = _Ncnn()
-    runner = VulkanBgeRunner(
-        tmp_path / "model.ncnn.param", _StaticTokenizer(), runtime=runtime
-    )
+    runner = VulkanBgeRunner(tmp_path / "model.ncnn.param", _StaticTokenizer(), runtime=runtime)
     vector = runner.embed("text")
 
     assert runner.device_name == "named-gpu"
@@ -482,14 +479,10 @@ def test_native_runner_contains_dependency_and_extractor_failures(monkeypatch, t
     monkeypatch.setitem(sys.modules, "ncnn", None)
     with pytest.raises(DocumentModelError) as missing:
         VulkanBgeRunner(tmp_path / "model.ncnn.param", _StaticTokenizer())
-    _assert_document_error(
-        missing.value, "producer-dependency-missing", dependency_detail
-    )
+    _assert_document_error(missing.value, "producer-dependency-missing", dependency_detail)
 
     runtime = _Ncnn()
-    runner = VulkanBgeRunner(
-        tmp_path / "model.ncnn.param", _StaticTokenizer(), runtime=runtime
-    )
+    runner = VulkanBgeRunner(tmp_path / "model.ncnn.param", _StaticTokenizer(), runtime=runtime)
 
     class RefusingExtractor(_Extractor):
         def input(self, name, value):
@@ -501,9 +494,7 @@ def test_native_runner_contains_dependency_and_extractor_failures(monkeypatch, t
     )
     with pytest.raises(DocumentModelError) as refused:
         runner.embed("text")
-    _assert_document_error(
-        refused.value, "native-failed", "native input 1 was refused"
-    )
+    _assert_document_error(refused.value, "native-failed", "native input 1 was refused")
 
     class ExtractionFailure(_Extractor):
         def extract(self, _name):
@@ -514,16 +505,12 @@ def test_native_runner_contains_dependency_and_extractor_failures(monkeypatch, t
     )
     with pytest.raises(DocumentModelError) as extraction:
         runner.embed("text")
-    _assert_document_error(
-        extraction.value, "native-failed", "native embedding extraction failed"
-    )
+    _assert_document_error(extraction.value, "native-failed", "native embedding extraction failed")
 
     monkeypatch.setitem(sys.modules, "numpy", None)
     with pytest.raises(DocumentModelError) as numpy_missing:
         runner.embed("text")
-    _assert_document_error(
-        numpy_missing.value, "producer-dependency-missing", dependency_detail
-    )
+    _assert_document_error(numpy_missing.value, "producer-dependency-missing", dependency_detail)
 
 
 def test_portable_runner_uses_only_cpu_reference_provider(monkeypatch, tmp_path):
@@ -538,7 +525,9 @@ def test_portable_runner_uses_only_cpu_reference_provider(monkeypatch, tmp_path)
             return [np.ones((1, 384), dtype=np.float32)]
 
     monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=Session))
-    runner = PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
+    runner = _producer_cpu_reference_runner(
+        tmp_path / "reference.onnx", _StaticTokenizer()
+    )
 
     assert runner.embed("text") == (1.0,) * 384
     assert observed["init"] == (
@@ -557,6 +546,61 @@ def test_portable_runner_uses_only_cpu_reference_provider(monkeypatch, tmp_path)
     )
 
 
+def test_portable_cpu_reference_requires_producer_capability_before_import(monkeypatch, tmp_path):
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
+    with pytest.raises(DocumentModelError) as refused:
+        PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
+    _assert_document_error(
+        refused.value,
+        "cpu-reference-forbidden",
+        "CPU reference execution is restricted to document-model production",
+    )
+    assert PortableBgeRunner.backend == "producer-cpu-reference"
+    assert PortableBgeRunner.producer_only is True
+
+
+def test_native_tensor_contract_is_derived_without_mutating_portable_recipe(tmp_path):
+    source = _source(tmp_path)
+    portable = copy.deepcopy(source.recipe.tensor_contract)
+
+    first = native_tensor_contract(source.recipe)
+    assert first == NATIVE_TENSOR_CONTRACT
+    assert document_model.NATIVE_TENSOR_CONTRACT is NATIVE_TENSOR_CONTRACT
+    assert "NATIVE_TENSOR_CONTRACT" in dir(document_model)
+    assert first == {
+        "inputs": [
+            {"shape": [1, 128], "dtype": "int32", "layout": "NC"},
+            {"shape": [1, 128], "dtype": "float32", "layout": "NC"},
+            {"shape": [1, 128], "dtype": "int32", "layout": "NC"},
+        ]
+    }
+    assert source.recipe.tensor_contract == portable
+    first["inputs"][0]["shape"][1] = 1
+    assert native_tensor_contract(source.recipe)["inputs"][0]["shape"] == [1, 128]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda recipe: recipe.producer.update(inputNames=["attention_mask"] * 3),
+        lambda recipe: recipe.tensor_contract["inputs"].pop(),
+        lambda recipe: recipe.tensor_contract["inputs"][0].update(shape=[1, 127]),
+        lambda recipe: recipe.tensor_contract["inputs"][0].update(dtype="int32"),
+        lambda recipe: recipe.tensor_contract["inputs"][0].update(layout="NCHW"),
+    ],
+)
+def test_native_tensor_contract_refuses_every_portable_contract_drift(tmp_path, mutate):
+    recipe = copy.deepcopy(_source(tmp_path).recipe)
+    mutate(recipe)
+    with pytest.raises(DocumentModelError) as refused:
+        native_tensor_contract(recipe)
+    _assert_document_error(
+        refused.value,
+        "recipe-incompatible",
+        "recipe has no fixed BGE tensor contract",
+    )
+
+
 def test_portable_runner_contains_session_and_inference_failures(monkeypatch, tmp_path):
     class InvalidSession:
         def __init__(self, *_args, **_kwargs):
@@ -566,7 +610,9 @@ def test_portable_runner_contains_session_and_inference_failures(monkeypatch, tm
         sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=InvalidSession)
     )
     with pytest.raises(DocumentModelError) as invalid:
-        PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
+        _producer_cpu_reference_runner(
+            tmp_path / "reference.onnx", _StaticTokenizer()
+        )
     _assert_document_error(
         invalid.value, "portable-invalid", "cannot load portable model: bad graph"
     )
@@ -581,7 +627,9 @@ def test_portable_runner_contains_session_and_inference_failures(monkeypatch, tm
     monkeypatch.setitem(
         sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=FailingSession)
     )
-    runner = PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
+    runner = _producer_cpu_reference_runner(
+        tmp_path / "reference.onnx", _StaticTokenizer()
+    )
     with pytest.raises(DocumentModelError) as failed:
         runner.embed("text")
     _assert_document_error(
@@ -595,16 +643,14 @@ def test_producer_only_dependency_failures_are_exact(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "tokenizers", None)
     with pytest.raises(DocumentModelError) as tokenizer:
         BgeTokenizer(tmp_path / "tokenizer.json")
-    _assert_document_error(
-        tokenizer.value, "producer-dependency-missing", dependency_detail
-    )
+    _assert_document_error(tokenizer.value, "producer-dependency-missing", dependency_detail)
 
     monkeypatch.setitem(sys.modules, "onnxruntime", None)
     with pytest.raises(DocumentModelError) as portable:
-        PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
-    _assert_document_error(
-        portable.value, "producer-dependency-missing", dependency_detail
-    )
+        _producer_cpu_reference_runner(
+            tmp_path / "reference.onnx", _StaticTokenizer()
+        )
+    _assert_document_error(portable.value, "producer-dependency-missing", dependency_detail)
 
     monkeypatch.setitem(sys.modules, "pnnx", None)
     with pytest.raises(DocumentModelError) as stack:
@@ -708,8 +754,7 @@ def test_export_reconstructs_pinned_weights_and_requires_complete_pair(  # noqa:
             observed["export"] = (model, path, inputs, fp16)
             root = Path(path).parent
             (root / "model.ncnn.param").write_text(
-                "7767517\n1 2\n"
-                "Squeeze squeeze_0 1 1 in0 out0 -23303=1,0\n",
+                "7767517\n1 2\nSqueeze squeeze_0 1 1 in0 out0 -23303=1,0\n",
                 encoding="utf-8",
             )
             (root / "model.ncnn.bin").write_bytes(b"weights")
@@ -722,6 +767,22 @@ def test_export_reconstructs_pinned_weights_and_requires_complete_pair(  # noqa:
         "omnitensor.training.document_model._document_dependencies",
         lambda: (Pnnx, torch, load_weights, Config, Encoder),
     )
+    fixed_model = document_model._fixed_bge_model
+    normalize_graph = document_model._append_ncnn_l2_normalization
+
+    def fixed_spy(torch_module, encoder_model):
+        observed["fixed"] = (torch_module, encoder_model)
+        return fixed_model(torch_module, encoder_model)
+
+    def normalize_spy(path):
+        observed["normalized"] = path
+        normalize_graph(path)
+
+    monkeypatch.setattr("omnitensor.training.document_model._fixed_bge_model", fixed_spy)
+    monkeypatch.setattr(
+        "omnitensor.training.document_model._append_ncnn_l2_normalization",
+        normalize_spy,
+    )
     destination = tmp_path / "nested" / "build"
     output = export_bge_ncnn(source, destination, _tokens())
 
@@ -729,6 +790,9 @@ def test_export_reconstructs_pinned_weights_and_requires_complete_pair(  # noqa:
     assert observed["config"] == str(source.root / "config.json")
     assert observed["weights"] == str(source.root / "model.safetensors")
     assert observed["implementation"] == "eager"
+    assert observed["fixed"][0] is torch
+    assert isinstance(observed["fixed"][1], Encoder)
+    assert observed["normalized"] == output
     assert observed["state"] == (
         {"path": str(source.root / "model.safetensors")},
         False,
@@ -900,8 +964,7 @@ def test_native_l2_graph_patch_preserves_counts_and_one_normalized_output(
 ):
     graph = tmp_path / "model.ncnn.param"
     graph.write_text(
-        f"7767517\n{layer_count} {blob_count}\n"
-        "Squeeze final 1 1 input out0 -23303=1,0\n",
+        f"7767517\n{layer_count} {blob_count}\nSqueeze final 1 1 input out0 -23303=1,0\n",
         encoding="utf-8",
     )
 
@@ -954,9 +1017,7 @@ def test_native_l2_graph_patch_bounds_and_contains_read_failure(tmp_path):
     oversized.write_text("x" * (1024 * 1024 + 1), encoding="utf-8")
     with pytest.raises(DocumentModelError) as too_large:
         _append_ncnn_l2_normalization(oversized)
-    _assert_document_error(
-        too_large.value, "compilation-incompatible", "ncnn graph is oversized"
-    )
+    _assert_document_error(too_large.value, "compilation-incompatible", "ncnn graph is oversized")
 
     with pytest.raises(DocumentModelError) as unreadable:
         _append_ncnn_l2_normalization(tmp_path)
@@ -1007,9 +1068,7 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
         observed["tokenizer"] = path
         return tokenizer
 
-    monkeypatch.setattr(
-        "omnitensor.training.document_model.BgeTokenizer", tokenizer_factory
-    )
+    monkeypatch.setattr("omnitensor.training.document_model.BgeTokenizer", tokenizer_factory)
 
     def portable_export(_self, received_source, destination):
         observed["portable_export"] = (received_source, destination)
@@ -1035,18 +1094,14 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
         observed["portable_runner"] = (path, received_tokenizer)
         return portable_runner
 
-    monkeypatch.setattr(
-        "omnitensor.training.document_model.PortableBgeRunner", portable_factory
-    )
+    monkeypatch.setattr("omnitensor.training.document_model.PortableBgeRunner", portable_factory)
     native = SimpleNamespace(device_index=1, device_name="RX 6600 XT")
 
     def native_factory(path, received_tokenizer, *, device_index):
         observed["native_runner"] = (path, received_tokenizer, device_index)
         return native
 
-    monkeypatch.setattr(
-        "omnitensor.training.document_model.VulkanBgeRunner", native_factory
-    )
+    monkeypatch.setattr("omnitensor.training.document_model.VulkanBgeRunner", native_factory)
 
     gate = EmbeddingGateEvidence(0.9999, 1.0, 0.0, 28, 2, 12, True)
 
@@ -1079,9 +1134,7 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
         )
         return 2
 
-    monkeypatch.setattr(
-        "omnitensor.training.document_model._expected_retrieval_hits", retrieval
-    )
+    monkeypatch.setattr("omnitensor.training.document_model._expected_retrieval_hits", retrieval)
 
     prepare = document_model.prepare_artifact
 
@@ -1193,7 +1246,7 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
     manifest = json.loads(installed.binding_path.read_text())
     model = manifest["requirements"]["model"]
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
-    assert model["tensorContract"] == NATIVE_TENSOR_CONTRACT
+    assert model["tensorContract"] == native_tensor_contract(source.recipe)
     assert model["outputContract"] == {"kind": "embedding"}
     assert model["nativeEvidence"]["namedDeviceAccepted"] is False
     assert model["trainingContract"]["reportSha256"] == document_model.file_digest(
@@ -1233,9 +1286,7 @@ def test_install_document_model_rejects_each_recipe_identity_and_portable_confli
         )
 
     tokenizer = _StaticTokenizer()
-    monkeypatch.setattr(
-        "omnitensor.training.document_model.BgeTokenizer", lambda _path: tokenizer
-    )
+    monkeypatch.setattr("omnitensor.training.document_model.BgeTokenizer", lambda _path: tokenizer)
     build = tmp_path / "conflict"
     build.mkdir()
     (build / "model.reference.onnx").write_bytes(b"present")
@@ -1271,12 +1322,10 @@ def test_binding_and_report_are_schema_valid_and_do_not_claim_profile_acceptance
         "recipeId": RECIPE_ID,
         "recipeVersion": "1.0.0",
         "recipeSha256": source.recipe.document_sha256,
-        "sourceReceiptSha256": (
-            "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
-        ),
+        "sourceReceiptSha256": ("44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"),
         "portableReferenceSha256": "a" * 64,
         "nativeArtifactSha256": "b" * 64,
-        "tensorContract": NATIVE_TENSOR_CONTRACT,
+        "tensorContract": native_tensor_contract(source.recipe),
         "outputContract": {"kind": "embedding"},
         "holdout": {
             "licenseId": "CC0-1.0",
@@ -1363,9 +1412,7 @@ def test_source_lookup_and_cli_success_and_failure(monkeypatch, tmp_path, capsys
     assert _source_path(source, "weights").name == "model.safetensors"
     with pytest.raises(DocumentModelError) as missing:
         _source_path(source, "labels")
-    _assert_document_error(
-        missing.value, "recipe-incompatible", "recipe has no labels source"
-    )
+    _assert_document_error(missing.value, "recipe-incompatible", "recipe has no labels source")
 
     observed = {}
     installed = SimpleNamespace(document=lambda: {"installed": True})
@@ -1453,8 +1500,7 @@ def test_document_model_cli_help_is_an_exact_operator_contract(capsys):
         "usage: omnitensor-install-document-model [-h] --accept-license ACCEPT_LICENSE"
     )
     assert (
-        "Fetch, build, GPU-gate, and install pinned BGE-small for Document Intelligence"
-        in output
+        "Fetch, build, GPU-gate, and install pinned BGE-small for Document Intelligence" in output
     )
     for option in (
         "--source-root SOURCE_ROOT",

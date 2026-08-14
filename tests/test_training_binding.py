@@ -29,10 +29,7 @@ def _loader(profile_id: str, manifest: dict):
 
 
 def _variants(lanes=("tpu", "npu", "gpu")) -> dict:
-    return {
-        lane: {"id": f"model-{lane}", "nested": {"lane": lane}}
-        for lane in reversed(lanes)
-    }
+    return {lane: {"id": f"model-{lane}", "nested": {"lane": lane}} for lane in reversed(lanes)}
 
 
 def test_plural_and_singular_bindings_preserve_exact_golden_order():
@@ -220,15 +217,19 @@ def test_native_evidence_preserves_family_values_and_field_order():
         compiler_report_sha256=None,
         named_device_accepted=False,
     )
-    assert tuple(numeric) == tuple(document) == (
-        "portableSha256",
-        "nativeSha256",
-        "reportSha256",
-        "samples",
-        "maximumAbsoluteError",
-        "tolerance",
-        "compilerReportSha256",
-        "namedDeviceAccepted",
+    assert (
+        tuple(numeric)
+        == tuple(document)
+        == (
+            "portableSha256",
+            "nativeSha256",
+            "reportSha256",
+            "samples",
+            "maximumAbsoluteError",
+            "tolerance",
+            "compilerReportSha256",
+            "namedDeviceAccepted",
+        )
     )
     assert numeric["compilerReportSha256"] == "d" * 64
     assert document["compilerReportSha256"] is None
@@ -298,7 +299,19 @@ def test_document_private_facade_keeps_error_mapping_and_patch_seams(monkeypatch
     )
 
     base = sample_manifest("document-intelligence")
-    source = SimpleNamespace(recipe=SimpleNamespace(document_sha256="a" * 64))
+    source = SimpleNamespace(
+        recipe=SimpleNamespace(
+            document_sha256="a" * 64,
+            tensor_contract={
+                "inputs": [
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                    {"shape": [1, 128], "dtype": "int64", "layout": "NC"},
+                ]
+            },
+            producer={"inputNames": ["input_ids", "attention_mask", "token_type_ids"]},
+        )
+    )
     artifact = {"sha256": "b" * 64}
     monkeypatch.setattr(
         "omnitensor.training.document_model.load_workloads",

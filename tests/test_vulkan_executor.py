@@ -4,7 +4,12 @@ import pytest
 
 from omnitensor.executors.base import Availability, InferenceResult
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
-from omnitensor.executors.vulkan import VulkanGpuExecutor
+from omnitensor.executors.vulkan import (
+    VulkanDevice,
+    VulkanGpuExecutor,
+    VulkanSelectionError,
+    select_vulkan_device,
+)
 
 
 class FakeGpuInfo:
@@ -97,6 +102,56 @@ class FakeNcnn:
 
 
 DISCRETE, INTEGRATED, VIRTUAL, CPU = 0, 1, 2, 3
+
+
+def test_public_vulkan_selector_returns_named_hardware_and_refuses_exactly():
+    class NamedInfo(FakeGpuInfo):
+        def __init__(self, device_type, name):
+            super().__init__(device_type)
+            self._name = name
+
+        def device_name(self):
+            return self._name
+
+    runtime = FakeNcnn([INTEGRATED, DISCRETE, CPU])
+    runtime.get_gpu_info = lambda index: NamedInfo(
+        runtime._device_types[index], ("integrated", "discrete", "cpu")[index]
+    )
+    assert select_vulkan_device(runtime) == VulkanDevice(1, "discrete", DISCRETE)
+    assert select_vulkan_device(runtime, 0) == VulkanDevice(0, "integrated", INTEGRATED)
+
+    with pytest.raises(VulkanSelectionError) as requested:
+        select_vulkan_device(runtime, 2)
+    assert (requested.value.kind, requested.value.reason) == (
+        "requested",
+        "Vulkan device 2 is absent or software-only",
+    )
+
+    software = FakeNcnn([CPU])
+    with pytest.raises(VulkanSelectionError) as refused:
+        select_vulkan_device(software)
+    assert (refused.value.kind, refused.value.reason) == (
+        "software-only",
+        "Only a software (CPU) Vulkan device is present; CPU execution is not used",
+    )
+
+
+def test_public_vulkan_selector_contains_enumeration_and_empty_inventory():
+    class BrokenRuntime:
+        @staticmethod
+        def get_gpu_count():
+            raise OSError("loader failed")
+
+    with pytest.raises(VulkanSelectionError) as broken:
+        select_vulkan_device(BrokenRuntime())
+    assert (broken.value.kind, broken.value.reason) == ("enumeration", "loader failed")
+
+    with pytest.raises(VulkanSelectionError) as absent:
+        select_vulkan_device(FakeNcnn([]))
+    assert (absent.value.kind, absent.value.reason) == (
+        "absent",
+        "No Vulkan device is available",
+    )
 
 
 def test_vulkan_prefers_discrete_and_never_selects_software_devices():
@@ -197,7 +252,9 @@ def test_vulkan_degrades_without_device_runtime_or_gpus():
     missing = VulkanGpuExecutor(device_present=True, runtime=None)
     missing._runtime = None
     assert missing.availability() == Availability(
-        False, "ncnn is not installed", "runtime-missing",
+        False,
+        "ncnn is not installed",
+        "runtime-missing",
     )
     with pytest.raises(RuntimeError) as raised:
         missing.run("model.param", [])
@@ -255,7 +312,9 @@ def test_composite_dispatches_by_extension_and_prefers_vulkan():
     ],
 )
 def test_composite_dispatches_by_declared_format_not_path(
-    model_format, misleading_path, expected,
+    model_format,
+    misleading_path,
+    expected,
 ):
     vulkan = StubExecutor({"ncnn"}, True, marker="vulkan")
     onnx = StubExecutor({"onnx"}, True, marker="onnx")
@@ -264,12 +323,8 @@ def test_composite_dispatches_by_declared_format_not_path(
     result = composite.run_for_format(model_format, misleading_path, [1])
 
     assert result.outputs == [expected]
-    assert vulkan.run_calls == (
-        [(misleading_path, [1])] if expected == "vulkan" else []
-    )
-    assert onnx.run_calls == (
-        [(misleading_path, [1])] if expected == "onnx" else []
-    )
+    assert vulkan.run_calls == ([(misleading_path, [1])] if expected == "vulkan" else [])
+    assert onnx.run_calls == ([(misleading_path, [1])] if expected == "onnx" else [])
 
 
 def test_composite_refuses_unknown_format_without_probing_or_running_a_lane():
@@ -295,9 +350,7 @@ def test_composite_does_not_fall_through_to_another_format_when_lane_is_down():
     with pytest.raises(RuntimeError) as raised:
         composite.run_for_format("ncnn", "misleading.onnx", [])
 
-    assert str(raised.value) == (
-        "No available GPU runtime for model: misleading.onnx"
-    )
+    assert str(raised.value) == ("No available GPU runtime for model: misleading.onnx")
     assert vulkan.availability_calls == 1
     assert onnx.availability_calls == 0
     assert vulkan.run_calls == []
@@ -305,25 +358,32 @@ def test_composite_does_not_fall_through_to_another_format_when_lane_is_down():
 
 
 def test_composite_availability_is_scoped_to_requested_format():
-    composite = CompositeGpuExecutor([
-        StubExecutor({"ncnn"}, True),
-        StubExecutor({"onnx"}, False, "no GPU provider"),
-    ])
+    composite = CompositeGpuExecutor(
+        [
+            StubExecutor({"ncnn"}, True),
+            StubExecutor({"onnx"}, False, "no GPU provider"),
+        ]
+    )
     assert composite.availability().available is True
     assert composite.availability_for({"format": "ncnn"}) == Availability(True)
     assert composite.availability_for({"format": "onnx"}) == Availability(
-        False, "no GPU provider",
+        False,
+        "no GPU provider",
     )
     assert composite.availability_for({"format": "openvino"}) == Availability(
-        False, "No GPU runtime supports the model format", "format-unsupported",
+        False,
+        "No GPU runtime supports the model format",
+        "format-unsupported",
     )
 
 
 def test_composite_reports_joined_reasons_and_missing_runtime():
-    composite = CompositeGpuExecutor([
-        StubExecutor({"ncnn"}, False, "no vulkan"),
-        StubExecutor({"onnx"}, False, "no provider"),
-    ])
+    composite = CompositeGpuExecutor(
+        [
+            StubExecutor({"ncnn"}, False, "no vulkan"),
+            StubExecutor({"onnx"}, False, "no provider"),
+        ]
+    )
     availability = composite.availability()
     assert availability.available is False
     assert availability.reason == "no vulkan; no provider"
@@ -341,10 +401,12 @@ def test_composite_with_real_onnx_fallback_shape():
         def get_available_providers():
             return ["CPUExecutionProvider"]
 
-    composite = CompositeGpuExecutor([
-        VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([CPU])),
-        GpuExecutor(device_present=True, runtime=FakeOrt()),
-    ])
+    composite = CompositeGpuExecutor(
+        [
+            VulkanGpuExecutor(device_present=True, runtime=FakeNcnn([CPU])),
+            GpuExecutor(device_present=True, runtime=FakeOrt()),
+        ]
+    )
     availability = composite.availability()
     assert availability.available is False
     assert "CPU execution is not used" in availability.reason
@@ -359,6 +421,7 @@ def test_the_device_is_enumerated_once_and_reused():
     different thread from the one running inference. Doing that under a
     running job corrupted its results.
     """
+
     class CountingNcnn(FakeNcnn):
         def __init__(self):
             super().__init__([INTEGRATED, DISCRETE])

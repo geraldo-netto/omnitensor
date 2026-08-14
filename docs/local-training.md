@@ -170,9 +170,18 @@ operators, while the independent MiniLM mean-pooling wrapper legitimately uses
 opset 13; both publish the same embedding output contract, so no second service
 API or forced graph upgrade is needed.
 
+The ONNX CPU runner is a producer-only reference oracle: its constructor is
+guarded and only the one-shot installer can authorize it. The service and the
+external BGE worker instantiate only the native tokenizer/Vulkan runner and
+never receive that capability, so the reference cannot become a runtime
+fallback.
+
 The native path reconstructs the reviewed BERT encoder from the pinned
 safetensors and exports directly to ncnn with fixed `[1,128]` token, mask, and
-segment inputs. It refuses software Vulkan devices and CPU fallback. Before
+segment inputs. Their order, shapes, and layouts come from the portable recipe;
+the explicit ncnn boundary narrows token and segment IDs to `int32` and turns
+the attention mask into `float32`, matching the graph measured on Vulkan. It
+refuses software Vulkan devices and CPU fallback. Before
 publishing, it requires finite 384-value output, cosine parity of at least
 `0.999`, top-10 overlap of at least `0.9`, maximum absolute error at most
 `0.001`, and every expected top result in the bundled CC0 smoke corpus. The

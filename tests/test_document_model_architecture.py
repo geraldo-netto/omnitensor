@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import ast
+import pickle
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import omnitensor.training.document_model as facade
+from omnitensor.training import document_model_contracts as contracts
+from omnitensor.training import document_model_cpu_reference as cpu_reference
+from omnitensor.training import document_model_export as exporter
+from omnitensor.training import document_model_gate as gate
+from omnitensor.training import document_model_installation as installation
+from omnitensor.training import document_model_runners as runners
+from omnitensor.training import document_model_types as types
+
+ROOT = Path(__file__).parents[1]
+LEGACY_MODULE = "omnitensor.training.document_model"
+
+
+def test_document_model_facade_preserves_type_identity_name_and_pickle_globals(tmp_path):
+    owners = {
+        "DocumentModelError": types.DocumentModelError,
+        "TokenizedText": types.TokenizedText,
+        "DocumentModelEvidence": types.DocumentModelEvidence,
+        "InstalledDocumentModel": types.InstalledDocumentModel,
+        "BgeTokenizer": runners.BgeTokenizer,
+        "PortableBgeRunner": cpu_reference.PortableBgeRunner,
+        "ProducerCpuBgeReferenceRunner": cpu_reference.ProducerCpuBgeReferenceRunner,
+        "VulkanBgeRunner": runners.VulkanBgeRunner,
+    }
+    for name, owner in owners.items():
+        assert getattr(facade, name) is owner
+        assert owner.__module__ == LEGACY_MODULE
+        assert pickle.loads(pickle.dumps(owner)) is owner
+    assert facade.PortableBgeRunner.__name__ == "PortableBgeRunner"
+    assert facade.PortableBgeRunner is facade.ProducerCpuBgeReferenceRunner
+
+    tokens = types.TokenizedText((1,), (1.0,), (0,))
+    evidence = types.DocumentModelEvidence(0, "GPU", 2, 1.0, 1.0, 0.0, 1)
+    installed = types.InstalledDocumentModel(
+        tmp_path / "model", tmp_path / "binding", tmp_path / "report", evidence
+    )
+    for value in (tokens, evidence, installed):
+        assert pickle.loads(pickle.dumps(value)) == value
+
+    with pytest.raises(TypeError, match="missing 1 required positional argument"):
+        pickle.loads(pickle.dumps(types.DocumentModelError("code", "detail")))
+
+
+def test_document_model_facade_maps_direct_leaf_owners_and_contains_no_classes():
+    assert facade.source_path is contracts.source_path
+    assert facade.append_ncnn_l2_normalization is exporter.append_ncnn_l2_normalization
+    assert facade.maximum_embedding_error is gate.maximum_embedding_error
+    assert facade.expected_retrieval_hits is gate.expected_retrieval_hits
+    assert facade.report_document is gate.report_document
+    assert facade.binding_document is installation.binding_document
+    assert facade.native_tensor_contract is types.native_tensor_contract
+
+    tree = ast.parse((ROOT / "src/omnitensor/training/document_model.py").read_text())
+    assert not any(isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) for node in tree.body)
+
+
+def test_document_model_private_facade_factories_resolve_live_legacy_seams(
+    monkeypatch, tmp_path
+):
+    fixed = object()
+    monkeypatch.setattr(facade, "fixed_bge_model", lambda torch, encoder: (torch, encoder))
+    assert facade._fixed_bge_model("torch", "encoder") == ("torch", "encoder")
+
+    monkeypatch.setattr(
+        facade, "_canonical_cpu_reference_factory", lambda model, tokenizer: fixed
+    )
+    assert facade._portable_reference_factory(tmp_path / "model", object()) is fixed
+
+    alternate = object()
+    monkeypatch.setattr(facade, "PortableBgeRunner", lambda model, tokenizer: alternate)
+    assert facade._portable_reference_factory(tmp_path / "model", object()) is alternate
+
+
+def test_document_model_leaves_import_before_facade_and_never_import_it():
+    modules = (
+        "document_model_types",
+        "document_model_contracts",
+        "document_model_runners",
+        "document_model_cpu_reference",
+        "document_model_export",
+        "document_model_gate",
+        "document_model_installation",
+        "document_model_cli",
+    )
+    script = "\n".join(
+        [
+            "import importlib, sys",
+            *(f"importlib.import_module('omnitensor.training.{name}')" for name in modules),
+            "assert 'omnitensor.training.document_model' not in sys.modules",
+        ]
+    )
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        env={"PYTHONPATH": str(ROOT / "src")},
+        check=True,
+    )
+
+    for name in modules:
+        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, ast.ImportFrom) and node.module == "document_model"
+            for node in ast.walk(tree)
+        )
+
+
+def test_cpu_reference_owner_is_absent_from_runtime_and_native_modules():
+    allowed = {"document_model.py", "document_model_installation.py"}
+    owners = []
+    for path in (ROOT / "src/omnitensor/training").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.ImportFrom) and node.module == "document_model_cpu_reference"
+            for node in ast.walk(tree)
+        ):
+            owners.append(path.name)
+    assert set(owners) <= allowed
+
+    provider = (
+        ROOT / "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/bge.py"
+    ).read_text(encoding="utf-8")
+    assert "document_model import QUERY_PREFIX, BgeTokenizer, VulkanBgeRunner" in provider
+    assert "document_model_cpu_reference" not in provider
+
+
+def test_document_model_cli_entrypoint_remains_on_stable_facade():
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert (
+        'omnitensor-install-document-model = "omnitensor.training.document_model:main"' in project
+    )

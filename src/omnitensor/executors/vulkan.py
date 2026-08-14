@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .base import (
@@ -28,9 +29,62 @@ from .base import (
 _DEVICE_PREFERENCE = {0: 0, 1: 1, 2: 2}
 
 
+@dataclass(frozen=True, slots=True)
+class VulkanDevice:
+    """One hardware Vulkan device selected by the shared runtime policy."""
+
+    index: int
+    name: str
+    kind: int
+
+
+class VulkanSelectionError(RuntimeError):
+    """A stable Vulkan selection refusal with a caller-specific rendering."""
+
+    def __init__(self, kind: str, reason: str):
+        self.kind = kind
+        self.reason = reason
+        super().__init__(reason)
+
+
+def select_vulkan_device(runtime, requested: int | None = None) -> VulkanDevice:
+    """Choose the preferred hardware Vulkan device, never a CPU device."""
+    try:
+        count = runtime.get_gpu_count()
+        candidates = []
+        for index in range(count):
+            info = runtime.get_gpu_info(index)
+            kind = info.type()
+            if kind in _DEVICE_PREFERENCE:
+                name_getter = getattr(info, "device_name", None)
+                name = name_getter() if callable(name_getter) else ""
+                candidates.append(
+                    (_DEVICE_PREFERENCE[kind], index, VulkanDevice(index, name, kind))
+                )
+    except Exception as error:  # noqa: BLE001 - native loader failures are arbitrary
+        raise VulkanSelectionError("enumeration", str(error)) from error
+    if requested is not None:
+        matching = [item for item in candidates if item[1] == requested]
+        if not matching:
+            raise VulkanSelectionError(
+                "requested",
+                f"Vulkan device {requested} is absent or software-only",
+            )
+        return matching[0][2]
+    if not candidates:
+        if count > 0:
+            raise VulkanSelectionError(
+                "software-only",
+                "Only a software (CPU) Vulkan device is present; CPU execution is not used",
+            )
+        raise VulkanSelectionError("absent", "No Vulkan device is available")
+    return min(candidates)[2]
+
+
 def _import_ncnn():  # pragma: no cover - trivial import shim
     try:
         import ncnn  # noqa: PLC0415
+
         return ncnn
     except ImportError:
         return None
@@ -78,22 +132,11 @@ class VulkanGpuExecutor:
 
     def _enumerate_device(self) -> tuple[int | None, str]:
         try:
-            count = self._runtime.get_gpu_count()
-        except Exception as error:  # noqa: BLE001 - loader failures are arbitrary
-            return None, f"Vulkan device enumeration failed: {error}"
-        candidates: list[tuple[int, int]] = []
-        for index in range(count):
-            device_type = self._runtime.get_gpu_info(index).type()
-            if device_type in _DEVICE_PREFERENCE:
-                candidates.append((_DEVICE_PREFERENCE[device_type], index))
-        if not candidates:
-            if count > 0:
-                return None, (
-                    "Only a software (CPU) Vulkan device is present; "
-                    "CPU execution is not used"
-                )
-            return None, "No Vulkan device is available"
-        return min(candidates)[1], ""
+            return select_vulkan_device(self._runtime).index, ""
+        except VulkanSelectionError as error:
+            if error.kind == "enumeration":
+                return None, f"Vulkan device enumeration failed: {error.reason}"
+            return None, error.reason
 
     def availability(self) -> Availability:
         device, reason, code = self._available_device()
@@ -228,9 +271,7 @@ class VulkanGpuExecutor:
         observed = numpy.asarray(value)
         if observed.dtype.kind in "iu" and observed.dtype.kind != "b":
             limits = numpy.iinfo(numpy.int32)
-            if observed.size and (
-                observed.min() < limits.min or observed.max() > limits.max
-            ):
+            if observed.size and (observed.min() < limits.min or observed.max() > limits.max):
                 raise RuntimeError("ncnn integer input exceeds int32 range")
             dtype = numpy.int32
         else:
