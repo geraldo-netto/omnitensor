@@ -67,6 +67,7 @@ from .supervisor_recovery import DEFAULT_MAX_RESTARTS as DEFAULT_MAX_RESTARTS
 from .supervisor_recovery import (
     DEFAULT_RESTART_BACKOFF_MULTIPLIER as DEFAULT_RESTART_BACKOFF_MULTIPLIER,
 )
+from .supervisor_recovery import DEFAULT_RESTART_DECAY_SECONDS as DEFAULT_RESTART_DECAY_SECONDS
 from .supervisor_recovery import (
     DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS as DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS,
 )
@@ -137,6 +138,8 @@ class PluginWorkerSupervisor:
         self._failure_observer = failure_observer or _NullWorkerFailureObserver()
         self._slots: dict[str, _WorkerSlot] = {}
         self._recoveries: dict[str, asyncio.Task] = {}
+        self._restart_attempts: dict[str, int] = {}
+        self._ready_since: dict[str, float] = {}
         self._statuses: dict[str, WorkerStatus] = {}
         self._diagnostics: dict[str, list[WorkerDiagnostic]] = {}
         self._startup_order: list[str] = []
@@ -219,6 +222,8 @@ class PluginWorkerSupervisor:
             self._statuses.clear()
             self._diagnostics.clear()
             self._startup_order.clear()
+            self._restart_attempts.clear()
+            self._ready_since.clear()
             for spec in ordered:
                 await self._start_one(spec)
             return self.statuses()
@@ -269,8 +274,11 @@ class PluginWorkerSupervisor:
                     slot.process.pid,
                     slot.agreement.protocol_version,
                     detail,
+                    self._restart_attempts.get(plugin_id, 0),
                 )
             self._startup_order.clear()
+            self._restart_attempts.clear()
+            self._ready_since.clear()
             return self.statuses()
 
     async def revoke(self, plugin_id: str, detail: str) -> WorkerStatus | None:
@@ -283,6 +291,8 @@ class PluginWorkerSupervisor:
             slot = self._slots.pop(plugin_id, None)
             previous = self._statuses.get(plugin_id)
             if slot is None:
+                self._restart_attempts.pop(plugin_id, None)
+                self._ready_since.pop(plugin_id, None)
                 return previous
             await _cancel_monitor(slot.monitor)
             await self._stop_process(slot)
@@ -295,6 +305,8 @@ class PluginWorkerSupervisor:
                 previous.restart_attempts if previous is not None else 0,
             )
             self._statuses[plugin_id] = status
+            self._restart_attempts.pop(plugin_id, None)
+            self._ready_since.pop(plugin_id, None)
         await self._cancel_orphaned_jobs(plugin_id, detail)
         return status
 
@@ -343,6 +355,7 @@ class PluginWorkerSupervisor:
     ) -> None:
         slot = _WorkerSlot(spec, process, agreement)
         self._slots[spec.plugin_id] = slot
+        self._ready_since[spec.plugin_id] = asyncio.get_running_loop().time()
         if spec.plugin_id not in self._startup_order:
             self._startup_order.append(spec.plugin_id)
         detail = (

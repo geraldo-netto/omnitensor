@@ -25,12 +25,12 @@ KERNEL_EXPORTS = (
     "parse_aggregate",
     "scheduler_features",
 )
-EXPORT_MAP_SHA256 = "376b7eb7cf921804172c30d91fc3e8d75da2d8b8e1bca14eb4262387647c4233"
+EXPORT_MAP_SHA256 = "47aa70da66d11280cb7bfe92221c4ab096c2c8ab0cdacdd481f9033dbd17752b"
 
 
 def test_export_map_preserves_the_locked_public_surface_and_order():
     assert isinstance(plugins.__all__, list)
-    assert len(plugins.__all__) == len(plugins._EXPORTS) == 370
+    assert len(plugins.__all__) == len(plugins._EXPORTS) == 371
     assert plugins.__all__ == list(plugins._EXPORTS)
     assert set(plugins.__all__) <= set(dir(plugins))
     assert tuple(plugins.__all__[-len(KERNEL_EXPORTS) :]) == KERNEL_EXPORTS
@@ -62,7 +62,7 @@ print(json.dumps({
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == {"count": 370, "owners": []}
+    assert json.loads(completed.stdout) == {"count": 371, "owners": []}
 
 
 def test_dir_lists_lazy_exports_without_resolving_them():

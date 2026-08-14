@@ -605,6 +605,7 @@ def test_monitor_records_unexpected_worker_exit(returncode):
         )
         assert status.state is expected_state
         assert status.detail == expected_detail
+        assert status.restart_attempts == 0
         stopped = await supervisor.stop()
         assert stopped == (status,)
 
@@ -712,6 +713,100 @@ def test_crashed_worker_cancels_orphans_and_recovers_with_diagnostics():
             WorkerDiagnosticCode.RECOVERED,
         ]
         assert launcher.calls == ["recovering", "recovering"]
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_restart_budget_spans_successful_crash_recovery_cycles():
+    async def scenario():
+        events = []
+        processes = [
+            FakeProcess("looping", worker_offer("looping"), events, pid=pid)
+            for pid in (101, 102, 103)
+        ]
+        launcher = SequencedLauncher(processes)
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=2,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                backoff_multiplier=1,
+                restart_decay_seconds=60,
+            ),
+        )
+        await supervisor.start([worker_spec("looping")])
+
+        processes[0].exit(7)
+        await asyncio.sleep(0.01)
+        assert supervisor.statuses()[0].restart_attempts == 1
+        processes[1].exit(7)
+        await asyncio.sleep(0.01)
+        assert supervisor.statuses()[0].restart_attempts == 2
+        processes[2].exit(7)
+        await asyncio.sleep(0.01)
+
+        status = supervisor.statuses()[0]
+        assert status.state is WorkerState.EXHAUSTED
+        assert status.plugin_id == "looping"
+        assert status.pid == 103
+        assert status.protocol_version == 2
+        assert status.restart_attempts == 2
+        assert status.detail == (
+            "worker restart budget exhausted after 2 attempts: worker exited with status 7"
+        )
+        assert launcher.calls == ["looping"] * 3
+        diagnostics = supervisor.diagnostics("looping")
+        assert [item.code for item in diagnostics] == [
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.RECOVERED,
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.RECOVERED,
+            WorkerDiagnosticCode.EXITED,
+            WorkerDiagnosticCode.EXHAUSTED,
+        ]
+        assert [item.restart_attempt for item in diagnostics] == [0, 1, 1, 2, 2, 2]
+        assert supervisor._recoveries == {}
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_stable_worker_uptime_restores_its_restart_budget():
+    async def scenario():
+        events = []
+        processes = [
+            FakeProcess("stable", worker_offer("stable"), events, pid=pid)
+            for pid in (111, 112, 113)
+        ]
+        launcher = SequencedLauncher(processes)
+        supervisor = PluginWorkerSupervisor(
+            launcher,
+            recovery_policy=WorkerRecoveryPolicy(
+                max_restarts=1,
+                initial_backoff_seconds=0.001,
+                max_backoff_seconds=0.001,
+                restart_decay_seconds=1,
+            ),
+        )
+        await supervisor.start([worker_spec("stable")])
+        processes[0].exit(4)
+        await asyncio.sleep(0.01)
+        assert supervisor.statuses()[0].restart_attempts == 1
+
+        supervisor._ready_since["stable"] -= 2
+        processes[1].exit(4)
+        await asyncio.sleep(0.01)
+
+        status = supervisor.statuses()[0]
+        assert status.state is WorkerState.READY
+        assert status.pid == 113
+        assert status.restart_attempts == 1
+        assert launcher.calls == ["stable"] * 3
+        assert WorkerDiagnosticCode.EXHAUSTED not in {
+            item.code for item in supervisor.diagnostics("stable")
+        }
         await supervisor.stop()
 
     run_scenario(scenario())
@@ -901,6 +996,7 @@ def test_stop_reaps_replacement_cancelled_during_handshake():
         ({"max_restarts": -1}, "max_restarts"),
         ({"max_restarts": 17}, "max_restarts"),
         ({"initial_backoff_seconds": 0}, "initial_backoff_seconds"),
+        ({"restart_decay_seconds": 0}, "restart_decay_seconds"),
         (
             {"initial_backoff_seconds": 2, "max_backoff_seconds": 1},
             "must not exceed",

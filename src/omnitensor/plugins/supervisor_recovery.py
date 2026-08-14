@@ -21,6 +21,7 @@ DEFAULT_MAX_RESTARTS = 3
 DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS = 0.1
 DEFAULT_RESTART_MAX_BACKOFF_SECONDS = 5.0
 DEFAULT_RESTART_BACKOFF_MULTIPLIER = 2.0
+DEFAULT_RESTART_DECAY_SECONDS = 60.0
 MAX_RESTARTS = 16
 
 
@@ -35,6 +36,7 @@ class WorkerRecoveryPolicy:
     initial_backoff_seconds: float = DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS
     max_backoff_seconds: float = DEFAULT_RESTART_MAX_BACKOFF_SECONDS
     backoff_multiplier: float = DEFAULT_RESTART_BACKOFF_MULTIPLIER
+    restart_decay_seconds: float = DEFAULT_RESTART_DECAY_SECONDS
 
     def __post_init__(self) -> None:
         maximum = _facade_value("MAX_RESTARTS", MAX_RESTARTS)
@@ -47,6 +49,7 @@ class WorkerRecoveryPolicy:
         validator = _facade_value("_validate_timeout", validate_timeout)
         validator("initial_backoff_seconds", self.initial_backoff_seconds)
         validator("max_backoff_seconds", self.max_backoff_seconds)
+        validator("restart_decay_seconds", self.restart_decay_seconds)
         if self.initial_backoff_seconds > self.max_backoff_seconds:
             raise ValueError("initial_backoff_seconds must not exceed max_backoff_seconds")
         if (
@@ -71,6 +74,10 @@ class WorkerRecoveryPolicy:
         )
 
 
+def _retained_restart_attempts(attempts: int, uptime: float, decay_seconds: float) -> int:
+    return 0 if uptime >= decay_seconds else attempts
+
+
 class WorkerFailureObserver(Protocol):
     async def cancel_orphaned_jobs(self, plugin_id: str, detail: str) -> None: ...
 
@@ -87,6 +94,15 @@ async def monitor_worker(host, plugin_id: str, process: WorkerProcess) -> None:
         if slot is None or slot.process is not process:
             return
         host._slots.pop(plugin_id)
+        ready_since = host._ready_since.pop(plugin_id)
+        attempts = host._restart_attempts.get(plugin_id, 0)
+        uptime = asyncio.get_running_loop().time() - ready_since
+        attempts = _retained_restart_attempts(
+            attempts,
+            uptime,
+            host._recovery_policy.restart_decay_seconds,
+        )
+        host._restart_attempts[plugin_id] = attempts
         state = WorkerState.EXITED if returncode == 0 else WorkerState.FAILED
         detail = "worker exited" if returncode == 0 else f"worker exited with status {returncode}"
         host._statuses[plugin_id] = WorkerStatus(
@@ -95,6 +111,7 @@ async def monitor_worker(host, plugin_id: str, process: WorkerProcess) -> None:
             process.pid,
             slot.agreement.protocol_version,
             detail,
+            attempts,
         )
         host._record_diagnostic(
             WorkerDiagnostic(
@@ -103,15 +120,18 @@ async def monitor_worker(host, plugin_id: str, process: WorkerProcess) -> None:
                 detail,
                 process.pid,
                 returncode,
-                0,
+                attempts,
             )
         )
-        if host._running and host._recovery_policy.max_restarts:
-            recovery = asyncio.create_task(
-                host._recover(slot.spec, detail),
-                name=f"omnitensor-recovery-{plugin_id}",
-            )
+        if (
+            host._running
+            and host._recovery_policy.max_restarts
+            and attempts < host._recovery_policy.max_restarts
+        ):
+            recovery = asyncio.create_task(host._recover(slot.spec, detail))
             host._recoveries[plugin_id] = recovery
+        elif host._running and host._recovery_policy.max_restarts:
+            _mark_exhausted(host, plugin_id, detail)
 
 
 async def fail_startup(
@@ -132,6 +152,7 @@ async def fail_startup(
             error.detail,
             attempt - 1,
         )
+        host._restart_attempts[plugin_id] = attempt - 1
         host._recoveries.pop(plugin_id, None)
 
 
@@ -145,7 +166,8 @@ async def recover_worker(
     plugin_id = spec.plugin_id
     await host._cancel_orphaned_jobs(plugin_id, failure_detail)
     last_detail = failure_detail
-    for attempt in range(1, host._recovery_policy.max_restarts + 1):
+    first_attempt = host._restart_attempts[plugin_id] + 1
+    for attempt in range(first_attempt, host._recovery_policy.max_restarts + 1):
         async with host._lock:
             if (
                 not host._running
@@ -161,6 +183,7 @@ async def recover_worker(
                 f"worker restart attempt {attempt}",
                 attempt,
             )
+            host._restart_attempts[plugin_id] = attempt
         await asyncio.sleep(host._recovery_policy.delay(attempt))
         start_error_type = _facade_value("_WorkerStartError", WorkerStartError)
         try:
@@ -211,30 +234,32 @@ async def recover_worker(
     async with host._lock:
         if host._recoveries.get(plugin_id) is not asyncio.current_task():
             return
-        previous = host._statuses[plugin_id]
-        detail = (
-            f"worker restart budget exhausted after "
-            f"{host._recovery_policy.max_restarts} attempts: {last_detail}"
-        )
-        host._statuses[plugin_id] = WorkerStatus(
+        _mark_exhausted(host, plugin_id, last_detail)
+
+
+def _mark_exhausted(host, plugin_id: str, last_detail: str) -> None:
+    previous = host._statuses[plugin_id]
+    attempts = host._restart_attempts[plugin_id]
+    detail = f"worker restart budget exhausted after {attempts} attempts: {last_detail}"
+    host._statuses[plugin_id] = WorkerStatus(
+        plugin_id,
+        WorkerState.EXHAUSTED,
+        previous.pid,
+        previous.protocol_version,
+        detail,
+        attempts,
+    )
+    host._record_diagnostic(
+        WorkerDiagnostic(
             plugin_id,
-            WorkerState.EXHAUSTED,
-            previous.pid,
-            previous.protocol_version,
+            WorkerDiagnosticCode.EXHAUSTED,
             detail,
-            host._recovery_policy.max_restarts,
+            previous.pid,
+            None,
+            attempts,
         )
-        host._record_diagnostic(
-            WorkerDiagnostic(
-                plugin_id,
-                WorkerDiagnosticCode.EXHAUSTED,
-                detail,
-                previous.pid,
-                None,
-                host._recovery_policy.max_restarts,
-            )
-        )
-        host._recoveries.pop(plugin_id, None)
+    )
+    host._recoveries.pop(plugin_id, None)
 
 
 async def cancel_orphaned_jobs(host, plugin_id: str, detail: str) -> None:
@@ -265,6 +290,7 @@ for _legacy_type in (WorkerRecoveryPolicy, WorkerFailureObserver):
 __all__ = [
     "DEFAULT_MAX_RESTARTS",
     "DEFAULT_RESTART_BACKOFF_MULTIPLIER",
+    "DEFAULT_RESTART_DECAY_SECONDS",
     "DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS",
     "DEFAULT_RESTART_MAX_BACKOFF_SECONDS",
     "MAX_RESTARTS",

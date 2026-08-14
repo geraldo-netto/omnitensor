@@ -5,6 +5,7 @@
 - policy loading never raises and always yields bounded state,
 - snapshot building returns schema-valid or raises ValueError,
 - discovery never raises on arbitrary sysfs file contents.
+- worker restart attempts decay only after the configured stable window.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from conftest import sample_plugin_manifest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from omnitensor.control import ControlService
@@ -37,6 +38,7 @@ from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import JobSubmissionService
 from omnitensor.outputcontract import MAX_TOP_K, OutputSpec, declared_output, reduce_output
+from omnitensor.plugins import supervisor_recovery
 from omnitensor.registry import merge_workloads, validate_document
 from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
@@ -60,6 +62,16 @@ json_values = st.recursive(
     | st.dictionaries(st.text(max_size=8), children, max_size=4),
     max_leaves=25,
 )
+
+
+@given(
+    attempts=st.integers(min_value=0, max_value=16),
+    uptime=st.floats(min_value=0, max_value=120, allow_nan=False, allow_infinity=False),
+)
+@example(attempts=1, uptime=60.0)
+def test_worker_restart_attempts_decay_only_after_the_stable_window(attempts, uptime):
+    retained = supervisor_recovery._retained_restart_attempts(attempts, uptime, 60)
+    assert retained == (0 if uptime >= 60 else attempts)
 
 
 @given(count=st.integers(min_value=0, max_value=MAX_INPUTS + 2))

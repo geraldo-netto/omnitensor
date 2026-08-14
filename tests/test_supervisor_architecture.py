@@ -25,6 +25,7 @@ PUBLIC_FACADE_NAMES = (
     "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
     "DEFAULT_MAX_RESTARTS",
     "DEFAULT_RESTART_BACKOFF_MULTIPLIER",
+    "DEFAULT_RESTART_DECAY_SECONDS",
     "DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS",
     "DEFAULT_RESTART_MAX_BACKOFF_SECONDS",
     "DEFAULT_STARTUP_TIMEOUT_SECONDS",
@@ -287,6 +288,7 @@ def test_recovery_catches_the_live_facade_start_error(monkeypatch):
                     max_backoff_seconds=0.0001,
                 )
                 self._recoveries = {"worker": asyncio.current_task()}
+                self._restart_attempts = {"worker": 0}
                 self._statuses = {
                     "worker": diagnostics.WorkerStatus(
                         "worker",
