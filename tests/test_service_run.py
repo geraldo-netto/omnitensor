@@ -449,6 +449,48 @@ def test_publisher_persistence_runs_off_the_event_loop(tmp_path):
     assert publisher.publish_thread != loop_thread
 
 
+def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
+    class BlockingGrants:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.reload_thread = None
+            self.reloads = 0
+
+        def reload(self):
+            self.reload_thread = threading.get_ident()
+            self.reloads += 1
+            self.started.set()
+            assert self.release.wait(timeout=0.5)
+
+        def is_granted(self, _profile_id, _permission, _declared):
+            return False
+
+    grants = BlockingGrants()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=60.0,
+            discovery_interval_s=60.0,
+        )
+        service._grants = grants
+        loop_thread = threading.get_ident()
+        task = asyncio.create_task(service._publisher())
+        assert await asyncio.to_thread(grants.started.wait, 0.5)
+        grants.release.set()
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=1)
+        return loop_thread
+
+    loop_thread = asyncio.run(scenario())
+    assert grants.reloads == 1
+    assert grants.reload_thread != loop_thread
+
+
 def test_snapshot_retraction_runs_off_the_event_loop(tmp_path):
     class RecordingPublisher(FakePublisher):
         def __init__(self):

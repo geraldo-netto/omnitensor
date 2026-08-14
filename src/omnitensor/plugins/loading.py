@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json as json
+import logging
 import os
 import re as re
 import shutil
@@ -73,6 +74,8 @@ entry_points_from_distributions = _specs.entry_points_from_distributions
 _executable = _specs.executable_path
 _import_paths = _specs.worker_import_paths_tuple
 _trusted_runtime_paths = _specs.trusted_runtime_paths
+LOGGER = logging.getLogger(__name__)
+GRANT_REFRESH_SECONDS = 0.25
 
 
 async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
@@ -157,6 +160,7 @@ class InstalledPluginRuntime:
         self._revoked_workers: set[str] = set()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
         self._grant_monitor: asyncio.Task | None = None
+        self._grant_changes: dict[str, set[asyncio.Event]] = {}
 
     @property
     def snapshot(self) -> InstalledPluginSnapshot:
@@ -268,20 +272,30 @@ class InstalledPluginRuntime:
         plugin = self._plugin(request.plugin_id)
         assert plugin is not None
         declared = set(plugin.manifest["plugin"]["permissions"])
+        change = asyncio.Event()
+        changes = self._grant_changes.setdefault(request.plugin_id, set())
+        changes.add(change)
+        local_monitor = None
+        if self._grant_monitor is None and isinstance(
+            self._grant_source, ReloadablePermissionGrantSource
+        ):
+            local_monitor = asyncio.ensure_future(self._monitor_permission_grants())
+        changed = asyncio.ensure_future(change.wait())
         try:
-            while not execution.done():
-                await asyncio.sleep(0.05)
-                current = self._current_permissions(request.plugin_id, declared)
-                if current != self.granted_permissions(request.plugin_id):
-                    execution.cancel()
-                    await asyncio.gather(execution, return_exceptions=True)
-                    await self._revoke_worker(request.plugin_id)
-                    raise PluginWorkerError(
-                        "consent-revoked", "Plugin permission changed while work was active"
-                    )
+            done, _pending = await asyncio.wait(
+                (execution, changed), return_when=asyncio.FIRST_COMPLETED
+            )
+            if changed in done:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+                raise PluginWorkerError(
+                    "consent-revoked", "Plugin permission changed while work was active"
+                )
+            await self._refresh_permission_grants()
             if self._current_permissions(request.plugin_id, declared) != self.granted_permissions(
                 request.plugin_id
             ):
+                await self._revoke_worker(request.plugin_id)
                 raise PluginWorkerError(
                     "consent-revoked", "Plugin permission changed while work was active"
                 )
@@ -291,8 +305,19 @@ class InstalledPluginRuntime:
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
             raise
+        finally:
+            changed.cancel()
+            await asyncio.gather(changed, return_exceptions=True)
+            if local_monitor is not None:
+                local_monitor.cancel()
+                await asyncio.gather(local_monitor, return_exceptions=True)
+            changes.discard(change)
+            if not changes:
+                self._grant_changes.pop(request.plugin_id, None)
 
     async def _revoke_worker(self, plugin_id: str) -> None:
+        for change in tuple(self._grant_changes.get(plugin_id, ())):
+            change.set()
         if plugin_id in self._revoked_workers:
             return
         self._revoked_workers.add(plugin_id)
@@ -304,22 +329,37 @@ class InstalledPluginRuntime:
     async def _monitor_permission_grants(self) -> None:
         try:
             while True:
-                await asyncio.sleep(0.05)
-                for plugin in self._snapshot.catalog.plugins:
-                    if plugin.source is not PluginSource.EXTERNAL:
-                        continue
-                    declared = set(plugin.manifest["plugin"]["permissions"])
-                    current = self._current_permissions(plugin.plugin_id, declared)
-                    if current != self.granted_permissions(plugin.plugin_id):
-                        await self._revoke_worker(plugin.plugin_id)
+                await self._reconcile_permission_grants()
+                await asyncio.sleep(GRANT_REFRESH_SECONDS)
         except asyncio.CancelledError:
             return
+
+    async def _reconcile_permission_grants(self) -> None:
+        external = tuple(
+            plugin
+            for plugin in self._snapshot.catalog.plugins
+            if plugin.source is PluginSource.EXTERNAL
+        )
+        try:
+            await self._refresh_permission_grants()
+        except Exception:  # noqa: BLE001 - persisted grant adapters vary
+            LOGGER.exception("Could not refresh plugin grants; revoking workers")
+            for plugin in external:
+                await self._revoke_worker(plugin.plugin_id)
+            return
+        for plugin in external:
+            declared = set(plugin.manifest["plugin"]["permissions"])
+            current = self._current_permissions(plugin.plugin_id, declared)
+            if current != self.granted_permissions(plugin.plugin_id):
+                await self._revoke_worker(plugin.plugin_id)
+
+    async def _refresh_permission_grants(self) -> None:
+        if isinstance(self._grant_source, ReloadablePermissionGrantSource):
+            await asyncio.to_thread(self._grant_source.reload)
 
     def _current_permissions(self, plugin_id: str, declared: set[str]) -> frozenset[str]:
         if isinstance(self._grant_source, _DenyAllGrants):
             return self.granted_permissions(plugin_id)
-        if isinstance(self._grant_source, ReloadablePermissionGrantSource):
-            self._grant_source.reload()
         return self._grant_source.active_permissions(plugin_id, declared)
 
     def _plugin(self, plugin_id: str) -> ResolvedPlugin | None:
@@ -333,6 +373,7 @@ class InstalledPluginRuntime:
         )
 
     async def start(self) -> InstalledPluginSnapshot:
+        await self._refresh_permission_grants()
         candidates = discover_plugin_metadata(
             bundled_root=self._bundled_root,
             entry_points_provider=self._entry_points_provider,
@@ -349,6 +390,7 @@ class InstalledPluginRuntime:
         self._granted = dict(granted_permissions)
         self._snapshot = InstalledPluginSnapshot(catalog, ())
         self._revoked_workers.clear()
+        self._grant_changes.clear()
         spec_options = {
             "python_executable": self._python_executable,
             "worker_import_paths": self._worker_import_paths,

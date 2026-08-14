@@ -18,12 +18,18 @@ import contextlib
 import fcntl
 import os
 import stat
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 
 @contextlib.contextmanager
-def store_lock(root: Path, name: str) -> Iterator[None]:
+def store_lock(
+    root: Path,
+    name: str,
+    *,
+    timeout_seconds: float | None = None,
+) -> Iterator[None]:
     """Hold an exclusive advisory lock on ``root/name`` for the whole block.
 
     ``root`` is created when absent.  The lock file is opened ``O_NOFOLLOW``
@@ -38,7 +44,21 @@ def store_lock(root: Path, name: str) -> Iterator[None]:
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise OSError(f"store lock is not a regular file: {name}")
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        if timeout_seconds is None:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + max(0.0, timeout_seconds)
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            f"timed out acquiring store lock: {name}"
+                        ) from None
+                    time.sleep(min(0.01, remaining))
         yield
     finally:
         with contextlib.suppress(OSError):

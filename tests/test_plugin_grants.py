@@ -509,6 +509,26 @@ def test_a_stale_ledger_observes_a_grant_committed_elsewhere(tmp_path):
     assert stale.revision == 1
 
 
+def test_reload_stats_before_locking_and_reads_only_a_changed_ledger(tmp_path, monkeypatch):
+    path = tmp_path / "grants.json"
+    stale = GrantLedger(path)
+    real_locked = stale._locked
+    locks = []
+
+    def observed_lock(*, timeout_seconds=None):
+        locks.append(timeout_seconds)
+        return real_locked(timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(stale, "_locked", observed_lock)
+    assert stale.reload() == 0
+    assert locks == []
+
+    grant_once(GrantLedger(path))
+    assert stale.reload() == 1
+    assert locks == [0.1]
+    assert stale.is_granted("hardware-health", READ_SENSOR, DECLARED) is True
+
+
 def _race_grant(path: str, ready, results, permission: str) -> None:
     ledger = GrantLedger(Path(path))
     ready.wait(timeout=30)

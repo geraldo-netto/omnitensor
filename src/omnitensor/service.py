@@ -130,6 +130,7 @@ LOGGER = logging.getLogger(__name__)
 
 PUBLISH_INTERVAL_S = 2.0
 DISCOVERY_INTERVAL_S = 10.0
+GRANT_REFRESH_INTERVAL_S = 0.25
 
 
 class OmniTensorService:
@@ -256,6 +257,7 @@ class OmniTensorService:
             logger=LOGGER,
         )
         self._snapshot_retracted = False
+        self._next_grant_refresh = 0.0
         self._stopping = asyncio.Event()
 
     def _device_load(self, device, stats) -> float | None:
@@ -455,6 +457,7 @@ class OmniTensorService:
             # it, so a full disk would stop far more than snapshot publishing.
             try:
                 if self._devices:
+                    await self._refresh_grants()
                     if self._snapshot_retracted:
                         LOGGER.info("Accelerator devices returned; publishing snapshots again")
                         self._snapshot_retracted = False
@@ -473,6 +476,13 @@ class OmniTensorService:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._publish_interval_s)
             except TimeoutError:
                 continue
+
+    async def _refresh_grants(self) -> None:
+        now = asyncio.get_running_loop().time()
+        if now < self._next_grant_refresh:
+            return
+        await asyncio.to_thread(self._grants.reload)
+        self._next_grant_refresh = now + GRANT_REFRESH_INTERVAL_S
 
     async def _rediscover(self) -> None:
         while not self._stopping.is_set():

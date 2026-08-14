@@ -145,7 +145,6 @@ def profile_permissions_missing(workload: Workload, grants) -> tuple[str, ...]:
     declared = required_permissions(workload)
     if not declared:
         return ()
-    grants.reload()
     return tuple(
         permission
         for permission in declared
@@ -165,7 +164,6 @@ def profile_permitted(
     declared = set(required_permissions(workload))
     if permission not in declared:
         return False
-    grants.reload()
     return grants.is_granted(profile_id, permission, declared)
 
 

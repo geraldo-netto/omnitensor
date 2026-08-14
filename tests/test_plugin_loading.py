@@ -917,7 +917,8 @@ def test_external_runtime_rechecks_grants_when_execution_is_already_done(tmp_pat
         "consent-revoked",
         "Plugin permission changed while work was active",
     )
-    assert calls == [("reload",), ("active", plugin.plugin_id, {permission})]
+    assert calls.count(("reload",)) == 2
+    assert calls.count(("active", plugin.plugin_id, {permission})) == 2
 
 
 def test_external_runtime_admission_compares_live_and_worker_grants_exactly(tmp_path):
@@ -943,7 +944,7 @@ def test_external_runtime_admission_compares_live_and_worker_grants_exactly(tmp_
     runtime._granted[plugin.plugin_id] = frozenset({permission})
 
     runtime._admit_permissions(plugin)
-    assert calls == [("reload",), ("active", plugin.plugin_id, {permission})]
+    assert calls == [("active", plugin.plugin_id, {permission})]
 
     grants.active = frozenset()
     with pytest.raises(JobDispatchError) as caught:

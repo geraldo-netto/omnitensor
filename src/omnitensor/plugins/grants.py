@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -15,6 +16,7 @@ from ..storelock import store_lock
 GRANTS_DOCUMENT_VERSION = 1
 DEFAULT_MAX_GRANTS_BYTES = 512 * 1024
 DEFAULT_AUDIT_EVENTS = 1024
+DEFAULT_RELOAD_LOCK_TIMEOUT_SECONDS = 0.1
 MAX_DECLARED_PERMISSIONS = 32
 _PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PERMISSION = re.compile(r"^[a-z][a-z0-9-]*:[a-zA-Z0-9*._/-]+$")
@@ -87,35 +89,47 @@ class GrantLedger:
         self._path = Path(path)
         self._max_bytes = max_bytes
         self._audit_limit = audit_limit
+        self._state_lock = threading.RLock()
         self._revision = 0
         self._grants: dict[str, dict[str, GrantProvenance]] = {}
         self._audit: list[GrantAuditEvent] = []
         self._load()
+        self._source_stamp = self._path_stamp()
 
     @property
     def revision(self) -> int:
-        return self._revision
+        with self._state_lock:
+            return self._revision
 
-    def reload(self) -> int:
+    def reload(
+        self,
+        *,
+        lock_timeout_seconds: float = DEFAULT_RELOAD_LOCK_TIMEOUT_SECONDS,
+    ) -> int:
         """Re-read the ledger from disk and return the current revision.
 
         In-memory state is a snapshot taken at construction, so a grant another
         process revoked is invisible until it is re-read.  Enforcement paths
         that must observe a withdrawal promptly call this first.
         """
-        with self._locked():
+        stamp = self._path_stamp()
+        with self._state_lock:
+            if stamp == self._source_stamp:
+                return self._revision
+        with self._locked(timeout_seconds=lock_timeout_seconds):
             return self._revision
 
     def snapshot(self, plugin_id: str, declared_permissions: set[str]) -> GrantSnapshot:
         declared = _validated_declarations(declared_permissions)
         _validate_plugin_id(plugin_id)
-        active = tuple(
-            ActiveGrant(permission, provenance)
-            for permission, provenance in sorted(self._grants.get(plugin_id, {}).items())
-            if permission in declared
-        )
-        audit = tuple(event for event in self._audit if event.plugin_id == plugin_id)
-        return GrantSnapshot(plugin_id, self._revision, active, audit)
+        with self._state_lock:
+            active = tuple(
+                ActiveGrant(permission, provenance)
+                for permission, provenance in sorted(self._grants.get(plugin_id, {}).items())
+                if permission in declared
+            )
+            audit = tuple(event for event in self._audit if event.plugin_id == plugin_id)
+            return GrantSnapshot(plugin_id, self._revision, active, audit)
 
     def grant(
         self,
@@ -179,7 +193,8 @@ class GrantLedger:
         declared = _validated_declarations(declared_permissions)
         _validate_plugin_id(plugin_id)
         _validate_permission(permission)
-        return permission in declared and permission in self._grants.get(plugin_id, {})
+        with self._state_lock:
+            return permission in declared and permission in self._grants.get(plugin_id, {})
 
     def require(
         self,
@@ -202,7 +217,7 @@ class GrantLedger:
         )
 
     @contextlib.contextmanager
-    def _locked(self):
+    def _locked(self, *, timeout_seconds: float | None = None):
         """Serialize a mutation and re-read the ledger the caller will replace.
 
         The in-memory state is a snapshot taken at construction.  Committing
@@ -210,11 +225,16 @@ class GrantLedger:
         another process persisted in the meantime, resurrecting a permission
         the user has already withdrawn.
         """
-        with store_lock(self._path.parent, f".{self._path.name}.lock"):
+        with self._state_lock, store_lock(
+            self._path.parent,
+            f".{self._path.name}.lock",
+            timeout_seconds=timeout_seconds,
+        ):
             self._revision = 0
             self._grants = {}
             self._audit = []
             self._load()
+            self._source_stamp = self._path_stamp()
             yield
 
     def _check_revision(self, expected_revision: int) -> None:
@@ -249,6 +269,14 @@ class GrantLedger:
         self._revision = revision
         self._grants = grants
         self._audit = audit
+        self._source_stamp = self._path_stamp()
+
+    def _path_stamp(self) -> tuple[int, int, int, int] | None:
+        try:
+            status = self._path.stat()
+        except FileNotFoundError:
+            return None
+        return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
 
     def _load(self) -> None:
         if not self._path.exists():

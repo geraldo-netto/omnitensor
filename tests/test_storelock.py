@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import multiprocessing
 import os
 import time
@@ -25,6 +26,22 @@ def test_lock_is_reusable_after_release(tmp_path):
     for _ in range(3):
         with store_lock(tmp_path, ".store.lock"):
             pass
+
+
+def test_lock_timeout_bounds_a_contended_wait(tmp_path):
+    lock = tmp_path / ".store.lock"
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    started = time.monotonic()
+    try:
+        with pytest.raises(
+            TimeoutError, match="timed out acquiring store lock"
+        ), store_lock(tmp_path, lock.name, timeout_seconds=0.02):
+            pass
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+    assert time.monotonic() - started < 0.2
 
 
 def test_lock_releases_when_the_block_raises(tmp_path):
