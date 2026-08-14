@@ -56,6 +56,16 @@ class ModelAwareAvailability(Protocol):
         """Availability of the lane that can execute ``model``."""
 
 
+@runtime_checkable
+class FormatAwareExecutor(Protocol):
+    """Optional executor capability for routing by a declared model format."""
+
+    def run_for_format(
+        self, model_format: str, model_path: str, inputs: list,
+    ) -> InferenceResult:
+        """Execute ``model_path`` using the lane for ``model_format``."""
+
+
 # Ordered by what a user can actually do about it: install a package, repair
 # an installed one, supply a different artifact, obtain hardware. A profile
 # blocked on several backends is reported by the most actionable of them,
@@ -88,6 +98,19 @@ def availability_for_model(executor: Executor, model: dict | None) -> Availabili
     if isinstance(executor, ModelAwareAvailability):
         return executor.availability_for(model)
     return executor.availability()
+
+
+def run_executor(
+    executor: Executor,
+    model_path: str,
+    inputs: list,
+    *,
+    model_format: str | None = None,
+) -> InferenceResult:
+    """Run through an optional declared-format capability when available."""
+    if model_format is not None and isinstance(executor, FormatAwareExecutor):
+        return executor.run_for_format(model_format, model_path, inputs)
+    return executor.run(model_path, inputs)
 
 
 DEFAULT_MAX_CACHED_MODELS = 4

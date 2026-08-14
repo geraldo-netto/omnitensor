@@ -23,6 +23,7 @@ from .executors.base import (
     InferenceResult,
     availability_for_model,
     most_actionable,
+    run_executor,
     supports_model,
 )
 from .registry import Workload
@@ -126,6 +127,7 @@ class _Job:
     model_path: str
     inputs: list
     future: asyncio.Future
+    model_format: str | None = None
 
 
 class _BackendQueue:
@@ -297,7 +299,13 @@ class Scheduler:
                     job.future.cancel()
 
     def submit(
-        self, backend: str, workload_id: str, model_path: str, inputs: list,
+        self,
+        backend: str,
+        workload_id: str,
+        model_path: str,
+        inputs: list,
+        *,
+        model_format: str | None = None,
     ) -> asyncio.Future:
         if self._stopped:
             raise RuntimeError("scheduler is stopped")
@@ -307,7 +315,7 @@ class Scheduler:
                 f"{backend} queue is full ({self._max_backend_queue_depth} jobs)",
             )
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        queue.push(_Job(workload_id, model_path, inputs, future))
+        queue.push(_Job(workload_id, model_path, inputs, future, model_format))
         self._wakeups[backend].set()
         return future
 
@@ -396,7 +404,11 @@ class Scheduler:
         started = time.monotonic()
         try:
             result: InferenceResult = await asyncio.to_thread(
-                executor.run, job.model_path, job.inputs,
+                run_executor,
+                executor,
+                job.model_path,
+                job.inputs,
+                model_format=job.model_format,
             )
         except asyncio.CancelledError:
             # Worker cancellation (stop) is not an executor failure: cancel the

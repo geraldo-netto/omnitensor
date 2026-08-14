@@ -164,7 +164,13 @@ class InferenceJobDispatcher:
         backend = choice.backend
         path = self._model_path(workload, model)
         try:
-            return self._scheduler.submit(backend, workload_id, path, inputs)
+            return self._scheduler.submit(
+                backend,
+                workload_id,
+                path,
+                inputs,
+                model_format=model["format"],
+            )
         except QueueFullError as error:
             raise JobDispatchError("backend-queue-full", str(error)) from error
         except RuntimeError as error:

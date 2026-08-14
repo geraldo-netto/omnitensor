@@ -10,7 +10,12 @@ from conftest import sample_manifest
 import omnitensor.executors.gpu as gpu_module
 import omnitensor.executors.npu as npu_module
 import omnitensor.executors.tpu as tpu_module
-from omnitensor.executors.base import Availability, ModelCache, supports_model
+from omnitensor.executors.base import (
+    Availability,
+    InferenceResult,
+    ModelCache,
+    supports_model,
+)
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
@@ -378,6 +383,44 @@ def test_scheduler_serializes_per_device_and_reports_stats():
         await scheduler.stop()
 
     asyncio.run(scenario())
+
+
+def test_scheduler_forwards_the_declared_format_through_the_queued_job():
+    class FormatAwareRecording(SlowExecutor):
+        backend = "gpu"
+        model_formats = frozenset({"ncnn"})
+
+        def __init__(self):
+            super().__init__()
+            self.format_calls = []
+
+        def run_for_format(self, model_format, model_path, inputs):
+            self.format_calls.append((model_format, model_path, inputs))
+            return InferenceResult(outputs=[inputs], duration_ms=1.0)
+
+        def run(self, model_path, inputs):  # pragma: no cover - must not dispatch here
+            raise AssertionError("declared format was discarded")
+
+    async def scenario():
+        executor = FormatAwareRecording()
+        scheduler = Scheduler({"gpu": executor}, weight_of=lambda _profile: 1)
+        future = scheduler.submit(
+            "gpu",
+            "profile-a",
+            "misleading.onnx",
+            [1, 2],
+            model_format="ncnn",
+        )
+        queued = scheduler._queues["gpu"].profiles["profile-a"][0]
+        assert queued.model_format == "ncnn"
+        scheduler.start()
+        result = await future
+        await scheduler.stop()
+        return executor, result
+
+    executor, result = asyncio.run(scenario())
+    assert executor.format_calls == [("ncnn", "misleading.onnx", [1, 2])]
+    assert result.outputs == [[1, 2]]
 
 
 def test_scheduler_weighted_shares_favour_heavier_profiles():

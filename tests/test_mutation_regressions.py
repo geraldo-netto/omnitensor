@@ -22,7 +22,7 @@ from omnitensor.discovery import (
     detect_tpu,
     device_utilization,
 )
-from omnitensor.executors.base import Availability, InferenceResult
+from omnitensor.executors.base import Availability, InferenceResult, run_executor
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
@@ -618,6 +618,49 @@ def test_composite_forwards_exact_arguments():
     composite = CompositeGpuExecutor([inner])
     composite.run("model.param", [7, 8])
     assert inner.calls == [("model.param", [7, 8])]
+
+
+def test_optional_format_execution_preserves_the_legacy_executor_contract():
+    class FormatAware:
+        backend = "gpu"
+        model_formats = frozenset({"ncnn"})
+
+        def __init__(self):
+            self.calls = []
+
+        def run_for_format(self, model_format, model_path, inputs):
+            self.calls.append(("format", model_format, model_path, inputs))
+            return InferenceResult(outputs=[model_format], duration_ms=0.0)
+
+        def run(self, model_path, inputs):
+            self.calls.append(("legacy", model_path, inputs))
+            return InferenceResult(outputs=["legacy"], duration_ms=0.0)
+
+    class Legacy:
+        backend = "gpu"
+        model_formats = frozenset({"ncnn"})
+
+        def __init__(self):
+            self.calls = []
+
+        def run(self, model_path, inputs):
+            self.calls.append((model_path, inputs))
+            return InferenceResult(outputs=["done"], duration_ms=0.0)
+
+    aware = FormatAware()
+    assert run_executor(
+        aware, "misleading.onnx", [1], model_format="ncnn"
+    ).outputs == ["ncnn"]
+    assert run_executor(aware, "legacy.param", [2]).outputs == ["legacy"]
+    assert aware.calls == [
+        ("format", "ncnn", "misleading.onnx", [1]),
+        ("legacy", "legacy.param", [2]),
+    ]
+
+    legacy = Legacy()
+    result = run_executor(legacy, "model.param", [3], model_format="ncnn")
+    assert result.outputs == ["done"]
+    assert legacy.calls == [("model.param", [3])]
 
 
 class RecordingOpenVino:

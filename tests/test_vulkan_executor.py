@@ -225,11 +225,15 @@ class StubExecutor:
         self.model_formats = frozenset(formats)
         self._availability = Availability(available, reason)
         self._marker = marker
+        self.availability_calls = 0
+        self.run_calls = []
 
     def availability(self):
+        self.availability_calls += 1
         return self._availability
 
     def run(self, model_path, inputs):
+        self.run_calls.append((model_path, inputs))
         return InferenceResult(outputs=[self._marker], duration_ms=0.0)
 
 
@@ -241,6 +245,63 @@ def test_composite_dispatches_by_extension_and_prefers_vulkan():
     assert composite.model_formats == {"ncnn", "onnx"}
     assert composite.run("model.param", []).outputs == ["vulkan"]
     assert composite.run("model.onnx", []).outputs == ["onnx"]
+
+
+@pytest.mark.parametrize(
+    ("model_format", "misleading_path", "expected"),
+    [
+        ("ncnn", "model.onnx", "vulkan"),
+        ("onnx", "model.param", "onnx"),
+    ],
+)
+def test_composite_dispatches_by_declared_format_not_path(
+    model_format, misleading_path, expected,
+):
+    vulkan = StubExecutor({"ncnn"}, True, marker="vulkan")
+    onnx = StubExecutor({"onnx"}, True, marker="onnx")
+    composite = CompositeGpuExecutor([vulkan, onnx])
+
+    result = composite.run_for_format(model_format, misleading_path, [1])
+
+    assert result.outputs == [expected]
+    assert vulkan.run_calls == (
+        [(misleading_path, [1])] if expected == "vulkan" else []
+    )
+    assert onnx.run_calls == (
+        [(misleading_path, [1])] if expected == "onnx" else []
+    )
+
+
+def test_composite_refuses_unknown_format_without_probing_or_running_a_lane():
+    vulkan = StubExecutor({"ncnn"}, True)
+    onnx = StubExecutor({"onnx"}, True)
+    composite = CompositeGpuExecutor([vulkan, onnx])
+
+    with pytest.raises(RuntimeError) as raised:
+        composite.run_for_format("openvino", "model.param", [])
+
+    assert str(raised.value) == "No available GPU runtime for model: model.param"
+    assert vulkan.availability_calls == 0
+    assert onnx.availability_calls == 0
+    assert vulkan.run_calls == []
+    assert onnx.run_calls == []
+
+
+def test_composite_does_not_fall_through_to_another_format_when_lane_is_down():
+    vulkan = StubExecutor({"ncnn"}, False, "no Vulkan", marker="vulkan")
+    onnx = StubExecutor({"onnx"}, True, marker="onnx")
+    composite = CompositeGpuExecutor([vulkan, onnx])
+
+    with pytest.raises(RuntimeError) as raised:
+        composite.run_for_format("ncnn", "misleading.onnx", [])
+
+    assert str(raised.value) == (
+        "No available GPU runtime for model: misleading.onnx"
+    )
+    assert vulkan.availability_calls == 1
+    assert onnx.availability_calls == 0
+    assert vulkan.run_calls == []
+    assert onnx.run_calls == []
 
 
 def test_composite_availability_is_scoped_to_requested_format():

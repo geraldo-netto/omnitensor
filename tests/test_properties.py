@@ -15,6 +15,7 @@ import re
 import tempfile
 from pathlib import Path
 
+import pytest
 from conftest import sample_plugin_manifest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -26,7 +27,11 @@ from omnitensor.discovery import (
     detect_devices,
     device_utilization,
 )
-from omnitensor.executors.base import Availability, availability_for_model
+from omnitensor.executors.base import (
+    Availability,
+    InferenceResult,
+    availability_for_model,
+)
 from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
@@ -146,9 +151,15 @@ class FormatLane:
     def __init__(self, model_format: str, available: bool):
         self.model_formats = frozenset({model_format})
         self._availability = Availability(available, f"{model_format} unavailable")
+        self.calls = []
 
     def availability(self):
         return self._availability
+
+    def run(self, model_path, inputs):
+        model_format = next(iter(self.model_formats))
+        self.calls.append((model_path, inputs))
+        return InferenceResult(outputs=[model_format], duration_ms=0.0)
 
 
 @given(
@@ -443,13 +454,20 @@ def test_executor_reconciliation_reuses_exactly_unchanged_device_states(states):
 def test_composite_gpu_availability_matches_requested_runtime_lane(
     ncnn_available, onnx_available, requested,
 ):
-    composite = CompositeGpuExecutor([
-        FormatLane("ncnn", ncnn_available),
-        FormatLane("onnx", onnx_available),
-    ])
+    ncnn = FormatLane("ncnn", ncnn_available)
+    onnx = FormatLane("onnx", onnx_available)
+    composite = CompositeGpuExecutor([ncnn, onnx])
     availability = availability_for_model(composite, {"format": requested})
     expected = {"ncnn": ncnn_available, "onnx": onnx_available, "openvino": False}
     assert availability.available is expected[requested]
+    if availability.available:
+        result = composite.run_for_format(requested, "misleading.model", [1])
+        assert result.outputs == [requested]
+    else:
+        with pytest.raises(RuntimeError):
+            composite.run_for_format(requested, "misleading.model", [1])
+    assert bool(ncnn.calls) is (requested == "ncnn" and ncnn_available)
+    assert bool(onnx.calls) is (requested == "onnx" and onnx_available)
 
 
 device_entries = st.builds(

@@ -14,6 +14,7 @@ from omnitensor.dispatch import (
     inference_result_payload,
 )
 from omnitensor.executors.base import Availability, InferenceResult
+from omnitensor.executors.gpu import CompositeGpuExecutor
 from omnitensor.jobs import JobDispatchError
 from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
 from omnitensor.registry import Workload
@@ -333,6 +334,42 @@ def test_a_dispatched_job_reaches_the_executor_and_returns_its_outcome():
 
     assert executor.ran == [("/models/sample.ncnn.param", [[3]])]
     assert inference_result_payload(result) == {"outputs": [[7]], "durationMs": 1.5}
+
+
+@pytest.mark.parametrize(
+    ("model_format", "resolved_path", "expected_lane"),
+    [
+        ("ncnn", Path("/models/mislabeled.onnx"), "ncnn"),
+        ("onnx", Path("/models/mislabeled.param"), "onnx"),
+    ],
+)
+def test_dispatch_routes_composite_gpu_by_the_manifest_format(
+    model_format, resolved_path, expected_lane,
+):
+    ncnn = FakeExecutor(outputs=[["ncnn"]], model_formats=("ncnn",))
+    onnx = FakeExecutor(outputs=[["onnx"]], model_formats=("onnx",))
+    composite = CompositeGpuExecutor([ncnn, onnx])
+    declared = dict(MODEL, format=model_format)
+    artifacts = FakeArtifacts(ArtifactResolution(True, resolved_path, "", 64))
+
+    async def scenario():
+        subject = dispatcher(
+            [workload(model=declared)],
+            executors={"gpu": composite},
+            artifacts=artifacts,
+        )
+        subject._scheduler.start()
+        result = await subject.dispatch(
+            "job-1", "sample-workload", {"inputs": [[3]]}
+        )
+        await subject._scheduler.stop()
+        return result
+
+    result = asyncio.run(scenario())
+    expected_call = [(str(resolved_path), [[3]])]
+    assert ncnn.ran == (expected_call if expected_lane == "ncnn" else [])
+    assert onnx.ran == (expected_call if expected_lane == "onnx" else [])
+    assert result.outputs == [[expected_lane]]
 
 
 def test_a_full_backend_queue_is_a_stable_refusal():

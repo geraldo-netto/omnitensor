@@ -99,8 +99,8 @@ class CompositeGpuExecutor:
 
     Tries sub-executors in construction order (Vulkan/ncnn first, ONNX
     Runtime second) so a machine with any Vulkan driver serves GPU work
-    without CUDA or ROCm.  ``run`` dispatches on the model file extension:
-    ``.param`` is an ncnn model, ``.onnx`` an ONNX model.
+    without CUDA or ROCm. Scheduler dispatch uses the declared model format;
+    legacy direct ``run`` calls retain their filename-based routing contract.
     """
 
     backend = "gpu"
@@ -141,12 +141,21 @@ class CompositeGpuExecutor:
             )
         return self._availability_of(compatible)
 
-    def _executor_for(self, model_path: str):
-        wanted = "ncnn" if model_path.endswith(".param") else "onnx"
+    def _executor_for(self, model_format: str, model_path: str):
         for executor in self._executors:
-            if wanted in executor.model_formats and executor.availability().available:
+            if (
+                model_format in executor.model_formats
+                and executor.availability().available
+            ):
                 return executor
         raise RuntimeError(f"No available GPU runtime for model: {model_path}")
 
+    def run_for_format(
+        self, model_format: str, model_path: str, inputs: list,
+    ) -> InferenceResult:
+        """Run the lane selected by the manifest's declared model format."""
+        return self._executor_for(model_format, model_path).run(model_path, inputs)
+
     def run(self, model_path: str, inputs: list) -> InferenceResult:
-        return self._executor_for(model_path).run(model_path, inputs)
+        model_format = "ncnn" if model_path.endswith(".param") else "onnx"
+        return self.run_for_format(model_format, model_path, inputs)

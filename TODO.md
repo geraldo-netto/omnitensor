@@ -19,7 +19,6 @@ audit's dependency order without weakening the required status schema.
 | OMNI-0273 | open | high | l | OMNI-0258 | Split training CLI responsibilities into record, train, install, and forecast modules behind stable import paths and a table-driven trainer dispatcher; move the live D-Bus forecast client to its own module. |
 | OMNI-0275 | open | high | l | OMNI-0254, OMNI-0261 | Split document-model runners, export, gate, install, and CLI; reuse the Vulkan executor's device selector, label and guard the producer-only CPU reference runner, and use the recipe tensor contract as the sole truth. |
 | OMNI-0281 | open | medium | m | — | Split acceptance checks, probes, and CLI behind the current acceptance facade. |
-| OMNI-0282 | open | low | s | — | Route composite GPU execution by declared model format rather than filename suffix and refuse unknown formats before ONNX execution; add mixed-format regression coverage. |
 | OMNI-0284 | open | low | s | — | Split media acceptance fixture generation by format and prefer ImageMagick 7 `magick` before the legacy `convert` executable. |
 | OMNI-0285 | open | high | l | — | Move training-shared plugin value types into neutral `telemetry_types.py`, re-export them for compatibility, and enforce an import rule forbidding training-to-plugin dependencies. |
 | OMNI-0287 | open | medium | s | OMNI-0290 | Reverify and remove dead `StageFailure`, `pick_backend`, and `_digest_of`; either route dispatch through `referenced_inputs` when the factoring remains small or delete it, updating tests to assert stable reason codes. |
