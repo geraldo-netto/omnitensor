@@ -388,7 +388,10 @@ def test_external_worker_specs_fail_closed_on_undeclared_grant(tmp_path):
         )
 
 
-def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(tmp_path):
+def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(
+    tmp_path,
+    monkeypatch,
+):
     site = tmp_path / "site"
     state = tmp_path / "state"
     artifact_root = tmp_path / "artifact"
@@ -410,6 +413,18 @@ def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(tmp
             "companions": {"tokenizer.json": "b" * 64},
         }
     ]
+    gpu = Path("/dev/dri/renderD128")
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda path: path == gpu or real_exists(path),
+    )
+    monkeypatch.setattr(
+        worker_specs_module,
+        "vulkan_sysfs_resources",
+        lambda _devices: ((), ()),
+    )
 
     [spec] = external_worker_specs(
         (plugin,),
@@ -417,6 +432,7 @@ def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(tmp
         granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
         worker_state_root=state,
         resolve_artifact=lambda reference: ArtifactResolution(True, primary, "", 4),
+        accelerator_devices={"gpu": gpu},
     )
 
     artifact_index = spec.argv.index("--artifact")
@@ -434,9 +450,53 @@ def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(tmp
     assert spec.argv[spec.argv.index("--state-path") + 1] == str(plugin_state)
     assert spec.argv[spec.argv.index("--accelerator-lease-path") + 1] == str(lease)
     assert spec.sandbox.write_paths == tuple(sorted((str(lease), str(plugin_state))))
+    assert spec.sandbox.device_paths == (str(gpu),)
     assert str(primary) in spec.sandbox.runtime_paths
     assert str(tokenizer) in spec.sandbox.runtime_paths
     assert str(artifact_root) not in spec.sandbox.runtime_paths
+
+
+def test_external_worker_mounts_and_leases_a_granted_pcie_tpu(
+    tmp_path,
+    monkeypatch,
+):
+    state = tmp_path / "state"
+    state.mkdir()
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["accelerator:tpu"]
+    tpu = Path("/dev/apex_7")
+    real_exists = Path.exists
+
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda path: path == tpu or real_exists(path),
+    )
+
+    [spec] = external_worker_specs(
+        (plugin,),
+        granted_permissions={plugin.plugin_id: {"accelerator:tpu"}},
+        worker_state_root=state,
+        accelerator_devices={"tpu": tpu},
+    )
+
+    lease = (state / "_accelerator-tpu.lock").resolve()
+    assert spec.argv[spec.argv.index("--accelerator-lease-path") + 1] == str(lease)
+    assert spec.sandbox.device_paths == (str(tpu),)
+
+
+def test_external_worker_refuses_a_granted_accelerator_without_a_device(tmp_path):
+    plugin = _resolved(tmp_path=tmp_path)
+    plugin.manifest["plugin"]["permissions"] = ["accelerator:tpu"]
+
+    with pytest.raises(ValueError) as excinfo:
+        external_worker_specs(
+            (plugin,),
+            granted_permissions={plugin.plugin_id: {"accelerator:tpu"}},
+            accelerator_devices={},
+        )
+
+    assert str(excinfo.value) == "granted accelerator device is unavailable: tpu"
 
 
 def test_vulkan_sysfs_mounts_only_selected_render_device_identity(tmp_path, monkeypatch):
@@ -625,18 +685,25 @@ def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
 
     gpu = tmp_path / "renderD128"
     npu = tmp_path / "accel0"
+    tpu = tmp_path / "apex_0"
     gpu.touch()
     npu.touch()
+    tpu.touch()
+    all_accelerators = both | {"accelerator:tpu"}
     assert loading_module._accelerator_paths(
-        both,
-        both,
-        {"gpu": gpu, "npu": npu},
-    ) == (gpu, npu)
-    assert loading_module._accelerator_paths(
+        all_accelerators,
+        all_accelerators,
+        {"gpu": gpu, "npu": npu, "tpu": tpu},
+    ) == (gpu, npu, tpu)
+    with pytest.raises(ValueError) as missing_device:
+        loading_module._accelerator_paths(
         both,
         frozenset({"accelerator:gpu"}),
         {"gpu": tmp_path / "missing"},
-    ) == ()
+        )
+    assert str(missing_device.value) == (
+        "granted accelerator device is unavailable: gpu"
+    )
 
     resolution = ArtifactResolution(True, tmp_path / "model.gguf", "ready", 4)
     calls = []

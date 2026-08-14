@@ -7,8 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from conftest import add_npu, add_pcie_tpu, sample_manifest, write_workload
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor import service as service_module
+from omnitensor.artifact_readiness import plugin_accelerator_devices
 from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
@@ -126,13 +129,24 @@ def test_plugin_accelerator_devices_exposes_only_supported_device_nodes(fake_nod
         Device("gpu-renderD128", "gpu", "GPU 0", "dri"),
         Device("gpu-renderD129", "gpu", "GPU 1", "dri"),
         Device("npu-accel0", "npu", "NPU 0", "accel"),
-        Device("tpu-apex_0", "tpu", "TPU", "apex"),
+        Device("tpu-pcie-0", "tpu", "TPU", "pcie"),
+        Device("tpu-usb", "tpu", "USB TPU", "usb"),
         Device("gpu-card0", "gpu", "GPU card", "card"),
     ]
 
     assert service._plugin_accelerator_devices() == {
+        "tpu": Path("/dev/apex_0"),
         "gpu": Path("/dev/dri/renderD128"),
         "npu": Path("/dev/accel/accel0"),
+    }
+
+
+@given(index=st.integers(min_value=0, max_value=999_999))
+def test_pcie_tpu_device_mapping_preserves_the_discovered_index(index):
+    device = Device(f"tpu-pcie-{index}", "tpu", "TPU", "pcie")
+
+    assert plugin_accelerator_devices((device,)) == {
+        "tpu": Path(f"/dev/apex_{index}")
     }
 
 

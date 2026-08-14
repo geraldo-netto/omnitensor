@@ -128,7 +128,11 @@ def declared_reference(
 def plugin_accelerator_devices(devices: Sequence[object]) -> dict[str, Path]:
     paths: dict[str, Path] = {}
     for device in devices:
-        if device.backend == "gpu" and device.kind == "dri":
+        if device.backend == "tpu" and device.kind == "pcie":
+            index = device.id.removeprefix("tpu-pcie-")
+            if index.isdecimal():
+                paths.setdefault("tpu", Path("/dev") / f"apex_{index}")
+        elif device.backend == "gpu" and device.kind == "dri":
             paths.setdefault("gpu", Path("/dev/dri") / device.id.removeprefix("gpu-"))
         elif device.backend == "npu" and device.kind == "accel":
             paths.setdefault("npu", Path("/dev/accel") / device.id.removeprefix("npu-"))
