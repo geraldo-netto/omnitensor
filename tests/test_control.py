@@ -51,6 +51,7 @@ def apply(control, text):
 def test_apply_enable_and_weight_increment_revision_and_persist(control, tmp_path):
     first = apply(control, command("set-profile-enabled", "visual-library", True))
     assert first["status"] == "applied"
+    assert first["message"] == "Policy applied"
     assert first["revision"] == 1
     assert first["portfolio"]["profiles"]["visual-library"]["enabled"] is True
 
@@ -88,14 +89,17 @@ def test_unknown_profile_and_malformed_commands_reject(control):
     not_json = apply(control, "{nope")
     assert not_json["status"] == "rejected"
     assert not_json["commandId"] == "invalid"
+    assert not_json["message"] == "Command is not valid JSON"
 
     not_object = apply(control, json.dumps(["array"]))
     assert not_object["status"] == "rejected"
+    assert not_object["commandId"] == "invalid"
+    assert not_object["message"] == "Command is not an object"
 
     bad_contract = apply(control, json.dumps({"version": 2, "id": "x-1"}))
     assert bad_contract["status"] == "rejected"
     assert bad_contract["commandId"] == "x-1"
-    assert "version 1 contract" in bad_contract["message"]
+    assert bad_contract["message"] == "Command does not match the version 1 contract"
 
 
 def test_rejection_leaves_revision_untouched(control):
@@ -213,7 +217,8 @@ def test_policy_persistence_does_not_block_the_event_loop(tmp_path):
                 command("set-profile-enabled", "visual-library", False)
             )
         )
-        await asyncio.to_thread(started.wait, 5)
+        while not started.is_set():
+            await asyncio.sleep(0.001)
         # The loop is still live while the store blocks in its own thread.
         ticks = 0
         for _ in range(3):

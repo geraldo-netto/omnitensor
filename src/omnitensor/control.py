@@ -16,6 +16,7 @@ import re
 import time
 from pathlib import Path
 
+from .plugins.offloop import run_off_loop
 from .ports import PolicyStorage
 from .registry import validate_document
 from .state import MAX_WEIGHT, MIN_WEIGHT, PolicyState, PolicyStore, ProfilePolicy
@@ -109,7 +110,7 @@ class ControlService:
                 # A policy save is a write plus a file and a directory fsync.
                 # On the event loop that stalls snapshot publishing and job
                 # dispatch for as long as the disk takes.
-                await asyncio.to_thread(self._store.save, candidate)
+                await run_off_loop(self._store.save, candidate)
             except OSError:
                 return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
             self._state = candidate
