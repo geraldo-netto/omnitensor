@@ -1,0 +1,421 @@
+from __future__ import annotations
+
+import copy
+import importlib.metadata
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from omnitensor import mutation_campaign
+from omnitensor.mutation_campaign import (
+    DEFAULT_MUTMUT_EXECUTABLE,
+    execute_mutation_shard,
+    mutation_commands,
+    mutation_patterns,
+)
+from omnitensor.mutation_manifest import (
+    MutationShard,
+    _module_path,
+    load_mutation_manifest,
+    mutable_selector_inventory,
+    source_selector_inventory,
+)
+from omnitensor.mutation_quality import main as mutation_quality_main
+
+ROOT = Path(__file__).parents[1]
+MANIFEST = ROOT / "mutation-selectors.json"
+_MUTMUT_ACTIVE = "MUTANT_UNDER_TEST" in os.environ
+
+
+def _source_root(tmp_path: Path) -> Path:
+    root = tmp_path / "src"
+    package = root / "omnitensor"
+    package.mkdir(parents=True)
+    (package / "subject.py").write_text(
+        "def alpha(value):\n    return value + 1\n\n"
+        "def inert():\n    return None\n\n"
+        "@decorator\ndef skipped():\n    return 0\n\n"
+        "class Worker:\n"
+        "    @property\n    def skipped(self):\n        return 0\n\n"
+        "    @staticmethod\n    def run(value):\n        return value * 2\n\n"
+        "@decorator\nclass Skipped:\n    def method(self):\n        return 0\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def _document() -> dict:
+    return {
+        "version": 1,
+        "shards": [
+            {
+                "name": "subject",
+                "selectors": [
+                    "omnitensor.subject.x_alpha",
+                    "omnitensor.subject.xǁWorkerǁrun",
+                ],
+            }
+        ],
+    }
+
+
+def _write_manifest(tmp_path: Path, document: object) -> Path:
+    path = tmp_path / "selectors.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+@pytest.mark.skipif(_MUTMUT_ACTIVE, reason="mutmut transforms the inspected source tree")
+def test_tracked_manifest_is_exact_complete_and_source_current():
+    manifest = load_mutation_manifest(MANIFEST, source_root=ROOT / "src")
+
+    assert manifest.shard_names() == (
+        "executors",
+        "runtime-contract",
+        "scheduler",
+        "snapshot-forecast",
+        "tensor-output",
+    )
+    assert [len(shard.selectors) for shard in manifest.shards] == [21, 5, 24, 10, 12]
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 72
+    assert {
+        selector.split(".x", 1)[0]
+        for shard in manifest.shards
+        for selector in shard.selectors
+    } == {
+        "omnitensor.contract",
+        "omnitensor.executors.base",
+        "omnitensor.executors.gpu",
+        "omnitensor.forecastresult",
+        "omnitensor.outputcontract",
+        "omnitensor.scheduler",
+        "omnitensor.snapshot",
+        "omnitensor.tensorcontract",
+    }
+    with pytest.raises(ValueError, match="no shard named unknown"):
+        manifest.shard("unknown")
+
+
+def test_source_inventory_uses_exact_function_and_method_encoding(tmp_path):
+    root = _source_root(tmp_path)
+    assert source_selector_inventory(root) == {
+        "omnitensor.subject.x_alpha",
+        "omnitensor.subject.x_inert",
+        "omnitensor.subject.xǁWorkerǁrun",
+    }
+    assert load_mutation_manifest(
+        _write_manifest(tmp_path, _document()), source_root=root
+    ).shard("subject").selectors == (
+        "omnitensor.subject.x_alpha",
+        "omnitensor.subject.xǁWorkerǁrun",
+    )
+    assert mutable_selector_inventory(root, frozenset({"omnitensor.subject"})) == {
+        "omnitensor.subject.x_alpha",
+        "omnitensor.subject.xǁWorkerǁrun",
+    }
+
+
+def test_mutable_inventory_resolves_modules_and_requires_the_pinned_engine(
+    monkeypatch, tmp_path
+):
+    root = _source_root(tmp_path)
+    package = root / "omnitensor/package"
+    package.mkdir()
+    (package / "__init__.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+
+    assert _module_path(root, "omnitensor.subject") == root / "omnitensor/subject.py"
+    assert _module_path(root, "omnitensor.package") == package / "__init__.py"
+    with pytest.raises(ValueError, match="has no source file"):
+        _module_path(root, "omnitensor.missing")
+
+    monkeypatch.setattr("omnitensor.mutation_manifest.importlib.metadata.version", lambda _: "3.6")
+    with pytest.raises(ValueError, match="3.7.0.*found 3.6"):
+        mutable_selector_inventory(root, frozenset({"omnitensor.subject"}))
+
+    def missing_engine(_: str) -> str:
+        raise importlib.metadata.PackageNotFoundError("mutmut")
+
+    monkeypatch.setattr(
+        "omnitensor.mutation_manifest.importlib.metadata.version", missing_engine
+    )
+    with pytest.raises(ValueError, match="3.7.0 is required"):
+        mutable_selector_inventory(root, frozenset({"omnitensor.subject"}))
+
+
+def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
+    root = _source_root(tmp_path)
+    missing = _document()
+    missing["shards"][0]["selectors"] = ["omnitensor.subject.x_alpha"]
+    with pytest.raises(ValueError, match="omits mutable callable"):
+        load_mutation_manifest(_write_manifest(tmp_path, missing), source_root=root)
+
+    inert = _document()
+    inert["shards"][0]["selectors"].insert(1, "omnitensor.subject.x_inert")
+    with pytest.raises(ValueError, match="has no mutation points"):
+        load_mutation_manifest(_write_manifest(tmp_path, inert), source_root=root)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda document: document.update(extra=True), "only version and shards"),
+        (lambda document: document.update(version=True), "version must be 1"),
+        (lambda document: document.update(shards=[]), "nonempty array"),
+        (
+            lambda document: document["shards"][0].update(name="Bad Name"),
+            "name is invalid",
+        ),
+        (
+            lambda document: document["shards"][0]["selectors"].reverse(),
+            "must be sorted",
+        ),
+        (
+            lambda document: document["shards"][0]["selectors"].append(
+                "omnitensor.subject.xǁWorkerǁrun"
+            ),
+            "must be unique",
+        ),
+        (
+            lambda document: document["shards"][0].update(
+                selectors=["omnitensor.subject.x_*"]
+            ),
+            "without wildcards",
+        ),
+        (
+            lambda document: document["shards"][0].update(
+                selectors=["omnitensor.subject.x_missing"]
+            ),
+            "stale or unknown",
+        ),
+    ],
+)
+def test_manifest_refuses_open_ambiguous_or_stale_scope(tmp_path, change, message):
+    root = _source_root(tmp_path)
+    document = _document()
+    change(document)
+    with pytest.raises(ValueError, match=message):
+        load_mutation_manifest(_write_manifest(tmp_path, document), source_root=root)
+
+
+def test_manifest_rejects_duplicate_json_keys_shards_and_cross_shard_selectors(tmp_path):
+    root = _source_root(tmp_path)
+    duplicate_key = tmp_path / "duplicate.json"
+    duplicate_key.write_text('{"version":1,"version":1,"shards":[]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="repeats key: version"):
+        load_mutation_manifest(duplicate_key, source_root=root)
+
+    document = _document()
+    duplicate = copy.deepcopy(document["shards"][0])
+    duplicate["name"] = "another"
+    document["shards"].insert(0, duplicate)
+    with pytest.raises(ValueError, match="appears in multiple shards"):
+        load_mutation_manifest(_write_manifest(tmp_path, document), source_root=root)
+
+    document = _document()
+    document["shards"].append(copy.deepcopy(document["shards"][0]))
+    with pytest.raises(ValueError, match="sorted by name|names must be unique"):
+        load_mutation_manifest(_write_manifest(tmp_path, document), source_root=root)
+
+
+def test_manifest_rejects_missing_empty_and_invalid_source_roots(tmp_path):
+    with pytest.raises(ValueError, match="not a directory"):
+        source_selector_inventory(tmp_path / "missing")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match="contains no Python files"):
+        source_selector_inventory(empty)
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "bad.py").write_text("def nope(:\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot inspect mutation source"):
+        source_selector_inventory(broken)
+
+
+def test_campaign_builds_deterministic_shell_free_exact_commands():
+    shard = MutationShard(
+        "subject",
+        ("omnitensor.subject.x_alpha", "omnitensor.subject.xǁWorkerǁrun"),
+    )
+    assert mutation_patterns(shard.selectors) == (
+        "omnitensor.subject.x_alpha__mutmut_*",
+        "omnitensor.subject.xǁWorkerǁrun__mutmut_*",
+    )
+    assert mutation_commands(shard, executable="/venv/bin/mutmut") == (
+        (
+            "/venv/bin/mutmut",
+            "run",
+            "omnitensor.subject.x_alpha__mutmut_*",
+            "omnitensor.subject.xǁWorkerǁrun__mutmut_*",
+        ),
+        ("/venv/bin/mutmut", "results", "--all", "true"),
+    )
+    assert mutation_commands(shard)[0][0] == DEFAULT_MUTMUT_EXECUTABLE
+    assert str(Path(sys.executable).with_name("mutmut")) == DEFAULT_MUTMUT_EXECUTABLE
+    assert Path(DEFAULT_MUTMUT_EXECUTABLE).is_file()
+    with pytest.raises(ValueError, match="no selectors"):
+        mutation_patterns(())
+
+
+def test_campaign_runs_then_reports_and_gates_the_same_exact_selectors(tmp_path):
+    shard = MutationShard("subject", ("omnitensor.subject.x_alpha",))
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[1] == "run":
+            return SimpleNamespace(returncode=0)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="omnitensor.subject.x_alpha__mutmut_1: killed\n",
+        )
+
+    report = tmp_path / "mutmut.txt"
+    report.write_text("stale", encoding="utf-8")
+    assert execute_mutation_shard(shard, report, runner=runner) == ()
+    assert calls == [
+        (
+            (DEFAULT_MUTMUT_EXECUTABLE, "run", "omnitensor.subject.x_alpha__mutmut_*"),
+            {"check": False},
+        ),
+        (
+            (DEFAULT_MUTMUT_EXECUTABLE, "results", "--all", "true"),
+            {"check": False, "capture_output": True, "text": True},
+        ),
+    ]
+    assert report.read_text(encoding="utf-8") == (
+        "omnitensor.subject.x_alpha__mutmut_1: killed\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [("run", "run exited 9"), ("results", "results exited 9")],
+)
+def test_campaign_refuses_tool_failures_and_removes_stale_reports(tmp_path, stage, message):
+    shard = MutationShard("subject", ("omnitensor.subject.x_alpha",))
+
+    def runner(command, **_kwargs):
+        failed = command[1] == stage
+        return SimpleNamespace(returncode=9 if failed else 0, stdout="")
+
+    report = tmp_path / "mutmut.txt"
+    report.write_text("stale", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=message):
+        execute_mutation_shard(shard, report, runner=runner)
+    assert not report.exists()
+
+
+@pytest.mark.skipif(_MUTMUT_ACTIVE, reason="mutmut transforms the inspected source tree")
+def test_campaign_cli_lists_manifest_shards_without_running_mutmut(capsys):
+    assert mutation_campaign.main([str(MANIFEST), "--list-shards"]) == 0
+    assert json.loads(capsys.readouterr().out) == [
+        "executors",
+        "runtime-contract",
+        "scheduler",
+        "snapshot-forecast",
+        "tensor-output",
+    ]
+    assert mutation_campaign.main(
+        [str(MANIFEST), "--shard", "unknown", "--report", "/tmp/report"]
+    ) == 2
+    assert "no shard named unknown" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(_MUTMUT_ACTIVE, reason="mutmut transforms the inspected source tree")
+def test_campaign_cli_gates_selected_shard_and_validates_mode_options(
+    monkeypatch, tmp_path, capsys
+):
+    observed = []
+
+    def execute(shard, report, **options):
+        observed.append((shard.name, report, options))
+        return ()
+
+    monkeypatch.setattr(mutation_campaign, "execute_mutation_shard", execute)
+    arguments = [
+        str(MANIFEST),
+        "--shard",
+        "runtime-contract",
+        "--report",
+        str(tmp_path / "report.txt"),
+        "--threshold",
+        "90",
+        "--mutmut-executable",
+        "/venv/bin/mutmut",
+    ]
+    assert mutation_campaign.main(arguments) == 0
+    assert observed == [
+        (
+            "runtime-contract",
+            tmp_path / "report.txt",
+            {"threshold": 90.0, "executable": "/venv/bin/mutmut"},
+        )
+    ]
+    assert capsys.readouterr().out == (
+        "mutation shard runtime-contract: 5 callables at or above 90%\n"
+    )
+
+    monkeypatch.setattr(
+        mutation_campaign,
+        "execute_mutation_shard",
+        lambda *_args, **_kwargs: ("selector 50.0% (1/2 detected)",),
+    )
+    assert mutation_campaign.main(arguments) == 1
+    assert capsys.readouterr().out == (
+        "Per-callable mutation score below 90%:\nselector 50.0% (1/2 detected)\n"
+    )
+    assert mutation_campaign.main([str(MANIFEST), "--shard", "runtime-contract"]) == 2
+    assert "--report is required" in capsys.readouterr().out
+    assert mutation_campaign.main(
+        [str(MANIFEST), "--list-shards", "--report", str(tmp_path / "report")]
+    ) == 2
+    assert "--report is invalid" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(_MUTMUT_ACTIVE, reason="mutmut transforms the inspected source tree")
+def test_mutation_quality_accepts_the_same_manifest_shard(tmp_path, capsys):
+    manifest = load_mutation_manifest(MANIFEST, source_root=ROOT / "src")
+    shard = manifest.shard("runtime-contract")
+    report = tmp_path / "mutmut.txt"
+    report.write_text(
+        "\n".join(f"{selector}__mutmut_1: killed" for selector in shard.selectors),
+        encoding="utf-8",
+    )
+    assert mutation_quality_main(
+        [
+            str(report),
+            "--selector-file",
+            str(MANIFEST),
+            "--shard",
+            shard.name,
+            "--source-root",
+            str(ROOT / "src"),
+        ]
+    ) == 0
+    assert capsys.readouterr().out == (
+        "per-callable mutation score: 5 callables at or above 80%\n"
+    )
+    assert mutation_quality_main(
+        [str(report), "--selector-file", str(MANIFEST), "--source-root", str(ROOT / "src")]
+    ) == 2
+    assert "--shard is required" in capsys.readouterr().out
+
+
+def test_ci_matrix_is_derived_from_manifest_and_runs_the_same_campaign():
+    workflow = (ROOT / ".github/workflows/mutation.yml").read_text(encoding="utf-8")
+    assert "mutation_campaign" in workflow
+    assert "mutation-selectors.json --list-shards" in workflow
+    assert "fromJSON(needs.selector-plan.outputs.shards)" in workflow
+    assert "mutation_campaign mutation-selectors.json" in workflow
+    assert '--shard "${{ matrix.shard }}"' in workflow
+    assert "if-no-files-found: error" in workflow
+
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"mutation-selectors.json",' in project
+    assert '"mutmut==3.7.0",' in project
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--selector-file mutation-selectors.json --shard scheduler" in readme

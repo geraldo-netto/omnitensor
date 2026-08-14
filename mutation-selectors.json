@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "shards": [
+    {
+      "name": "executors",
+      "selectors": [
+        "omnitensor.executors.base.x__model_revision",
+        "omnitensor.executors.base.x_availability_for_model",
+        "omnitensor.executors.base.x_most_actionable",
+        "omnitensor.executors.base.x_require_available",
+        "omnitensor.executors.base.x_run_executor",
+        "omnitensor.executors.base.x_supports_model",
+        "omnitensor.executors.base.xǁModelCacheǁ__init__",
+        "omnitensor.executors.base.xǁModelCacheǁget_or_build",
+        "omnitensor.executors.base.xǁModelCacheǁpaths",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁ__init__",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁ_availability_of",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁ_executor_for",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁavailability",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁavailability_for",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁrun",
+        "omnitensor.executors.gpu.xǁCompositeGpuExecutorǁrun_for_format",
+        "omnitensor.executors.gpu.xǁGpuExecutorǁ__init__",
+        "omnitensor.executors.gpu.xǁGpuExecutorǁ_providers",
+        "omnitensor.executors.gpu.xǁGpuExecutorǁ_session_for",
+        "omnitensor.executors.gpu.xǁGpuExecutorǁavailability",
+        "omnitensor.executors.gpu.xǁGpuExecutorǁrun"
+      ]
+    },
+    {
+      "name": "runtime-contract",
+      "selectors": [
+        "omnitensor.contract.x__declared_version",
+        "omnitensor.contract.x_build_contract_document",
+        "omnitensor.contract.x_contract_document_text",
+        "omnitensor.contract.x_schema_versions",
+        "omnitensor.contract.x_wire_schema_names"
+      ]
+    },
+    {
+      "name": "scheduler",
+      "selectors": [
+        "omnitensor.scheduler.x__runnable_model",
+        "omnitensor.scheduler.x_runnable_model",
+        "omnitensor.scheduler.x_select_backend",
+        "omnitensor.scheduler.xǁSchedulerǁ__init__",
+        "omnitensor.scheduler.xǁSchedulerǁ_cancel_queued",
+        "omnitensor.scheduler.xǁSchedulerǁ_clear_degradation",
+        "omnitensor.scheduler.xǁSchedulerǁ_degrade",
+        "omnitensor.scheduler.xǁSchedulerǁ_execute",
+        "omnitensor.scheduler.xǁSchedulerǁ_job_finished",
+        "omnitensor.scheduler.xǁSchedulerǁ_spawn_worker",
+        "omnitensor.scheduler.xǁSchedulerǁ_worker",
+        "omnitensor.scheduler.xǁSchedulerǁdegraded_backends",
+        "omnitensor.scheduler.xǁSchedulerǁprofile_stats",
+        "omnitensor.scheduler.xǁSchedulerǁstart",
+        "omnitensor.scheduler.xǁSchedulerǁstats",
+        "omnitensor.scheduler.xǁSchedulerǁstop",
+        "omnitensor.scheduler.xǁSchedulerǁsubmit",
+        "omnitensor.scheduler.xǁSchedulerǁtick",
+        "omnitensor.scheduler.xǁSchedulerǁupdate_executors",
+        "omnitensor.scheduler.xǁ_BackendQueueǁ__init__",
+        "omnitensor.scheduler.xǁ_BackendQueueǁ_clamp_held_out",
+        "omnitensor.scheduler.xǁ_BackendQueueǁdepth",
+        "omnitensor.scheduler.xǁ_BackendQueueǁpop_weighted",
+        "omnitensor.scheduler.xǁ_BackendQueueǁpush"
+      ]
+    },
+    {
+      "name": "snapshot-forecast",
+      "selectors": [
+        "omnitensor.forecastresult.x__single_finite_value",
+        "omnitensor.forecastresult.x_forecast_reading",
+        "omnitensor.forecastresult.x_parse_forecast_reading",
+        "omnitensor.forecastresult.xǁForecastResultErrorǁ__init__",
+        "omnitensor.snapshot.x__metric",
+        "omnitensor.snapshot.x__now_ms",
+        "omnitensor.snapshot.x_build_snapshot",
+        "omnitensor.snapshot.x_input_roots_document",
+        "omnitensor.snapshot.x_remove_snapshot",
+        "omnitensor.snapshot.x_write_snapshot"
+      ]
+    },
+    {
+      "name": "tensor-output",
+      "selectors": [
+        "omnitensor.outputcontract.x__entry",
+        "omnitensor.outputcontract.x__scores",
+        "omnitensor.outputcontract.x_declared_output",
+        "omnitensor.outputcontract.x_parse_labels",
+        "omnitensor.outputcontract.x_reduce_output",
+        "omnitensor.tensorcontract.x__input_spec",
+        "omnitensor.tensorcontract.x__preprocess_spec",
+        "omnitensor.tensorcontract.x__rectangular_shape",
+        "omnitensor.tensorcontract.x__resize_spec",
+        "omnitensor.tensorcontract.x_contract_error",
+        "omnitensor.tensorcontract.x_declared_inputs",
+        "omnitensor.tensorcontract.x_measured_shape"
+      ]
+    }
+  ]
+}

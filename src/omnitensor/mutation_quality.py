@@ -20,7 +20,10 @@ def parse_results(text: str) -> dict[str, str]:
     for line in text.splitlines():
         match = _RESULT.fullmatch(line)
         if match:
-            results[match.group(1)] = match.group(2)
+            name, status = match.groups()
+            if name in results:
+                raise ValueError(f"mutation report repeats result: {name}")
+            results[name] = status
     if not results:
         raise ValueError("mutation report contains no results")
     return results
@@ -36,7 +39,10 @@ def mutation_failures(
     if isinstance(selectors, (str, bytes)):
         raise ValueError("mutation selectors must be a collection")
     selected = tuple(selectors)
-    if not selected or any(not selector or "*" in selector for selector in selected):
+    if not selected or any(
+        not selector or any(wildcard in selector for wildcard in "*?[")
+        for selector in selected
+    ):
         raise ValueError("mutation selectors must name exact callables without wildcards")
     if len(set(selected)) != len(selected):
         raise ValueError("mutation selectors must be unique")
@@ -60,13 +66,29 @@ def mutation_failures(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path, help="output from mutmut results --all true")
-    parser.add_argument("--selector", action="append", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--selector", action="append")
+    selection.add_argument("--selector-file", type=Path)
+    parser.add_argument("--shard")
+    parser.add_argument("--source-root", type=Path, default=Path("src"))
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     arguments = parser.parse_args(argv)
     try:
+        selectors = arguments.selector
+        if arguments.selector_file is not None:
+            if arguments.shard is None:
+                raise ValueError("--shard is required with --selector-file")
+            from .mutation_manifest import load_mutation_manifest  # noqa: PLC0415
+
+            selectors = load_mutation_manifest(
+                arguments.selector_file,
+                source_root=arguments.source_root,
+            ).shard(arguments.shard).selectors
+        elif arguments.shard is not None:
+            raise ValueError("--shard requires --selector-file")
         failures = mutation_failures(
             arguments.report.read_text(encoding="utf-8"),
-            arguments.selector,
+            selectors,
             arguments.threshold,
         )
     except (OSError, ValueError) as error:
@@ -77,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(failures))
         return 1
     print(
-        f"per-callable mutation score: {len(arguments.selector)} callables "
+        f"per-callable mutation score: {len(selectors)} callables "
         f"at or above {arguments.threshold:g}%"
     )
     return 0

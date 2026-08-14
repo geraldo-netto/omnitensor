@@ -224,6 +224,8 @@ def test_mutation_gate_names_each_callable_below_floor():
         (mutation_report("killed"), [], "exact callables"),
         (mutation_report("killed"), "selector", "collection"),
         (mutation_report("killed"), ["omnitensor.subject.*"], "without wildcards"),
+        (mutation_report("killed"), ["omnitensor.subject.x_method?"], "without wildcards"),
+        (mutation_report("killed"), ["omnitensor.subject.x_method[1]"], "without wildcards"),
         (
             mutation_report("killed"),
             ["omnitensor.subject.x_method", "omnitensor.subject.x_method"],
@@ -242,6 +244,8 @@ def test_mutation_result_parser_ignores_progress_noise():
     assert parse_results("progress\n" + mutation_report("survived")) == {
         "omnitensor.subject.x_method__mutmut_1": "survived"
     }
+    with pytest.raises(ValueError, match="repeats result"):
+        parse_results(mutation_report("killed") + "\n" + mutation_report("survived"))
 
 
 def test_mutation_gate_cli_returns_nonzero_for_a_gap(tmp_path, capsys):
@@ -274,7 +278,11 @@ def test_mutation_gate_cli_reports_success_and_invalid_input(tmp_path, capsys):
     assert "Fail-closed per-callable mutation-score gate for an exact mutmut" in output
     assert "output from mutmut results --all true" in output
     assert "--selector SELECTOR" in output
+    assert "--selector-file SELECTOR_FILE" in output
+    assert "--shard SHARD" in output
 
     with pytest.raises(SystemExit, match="2"):
         mutation_main(["report.txt"])
-    assert "the following arguments are required: --selector" in capsys.readouterr().err
+    assert "one of the arguments --selector --selector-file is required" in (
+        capsys.readouterr().err
+    )

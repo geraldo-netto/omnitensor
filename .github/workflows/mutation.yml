@@ -1,0 +1,58 @@
+name: mutation
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  selector-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.manifest.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned selector engine
+        run: python -m pip install mutmut==3.7.0
+      - id: manifest
+        name: Validate exact selector manifest
+        run: |
+          shards="$(PYTHONPATH=src python -m omnitensor.mutation_campaign \
+            mutation-selectors.json --list-shards)"
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+
+  exact-shards:
+    needs: selector-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.selector-plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install mutation environment
+        run: python -m pip install -e '.[dev]'
+      - name: Run and gate exact shard
+        run: |
+          python -m omnitensor.mutation_campaign mutation-selectors.json \
+            --shard "${{ matrix.shard }}" \
+            --report "$RUNNER_TEMP/mutmut-${{ matrix.shard }}.txt"
+      - name: Archive shard report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutmut-${{ matrix.shard }}
+          path: ${{ runner.temp }}/mutmut-${{ matrix.shard }}.txt
+          if-no-files-found: error

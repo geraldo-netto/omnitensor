@@ -120,14 +120,30 @@ not only on aggregate or module totals:
 .venv/bin/python -m omnitensor.quality /tmp/omnitensor-coverage.json
 ```
 
-Mutation runs must remain limited to changed callables. Use mutmut's quoted
-glob selector for each changed callable, then gate those same exact selectors:
+Mutation runs use the tracked, source-validated exact selector manifest. The
+manifest is split into deterministic CI shards; its loader rejects stale,
+duplicate, unsorted, wildcard, or unknown callables before mutmut starts. List
+the shards, then reproduce any one locally with the same runner CI uses:
 
 ```sh
-.venv/bin/mutmut run 'omnitensor.module.x_changed_callable__mutmut_*'
-.venv/bin/mutmut results --all true > /tmp/omnitensor-mutmut.txt
-.venv/bin/python -m omnitensor.mutation_quality /tmp/omnitensor-mutmut.txt \
-  --selector omnitensor.module.x_changed_callable
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json \
+  --list-shards
+.venv/bin/python -m omnitensor.mutation_campaign mutation-selectors.json \
+  --shard scheduler --report /tmp/omnitensor-mutmut-scheduler.txt
+```
+
+The runner passes every `__mutmut_*` pattern directly as an argument, never
+through shell expansion, and gates the resulting report at 80% per callable.
+The development extra pins mutmut 3.7.0 because selector mangling and result
+text are part of this checked contract; upgrade that pin together with the
+manifest and parser tests.
+To gate an already-produced report without running mutations again, use the
+same manifest and shard:
+
+```sh
+.venv/bin/python -m omnitensor.mutation_quality \
+  /tmp/omnitensor-mutmut-scheduler.txt \
+  --selector-file mutation-selectors.json --shard scheduler
 ```
 
 `mutmut` cannot instrument properties, decorated dataclass hooks, or functions
