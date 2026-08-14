@@ -6,6 +6,8 @@ import threading
 import time
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.control import (
     INTERNAL_ERROR_MESSAGE,
@@ -315,6 +317,23 @@ def test_a_batch_is_one_call_one_revision_and_one_acknowledgement(control):
     assert portfolio["visual-library"] == {"enabled": True, "weight": 5}
     assert portfolio["hardware-health"]["enabled"] is False
     assert portfolio["hardware-health"]["weight"] == 2, "what it did not name is untouched"
+
+
+@given(st.integers(min_value=1, max_value=5))
+def test_a_batch_persists_schema_integer_floats_as_integers(weight):
+    store = MemoryStore()
+    control = ControlService(store)
+
+    acknowledgement = apply(control, batch([
+        {"profileId": "visual-library", "weight": float(weight)},
+    ]))
+
+    acknowledged = acknowledgement["portfolio"]["profiles"]["visual-library"]["weight"]
+    persisted = store.saved[0].profiles["visual-library"].weight
+    assert acknowledged == weight
+    assert persisted == weight
+    assert isinstance(acknowledged, int)
+    assert isinstance(persisted, int)
 
 
 def test_a_batch_that_cannot_apply_whole_changes_nothing(control):

@@ -162,7 +162,10 @@ class ControlService:
             if "enabled" in change:
                 policy.enabled = change["enabled"] is True
             if "weight" in change:
-                policy.weight = change["weight"]
+                weight = _integral_weight(change["weight"])
+                if weight is None:  # Contract validation makes this unreachable.
+                    return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
+                policy.weight = weight
         return None
 
     def _batch_error(self, state: PolicyState, change: dict) -> str | None:
