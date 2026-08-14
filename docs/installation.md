@@ -246,6 +246,10 @@ absent and continues to serve other collectors. Installing it adds aggregate
 run-queue and block-I/O latency histograms; it never exports process, user,
 path, cgroup, or payload identity.
 
+The unprivileged reader defaults to `/run/omnitensor/bpf-aggregate.sock`, a
+256 KiB aggregate limit, and a 2.0-second timeout. Missing or unreachable
+helpers produce an explicit unavailable state rather than invented zeroes.
+
 Build the CO-RE object as an unprivileged user, then copy only the resulting
 object, helper, and unit into root-owned locations. Never run the privileged
 unit from a checkout, virtual environment, or other user-writable path.
