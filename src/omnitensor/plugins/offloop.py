@@ -1,4 +1,4 @@
-"""Cancellation-responsive bridge for bounded blocking plugin operations."""
+"""Cancellation-responsive bridge for bounded blocking runtime operations."""
 
 from __future__ import annotations
 

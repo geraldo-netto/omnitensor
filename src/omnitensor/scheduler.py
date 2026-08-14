@@ -15,6 +15,7 @@ import logging
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
+from functools import partial
 
 from .discovery import BACKENDS
 from .executors.base import (
@@ -26,6 +27,7 @@ from .executors.base import (
     run_executor,
     supports_model,
 )
+from .plugins.offloop import run_off_loop
 from .registry import Workload
 
 LOGGER = logging.getLogger(__name__)
@@ -397,12 +399,14 @@ class Scheduler:
         self._running[job.workload_id] += 1
         started = time.monotonic()
         try:
-            result: InferenceResult = await asyncio.to_thread(
-                run_executor,
-                executor,
-                job.model_path,
-                job.inputs,
-                model_format=job.model_format,
+            result: InferenceResult = await run_off_loop(
+                partial(
+                    run_executor,
+                    executor,
+                    job.model_path,
+                    job.inputs,
+                    model_format=job.model_format,
+                )
             )
         except asyncio.CancelledError:
             # Worker cancellation (stop) is not an executor failure: cancel the

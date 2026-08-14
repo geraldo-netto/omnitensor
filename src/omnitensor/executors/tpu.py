@@ -55,7 +55,7 @@ class TpuExecutor:
         self._runtime = runtime if runtime is not None else _import_tflite()
         self._delegate_retry_seconds = delegate_retry_seconds
         self._clock = clock
-        # Written by run() in a worker thread (asyncio.to_thread) and read by
+        # Written by run() in a dedicated off-loop thread and read by
         # availability() on the event loop thread; the lock makes the
         # publication of the error text safe across threads.  The timestamp is
         # what keeps the failure from latching.

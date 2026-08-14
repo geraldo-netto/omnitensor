@@ -53,7 +53,7 @@ class NpuExecutor:
 
     def _ensure_core(self):
         # availability() runs on the event loop thread while run() executes in
-        # a worker thread (asyncio.to_thread); the lock guarantees exactly one
+        # a dedicated off-loop thread; the lock guarantees exactly one
         # openvino.Core is ever constructed and safely published.
         with self._core_lock:
             if self._core is None:

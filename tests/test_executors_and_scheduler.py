@@ -376,6 +376,12 @@ class SlowExecutor:
         return InferenceResult(outputs=[inputs], duration_ms=1.0)
 
 
+async def wait_for_thread_event(event, timeout=5.0):
+    async with asyncio.timeout(timeout):
+        while not event.is_set():
+            await asyncio.sleep(0.001)
+
+
 def test_scheduler_serializes_per_device_and_reports_stats():
     async def scenario():
         executor = SlowExecutor()
@@ -396,6 +402,42 @@ def test_scheduler_serializes_per_device_and_reports_stats():
         await scheduler.stop()
 
     asyncio.run(scenario())
+
+
+def test_scheduler_executor_uses_dedicated_off_loop_thread(monkeypatch):
+    import threading
+
+    observed = []
+
+    class ThreadRecordingExecutor(SlowExecutor):
+        def run(self, model_path, inputs):
+            observed.append(threading.current_thread())
+            return super().run(model_path, inputs)
+
+    async def forbidden_shared_executor(*_args, **_kwargs):
+        pytest.fail("scheduler used asyncio's shared executor")
+
+    monkeypatch.setattr(asyncio, "to_thread", forbidden_shared_executor)
+
+    async def scenario():
+        loop_thread = threading.get_ident()
+        scheduler = Scheduler(
+            {"tpu": ThreadRecordingExecutor()}, weight_of=lambda _profile: 1
+        )
+        scheduler.start()
+        result = await asyncio.wait_for(
+            scheduler.submit("tpu", "profile-a", "job", [1]), timeout=2
+        )
+        await scheduler.stop()
+        return loop_thread, result
+
+    loop_thread, result = asyncio.run(scenario())
+
+    assert result.outputs == [[1]]
+    assert len(observed) == 1
+    assert observed[0].ident != loop_thread
+    assert observed[0].daemon is True
+    assert observed[0].name == "omnitensor-plugin-io"
 
 
 def test_scheduler_forwards_the_declared_format_through_the_queued_job():
@@ -488,7 +530,7 @@ def test_stop_cancels_in_flight_and_queued_futures_deterministically():
         f1 = scheduler.submit("tpu", "profile-a", "job-1", [])
         f2 = scheduler.submit("tpu", "profile-a", "job-2", [])
         f3 = scheduler.submit("tpu", "profile-b", "job-3", [])
-        await asyncio.to_thread(started.wait, 5)
+        await wait_for_thread_event(started)
         await scheduler.stop()
         gate.set()
         # The in-flight job is cancelled, not failed with RuntimeError('').
@@ -693,7 +735,7 @@ def test_profile_stats_report_per_profile_queued_and_running():
         )
         scheduler.start()
         in_flight = scheduler.submit("tpu", "profile-a", "job-1", [])
-        await asyncio.to_thread(started.wait, 5)
+        await wait_for_thread_event(started)
         queued = scheduler.submit("tpu", "profile-a", "job-2", [])
         await scheduler.submit("npu", "profile-b", "job-3", [])
         assert scheduler.profile_stats() == {
@@ -741,7 +783,7 @@ def test_profile_stats_report_running_with_no_backlog():
         scheduler = Scheduler({"tpu": BlockingExecutor()}, weight_of=lambda _profile: 1)
         scheduler.start()
         future = scheduler.submit("tpu", "profile-a", "job-1", [])
-        await asyncio.to_thread(started.wait, 5)
+        await wait_for_thread_event(started)
         assert scheduler.profile_stats() == {"profile-a": {"queued": 0, "running": 1}}
         gate.set()
         await future
@@ -775,8 +817,8 @@ def test_same_profile_on_two_backends_counts_until_both_finish():
         scheduler.start()
         tpu_future = scheduler.submit("tpu", "profile-a", "job-tpu", [])
         npu_future = scheduler.submit("npu", "profile-a", "job-npu", [])
-        await asyncio.to_thread(started["tpu"].wait, 5)
-        await asyncio.to_thread(started["npu"].wait, 5)
+        await wait_for_thread_event(started["tpu"])
+        await wait_for_thread_event(started["npu"])
         # One profile running on two backends is one running profile with two
         # in-flight jobs.
         assert scheduler.stats()["runningProfiles"] == 1
