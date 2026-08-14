@@ -387,8 +387,9 @@ def test_the_helper_decodes_little_endian_map_words_and_preserves_empty_slots(mo
 
 
 class FakeConnection:
-    def __init__(self):
+    def __init__(self, send_error=None):
         self.payloads = []
+        self.send_error = send_error
 
     def __enter__(self):
         return self
@@ -397,6 +398,8 @@ class FakeConnection:
         return None
 
     def sendall(self, payload):
+        if self.send_error is not None:
+            raise self.send_error
         self.payloads.append(payload)
 
 
@@ -457,6 +460,28 @@ def test_the_helper_socket_serves_aggregates_or_bounded_errors(monkeypatch, tmp_
         assert document["version"] == 1
         assert document["error"].startswith("Command '['bpftool']' returned non-zero")
         assert len(document["error"]) <= 200
+
+
+@pytest.mark.parametrize("send_error", [BrokenPipeError("closed"), ConnectionResetError("reset")])
+def test_the_helper_survives_a_client_disconnect_while_writing(
+    monkeypatch, tmp_path, send_error
+):
+    helper = load_helper()
+    connection = FakeConnection(send_error)
+    server = FakeServer(connection)
+    monkeypatch.setattr(helper.socket, "socket", lambda *_arguments: server)
+    monkeypatch.setattr(helper.os, "chmod", lambda *_arguments: None)
+    monkeypatch.setattr(
+        helper,
+        "aggregate",
+        lambda _pin_dir: {"version": 1, "histograms": [], "counters": []},
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        helper.serve(tmp_path / "bpf.sock", Path("/pins"))
+
+    assert server.accepted is True
+    assert connection.payloads == []
 
 
 def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_path, capsys):

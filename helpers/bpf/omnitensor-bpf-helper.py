@@ -124,7 +124,10 @@ def serve(socket_path: Path, pin_dir: Path) -> None:
                     payload = json.dumps(aggregate(pin_dir), separators=(",", ":"))
                 except (subprocess.CalledProcessError, ValueError) as error:
                     payload = json.dumps({"version": AGGREGATE_VERSION, "error": str(error)[:200]})
-                connection.sendall(payload.encode("utf-8"))
+                try:
+                    connection.sendall(payload.encode("utf-8"))
+                except (BrokenPipeError, ConnectionResetError):
+                    continue
 
 
 def main(argv: list[str] | None = None) -> int:
