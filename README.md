@@ -111,13 +111,11 @@ pip install .[train,convert] # separate producer environment, GPU artifact
 ## Quality gates
 
 Development requires unit, integration, regression, Hypothesis property/fuzz,
-and changed-function mutation tests. Enforce the 80% floor on every function,
-not only on aggregate or module totals:
+and changed-function mutation tests. Keep every changed module at or above 80%
+statement coverage; CI also rejects project coverage below that floor:
 
 ```sh
-.venv/bin/pytest --cov=omnitensor --cov-report=term
-.venv/bin/coverage json -o /tmp/omnitensor-coverage.json
-.venv/bin/python -m omnitensor.quality /tmp/omnitensor-coverage.json
+.venv/bin/pytest --cov=omnitensor --cov-report=term --cov-fail-under=80
 ```
 
 Mutation runs use the tracked, source-validated exact selector manifest. The
