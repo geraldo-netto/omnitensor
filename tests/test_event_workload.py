@@ -773,6 +773,27 @@ def test_serialized_grounded_result_is_defensive(valid_event_document):
     assert parsed.events[0].title != "changed"
 
 
+def test_serialized_grounded_result_fails_closed_on_public_contract_drift(
+    valid_event_document, monkeypatch
+):
+    parsed = __import__(
+        "omnitensor.plugins.events", fromlist=["parse_grounded_event_result"]
+    ).parse_grounded_event_result(valid_event_document)
+    monkeypatch.setattr(
+        event_workload,
+        "validate_document",
+        lambda _schema, _document: ["events/0/title: too long"],
+    )
+
+    with pytest.raises(EventResultError) as error:
+        grounded_event_document(parsed)
+
+    assert (error.value.code, error.value.detail) == (
+        "result-invalid",
+        "events/0/title: too long",
+    )
+
+
 def test_grounding_requires_exact_request_fragment_digest_page_and_span(valid_event_document):
     parsed = __import__(
         "omnitensor.plugins.events", fromlist=["parse_grounded_event_result"]

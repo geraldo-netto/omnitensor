@@ -19,7 +19,7 @@ from typing import Protocol, runtime_checkable
 from omnitensor.preparation import file_digest
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..registry import load_schema
+from ..registry import load_schema, validate_document
 from ..sdk import (
     ManagedPlugin,
     PluginCancelledError,
@@ -505,7 +505,7 @@ def event_generation_task():
 
 def grounded_event_document(result: GroundedEventResult) -> dict:
     """Serialize a validated private result without source text or paths."""
-    return {
+    document = {
         "version": 1,
         "requestId": result.request_id,
         "outcome": result.outcome,
@@ -536,6 +536,10 @@ def grounded_event_document(result: GroundedEventResult) -> dict:
             for event in result.events
         ],
     }
+    violations = validate_document("event-extraction-result.schema.json", document)
+    if violations:
+        raise EventResultError("result-invalid", violations[0])
+    return document
 
 
 def validate_event_grounding(
