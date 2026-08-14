@@ -35,6 +35,16 @@ IPC handshake confirms its plugin identity and protocol range. A failed or
 incompatible worker becomes an isolated status record and does not prevent
 later plugins from starting.
 
+The installed service also creates one delegated cgroup per worker before
+launch. A trusted exec shim joins that cgroup before Bubblewrap or plugin code
+can fork, and the kernel enforces its process and aggregate-memory ceilings.
+The supervisor polls cgroup membership, memory, and descriptor use while each
+call runs, and separately bounds call duration, concurrency, and encoded result
+size. A non-concurrency violation stops the worker before its channel can be
+reused. External-worker startup fails closed when the systemd-delegated cgroup
+is unavailable; embedders may explicitly select procfs accounting for tests,
+but that fallback cannot contain a daemonised descendant.
+
 Executable workers negotiate `execute`, `progress`, and `cancel` explicitly.
 `SubmitJob` sends one schema-validated request over the authenticated worker
 channel, relays bounded redacted progress, and accepts exactly one correlated

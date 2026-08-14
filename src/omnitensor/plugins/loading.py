@@ -27,6 +27,7 @@ from . import loading_staging as _staging
 from . import worker_specs as _specs
 from .artifacts import ArtifactReference as _ArtifactReference
 from .artifacts import ArtifactResolution as _ArtifactResolution
+from .budgets import current_process_cgroup
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
@@ -35,6 +36,7 @@ from .sandbox import SELECTED_FILES_PERMISSION
 from .sandbox import FilesystemSandbox as FilesystemSandbox
 from .supervisor import PluginWorkerSupervisor
 from .supervisor_diagnostics import WorkerState, WorkerStatus
+from .supervisor_process import AsyncioSubprocessLauncher
 from .supervisor_process import WorkerSpec as _WorkerSpec
 from .supervisor_session import PluginWorkerError
 
@@ -143,9 +145,18 @@ class InstalledPluginRuntime:
         worker_state_root: Path | None = None,
         resolve_artifact: ArtifactProvider | None = None,
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
+        require_worker_cgroup: bool = True,
     ) -> None:
         self._bundled_root = Path(bundled_root)
-        self._supervisor = supervisor or PluginWorkerSupervisor()
+        cgroup_parent = (
+            current_process_cgroup() if os.environ.get("INVOCATION_ID") else None
+        )
+        self._supervisor = supervisor or PluginWorkerSupervisor(
+            AsyncioSubprocessLauncher(
+                cgroup_parent=cgroup_parent,
+                require_cgroup=require_worker_cgroup,
+            )
+        )
         self._entry_points_provider = entry_points_provider
         self._python_executable = _executable(python_executable)
         self._worker_import_paths = _import_paths(worker_import_paths)

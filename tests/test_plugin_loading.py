@@ -2262,6 +2262,7 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
             entry_points_provider=provider,
             worker_import_paths=(site,),
             python_executable=sys.executable,
+            require_worker_cgroup=False,
         )
         assert runtime.snapshot.catalog.plugins == ()
         assert runtime.snapshot.workers == ()

@@ -7,9 +7,20 @@ import math
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
+from .budgets import (
+    CgroupWorkerUsageProbe,
+    ProcfsWorkerUsageProbe,
+    WorkerBudgetLimits,
+    WorkerResourceUsage,
+    configure_worker_cgroup,
+    create_worker_cgroup,
+    kill_worker_cgroup,
+    remove_worker_cgroup,
+)
 from .ipc import HandshakeOffer, handshake_frame
 from .sandbox import FilesystemSandbox
 
@@ -37,6 +48,7 @@ class WorkerSpec:
     maximum_protocol: int = 1
     capabilities: frozenset[str] = frozenset()
     sandbox: FilesystemSandbox | None = None
+    budget_limits: WorkerBudgetLimits = field(default_factory=WorkerBudgetLimits)
 
     def offer(self) -> HandshakeOffer:
         offer_type = _facade_value("HandshakeOffer", HandshakeOffer)
@@ -52,6 +64,7 @@ class WorkerProcess(Protocol):
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
     pid: int
+    usage_probe: Callable[[], WorkerResourceUsage]
 
     @property
     def returncode(self) -> int | None: ...
@@ -68,43 +81,103 @@ class WorkerLauncher(Protocol):
 
 
 class _SubprocessWorker:
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(
+        self,
+        process: asyncio.subprocess.Process,
+        usage_probe: Callable[[], WorkerResourceUsage],
+        cgroup: Path | None = None,
+    ) -> None:
         if process.stdout is None or process.stdin is None:
             raise RuntimeError("worker pipes are unavailable")
         self._process = process
         self.reader = process.stdout
         self.writer = process.stdin
         self.pid = process.pid
+        self.usage_probe = usage_probe
+        self._cgroup = cgroup
 
     @property
     def returncode(self) -> int | None:
         return self._process.returncode
 
     async def wait(self) -> int:
-        return await self._process.wait()
+        returncode = await self._process.wait()
+        if self._cgroup is not None:
+            with suppress(OSError):
+                remove_worker_cgroup(self._cgroup)
+        return returncode
 
     def terminate(self) -> None:
         self._process.terminate()
 
     def kill(self) -> None:
+        if self._cgroup is not None:
+            try:
+                kill_worker_cgroup(self._cgroup)
+                return
+            except OSError:
+                pass
         self._process.kill()
 
 
 class AsyncioSubprocessLauncher:
     """Launch workers without a shell, inherited descriptors, or a shared session."""
 
+    def __init__(
+        self,
+        *,
+        cgroup_parent: Path | None = None,
+        require_cgroup: bool = False,
+        proc_root: Path = Path("/proc"),
+    ) -> None:
+        self._cgroup_parent = Path(cgroup_parent) if cgroup_parent is not None else None
+        self._require_cgroup = require_cgroup
+        self._proc_root = Path(proc_root)
+
     async def launch(self, spec: WorkerSpec) -> WorkerProcess:
+        if self._require_cgroup and self._cgroup_parent is None:
+            raise RuntimeError("a delegated cgroup-v2 subtree is required for workers")
         argv = spec.sandbox.wrap(spec.argv) if spec.sandbox is not None else spec.argv
-        process = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            close_fds=True,
-            start_new_session=True,
+        cgroup = None
+        options = {
+            "stdin": asyncio.subprocess.PIPE,
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.DEVNULL,
+            "close_fds": True,
+            "start_new_session": True,
+        }
+        if self._cgroup_parent is not None:
+            cgroup = create_worker_cgroup(
+                self._cgroup_parent,
+                f"omnitensor-worker-{spec.plugin_id}",
+            )
+            try:
+                configure_worker_cgroup(cgroup, spec.budget_limits)
+            except Exception:
+                with suppress(OSError):
+                    remove_worker_cgroup(cgroup)
+                raise
+            argv = (
+                sys.executable,
+                "-m",
+                "omnitensor.plugins.cgroup_exec",
+                str(cgroup),
+                *argv,
+            )
+        try:
+            process = await asyncio.create_subprocess_exec(*argv, **options)
+        except Exception:
+            if cgroup is not None:
+                with suppress(OSError):
+                    remove_worker_cgroup(cgroup)
+            raise
+        usage_probe = (
+            CgroupWorkerUsageProbe(cgroup, proc_root=self._proc_root)
+            if cgroup is not None
+            else ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
         )
         wrapper = _facade_value("_SubprocessWorker", _SubprocessWorker)
-        return wrapper(process)
+        return wrapper(process, usage_probe, cgroup)
 
 
 def validate_specs(

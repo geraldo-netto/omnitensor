@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import json
 import math
 from collections.abc import Awaitable
+from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins import (
     DEFAULT_CALL_TIMEOUT_SECONDS,
@@ -36,6 +40,8 @@ from omnitensor.plugins import (
     join_worker_cgroup,
     remove_worker_cgroup,
 )
+from omnitensor.plugins.budgets import current_process_cgroup
+from omnitensor.plugins.protocol import PluginResult, PluginResultStatus
 
 T = TypeVar("T")
 
@@ -151,6 +157,7 @@ def test_resource_budgets_fail_before_call(observed, code, detail):
 
         enforcer = WorkerBudgetEnforcer(
             WorkerBudgetLimits(
+                max_processes=1,
                 max_memory_bytes=10,
                 max_descriptors=4,
             ),
@@ -280,6 +287,41 @@ def test_output_budget_rejects_invalid_or_oversized_results(result, detail):
         assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 0, 1)
 
     run_scenario(scenario())
+
+
+@given(st.text(max_size=64))
+def test_output_budget_measures_protocol_result_dataclasses_exactly(value):
+    result = PluginResult(
+        "job",
+        PluginResultStatus.SUCCEEDED,
+        {"value": value},
+        "",
+        1,
+    )
+    encoded_size = len(json.dumps(
+        asdict(result),
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8"))
+
+    async def accepted():
+        enforcer = WorkerBudgetEnforcer(
+            WorkerBudgetLimits(max_output_bytes=encoded_size), usage
+        )
+        assert await enforcer.run(lambda: asyncio.sleep(0, result=result)) == result
+
+    async def rejected():
+        enforcer = WorkerBudgetEnforcer(
+            WorkerBudgetLimits(max_output_bytes=encoded_size - 1), usage
+        )
+        with pytest.raises(WorkerBudgetExceededError) as error:
+            await enforcer.run(lambda: asyncio.sleep(0, result=result))
+        assert error.value.code is WorkerBudgetCode.OUTPUT
+
+    run_scenario(accepted())
+    run_scenario(rejected())
 
 
 def test_probe_failures_are_redacted_and_fail_closed():
@@ -482,6 +524,25 @@ def _write_cgroup(root, *, pids=(), memory_bytes=0):
     )
     (root / "memory.current").write_text(f"{memory_bytes}\n", encoding="ascii")
     return root
+
+
+def test_current_process_cgroup_accepts_only_a_writable_path_below_the_mount(tmp_path):
+    cgroup_root = tmp_path / "cgroup"
+    member = cgroup_root / "user.slice" / "omnitensor.service"
+    member.mkdir(parents=True)
+    membership = tmp_path / "membership"
+    membership.write_text("0::/user.slice/omnitensor.service\n", encoding="ascii")
+
+    assert current_process_cgroup(
+        membership_path=membership,
+        cgroup_root=cgroup_root,
+    ) == member
+
+    membership.write_text("0::/../../escape\n", encoding="ascii")
+    assert current_process_cgroup(
+        membership_path=membership,
+        cgroup_root=cgroup_root,
+    ) is None
 
 
 def test_cgroup_probe_counts_a_daemonised_process_the_tree_walk_cannot_see(tmp_path):

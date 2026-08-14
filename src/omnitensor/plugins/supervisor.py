@@ -14,6 +14,9 @@ from typing import Protocol as Protocol
 from . import supervisor_process as _process
 from . import supervisor_recovery as _recovery
 from . import supervisor_session as _session
+from .budgets import WorkerBudgetCode as _WorkerBudgetCode
+from .budgets import WorkerBudgetEnforcer as _WorkerBudgetEnforcer
+from .budgets import WorkerBudgetExceededError as _WorkerBudgetExceededError
 from .ipc import FRAME_FORMAT_VERSION as FRAME_FORMAT_VERSION
 from .ipc import HandshakeAgreement as HandshakeAgreement
 from .ipc import HandshakeOffer as HandshakeOffer
@@ -168,23 +171,40 @@ class PluginWorkerSupervisor:
             raise PluginWorkerError("worker-unavailable", "plugin worker is not ready")
         if "execute" not in slot.agreement.capabilities:
             raise PluginWorkerError("worker-incompatible", "plugin worker cannot execute jobs")
-        async with slot.request_lock:
-            try:
+        try:
+            return await self._run_request(slot, request, progress)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._cancel_request(slot, request.job_id))
+            raise
+        except _WorkerBudgetExceededError as error:
+            if error.code is not _WorkerBudgetCode.CONCURRENCY:
+                await asyncio.shield(_force_stop(slot.process, self._stop_timeout))
+            raise PluginWorkerError(error.code.value, error.detail) from error
+        except PluginWorkerError:
+            raise
+        except Exception as error:
+            raise PluginWorkerError(
+                "worker-protocol-failed",
+                f"worker channel failed: {type(error).__name__}",
+            ) from error
+
+    async def _run_request(
+        self,
+        slot: _WorkerSlot,
+        request: PluginRequest,
+        progress: ProgressReporter | None,
+    ) -> PluginResult:
+        async def operation():
+            async with slot.request_lock:
                 await write_frame(
                     slot.process.writer,
                     _with_protocol(execute_frame(request), slot.agreement.protocol_version),
                 )
                 return await self._read_result(slot, request.job_id, progress)
-            except asyncio.CancelledError:
-                await asyncio.shield(self._cancel_request(slot, request.job_id))
-                raise
-            except PluginWorkerError:
-                raise
-            except Exception as error:
-                raise PluginWorkerError(
-                    "worker-protocol-failed",
-                    f"worker channel failed: {type(error).__name__}",
-                ) from error
+
+        if slot.budget is None:
+            return await operation()
+        return await slot.budget.run(operation)
 
     async def _read_result(
         self,
@@ -353,7 +373,13 @@ class PluginWorkerSupervisor:
         agreement: HandshakeAgreement,
         restart_attempts: int,
     ) -> None:
-        slot = _WorkerSlot(spec, process, agreement)
+        usage_probe = getattr(process, "usage_probe", None)
+        budget = (
+            _WorkerBudgetEnforcer(spec.budget_limits, usage_probe)
+            if callable(usage_probe)
+            else None
+        )
+        slot = _WorkerSlot(spec, process, agreement, budget=budget)
         self._slots[spec.plugin_id] = slot
         self._ready_since[spec.plugin_id] = asyncio.get_running_loop().time()
         if spec.plugin_id not in self._startup_order:

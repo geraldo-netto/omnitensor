@@ -7,14 +7,18 @@ import contextlib
 import errno
 import json
 import math
+import os
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from enum import StrEnum
 from pathlib import Path
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
-DEFAULT_MAX_PROCESSES = 1
+# Bubblewrap retains a supervisor and namespace init around the worker.  Four
+# covers that fixed three-process sandbox topology plus no more than one
+# short-lived helper; additional forks are rejected.
+DEFAULT_MAX_PROCESSES = 4
 DEFAULT_MAX_MEMORY_BYTES = 512 * 1024 * 1024
 DEFAULT_MAX_DESCRIPTORS = 128
 DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
@@ -29,6 +33,9 @@ MAX_CONCURRENCY_LIMIT = 32
 MAX_PROCFS_PROCESSES = 4096
 CGROUP_PROCS_FILE = "cgroup.procs"
 CGROUP_MEMORY_FILE = "memory.current"
+CGROUP_MEMORY_LIMIT_FILE = "memory.max"
+CGROUP_PROCESS_LIMIT_FILE = "pids.max"
+CGROUP_KILL_FILE = "cgroup.kill"
 
 
 class WorkerBudgetCode(StrEnum):
@@ -360,6 +367,44 @@ def create_worker_cgroup(parent: Path, name: str) -> Path:
     return cgroup
 
 
+def configure_worker_cgroup(cgroup: Path, limits: WorkerBudgetLimits) -> None:
+    """Install kernel-enforced process and aggregate-memory ceilings."""
+    root = Path(cgroup)
+    (root / CGROUP_PROCESS_LIMIT_FILE).write_text(
+        str(limits.max_processes), encoding="ascii"
+    )
+    (root / CGROUP_MEMORY_LIMIT_FILE).write_text(
+        str(limits.max_memory_bytes), encoding="ascii"
+    )
+
+
+def current_process_cgroup(
+    *,
+    membership_path: Path = Path("/proc/self/cgroup"),
+    cgroup_root: Path = Path("/sys/fs/cgroup"),
+) -> Path | None:
+    """Resolve this process's unified cgroup-v2 directory, if available."""
+    try:
+        membership = Path(membership_path).read_text(encoding="ascii")
+    except OSError:
+        return None
+    root = Path(cgroup_root).resolve()
+    for line in membership.splitlines():
+        try:
+            hierarchy, controllers, member = line.split(":", 2)
+        except ValueError:
+            continue
+        if hierarchy != "0" or controllers:
+            continue
+        candidate = (root / member.lstrip("/")).resolve()
+        if (candidate == root or root in candidate.parents) and os.access(
+            candidate, os.W_OK
+        ):
+            return candidate
+        return None
+    return None
+
+
 def join_worker_cgroup(cgroup: Path) -> None:
     """Move the calling process into ``cgroup``.
 
@@ -368,6 +413,11 @@ def join_worker_cgroup(cgroup: Path) -> None:
     """
     with open(Path(cgroup) / CGROUP_PROCS_FILE, "w", encoding="ascii") as stream:
         stream.write("0")
+
+
+def kill_worker_cgroup(cgroup: Path) -> None:
+    """Kill every process retained in a worker's cgroup-v2 subtree."""
+    (Path(cgroup) / CGROUP_KILL_FILE).write_text("1", encoding="ascii")
 
 
 def remove_worker_cgroup(cgroup: Path) -> None:
@@ -396,9 +446,10 @@ def _vanished(error: OSError) -> bool:
 
 
 def _check_output(value: object, limit: int) -> None:
+    document = asdict(value) if is_dataclass(value) and not isinstance(value, type) else value
     try:
         body = json.dumps(
-            value,
+            document,
             allow_nan=False,
             ensure_ascii=False,
             separators=(",", ":"),

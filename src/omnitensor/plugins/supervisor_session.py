@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 
+from .budgets import WorkerBudgetEnforcer
 from .ipc import (
     FRAME_FORMAT_VERSION,
     HandshakeAgreement,
@@ -46,6 +47,7 @@ class WorkerSlot:
     agreement: HandshakeAgreement
     monitor: asyncio.Task | None = None
     request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    budget: WorkerBudgetEnforcer | None = None
 
 
 class WorkerStartError(Exception):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass
 
 import pytest
@@ -19,10 +20,12 @@ from omnitensor.plugins import (
     PluginResultStatus,
     PluginWorkerError,
     PluginWorkerSupervisor,
+    WorkerBudgetLimits,
     WorkerDiagnostic,
     WorkerDiagnosticCode,
     WorkerMessageType,
     WorkerRecoveryPolicy,
+    WorkerResourceUsage,
     WorkerSpec,
     WorkerState,
     WorkerStatus,
@@ -402,6 +405,102 @@ def test_supervisor_refuses_missing_or_incompatible_executable_worker():
         await plain.stop()
 
     run_scenario(scenario())
+
+
+def test_supervisor_enforces_resource_budget_before_writing_a_request():
+    async def scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
+        process = FakeProcess("events", offer, events)
+        process.usage_probe = lambda: WorkerResourceUsage(2, 1024, 3)
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}))
+        spec = WorkerSpec(
+            "events",
+            ("python", "worker.py"),
+            capabilities=frozenset({"execute"}),
+            budget_limits=WorkerBudgetLimits(max_processes=1),
+        )
+        await supervisor.start((spec,))
+
+        with pytest.raises(PluginWorkerError) as rejected:
+            await supervisor.execute(
+                PluginRequest("job-1", "events", "manual", {}, 1, None)
+            )
+
+        assert rejected.value.code == "process-budget-exceeded"
+        assert process.writer.closed is True
+        assert not any(
+            decode_frame(frame).type is WorkerMessageType.EXECUTE
+            for frame in process.writer.writes
+        )
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
+def test_supervisor_enforces_call_deadline_and_output_budget():
+    async def deadline_scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
+        process = FakeProcess("events", offer, events)
+        process.usage_probe = lambda: WorkerResourceUsage(1, 1024, 3)
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}))
+        spec = WorkerSpec(
+            "events",
+            ("python", "worker.py"),
+            capabilities=frozenset({"execute"}),
+            budget_limits=WorkerBudgetLimits(
+                call_timeout_seconds=0.01,
+                resource_poll_seconds=0.005,
+            ),
+        )
+        await supervisor.start((spec,))
+
+        with pytest.raises(PluginWorkerError) as rejected:
+            await supervisor.execute(
+                PluginRequest("job-1", "events", "manual", {}, 1, None)
+            )
+
+        assert rejected.value.code == "deadline-exceeded"
+        assert process.writer.closed is True
+        await supervisor.stop()
+
+    async def output_scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
+        process = FakeProcess("events", offer, events)
+        process.usage_probe = lambda: WorkerResourceUsage(1, 1024, 3)
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}))
+        spec = WorkerSpec(
+            "events",
+            ("python", "worker.py"),
+            capabilities=frozenset({"execute"}),
+            budget_limits=WorkerBudgetLimits(max_output_bytes=64),
+        )
+        await supervisor.start((spec,))
+        pending = asyncio.create_task(
+            supervisor.execute(
+                PluginRequest("job-1", "events", "manual", {}, 1, None)
+            )
+        )
+        await asyncio.sleep(0)
+        process.reader.feed_data(encode_frame(result_frame(PluginResult(
+            "job-1",
+            PluginResultStatus.SUCCEEDED,
+            {"value": "x" * 128},
+            "",
+            2,
+        ))))
+
+        with pytest.raises(PluginWorkerError) as rejected:
+            await pending
+
+        assert rejected.value.code == "output-budget-exceeded"
+        assert process.writer.closed is True
+        await supervisor.stop()
+
+    run_scenario(deadline_scenario())
+    run_scenario(output_scenario())
 
 
 def test_supervisor_rejects_worker_error_and_response_protocol_drift():
@@ -1122,6 +1221,52 @@ def test_asyncio_launcher_uses_isolated_bounded_process_options(monkeypatch):
         assert options["stderr"] is asyncio.subprocess.DEVNULL
         assert options["close_fds"] is True
         assert options["start_new_session"] is True
+
+    run_scenario(scenario())
+
+
+def test_asyncio_launcher_confines_worker_to_configured_cgroup(
+    monkeypatch, tmp_path
+):
+    async def scenario():
+        reader = asyncio.StreamReader()
+        owner = type("Owner", (), {"plugin_id": "real", "reader": reader})()
+        process = StubSubprocess(stdout=reader, stdin=FakeWriter(owner, None, []))
+        calls = []
+
+        async def create(*argv, **options):
+            calls.append((argv, options))
+            return process
+
+        parent = tmp_path / "delegated"
+        parent.mkdir()
+        limits = WorkerBudgetLimits(max_processes=7, max_memory_bytes=4096)
+        spec = WorkerSpec(
+            "real",
+            ("python", "worker.py"),
+            capabilities=frozenset({"execute"}),
+            budget_limits=limits,
+        )
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+
+        launched = await AsyncioSubprocessLauncher(
+            cgroup_parent=parent,
+            proc_root=tmp_path / "proc",
+        ).launch(spec)
+
+        cgroup = parent / "omnitensor-worker-real"
+        assert (cgroup / "pids.max").read_text(encoding="ascii") == "7"
+        assert (cgroup / "memory.max").read_text(encoding="ascii") == "4096"
+        assert calls[0][0] == (
+            sys.executable,
+            "-m",
+            "omnitensor.plugins.cgroup_exec",
+            str(cgroup),
+            "python",
+            "worker.py",
+        )
+        assert "preexec_fn" not in calls[0][1]
+        assert type(launched.usage_probe).__name__ == "CgroupWorkerUsageProbe"
 
     run_scenario(scenario())
 
