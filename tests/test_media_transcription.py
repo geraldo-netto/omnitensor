@@ -8,6 +8,7 @@ from omnitensor.plugins.media_transcription import (
     MAX_DOCUMENT_PAGES,
     MAX_DURATION_MS,
     MAX_IMAGE_PIXELS,
+    MAX_LANGUAGE_CHARACTERS,
     MAX_PRESENTATION_SLIDES,
     MAX_SOURCE_BYTES,
     MAX_VIDEO_DURATION_MS,
@@ -414,6 +415,7 @@ async def test_cancelled_request_returns_terminal_cancelled_and_discards_frames(
     [
         object(),
         MediaInfo(MediaModality.AUDIO, None, None, None, True),
+        MediaInfo(MediaModality.AUDIO, 0, None, None, True),
         MediaInfo(MediaModality.AUDIO, 1, None, None, False),
         MediaInfo(MediaModality.IMAGE, 1, 1, 1, False),
         MediaInfo(MediaModality.IMAGE, None, 0, 1, False),
@@ -474,6 +476,7 @@ def test_transcript_validation_bounds_text_language_timing_and_visuals():
     bad_speech = [
         object(),
         SpeechTranscript("not_language!", ()),
+        SpeechTranscript("en-abcdefgh-abcdefgh-abcdefgh-abcdefgh", ()),
         SpeechTranscript("en", (SpeechSegment(0, 0, "text"),)),
         SpeechTranscript("en", (SpeechSegment(0, 1001, "text"),)),
         SpeechTranscript("en", (SpeechSegment(0, 500, "first"), SpeechSegment(400, 600, "next"))),
@@ -586,6 +589,37 @@ def test_image_pixel_boundary_is_total(width, height):
     else:
         with pytest.raises(MediaTranscriptionError, match="image-invalid"):
             _validated_media(media)
+
+
+@given(duration=st.integers(min_value=0, max_value=MAX_DURATION_MS))
+def test_timed_media_duration_matches_public_schema_minimum(duration):
+    media = MediaInfo(MediaModality.AUDIO, duration, None, None, True)
+    if duration >= 1:
+        assert _validated_media(media) is media
+    else:
+        with pytest.raises(MediaTranscriptionError):
+            _validated_media(media)
+
+
+@given(
+    subtags=st.lists(
+        st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz0123456789",
+            min_size=2,
+            max_size=8,
+        ),
+        max_size=8,
+    )
+)
+def test_language_length_matches_public_schema_maximum(subtags):
+    language = "-".join(("en", *subtags))
+    transcript = SpeechTranscript(language, ())
+    media = MediaInfo(MediaModality.AUDIO, 1, None, None, True)
+    if len(language) <= MAX_LANGUAGE_CHARACTERS:
+        assert _validated_speech(transcript, media).language == language
+    else:
+        with pytest.raises(MediaTranscriptionError):
+            _validated_speech(transcript, media)
 
 
 @given(

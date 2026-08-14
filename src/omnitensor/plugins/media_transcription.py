@@ -39,6 +39,7 @@ MAX_DOCUMENT_PAGES = 64
 MAX_SPEECH_SEGMENTS = 2048
 MAX_TEXT_CHARACTERS = 16_384
 MAX_SPEECH_TEXT_CHARACTERS = 4096
+MAX_LANGUAGE_CHARACTERS = 35
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
@@ -372,7 +373,7 @@ def _validate_media_duration(media: MediaInfo) -> None:
     if duration is not None and (
         isinstance(duration, bool)
         or not isinstance(duration, int)
-        or not 0 <= duration <= MAX_DURATION_MS
+        or not 1 <= duration <= MAX_DURATION_MS
     ):
         raise MediaTranscriptionError("media-too-long", "media duration exceeds the bounded limit")
     if media.modality is MediaModality.VIDEO and (
@@ -445,7 +446,9 @@ def _validated_speech(value: object, media: MediaInfo) -> SpeechTranscript:
         raise MediaTranscriptionError("speech-invalid", "speech transcript is invalid")
     language = value.language
     if language is not None and (
-        not isinstance(language, str) or _LANGUAGE.fullmatch(language) is None
+        not isinstance(language, str)
+        or len(language) > MAX_LANGUAGE_CHARACTERS
+        or _LANGUAGE.fullmatch(language) is None
     ):
         raise MediaTranscriptionError("speech-invalid", "speech language is invalid")
     duration = media.duration_ms or 0
