@@ -17,7 +17,6 @@ from omnitensor.plugins.document_qa import (
     DocumentQuestionPlugin,
     EmbeddingProvider,
     IndexedSpan,
-    _AnswerProgress,
     _embedding_vector,
     _validate_embedding_provider,
     document_question_task,
@@ -37,6 +36,7 @@ from omnitensor.plugins.protocol import (
     PluginContext,
     PluginRequest,
     PluginResultStatus,
+    ScaledProgressReporter,
 )
 from omnitensor.registry import validate_document, validate_workload_document
 from omnitensor.sdk import CancellationController, PluginCancelledError
@@ -697,21 +697,6 @@ async def test_empty_and_crashed_extraction_publish_no_answer(tmp_path, adapter,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fraction", [True, float("nan"), -0.1, 1.1, "half"])
-async def test_generation_progress_rejects_nonfinite_and_out_of_range_values(fraction):
-    progress = Progress()
-    mapper = _AnswerProgress(
-        PluginRequest("job", "ask-selected-files", "manual", {}, 1, None),
-        progress,
-        lambda: 9,
-    )
-    with pytest.raises(DocumentQuestionError) as caught:
-        await mapper.report(type("ProviderProgress", (), {"fraction": fraction})())
-    assert caught.value.code == "progress-invalid"
-    assert progress.items == []
-
-
-@pytest.mark.asyncio
 async def test_progress_mappers_preserve_job_stage_fraction_redaction_and_clock(tmp_path):
     source = tmp_path / "source.txt"
     source.write_text("text", encoding="utf-8")
@@ -729,7 +714,15 @@ async def test_progress_mappers_preserve_job_stage_fraction_redaction_and_clock(
     ) == ("job-1", "retrieve", 0.5, "", 10)
 
     mapped = Progress()
-    mapper = _AnswerProgress(candidate, mapped, lambda: 17)
+    mapper = ScaledProgressReporter(
+        candidate,
+        mapped,
+        lambda: 17,
+        stage="answer",
+        offset=0.7,
+        scale=0.25,
+        error_type=DocumentQuestionError,
+    )
     await mapper.report(type("ProviderProgress", (), {"fraction": 0.4})())
     answer = mapped.items[0]
     assert (

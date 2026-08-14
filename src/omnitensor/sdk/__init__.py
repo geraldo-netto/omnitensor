@@ -20,6 +20,7 @@ from ..plugins.protocol import (
     PluginResult,
     PluginResultStatus,
     ProgressReporter,
+    ScaledProgressReporter,
     WorkloadPlugin,
 )
 from ..plugins.settings import ConfigurationMigration, PluginConfigurationSpec
@@ -149,6 +150,7 @@ __all__ = [
     "ProgressEmitter",
     "ProgressProbe",
     "ProgressReporter",
+    "ScaledProgressReporter",
     "ProgressSink",
     "RecordingProgressSink",
     "RecordingResultSink",

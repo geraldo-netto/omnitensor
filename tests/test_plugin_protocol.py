@@ -7,6 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor import sdk
 from omnitensor.plugins import (
     CancellationToken,
     PluginContext,
@@ -18,8 +19,13 @@ from omnitensor.plugins import (
     PluginResult,
     PluginResultStatus,
     ProgressReporter,
+    ScaledProgressReporter,
     WorkloadPlugin,
 )
+from omnitensor.plugins.document_qa import DocumentQuestionError
+from omnitensor.plugins.event_workload import EventWorkloadError
+from omnitensor.plugins.file_organizer import FileOrganizerError
+from omnitensor.plugins.selected_text import SelectedTextError
 
 
 class NeverCancelled:
@@ -71,6 +77,103 @@ class EchoPlugin:
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stage", "offset", "scale", "error_type", "expected"),
+    [
+        (
+            "suggest",
+            0.55,
+            0.4,
+            FileOrganizerError,
+            [0.55, 0.75, 0.9500000000000001],
+        ),
+        ("answer", 0.7, 0.25, DocumentQuestionError, [0.7, 0.825, 0.95]),
+        ("generate", 0.6, 0.25, EventWorkloadError, [0.6, 0.725, 0.85]),
+        ("generate", 0.1, 0.85, SelectedTextError, [0.1, 0.525, 0.95]),
+    ],
+)
+async def test_scaled_progress_reporter_preserves_workflow_contract(
+    stage, offset, scale, error_type, expected
+):
+    request = PluginRequest("outer-job", "workflow", "manual", {}, 1, None)
+    target = RecordingProgress()
+    reporter = ScaledProgressReporter(
+        request,
+        target,
+        lambda: 17,
+        stage=stage,
+        offset=offset,
+        scale=scale,
+        error_type=error_type,
+    )
+
+    assert isinstance(reporter, ProgressReporter)
+    for fraction in (0, 0.5, 1):
+        await reporter.report(
+            PluginProgress("provider-job", "provider-stage", fraction, "private", 2)
+        )
+
+    assert target.updates == [
+        PluginProgress("outer-job", stage, fraction, "", 17) for fraction in expected
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_type",
+    [FileOrganizerError, DocumentQuestionError, EventWorkloadError, SelectedTextError],
+)
+@pytest.mark.parametrize("fraction", [None, True, "0.5", -0.1, 1.1, float("nan"), float("inf")])
+async def test_scaled_progress_reporter_rejects_invalid_provider_fraction(error_type, fraction):
+    target = RecordingProgress()
+    reporter = ScaledProgressReporter(
+        PluginRequest("job", "workflow", "manual", {}, 1, None),
+        target,
+        lambda: 9,
+        stage="stage",
+        offset=0.1,
+        scale=0.8,
+        error_type=error_type,
+    )
+
+    with pytest.raises(error_type) as caught:
+        await reporter.report(PluginProgress("provider", "model", fraction, "private", 1))
+
+    assert (caught.value.code, caught.value.detail) == (
+        "progress-invalid",
+        "provider progress is invalid",
+    )
+    assert target.updates == []
+
+
+def test_scaled_progress_reporter_has_stable_sdk_export():
+    assert sdk.ScaledProgressReporter is ScaledProgressReporter
+
+
+@given(fraction=st.floats(min_value=0, max_value=1, allow_nan=False, allow_infinity=False))
+def test_scaled_progress_reporter_accepts_every_bounded_finite_fraction(fraction):
+    async def scenario():
+        target = RecordingProgress()
+        reporter = ScaledProgressReporter(
+            PluginRequest("job", "workflow", "manual", {}, 1, None),
+            target,
+            lambda: 11,
+            stage="generate",
+            offset=0.1,
+            scale=0.85,
+            error_type=SelectedTextError,
+        )
+
+        await reporter.report(PluginProgress("provider", "model", fraction, "private", 1))
+
+        assert target.updates == [
+            PluginProgress("job", "generate", 0.1 + (float(fraction) * 0.85), "", 11)
+        ]
+
+    asyncio.run(scenario())
 
 
 def test_structural_protocols_accept_an_external_plugin_without_inheritance():

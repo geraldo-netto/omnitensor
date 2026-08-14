@@ -47,7 +47,13 @@ from .generation import (
     generation_request,
     parse_generation_task,
 )
-from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
+from .protocol import (
+    CancellationToken,
+    PluginRequest,
+    PluginResult,
+    ProgressReporter,
+    ScaledProgressReporter,
+)
 from .search import cosine_similarity
 
 PLUGIN_ID = "ask-selected-files"
@@ -208,7 +214,15 @@ class DocumentQuestionPlugin(ManagedPlugin):
                     (question_fragment.reference, *(span.reference for span in retrieved)),
                 ),
                 cancellation,
-                _AnswerProgress(request, progress, self._clock_ms),
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="answer",
+                    offset=0.7,
+                    scale=0.25,
+                    error_type=DocumentQuestionError,
+                ),
             )
             output = grounded_answer_document(
                 generated.document,
@@ -316,37 +330,6 @@ class DocumentQuestionPlugin(ManagedPlugin):
     ) -> None:
         await progress.report(
             PluginProgress(request.job_id, stage, fraction, "", self._clock_ms())
-        )
-
-
-class _AnswerProgress:
-    def __init__(
-        self,
-        request: PluginRequest,
-        target: ProgressReporter,
-        clock_ms: Callable[[], int],
-    ) -> None:
-        self._request = request
-        self._target = target
-        self._clock_ms = clock_ms
-
-    async def report(self, progress: PluginProgress) -> None:
-        fraction = progress.fraction
-        if (
-            isinstance(fraction, bool)
-            or not isinstance(fraction, (int, float))
-            or not math.isfinite(fraction)
-            or not 0 <= fraction <= 1
-        ):
-            raise DocumentQuestionError("progress-invalid", "provider progress is invalid")
-        await self._target.report(
-            PluginProgress(
-                self._request.job_id,
-                "answer",
-                0.7 + (float(fraction) * 0.25),
-                "",
-                self._clock_ms(),
-            )
         )
 
 

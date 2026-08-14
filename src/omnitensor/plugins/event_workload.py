@@ -9,7 +9,6 @@ leaves the worker.  Paths and source text are never journalled.
 from __future__ import annotations
 
 import asyncio
-import math
 import re
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -55,7 +54,13 @@ from .generation import (
     parse_generation_task,
 )
 from .ingestion import IngestedFile
-from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
+from .protocol import (
+    CancellationToken,
+    PluginRequest,
+    PluginResult,
+    ProgressReporter,
+    ScaledProgressReporter,
+)
 from .text_encoding import TextEncodingError, decode_plain_text
 
 PLUGIN_ID = "event-extraction"
@@ -351,7 +356,15 @@ class EventExtractionPlugin(ManagedPlugin):
                 event_generation_task(),
                 generation_request(request.job_id, PLUGIN_ID, references),
                 cancellation,
-                _GenerationProgress(request, progress, self._clock_ms),
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="generate",
+                    offset=0.6,
+                    scale=0.25,
+                    error_type=EventWorkloadError,
+                ),
             )
             self._journal.stage(request.job_id, "validate")
             await self._report(request, progress, "validate", 0.9)
@@ -396,39 +409,6 @@ class EventExtractionPlugin(ManagedPlugin):
         fraction: float,
     ) -> None:
         await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
-
-
-class _GenerationProgress:
-    """Map provider progress into its stage and discard provider detail."""
-
-    def __init__(
-        self,
-        request: PluginRequest,
-        target: ProgressReporter,
-        clock_ms: Callable[[], int],
-    ) -> None:
-        self._request = request
-        self._target = target
-        self._clock_ms = clock_ms
-
-    async def report(self, progress: PluginProgress) -> None:
-        fraction = progress.fraction
-        if (
-            isinstance(fraction, bool)
-            or not isinstance(fraction, (int, float))
-            or not math.isfinite(fraction)
-            or not 0 <= fraction <= 1
-        ):
-            raise EventWorkloadError("progress-invalid", "provider progress is invalid")
-        await self._target.report(
-            PluginProgress(
-                self._request.job_id,
-                "generate",
-                0.6 + (float(fraction) * 0.25),
-                "",
-                self._clock_ms(),
-            )
-        )
 
 
 def select_sources(request_id: str, value: object) -> tuple[SelectedSource, ...]:

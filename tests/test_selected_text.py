@@ -23,7 +23,6 @@ from omnitensor.plugins.selected_text import (
     READ_ONCE_PERMISSION,
     SelectedTextError,
     SelectedTextPlugin,
-    _SelectedTextProgress,
     _validated_language,
     grounded_selected_text_result,
     selected_text_task,
@@ -436,15 +435,6 @@ def test_grounded_result_rejects_identity_tasks_evidence_and_public_contract_dri
         accelerator="gpu",
     )
     assert empty_tasks["tasks"] == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fraction", [None, True, -0.1, 1.1, float("nan"), float("inf")])
-async def test_provider_progress_is_finite_and_bounded(fraction):
-    target = Progress()
-    adapter = _SelectedTextProgress(request(), target, lambda: 7)
-    with pytest.raises(SelectedTextError, match="progress-invalid"):
-        await adapter.report(PluginProgress("job-1", "model", fraction, "private", 1))
 
 
 def test_task_manifest_schemas_health_and_constructor_contracts():

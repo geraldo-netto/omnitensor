@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -45,7 +44,13 @@ from .generation import (
     generation_request,
     parse_generation_task,
 )
-from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
+from .protocol import (
+    CancellationToken,
+    PluginRequest,
+    PluginResult,
+    ProgressReporter,
+    ScaledProgressReporter,
+)
 
 PLUGIN_ID = "file-organizer"
 READ_PERMISSION = "files:read-selected"
@@ -138,7 +143,15 @@ class FileOrganizerPlugin(ManagedPlugin):
                     ),
                 ),
                 cancellation,
-                _OrganizerProgress(request, progress, self._clock_ms),
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="suggest",
+                    offset=0.55,
+                    scale=0.4,
+                    error_type=FileOrganizerError,
+                ),
             )
             output = review_only_plan(
                 generated.document,
@@ -236,37 +249,6 @@ class FileOrganizerPlugin(ManagedPlugin):
     ) -> None:
         await progress.report(
             PluginProgress(request.job_id, stage, fraction, "", self._clock_ms())
-        )
-
-
-class _OrganizerProgress:
-    def __init__(
-        self,
-        request: PluginRequest,
-        target: ProgressReporter,
-        clock_ms: Callable[[], int],
-    ) -> None:
-        self._request = request
-        self._target = target
-        self._clock_ms = clock_ms
-
-    async def report(self, progress: PluginProgress) -> None:
-        fraction = progress.fraction
-        if (
-            isinstance(fraction, bool)
-            or not isinstance(fraction, (int, float))
-            or not math.isfinite(fraction)
-            or not 0 <= fraction <= 1
-        ):
-            raise FileOrganizerError("progress-invalid", "provider progress is invalid")
-        await self._target.report(
-            PluginProgress(
-                self._request.job_id,
-                "suggest",
-                0.55 + (float(fraction) * 0.4),
-                "",
-                self._clock_ms(),
-            )
         )
 
 

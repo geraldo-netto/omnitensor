@@ -731,25 +731,6 @@ def test_adapter_mapping_and_journal_stage_are_strict(tmp_path):
     assert stage.value.code == "stage-invalid"
 
 
-@pytest.mark.asyncio
-async def test_generation_progress_is_bounded_redacted_and_exact(tmp_path):
-    source = tmp_path / "event.txt"
-    source.write_text("event")
-    plugin, _worker, _store = await running_plugin(tmp_path, source)
-    target = Progress()
-    reporter = event_workload._GenerationProgress(request(source), target, lambda: 70)
-    for value, expected in ((0, 0.6), (1, 0.85)):
-        incoming = type("P", (), {"fraction": value, "detail": "private"})()
-        await reporter.report(incoming)
-        assert target.items[-1].fraction == expected
-        assert target.items[-1].detail == ""
-        assert target.items[-1].observed_at_ms == 70
-    for invalid in (True, "1", -0.1, 1.1, float("nan"), float("inf")):
-        with pytest.raises(EventWorkloadError) as error:
-            await reporter.report(type("P", (), {"fraction": invalid})())
-        assert str(error.value) == "progress-invalid: provider progress is invalid"
-
-
 def test_exact_file_reader_detects_replacement_and_bounds(tmp_path, monkeypatch):
     source = tmp_path / "source.txt"
     source.write_bytes(b"event")

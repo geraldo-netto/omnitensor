@@ -7,7 +7,8 @@ plugin implementation into the OmniTensor service process.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, TypeAlias, runtime_checkable
@@ -105,6 +106,53 @@ class ProgressReporter(Protocol):
     """Sink for bounded, replaceable progress updates."""
 
     async def report(self, progress: PluginProgress) -> None: ...
+
+
+class ScaledProgressReporter:
+    """Map provider progress into one bounded workflow stage.
+
+    Provider identity, stage, timestamps, and detail are deliberately not
+    forwarded: the workflow owns those public fields and provider detail can
+    contain private prompt material.
+    """
+
+    def __init__(
+        self,
+        request: PluginRequest,
+        target: ProgressReporter,
+        clock_ms: Callable[[], int],
+        *,
+        stage: str,
+        offset: float,
+        scale: float,
+        error_type: Callable[[str, str], Exception],
+    ) -> None:
+        self._request = request
+        self._target = target
+        self._clock_ms = clock_ms
+        self._stage = stage
+        self._offset = offset
+        self._scale = scale
+        self._error_type = error_type
+
+    async def report(self, progress: PluginProgress) -> None:
+        fraction = progress.fraction
+        if (
+            isinstance(fraction, bool)
+            or not isinstance(fraction, (int, float))
+            or not math.isfinite(fraction)
+            or not 0 <= fraction <= 1
+        ):
+            raise self._error_type("progress-invalid", "provider progress is invalid")
+        await self._target.report(
+            PluginProgress(
+                self._request.job_id,
+                self._stage,
+                self._offset + (float(fraction) * self._scale),
+                "",
+                self._clock_ms(),
+            )
+        )
 
 
 @runtime_checkable

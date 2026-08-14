@@ -24,7 +24,6 @@ from omnitensor.plugins.file_organizer import (
     FileOrganizerPlugin,
     _duplicate_groups,
     _metadata_fragments,
-    _OrganizerProgress,
     _safe_folder,
     _safe_name,
     file_organizer_task,
@@ -492,32 +491,6 @@ def test_metadata_and_duplicate_helpers_expose_only_basenames_and_exact_digests(
         for fragment in fragments
     )
     assert _duplicate_groups(selected) == {selected[0].item.digest: "duplicate-group-1"}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fraction", [True, -0.1, 1.1, float("nan"), "0.5"])
-async def test_provider_progress_must_be_finite_and_bounded(fraction):
-    target = Progress()
-    adapter = _OrganizerProgress(
-        PluginRequest("job-1", PLUGIN_ID, "manual", {}, 1, None), target, lambda: 10
-    )
-    with pytest.raises(FileOrganizerError) as captured:
-        await adapter.report(PluginProgress("job-1", "model", fraction, "", 1))
-    assert (captured.value.code, captured.value.detail) == (
-        "progress-invalid",
-        "provider progress is invalid",
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fraction,expected", [(0, 0.55), (0.5, 0.75), (1, 0.9500000000000001)])
-async def test_provider_progress_preserves_boundaries(fraction, expected):
-    target = Progress()
-    adapter = _OrganizerProgress(
-        PluginRequest("job-1", PLUGIN_ID, "manual", {}, 1, None), target, lambda: 10
-    )
-    await adapter.report(PluginProgress("provider-job", "model", fraction, "private", 1))
-    assert target.items == [PluginProgress("job-1", "suggest", expected, "", 10)]
 
 
 def test_manifest_task_schemas_and_source_have_no_action_capability():

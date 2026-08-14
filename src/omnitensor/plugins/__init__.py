@@ -289,6 +289,7 @@ from .protocol import (
     PluginResult,
     PluginResultStatus,
     ProgressReporter,
+    ScaledProgressReporter,
     WorkloadPlugin,
 )
 from .resource_collection import (
@@ -702,6 +703,7 @@ __all__ = [
     "PostprocessedOutput",
     "PreprocessedOutput",
     "ProgressReporter",
+    "ScaledProgressReporter",
     "ReplayNetworkMetadataSource",
     "ReplayPeripheralMetadataSource",
     "ResolvedPlugin",

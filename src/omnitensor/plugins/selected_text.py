@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import math
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -30,7 +29,13 @@ from .generation import (
     generation_request,
     parse_generation_task,
 )
-from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
+from .protocol import (
+    CancellationToken,
+    PluginRequest,
+    PluginResult,
+    ProgressReporter,
+    ScaledProgressReporter,
+)
 
 PLUGIN_ID = "selected-text-tools"
 READ_ONCE_PERMISSION = "clipboard:read-once"
@@ -130,7 +135,15 @@ class SelectedTextPlugin(ManagedPlugin):
                     (control.reference, source.reference),
                 ),
                 cancellation,
-                _SelectedTextProgress(request, progress, self._clock_ms),
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="generate",
+                    offset=0.1,
+                    scale=0.85,
+                    error_type=SelectedTextError,
+                ),
             )
             output = grounded_selected_text_result(
                 generated.document,
@@ -201,37 +214,6 @@ class SelectedTextPlugin(ManagedPlugin):
         if operation != "translate" or language is None:
             return self._router
         return self._translation_routes.get(language.casefold(), self._router)
-
-
-class _SelectedTextProgress:
-    def __init__(
-        self,
-        request: PluginRequest,
-        target: ProgressReporter,
-        clock_ms: Callable[[], int],
-    ) -> None:
-        self._request = request
-        self._target = target
-        self._clock_ms = clock_ms
-
-    async def report(self, progress: PluginProgress) -> None:
-        fraction = progress.fraction
-        if (
-            isinstance(fraction, bool)
-            or not isinstance(fraction, (int, float))
-            or not math.isfinite(fraction)
-            or not 0 <= fraction <= 1
-        ):
-            raise SelectedTextError("progress-invalid", "provider progress is invalid")
-        await self._target.report(
-            PluginProgress(
-                self._request.job_id,
-                "generate",
-                0.1 + (float(fraction) * 0.85),
-                "",
-                self._clock_ms(),
-            )
-        )
 
 
 def _validated_language(value: object) -> str:
