@@ -3,7 +3,7 @@
   "corpusSha256": "da58477462f26065d23813727e96349ed104171210685051f6c3ca851bfd05d4",
   "embedding": {
     "reportPath": "bge-rx6600xt-report.json",
-    "reportSha256": "5990e2b4a0c0af1c0713e2ee70375d01077b30b4561e53373af9260e9b1c4714",
+    "reportSha256": "425fcbc0e329daf42bbf0239cd4dbe67d223cee424f30abe2507698ebec11ae1",
     "artifactSha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb"
   },
   "generation": {

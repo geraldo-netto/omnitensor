@@ -17,7 +17,6 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0249 | open | high | s | — | Replace hardcoded selected-text no-CPU acceptance claims with measured worker load evidence; fail collection on CPU fallback or unexpected accelerator-layer counts. |
-| OMNI-0254 | open | high | xs | OMNI-0253 | Put measured `cpuFallback` at the top level of document-model training reports and require it through the canonical report schema, retaining a limitations copy only if a consumer needs it. |
 | OMNI-0260 | open | high | xl | OMNI-0253 | Extract the five numeric domain trainers into a shared `training/tabular/` package for ONNX export, chronological/class-floor splits, metrics, fitting, bounded JSONL, publication, reports, and shared model types while preserving fixture report values exactly. |
 | OMNI-0261 | open | high | l | OMNI-0254 | Consolidate the four production source pipelines, digests, report envelopes, Torch-to-ONNX export, IO validation, and width-checked dot product behind a shared production pipeline without changing artifacts or reports. |
 | OMNI-0263 | open | high | l | OMNI-0253 | Consolidate forecast, numeric, and document model binding publication/model fragments behind `training/binding.py`, parameterizing lane order and native evidence while preserving each caller's current order. |

@@ -17,9 +17,16 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from jsonschema.exceptions import SchemaError
+
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..preparation import file_digest, install_prepared, prepare_artifact
-from ..registry import bundled_workloads_path, load_workloads, validate_workload_document
+from ..registry import (
+    bundled_workloads_path,
+    load_workloads,
+    validate_document,
+    validate_workload_document,
+)
 from .embedding_production import (
     EmbeddingHoldout,
     SentenceEmbeddingOnnxExporter,
@@ -46,6 +53,7 @@ DEFAULT_SOURCE_ROOT = "~/.local/share/omnitensor/model-sources"
 DEFAULT_BUILD_ROOT = "~/.local/share/omnitensor/document-model-build"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
+DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
 NATIVE_TENSOR_CONTRACT = {
     "inputs": [
         {"shape": [1, SEQUENCE_LENGTH], "dtype": "int32", "layout": "NC"},
@@ -547,7 +555,7 @@ def install_document_model(
     report = _report_document(
         source, portable_sha, prepared.reference.sha256, holdout, evidence
     )
-    write_json_atomic(report_path, report, prefix=".document-model-report-")
+    _write_document_model_report(report_path, report)
     report_sha = file_digest(report_path)
     installed = install_prepared(prepared, artifact_root)
     binding = _binding_document(
@@ -613,13 +621,30 @@ def _report_document(source, portable_sha, native_sha, holdout, evidence) -> dic
             "expectedTopHits": evidence.expected_top_hits,
             "accepted": True,
         },
+        # This records the measured Vulkan execution route and absence of a
+        # fallback route. It deliberately does not claim all-layer residency.
+        "cpuFallback": False,
         "limitations": {
             "productionDomainQuality": "not-claimed",
             "namedDeviceProfileAcceptance": False,
-            "cpuFallback": "forbidden",
             "otherProfiles": "disabled",
         },
     }
+
+
+def _write_document_model_report(path: Path, document: dict) -> None:
+    try:
+        violations = validate_document(DOCUMENT_MODEL_REPORT_SCHEMA, document)
+    except (OSError, ValueError, SchemaError) as error:
+        raise DocumentModelError(
+            "report-invalid", f"cannot validate document model report: {error}"
+        ) from error
+    if violations:
+        raise DocumentModelError(
+            "report-invalid",
+            f"document model report violates schema: {violations[0]}",
+        )
+    write_json_atomic(path, document, prefix=".document-model-report-")
 
 
 def _binding_document(

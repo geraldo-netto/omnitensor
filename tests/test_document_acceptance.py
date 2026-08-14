@@ -540,6 +540,17 @@ def test_qualification_rejects_partial_or_cpu_generation_load(tmp_path):
     ("mutate_report", "change", "code"),
     [
         (lambda value: value.update(kind="other"), {}, "device-unqualified"),
+        (lambda value: value.pop("cpuFallback"), {}, "device-unqualified"),
+        (lambda value: value.update(cpuFallback=True), {}, "device-unqualified"),
+        (lambda value: value.update(cpuFallback="forbidden"), {}, "device-unqualified"),
+        (
+            lambda value: (
+                value.pop("cpuFallback"),
+                value["limitations"].update(cpuFallback="forbidden"),
+            ),
+            {},
+            "device-unqualified",
+        ),
         (lambda value: value.update(nativeArtifactSha256="0" * 64), {}, "device-unqualified"),
         (lambda value: value["nativeGate"].update(accepted=False), {}, "device-unqualified"),
         (lambda value: value["device"].update(name="llvmpipe"), {}, "device-unqualified"),

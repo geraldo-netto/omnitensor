@@ -1179,6 +1179,9 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
     assert observed["binding"][0] is source
     assert observed["binding"][1] == observed["prepared"].manifest_fragment()
     assert observed["binding"][2] == observed["report"][1]
+    assert observed["binding"][3] == document_model.file_digest(
+        build_root / "document-model-report.json"
+    )
     assert observed["binding"][4:] == (installed.evidence, bundled_root)
     assert [(path, prefix) for path, _payload, prefix in observed["writes"]] == [
         (build_root / "document-model-report.json", ".document-model-report-"),
@@ -1193,10 +1196,17 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
     assert model["tensorContract"] == NATIVE_TENSOR_CONTRACT
     assert model["outputContract"] == {"kind": "embedding"}
     assert model["nativeEvidence"]["namedDeviceAccepted"] is False
+    assert model["trainingContract"]["reportSha256"] == document_model.file_digest(
+        installed.report_path
+    )
+    assert model["nativeEvidence"]["reportSha256"] == document_model.file_digest(
+        installed.report_path
+    )
     assert installed.evidence.device_name == "RX 6600 XT"
     assert installed.document()["device"] == {"index": 1, "name": "RX 6600 XT"}
     report = json.loads(installed.report_path.read_text())
     assert report["nativeGate"]["accepted"] is True
+    assert report["cpuFallback"] is False
     assert report["limitations"]["otherProfiles"] == "disabled"
 
 
@@ -1283,13 +1293,30 @@ def test_binding_and_report_are_schema_valid_and_do_not_claim_profile_acceptance
             "expectedTopHits": 2,
             "accepted": True,
         },
+        "cpuFallback": False,
         "limitations": {
             "productionDomainQuality": "not-claimed",
             "namedDeviceProfileAcceptance": False,
-            "cpuFallback": "forbidden",
             "otherProfiles": "disabled",
         },
     }
+    assert tuple(report) == (
+        "reportVersion",
+        "kind",
+        "recipeId",
+        "recipeVersion",
+        "recipeSha256",
+        "sourceReceiptSha256",
+        "portableReferenceSha256",
+        "nativeArtifactSha256",
+        "tensorContract",
+        "outputContract",
+        "holdout",
+        "device",
+        "nativeGate",
+        "cpuFallback",
+        "limitations",
+    )
     binding = _binding_document(
         source,
         {

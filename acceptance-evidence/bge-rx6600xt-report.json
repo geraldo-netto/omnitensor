@@ -30,10 +30,10 @@
     "expectedTopHits": 2,
     "accepted": true
   },
+  "cpuFallback": false,
   "limitations": {
     "productionDomainQuality": "not-claimed",
     "namedDeviceProfileAcceptance": false,
-    "cpuFallback": "forbidden",
     "otherProfiles": "disabled"
   }
 }

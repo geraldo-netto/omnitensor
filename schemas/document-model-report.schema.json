@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/document-model-report.schema.json",
+  "title": "OmniTensor BGE-small document model report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reportVersion",
+    "kind",
+    "recipeId",
+    "recipeVersion",
+    "recipeSha256",
+    "sourceReceiptSha256",
+    "portableReferenceSha256",
+    "nativeArtifactSha256",
+    "tensorContract",
+    "outputContract",
+    "holdout",
+    "device",
+    "nativeGate",
+    "cpuFallback",
+    "limitations"
+  ],
+  "properties": {
+    "reportVersion": {"const": 1},
+    "kind": {"const": "bge-small-document-model"},
+    "recipeId": {"const": "bge-small-en-v1-5"},
+    "recipeVersion": {"$ref": "#/$defs/semanticVersion"},
+    "recipeSha256": {"$ref": "#/$defs/sha256"},
+    "sourceReceiptSha256": {"$ref": "#/$defs/sha256"},
+    "portableReferenceSha256": {"$ref": "#/$defs/sha256"},
+    "nativeArtifactSha256": {"$ref": "#/$defs/sha256"},
+    "tensorContract": {"$ref": "#/$defs/tensorContract"},
+    "outputContract": {"$ref": "#/$defs/outputContract"},
+    "holdout": {"$ref": "#/$defs/holdout"},
+    "device": {"$ref": "#/$defs/device"},
+    "nativeGate": {"$ref": "#/$defs/nativeGate"},
+    "cpuFallback": {
+      "type": "boolean",
+      "const": false,
+      "description": "The measured native Vulkan route exposed no CPU fallback route; this is not a claim that every layer remained GPU-resident."
+    },
+    "limitations": {"$ref": "#/$defs/limitations"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "tensorContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs"],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"$ref": "#/$defs/tokenInput"},
+            {"$ref": "#/$defs/maskInput"},
+            {"$ref": "#/$defs/tokenInput"}
+          ],
+          "items": false
+        }
+      }
+    },
+    "tokenInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "layout"],
+      "properties": {
+        "shape": {"$ref": "#/$defs/inputShape"},
+        "dtype": {"const": "int32"},
+        "layout": {"const": "NC"}
+      }
+    },
+    "maskInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "layout"],
+      "properties": {
+        "shape": {"$ref": "#/$defs/inputShape"},
+        "dtype": {"const": "float32"},
+        "layout": {"const": "NC"}
+      }
+    },
+    "inputShape": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [{"const": 1}, {"const": 128}],
+      "items": false
+    },
+    "outputContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"const": "embedding"}
+      }
+    },
+    "holdout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["licenseId", "corpusSha256", "queryCount", "documentCount"],
+      "properties": {
+        "licenseId": {"type": "string", "minLength": 1, "maxLength": 200},
+        "corpusSha256": {"$ref": "#/$defs/sha256"},
+        "queryCount": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "documentCount": {"type": "integer", "minimum": 10, "maximum": 65535}
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "name"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S",
+          "not": {
+            "pattern": "^\\s*(?:[cC][pP][uU]|[lL][lL][vV][mM][pP][iI][pP][eE])\\s*$"
+          }
+        }
+      }
+    },
+    "nativeGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "samples",
+        "minimumCosineSimilarity",
+        "minimumTop10Overlap",
+        "maximumAbsoluteError",
+        "expectedTopHits",
+        "accepted"
+      ],
+      "properties": {
+        "samples": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "minimumCosineSimilarity": {"type": "number", "minimum": 0.999, "maximum": 1},
+        "minimumTop10Overlap": {"type": "number", "minimum": 0.9, "maximum": 1},
+        "maximumAbsoluteError": {"type": "number", "minimum": 0, "maximum": 0.001},
+        "expectedTopHits": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "accepted": {"const": true}
+      }
+    },
+    "limitations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "productionDomainQuality",
+        "namedDeviceProfileAcceptance",
+        "otherProfiles"
+      ],
+      "properties": {
+        "productionDomainQuality": {"const": "not-claimed"},
+        "namedDeviceProfileAcceptance": {"const": false},
+        "otherProfiles": {"const": "disabled"}
+      }
+    }
+  }
+}

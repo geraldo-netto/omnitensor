@@ -26,6 +26,7 @@ from .qwen import NativeLoadReport, ProviderGenerationError, _validate_gpu_load
 
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
+DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
 QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
 QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -436,6 +437,10 @@ def _validate_bge_evidence(evidence: DocumentAcceptanceEvidence) -> str:
         raise DocumentAcceptanceError("evidence-invalid", "BGE report cannot be read") from error
     if not isinstance(report, Mapping):
         raise DocumentAcceptanceError("evidence-invalid", "BGE report must be an object")
+    if validate_document(DOCUMENT_MODEL_REPORT_SCHEMA, report):
+        raise DocumentAcceptanceError(
+            "device-unqualified", "BGE named-GPU evidence is invalid"
+        )
     gate = report.get("nativeGate")
     device = report.get("device")
     if (
