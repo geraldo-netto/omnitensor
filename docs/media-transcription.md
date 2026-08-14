@@ -59,7 +59,10 @@ readelf -d "$HOME"/.local/share/omnitensor/venv/lib/python*/site-packages/_pywhi
 Install `av`, `Pillow`, `CairoSVG`, `defusedxml`, and `PyMuPDF` from the
 provider wheel's declared dependencies. The host `ffmpeg` and ImageMagick
 packages are acceptance-fixture authoring tools, not production inference
-dependencies.
+dependencies. Authoring also needs Pillow and LibreOffice. Run
+`python3 scripts/generate-media-acceptance-fixtures.py /new/absolute/path`;
+the generator prefers ImageMagick 7's `magick` executable and falls back to
+the legacy `convert` executable.
 
 All public text is Unicode. A KOI8-R fixture is decoded to Cyrillic Unicode at
 fixture creation; raw invalid or undecoded legacy bytes are rejected rather
@@ -70,4 +73,6 @@ frames, lossy/lossless audio, malformed archives, and cancellation cases.
 RX 6600 XT qualification is frozen in
 `acceptance-evidence/media-transcription-rx6600xt-report.json`. Its digest is
 bound into the provider receipt; changing evidence, native runtimes, model
-artifacts, or provider version makes startup fail closed.
+artifacts, or provider version makes startup fail closed. Generating a new
+fixture set does not rewrite that historical evidence: the new manifest must
+be qualified and archived by a fresh hardware run.

@@ -19,6 +19,14 @@ def _command(name: str) -> str:
     return resolved
 
 
+def _imagemagick_command() -> str:
+    for name in ("magick", "convert"):
+        resolved = shutil.which(name)
+        if resolved is not None:
+            return resolved
+    raise SystemExit("required fixture tool is unavailable: magick or convert")
+
+
 def _run(arguments: list[str]) -> None:
     completed = subprocess.run(arguments, check=False, capture_output=True, timeout=120)
     if completed.returncode != 0:
@@ -91,17 +99,13 @@ def _odp(path: Path, png: bytes, cyrillic: str) -> None:
         archive.writestr("Pictures/chart.png", png)
 
 
-def generate(target: Path) -> None:
-    if not target.is_absolute() or target.exists():
-        raise SystemExit("target must be a new absolute directory")
-    target.mkdir(parents=True, mode=0o700)
-    ffmpeg = _command("ffmpeg")
-    imagemagick = _command("convert")
-    libreoffice = _command("libreoffice")
-
+def _generate_text_fixture(target: Path) -> str:
     koi8 = "Привет мир".encode("koi8-r")
     (target / "legacy-koi8-r.txt").write_bytes(koi8)
-    cyrillic = koi8.decode("koi8-r")
+    return koi8.decode("koi8-r")
+
+
+def _generate_visual_fixtures(target: Path, imagemagick: str, cyrillic: str) -> None:
     (target / "complex.svg").write_text(_svg(cyrillic), encoding="utf-8")
     _run([imagemagick, str(target / "complex.svg"), str(target / "complex.png")])
     _run(
@@ -131,6 +135,9 @@ def generate(target: Path) -> None:
         append_images=[second],
         compression="tiff_lzw",
     )
+
+
+def _generate_presentation_fixtures(target: Path, libreoffice: str, cyrillic: str) -> None:
     _odp(target / "complex.odp", (target / "complex.png").read_bytes(), cyrillic)
     _run(
         [
@@ -155,6 +162,8 @@ def generate(target: Path) -> None:
         ]
     )
 
+
+def _generate_audio_fixtures(target: Path, ffmpeg: str) -> None:
     speech = "The blue chart has four bars and one circle"
     _run(
         [
@@ -195,6 +204,8 @@ def generate(target: Path) -> None:
             ]
         )
 
+
+def _generate_video_fixtures(target: Path, ffmpeg: str) -> None:
     _run(
         [
             ffmpeg,
@@ -260,6 +271,8 @@ def generate(target: Path) -> None:
         ]
     )
 
+
+def _write_fixture_manifest(target: Path) -> None:
     summary = {
         path.name: {"bytes": path.stat().st_size, "sha256": _sha256(path)}
         for path in sorted(target.iterdir())
@@ -269,6 +282,22 @@ def generate(target: Path) -> None:
         __import__("json").dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def generate(target: Path) -> None:
+    if not target.is_absolute() or target.exists():
+        raise SystemExit("target must be a new absolute directory")
+    target.mkdir(parents=True, mode=0o700)
+    ffmpeg = _command("ffmpeg")
+    imagemagick = _imagemagick_command()
+    libreoffice = _command("libreoffice")
+
+    cyrillic = _generate_text_fixture(target)
+    _generate_visual_fixtures(target, imagemagick, cyrillic)
+    _generate_presentation_fixtures(target, libreoffice, cyrillic)
+    _generate_audio_fixtures(target, ffmpeg)
+    _generate_video_fixtures(target, ffmpeg)
+    _write_fixture_manifest(target)
 
 
 def _sha256(path: Path) -> str:
