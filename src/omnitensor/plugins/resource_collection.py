@@ -22,7 +22,6 @@ from .collection import (
     bounded_number,
 )
 from .kernel_telemetry import UnixSocketAggregateSource
-from .pipeline import CollectedOutput
 
 RESOURCE_PLUGIN_ID = "resource-scheduler"
 RESOURCE_METADATA_PERMISSION = "read:resource-metadata"
@@ -123,14 +122,13 @@ class ResourceSchedulerCollector(BoundedCollector[ResourceSample]):
         super().__init__(*args, max_items=max_items, **changes)
         self._kernel_source = kernel_source or UnixSocketAggregateSource()
 
-    async def collect(self, trigger) -> CollectedOutput:
-        """Add aggregate run-queue and block-I/O features to PSI observations."""
-        collected = await super().collect(trigger)
+    async def _output_extensions(self) -> dict[str, object]:
+        """Add aggregate run-queue and block-I/O features before validation."""
         aggregate = await asyncio.to_thread(self._kernel_source.read)
-        payload = dict(collected.payload)
-        payload["kernelTelemetry"] = aggregate.document()
-        payload["kernelFeatures"] = aggregate.scheduler_features()
-        return CollectedOutput(payload)
+        return {
+            "kernelTelemetry": aggregate.document(),
+            "kernelFeatures": aggregate.scheduler_features(),
+        }
 
     def identity_of(self, item: ResourceSample) -> str:
         return item.stable_id

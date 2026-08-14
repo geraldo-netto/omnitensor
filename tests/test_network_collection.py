@@ -364,6 +364,38 @@ def test_invalid_snapshot_does_not_replace_last_successful_churn_state():
     }
 
 
+def test_invalid_output_does_not_replace_last_successful_churn_state():
+    second = snapshot(link("link-b"), observed_at_ms=20)
+    collector = NetworkMetadataCollector(
+        ReplayNetworkMetadataSource(
+            [snapshot(link("link-a")), second, second]
+        ),
+        permission_view("link-a", "link-b"),
+        ("link-a", "link-b"),
+    )
+    asyncio.run(collector.collect(trigger()))
+    build_document = collector._output_document
+
+    def invalid_document(*arguments):
+        document = build_document(*arguments)
+        document["schemaVersion"] = 2
+        return document
+
+    collector._output_document = invalid_document
+    with pytest.raises(NetworkCollectionError) as caught:
+        asyncio.run(collector.collect(trigger()))
+    assert caught.value.code == "output-invalid"
+    assert caught.value.detail == "schemaVersion: 1 was expected"
+
+    collector._output_document = build_document
+    recovered = asyncio.run(collector.collect(trigger())).payload
+    assert recovered["churn"] == {
+        "added": [{"stableId": "link-b", "kind": "ethernet"}],
+        "removed": [{"stableId": "link-a", "kind": "ethernet"}],
+        "changed": [],
+    }
+
+
 def test_revoked_link_is_forgotten_without_post_revocation_identity_output():
     class MutableGate:
         def __init__(self):

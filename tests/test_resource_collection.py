@@ -113,6 +113,51 @@ def test_kernel_histograms_become_bounded_scheduler_features():
     }
 
 
+def test_invalid_kernel_extension_is_refused_before_churn_commit():
+    class MutableKernelSource(KernelSource):
+        invalid = False
+
+        def read(self):
+            aggregate = super().read()
+            if not self.invalid:
+                return aggregate
+
+            class InvalidAggregate:
+                def document(self):
+                    return {**aggregate.document(), "version": 2}
+
+                def scheduler_features(self):
+                    return aggregate.scheduler_features()
+
+            return InvalidAggregate()
+
+    kernel = MutableKernelSource()
+    changed = snapshot(sample(QUEUE, scope=ResourceScope.QUEUE))
+    subject = collector(
+        snapshot(sample(UNIT)),
+        changed,
+        changed,
+        allowed=(UNIT, QUEUE),
+        granted=(UNIT, QUEUE),
+        kernel_source=kernel,
+    )
+    collect(subject)
+
+    kernel.invalid = True
+    with pytest.raises(CollectionError) as caught:
+        collect(subject)
+    assert caught.value.code == "output-invalid"
+    assert caught.value.detail == "kernelTelemetry/version: 1 was expected"
+
+    kernel.invalid = False
+    recovered = collect(subject)
+    assert recovered["churn"] == {
+        "added": [{"id": QUEUE}],
+        "removed": [{"id": UNIT}],
+        "changed": [],
+    }
+
+
 def test_full_pressure_exceeding_some_is_refused():
     """full counts windows where everything stalled, a subset of some."""
     assert "full exceeds some" in resource_sample_error(

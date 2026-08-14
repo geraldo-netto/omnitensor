@@ -21,11 +21,13 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from ..registry import validate_document
 from .pipeline import CollectedOutput
 from .triggers import CollectorReadiness, SourceStatus, Trigger
 
 STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._:@/-]{0,78}[a-z0-9])?")
 MAX_COLLECTED_ITEMS = 1024
+COLLECTED_OUTPUT_SCHEMA = "collected-output.schema.json"
 
 Sample = TypeVar("Sample")
 
@@ -251,14 +253,14 @@ class BoundedCollector(Generic[Sample]):
             if self._may_emit(identity)
         }
         churn = self._churn(authorized_previous, current)
-        output = self._collected_output(
-            self._output_document(
-                snapshot,
-                selected,
-                churn,
-                len(eligible) - len(selected),
-            )
+        document = self._output_document(
+            snapshot,
+            selected,
+            churn,
+            len(eligible) - len(selected),
         )
+        document.update(await self._output_extensions())
+        output = self._collected_output(document)
         # Churn is transactional: invalid snapshots or output construction
         # failures must not replace the last successfully emitted state.
         self._previous = current
@@ -287,7 +289,14 @@ class BoundedCollector(Generic[Sample]):
 
     def _collected_output(self, document: dict[str, object]) -> CollectedOutput:
         """Single shared emission boundary for canonical validation."""
+        violations = validate_document(COLLECTED_OUTPUT_SCHEMA, document)
+        if violations:
+            raise self.error_type("output-invalid", violations[0])
         return CollectedOutput(document)
+
+    async def _output_extensions(self) -> dict[str, object]:
+        """Family-specific fields merged before validation and churn commit."""
+        return {}
 
     def _churn(
         self, previous: dict[str, Sample], current: dict[str, Sample]
