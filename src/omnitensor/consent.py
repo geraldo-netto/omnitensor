@@ -43,17 +43,15 @@ import sys
 import time
 from pathlib import Path
 
+from .plugins.discovery import discover_plugin_metadata
 from .plugins.grants import (
     GrantError,
     GrantLedger,
     GrantOrigin,
     GrantProvenance,
 )
-from .plugins.loading import (
-    discover_plugin_metadata,
-    resolve_plugin_compatibility,
-    resolve_plugin_identities,
-)
+from .plugins.identity import resolve_plugin_identities
+from .plugins.manifest_compatibility import resolve_plugin_compatibility
 from .registry import bundled_workloads_path
 from .service import DEFAULT_GRANTS_PATH
 

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import json as json
 import os
-import re
+import re as re
 import shutil
-import stat
+import stat as stat
 import sys
-import tempfile
+import tempfile as tempfile
 import time
-from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Collection as Collection
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -20,34 +21,71 @@ from typing import Protocol, runtime_checkable
 import jsonschema
 
 from ..job_ports import JobDispatchError
-from .artifacts import ArtifactReference, ArtifactResolution
+from . import loading_accelerator as _accelerator
+from . import loading_staging as _staging
+from . import worker_specs as _specs
+from .artifacts import ArtifactReference as _ArtifactReference
+from .artifacts import ArtifactResolution as _ArtifactResolution
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
 from .protocol import PluginProgress, PluginRequest, PluginResultStatus
-from .sandbox import SELECTED_FILES_PERMISSION, FilesystemSandbox
+from .sandbox import SELECTED_FILES_PERMISSION
+from .sandbox import FilesystemSandbox as FilesystemSandbox
 from .supervisor import (
     PluginWorkerError,
     PluginWorkerSupervisor,
-    WorkerSpec,
     WorkerState,
     WorkerStatus,
 )
-
-MAX_WORKER_IMPORT_PATHS = 16
-WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
-MAX_SELECTED_SOURCES = 32
-MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024
-_STAGING_COMPONENT = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_ACCELERATOR_PERMISSIONS = frozenset({"accelerator:gpu", "accelerator:npu"})
-_VULKAN_METADATA_ROOTS = (
-    Path("/usr/share/vulkan"),
-    Path("/etc/vulkan"),
-    Path("/usr/share/libdrm"),
+from .supervisor import (
+    WorkerSpec as _WorkerSpec,
 )
-_TIMEZONE_METADATA_ROOT = Path("/usr/share/zoneinfo")
-_SYS_CHAR_ROOT = Path("/sys/dev/char")
-_SYS_DEVICES_ROOT = Path("/sys/devices")
+
+ArtifactReference = _ArtifactReference
+ArtifactResolution = _ArtifactResolution
+WorkerSpec = _WorkerSpec
+
+MAX_WORKER_IMPORT_PATHS = _specs.MAX_WORKER_IMPORT_PATHS
+WORKER_CAPABILITIES = _specs.WORKER_CAPABILITIES
+MAX_SELECTED_SOURCES = _staging.MAX_SELECTED_SOURCES
+MAX_SELECTED_SOURCE_BYTES = _staging.MAX_SELECTED_SOURCE_BYTES
+_STAGING_COMPONENT = _staging._STAGING_COMPONENT
+_ACCELERATOR_PERMISSIONS = _accelerator.ACCELERATOR_PERMISSIONS
+_VULKAN_METADATA_ROOTS = _accelerator.VULKAN_METADATA_ROOTS
+_TIMEZONE_METADATA_ROOT = _specs.TIMEZONE_METADATA_ROOT
+_SYS_CHAR_ROOT = _accelerator.SYS_CHAR_ROOT
+_SYS_DEVICES_ROOT = _accelerator.SYS_DEVICES_ROOT
+
+ArtifactProvider = _specs.ArtifactProvider
+external_worker_specs = _specs.external_worker_specs
+_external_worker_spec = _specs.external_worker_spec
+_worker_argv = _specs.worker_argv
+_artifact_bootstrap = _specs.artifact_bootstrap
+_artifact_paths = _specs.artifact_paths
+_prepare_selected_files_root = _staging.prepare_selected_files_root
+_prepare_worker_state_root = _specs.prepare_worker_state_root
+_plugin_state_path = _specs.plugin_state_path
+_accelerator_lease_path = _accelerator.accelerator_lease_path
+_resolved_artifacts = _specs.resolved_artifacts
+_accelerator_paths = _accelerator.accelerator_paths
+_vulkan_sysfs_resources = _accelerator.vulkan_sysfs_resources
+_staged_source_name = _staging.staged_source_name
+_canonical_selected_source = _staging.canonical_selected_source
+_open_selected_source = _staging.open_selected_source
+_selected_source_changed = _staging.selected_source_changed
+entry_points_from_distributions = _specs.entry_points_from_distributions
+_executable = _specs.executable_path
+_import_paths = _specs.worker_import_paths_tuple
+_trusted_runtime_paths = _specs.trusted_runtime_paths
+
+
+async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
+    try:
+        _worker_payload, abandoned = await asyncio.shield(staging)
+    except BaseException:
+        return
+    await asyncio.to_thread(shutil.rmtree, abandoned, True)
 
 
 class PermissionGrantSource(Protocol):
@@ -70,10 +108,6 @@ class WorkerRevoker(Protocol):
     """Optional supervisor capability for stopping one compromised worker."""
 
     async def revoke(self, plugin_id: str, detail: str) -> None: ...
-
-
-class ArtifactProvider(Protocol):
-    def __call__(self, reference: ArtifactReference) -> ArtifactResolution: ...
 
 
 class _DenyAllGrants:
@@ -164,9 +198,7 @@ class InstalledPluginRuntime:
         try:
             schema = plugin.manifest["plugin"]["schemas"]["input"]
             jsonschema.Draft202012Validator.check_schema(schema)
-            violations = tuple(
-                jsonschema.Draft202012Validator(schema).iter_errors(payload)
-            )
+            violations = tuple(jsonschema.Draft202012Validator(schema).iter_errors(payload))
         except jsonschema.SchemaError as error:
             raise JobDispatchError(
                 "plugin-contract-invalid", "Plugin input schema is invalid"
@@ -190,20 +222,7 @@ class InstalledPluginRuntime:
         return self._dispatch(job_id, plugin_id, payload)
 
     async def _dispatch(self, job_id: str, plugin_id: str, payload: dict) -> dict:
-        worker_payload = dict(payload)
-        staged: Path | None = None
-        if SELECTED_FILES_PERMISSION in self.granted_permissions(plugin_id):
-            if self._selected_files_root is None:
-                raise PluginWorkerError(
-                    "selected-files-unavailable", "selected-file broker is not configured"
-                )
-            worker_payload, staged = await asyncio.to_thread(
-                _stage_selected_sources,
-                self._selected_files_root,
-                plugin_id,
-                job_id,
-                payload,
-            )
+        worker_payload, staged = await self._stage_payload(job_id, plugin_id, payload)
         try:
             result = await self._execute_with_live_grants(
                 PluginRequest(job_id, plugin_id, "manual", worker_payload, self._clock_ms(), None)
@@ -216,6 +235,36 @@ class InstalledPluginRuntime:
         if result.status is PluginResultStatus.CANCELLED:
             raise asyncio.CancelledError(result.detail)
         raise PluginWorkerError("plugin-failed", result.detail or "plugin request failed")
+
+    async def _stage_payload(
+        self, job_id: str, plugin_id: str, payload: dict
+    ) -> tuple[dict, Path | None]:
+        if SELECTED_FILES_PERMISSION not in self.granted_permissions(plugin_id):
+            return dict(payload), None
+        if self._selected_files_root is None:
+            raise PluginWorkerError(
+                "selected-files-unavailable", "selected-file broker is not configured"
+            )
+        staging = asyncio.create_task(
+            asyncio.to_thread(
+                _stage_selected_sources,
+                self._selected_files_root,
+                plugin_id,
+                job_id,
+                payload,
+            )
+        )
+        try:
+            return await asyncio.shield(staging)
+        except BaseException:
+            cleanup = asyncio.create_task(_cleanup_abandoned_staging(staging))
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+            await cleanup
+            raise
 
     async def _execute_with_live_grants(self, request: PluginRequest):
         execution = asyncio.create_task(
@@ -271,9 +320,7 @@ class InstalledPluginRuntime:
         except asyncio.CancelledError:
             return
 
-    def _current_permissions(
-        self, plugin_id: str, declared: set[str]
-    ) -> frozenset[str]:
+    def _current_permissions(self, plugin_id: str, declared: set[str]) -> frozenset[str]:
         if isinstance(self._grant_source, _DenyAllGrants):
             return self.granted_permissions(plugin_id)
         if isinstance(self._grant_source, ReloadablePermissionGrantSource):
@@ -304,14 +351,7 @@ class InstalledPluginRuntime:
             for plugin in catalog.plugins
             if plugin.source is PluginSource.EXTERNAL
         }
-        # Retained rather than discarded after launch: the inventory reports
-        # what each plugin was granted, and recomputing it there would let the
-        # answer drift from what the workers actually run with.
         self._granted = dict(granted_permissions)
-        # Publish the accepted identities before worker statuses can become
-        # observable.  The supervisor records STARTING synchronously during
-        # ``start``; without this assignment, a concurrent inventory read can
-        # pair new worker states with the previous (often empty) catalog.
         self._snapshot = InstalledPluginSnapshot(catalog, ())
         self._revoked_workers.clear()
         spec_options = {
@@ -349,325 +389,20 @@ class InstalledPluginRuntime:
         return workers
 
 
-def external_worker_specs(
-    plugins: Sequence[ResolvedPlugin],
-    *,
-    python_executable: str | Path = sys.executable,
-    worker_import_paths: Sequence[Path] = (),
-    granted_permissions: Mapping[str, Collection[str]] | None = None,
-    selected_files_root: Path | None = None,
-    worker_state_root: Path | None = None,
-    resolve_artifact: ArtifactProvider | None = None,
-    accelerator_devices: Mapping[str, Path] | None = None,
-) -> tuple[WorkerSpec, ...]:
-    """Build deterministic argv without importing plugin code in the service."""
-    executable = _executable(python_executable)
-    import_paths = _import_paths(worker_import_paths)
-    permissions_by_plugin = granted_permissions or {}
-    device_map = dict(accelerator_devices or {})
-    return tuple(
-        _external_worker_spec(
-            plugin,
-            executable=executable,
-            import_paths=import_paths,
-            granted=frozenset(permissions_by_plugin.get(plugin.plugin_id, ())),
-            selected_files_root=selected_files_root,
-            worker_state_root=worker_state_root,
-            resolve_artifact=resolve_artifact,
-            accelerator_devices=device_map,
-        )
-        for plugin in plugins
-        if plugin.source is PluginSource.EXTERNAL
-    )
-
-
-def _external_worker_spec(
-    plugin: ResolvedPlugin,
-    *,
-    executable: str,
-    import_paths: tuple[str, ...],
-    granted: frozenset[str],
-    selected_files_root: Path | None,
-    worker_state_root: Path | None,
-    resolve_artifact: ArtifactProvider | None,
-    accelerator_devices: Mapping[str, Path],
-) -> WorkerSpec:
-    protocol = plugin.manifest["plugin"]["protocol"]
-    declared = frozenset(plugin.manifest["plugin"]["permissions"])
-    argv = _worker_argv(plugin, executable, import_paths, granted)
-    resolved_artifacts = _resolved_artifacts(plugin, resolve_artifact)
-    for reference, resolution in resolved_artifacts:
-        argv.extend(("--artifact", _artifact_bootstrap(reference, resolution)))
-    state_path = _plugin_state_path(worker_state_root, plugin.plugin_id)
-    if state_path is not None:
-        argv.extend(("--state-path", str(state_path)))
-    accelerator_paths = _accelerator_paths(declared, granted, accelerator_devices)
-    lease_path = _accelerator_lease_path(worker_state_root, declared, granted)
-    if lease_path is not None:
-        argv.extend(("--accelerator-lease-path", str(lease_path)))
-    runtime_paths = [
-        *_trusted_runtime_paths(import_paths),
-        *(
-            (_TIMEZONE_METADATA_ROOT,)
-            if _TIMEZONE_METADATA_ROOT.is_dir()
-            else ()
-        ),
-        *(
-            path
-            for reference, resolution in resolved_artifacts
-            for path in _artifact_paths(reference, resolution)
-        ),
-    ]
-    sysfs_paths: tuple[Path, ...] = ()
-    sysfs_links: tuple[tuple[str, Path], ...] = ()
-    if accelerator_paths:
-        runtime_paths.extend(path for path in _VULKAN_METADATA_ROOTS if path.is_dir())
-        sysfs_paths, sysfs_links = _vulkan_sysfs_resources(accelerator_paths)
-        runtime_paths.extend(sysfs_paths)
-    return WorkerSpec(
-        plugin.plugin_id,
-        tuple(argv),
-        minimum_protocol=protocol["minimum"],
-        maximum_protocol=protocol["maximum"],
-        capabilities=frozenset(protocol.get("capabilities", ())) & WORKER_CAPABILITIES,
-        sandbox=FilesystemSandbox.from_permissions(
-            declared,
-            granted,
-            runtime_paths=runtime_paths,
-            trusted_write_paths=tuple(
-                path for path in (state_path, lease_path) if path is not None
-            ),
-            accelerator_devices=accelerator_paths,
-            trusted_symlinks=sysfs_links,
-            python_path=Path(__file__).resolve().parents[2],
-            selected_files_root=selected_files_root,
-        ),
-    )
-
-
-def _worker_argv(
-    plugin: ResolvedPlugin,
-    executable: str,
-    import_paths: tuple[str, ...],
-    granted: frozenset[str],
-) -> list[str]:
-    argv = [
-        executable,
-        "-m",
-        "omnitensor.plugins.worker",
-        "--plugin-id",
-        plugin.plugin_id,
-        "--entry-point",
-        plugin.entry_point_name,
-        "--target",
-        plugin.entry_point_value,
-        "--distribution",
-        plugin.distribution_name,
-    ]
-    for path in import_paths:
-        argv.extend(("--import-path", path))
-    for permission in sorted(granted):
-        argv.extend(("--permission", permission))
-    return argv
-
-
-def _artifact_bootstrap(
-    reference: ArtifactReference,
-    resolution: ArtifactResolution,
-) -> str:
-    return json.dumps(
-        {
-            "id": reference.id,
-            "version": reference.version,
-            "format": reference.format,
-            "sha256": reference.sha256,
-            "companions": reference.declared_companions,
-            "path": str(resolution.path),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def _artifact_paths(
-    reference: ArtifactReference,
-    resolution: ArtifactResolution,
-) -> tuple[Path, ...]:
-    paths = [resolution.path]
-    paths.extend(resolution.path.parent / name for name in reference.declared_companions)
-    if any(not path.is_file() for path in paths):
-        raise ValueError("resolved plugin artifact companions are unavailable")
-    return tuple(paths)
-
-
-def _prepare_selected_files_root(root: Path | None) -> Path | None:
-    if root is None:
-        return None
-    candidate = Path(root)
-    if not candidate.is_absolute():
-        raise ValueError("selected_files_root must be absolute")
-    candidate.mkdir(parents=True, exist_ok=True)
-    candidate.chmod(0o700)
-    return candidate.resolve()
-
-
-def _prepare_worker_state_root(root: Path | None) -> Path | None:
-    if root is None:
-        return None
-    candidate = Path(root)
-    if not candidate.is_absolute():
-        raise ValueError("worker_state_root must be absolute")
-    candidate.mkdir(parents=True, exist_ok=True, mode=0o700)
-    candidate.chmod(0o700)
-    return candidate.resolve()
-
-
-def _plugin_state_path(root: Path | None, plugin_id: str) -> Path | None:
-    if root is None:
-        return None
-    if _STAGING_COMPONENT.fullmatch(plugin_id) is None:
-        raise ValueError("plugin identity is invalid for state storage")
-    path = root / plugin_id
-    path.mkdir(exist_ok=True)
-    path.chmod(0o700)
-    return path.resolve()
-
-
-def _accelerator_lease_path(
-    root: Path | None,
-    declared: frozenset[str],
-    granted: frozenset[str],
-) -> Path | None:
-    permissions = sorted(_ACCELERATOR_PERMISSIONS & declared & granted)
-    if root is None or not permissions:
-        return None
-    if len(permissions) != 1:
-        raise ValueError("a plugin worker must use exactly one accelerator lease")
-    accelerator = permissions[0].partition(":")[2]
-    path = root / f"_accelerator-{accelerator}.lock"
-    path.touch(exist_ok=True)
-    path.chmod(0o600)
-    return path.resolve()
-
-
-def _resolved_artifacts(
-    plugin: ResolvedPlugin,
-    resolver: ArtifactProvider | None,
-) -> tuple[tuple[ArtifactReference, ArtifactResolution], ...]:
-    resolved = []
-    for declared in plugin.manifest["plugin"]["artifacts"]:
-        reference = ArtifactReference(
-            declared["id"],
-            declared["version"],
-            declared["format"],
-            declared["sha256"],
-            tuple(sorted((declared.get("companions") or {}).items())),
-        )
-        resolution = (
-            resolver(reference)
-            if resolver is not None
-            else ArtifactResolution(False, None, "no artifact resolver is configured", 0)
-        )
-        if not resolution.ready or resolution.path is None:
-            continue
-        resolved.append((reference, resolution))
-    return tuple(resolved)
-
-
-def _accelerator_paths(
-    declared: frozenset[str],
-    granted: frozenset[str],
-    devices: Mapping[str, Path],
-) -> tuple[Path, ...]:
-    paths = []
-    for permission in sorted(_ACCELERATOR_PERMISSIONS & declared & granted):
-        accelerator = permission.partition(":")[2]
-        path = devices.get(accelerator)
-        if path is not None and path.exists():
-            paths.append(path)
-    return tuple(paths)
-
-
-def _vulkan_sysfs_resources(
-    devices: Sequence[Path],
-    *,
-    char_root: Path = _SYS_CHAR_ROOT,
-    devices_root: Path = _SYS_DEVICES_ROOT,
-) -> tuple[tuple[Path, ...], tuple[tuple[str, Path], ...]]:
-    """Expose only the selected DRM device identity needed by libdrm.
-
-    A render node alone is sufficient for inference, but libdrm discovers it
-    through ``/sys/dev/char`` before RADV opens the node.  The character-device
-    index contains only symlinks; mounting the resolved subtree separately
-    keeps every other host device's sysfs data outside the worker.
-    """
-    identities: list[Path] = []
-    links: list[tuple[str, Path]] = []
-    canonical_devices_root = devices_root.resolve()
-    for device in devices:
-        if device.parent != Path("/dev/dri") or not device.name.startswith("renderD"):
-            continue
-        status = device.stat()
-        node_id = f"{os.major(status.st_rdev)}:{os.minor(status.st_rdev)}"
-        candidate = char_root / node_id
-        try:
-            source = os.readlink(candidate)
-            render_identity = candidate.resolve(strict=True)
-            identity = (render_identity / "device").resolve(strict=True)
-        except OSError:
-            continue
-        if (
-            Path(source).is_absolute()
-            or render_identity.name != device.name
-            or not render_identity.is_relative_to(identity)
-            or not identity.is_relative_to(canonical_devices_root)
-        ):
-            continue
-        try:
-            if (render_identity / "dev").read_text(encoding="ascii").strip() != node_id:
-                continue
-        except (OSError, UnicodeError):
-            continue
-        identities.append(identity)
-        links.append((source, Path("/sys/dev/char") / node_id))
-    return tuple(dict.fromkeys(identities)), tuple(dict.fromkeys(links))
-
-
 def _stage_selected_sources(
     root: Path,
     plugin_id: str,
     job_id: str,
     payload: Mapping[str, object],
 ) -> tuple[dict, Path]:
-    sources = payload.get("sources")
-    if (
-        not isinstance(sources, list)
-        or not 1 <= len(sources) <= MAX_SELECTED_SOURCES
-        or not all(isinstance(source, str) and source for source in sources)
-    ):
-        raise PluginWorkerError(
-            "selected-files-invalid", "sources must name 1-32 selected files"
-        )
-    if (
-        _STAGING_COMPONENT.fullmatch(plugin_id) is None
-        or _STAGING_COMPONENT.fullmatch(job_id) is None
-    ):
-        raise PluginWorkerError("selected-files-invalid", "request identity is invalid")
-    plugin_root = root / plugin_id
-    plugin_root.mkdir(mode=0o700, exist_ok=True)
-    staged = Path(tempfile.mkdtemp(prefix=f"{job_id}-", dir=plugin_root))
-    observed: set[tuple[int, int]] = set()
-    try:
-        staged_sources = [
-            str(_copy_selected_source(source, staged, index, observed))
-            for index, source in enumerate(sources)
-        ]
-    except Exception:
-        shutil.rmtree(staged, ignore_errors=True)
-        raise
-    rewritten = dict(payload)
-    rewritten["sources"] = staged_sources
-    return rewritten, staged
+    return _staging.stage_selected_sources(
+        root,
+        plugin_id,
+        job_id,
+        payload,
+        copier=_copy_selected_source,
+        maximum_sources=MAX_SELECTED_SOURCES,
+    )
 
 
 def _copy_selected_source(
@@ -676,89 +411,20 @@ def _copy_selected_source(
     index: int,
     observed: set[tuple[int, int]],
 ) -> Path:
-    candidate = Path(source)
-    resolved = _canonical_selected_source(candidate)
-    descriptor = _open_selected_source(resolved)
-    destination = staged / f"{index:02d}" / _staged_source_name(candidate)
-    try:
-        with os.fdopen(descriptor, "rb") as reader:
-            before = os.fstat(reader.fileno())
-            identity = (before.st_dev, before.st_ino)
-            _validate_selected_source_stat(before)
-            if identity in observed:
-                raise PluginWorkerError(
-                    "selected-file-invalid", "the same selected file appears more than once"
-                )
-            observed.add(identity)
-            destination.parent.mkdir(mode=0o700)
-            with destination.open("xb") as writer:
-                shutil.copyfileobj(reader, writer, length=1024 * 1024)
-            after = os.fstat(reader.fileno())
-            if _selected_source_changed(before, after, destination):
-                raise PluginWorkerError(
-                    "selected-file-changed", "selected source changed while it was copied"
-                )
-    except OSError as error:
-        raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be copied"
-        ) from error
-    return destination
-
-
-def _staged_source_name(candidate: Path) -> str:
-    """Keep a safe selected basename without allowing staging-path control."""
-    name = candidate.name
-    if name and len(name) <= 255 and "/" not in name and "\\" not in name:
-        return name
-    suffix = candidate.suffix.lower()
-    if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
-        suffix = ".bin"
-    return f"selected-file{suffix}"
-
-
-def _canonical_selected_source(candidate: Path) -> Path:
-    try:
-        resolved = candidate.resolve(strict=True)
-    except (OSError, RuntimeError) as error:
-        raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be opened"
-        ) from error
-    if not candidate.is_absolute() or resolved != candidate:
-        raise PluginWorkerError(
-            "selected-file-invalid", "selected source must be a canonical absolute path"
-        )
-    return resolved
-
-
-def _open_selected_source(candidate: Path) -> int:
-    try:
-        return os.open(candidate, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    except OSError as error:
-        raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be opened"
-        ) from error
+    return _staging.copy_selected_source(
+        source,
+        staged,
+        index,
+        observed,
+        change_detector=_selected_source_changed,
+        maximum_bytes=MAX_SELECTED_SOURCE_BYTES,
+    )
 
 
 def _validate_selected_source_stat(status: os.stat_result) -> None:
-    if (
-        not stat.S_ISREG(status.st_mode)
-        or not 0 < status.st_size <= MAX_SELECTED_SOURCE_BYTES
-    ):
-        raise PluginWorkerError(
-            "selected-file-invalid", "selected source must be a bounded regular file"
-        )
-
-
-def _selected_source_changed(
-    before: os.stat_result,
-    after: os.stat_result,
-    destination: Path,
-) -> bool:
-    return (
-        (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
-        or after.st_size != before.st_size
-        or after.st_mtime_ns != before.st_mtime_ns
-        or destination.stat().st_size != before.st_size
+    _staging.validate_selected_source_stat(
+        status,
+        maximum_bytes=MAX_SELECTED_SOURCE_BYTES,
     )
 
 
@@ -769,50 +435,3 @@ class _ProgressSink:
     async def report(self, progress: PluginProgress) -> None:
         if self._sink is not None:
             self._sink(progress)
-
-
-def entry_points_from_distributions(paths: Sequence[Path]) -> Callable[..., tuple]:
-    """Create a metadata provider for an isolated installation root."""
-    roots = _import_paths(paths)
-
-    def provider(**selection) -> tuple:
-        group = selection.get("group")
-        entries = (
-            entry_point
-            for distribution in metadata.distributions(path=list(roots))
-            for entry_point in distribution.entry_points
-        )
-        if group is not None:
-            entries = (entry_point for entry_point in entries if entry_point.group == group)
-        return tuple(entries)
-
-    return provider
-
-
-def _executable(value: str | Path) -> str:
-    executable = str(value)
-    if not executable or "\0" in executable:
-        raise ValueError("python_executable must be a non-empty path")
-    return executable
-
-
-def _import_paths(paths: Sequence[Path]) -> tuple[str, ...]:
-    if len(paths) > MAX_WORKER_IMPORT_PATHS:
-        raise ValueError(f"at most {MAX_WORKER_IMPORT_PATHS} worker import paths are allowed")
-    resolved = []
-    for path in paths:
-        candidate = Path(path)
-        if not candidate.is_absolute() or not candidate.is_dir():
-            raise ValueError("worker import paths must be absolute directories")
-        resolved.append(str(candidate.resolve()))
-    if len(set(resolved)) != len(resolved):
-        raise ValueError("worker import paths must be unique")
-    return tuple(resolved)
-
-
-def _trusted_runtime_paths(import_paths: Sequence[str]) -> tuple[Path | str, ...]:
-    return (
-        Path(sys.prefix),
-        Path(__file__).resolve().parents[2],
-        *import_paths,
-    )
