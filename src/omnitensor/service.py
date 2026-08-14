@@ -470,7 +470,7 @@ class OmniTensorService:
                         "No accelerator devices present; retracted the runtime snapshot"
                         " so readers observe absence instead of stale data",
                     )
-            except OSError:
+            except (OSError, ValueError):
                 LOGGER.exception("Could not publish the runtime snapshot; retrying next tick")
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=self._publish_interval_s)

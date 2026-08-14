@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +28,7 @@ from omnitensor.callers import CallerIdentityResolver
 from omnitensor.composition import (
     ServiceEnvironment,
     _env_accelerator_device_ids,
+    _env_input_roots,
     _env_path,
     _env_paths,
     build_service_from_env,
@@ -636,6 +638,18 @@ def test_environment_composition_passes_exact_options_to_the_service_factory(tmp
     assert calls[0]["accelerator_device_ids"] == {"gpu": "gpu-renderD130"}
 
 
+def test_input_root_environment_deduplicates_and_refuses_unpublishable_sets(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    repeated = os.pathsep.join((str(first), str(second), str(first)))
+
+    assert _env_input_roots({"OMNITENSOR_INPUT_ROOTS": repeated}) == (first, second)
+
+    excessive = os.pathsep.join(str(tmp_path / f"root-{index}") for index in range(9))
+    with pytest.raises(ValueError, match="at most 8"):
+        ServiceEnvironment.read({"OMNITENSOR_INPUT_ROOTS": excessive})
+
+
 def test_environment_composition_uses_the_public_service_by_default(tmp_path):
     environment = {
         "OMNITENSOR_STATE_PATH": str(tmp_path / "state.json"),
@@ -739,6 +753,13 @@ def test_input_root_environment_round_trips_each_non_empty_segment(roots):
     raw = ":".join(roots)
 
     assert _env_paths("ROOTS", {"ROOTS": raw}) == tuple(Path(root) for root in roots)
+    expected = tuple(dict.fromkeys(Path(root) for root in roots))
+    environment = {"OMNITENSOR_INPUT_ROOTS": raw}
+    if len(expected) > 8:
+        with pytest.raises(ValueError, match="at most 8"):
+            _env_input_roots(environment)
+    else:
+        assert _env_input_roots(environment) == expected
 
 
 def test_service_module_is_only_the_compatibility_surface_for_host_implementations():

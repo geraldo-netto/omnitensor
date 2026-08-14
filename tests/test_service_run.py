@@ -1312,6 +1312,45 @@ def test_publisher_survives_an_io_failure_and_retries_next_tick(tmp_path, caplog
     assert "Could not publish the runtime snapshot" in caplog.text
 
 
+def test_publisher_survives_an_invalid_snapshot_and_retries_next_tick(tmp_path, caplog):
+    publisher = FakePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            publish_interval_s=0.001,
+        )
+        build = service._build_runtime_snapshot
+        attempts = 0
+
+        def intermittent_snapshot():
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise ValueError("snapshot violates contract")
+            return build()
+
+        service._build_runtime_snapshot = intermittent_snapshot
+        task = asyncio.create_task(service._publisher())
+        for _ in range(500):
+            if publisher.published:
+                break
+            await asyncio.sleep(0.001)
+        assert task.done() is False
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=2)
+        return attempts
+
+    with caplog.at_level("ERROR"):
+        attempts = asyncio.run(scenario())
+
+    assert attempts >= 3
+    assert len(publisher.published) == 1
+    assert "Could not publish the runtime snapshot" in caplog.text
+
+
 def test_publisher_survives_an_io_failure_while_retracting(tmp_path, caplog):
     class UnretractablePublisher(FakePublisher):
         def retract(self) -> None:

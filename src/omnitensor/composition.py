@@ -9,6 +9,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
+
 DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
 DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
 DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
@@ -34,6 +36,16 @@ def _env_paths(
     source = os.environ if environ is None else environ
     raw = source.get(name, "")
     return tuple(Path(part).expanduser() for part in raw.split(os.pathsep) if part)
+
+
+def _env_input_roots(environ: Mapping[str, str] | None = None) -> tuple[Path, ...]:
+    roots = tuple(dict.fromkeys(_env_paths("OMNITENSOR_INPUT_ROOTS", environ)))
+    if len(roots) > MAX_PUBLISHED_INPUT_ROOTS:
+        raise ValueError(
+            f"OMNITENSOR_INPUT_ROOTS contains {len(roots)} unique roots; "
+            f"at most {MAX_PUBLISHED_INPUT_ROOTS} are supported"
+        )
+    return roots
 
 
 def _env_accelerator_device_ids(
@@ -76,7 +88,7 @@ class ServiceEnvironment:
                 "OMNITENSOR_MODEL_BINDINGS", DEFAULT_MODEL_BINDINGS_PATH, environ
             ),
             grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH, environ),
-            input_roots=_env_paths("OMNITENSOR_INPUT_ROOTS", environ),
+            input_roots=_env_input_roots(environ),
             accelerator_device_ids=_env_accelerator_device_ids(environ),
         )
 
