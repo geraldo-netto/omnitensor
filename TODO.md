@@ -33,7 +33,6 @@ audit's dependency order without weakening the required status schema.
 | OMNI-0269 | open | low | s | — | Rename the canonical results module to `job_results.py` with a one-release compatibility shim and fold the small visual-results layer into visual indexing. |
 | OMNI-0270 | open | low | xs | — | Share one positive-bound parser between document and build ingestion without changing accepted values or errors. |
 | OMNI-0271 | open | low | s | — | Replace duplicate tensor-reference digest/finiteness readers with one chunked implementation parameterized by whether bytes are retained. |
-| OMNI-0272 | open | low | xs | — | Make selected-text acceptance collection import the canonical D-Bus bus name and object path rather than restating them. |
 | OMNI-0273 | open | high | l | OMNI-0258 | Split training CLI responsibilities into record, train, install, and forecast modules behind stable import paths and a table-driven trainer dispatcher; move the live D-Bus forecast client to its own module. |
 | OMNI-0274 | open | high | l | — | Split training recipes into model, validation/producer registry, URI policy, transport, fetch, and registry modules; replace the validation chain and raw schema-property indexing with registry accessors. |
 | OMNI-0275 | open | high | l | OMNI-0254, OMNI-0261 | Split document-model runners, export, gate, install, and CLI; reuse the Vulkan executor's device selector, label and guard the producer-only CPU reference runner, and use the recipe tensor contract as the sole truth. |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 from dataclasses import replace
@@ -24,6 +25,39 @@ from omnitensor.registry import validate_document, validate_workload_document
 
 ROOT = Path(__file__).parents[1]
 CORPUS = ROOT / "evaluation-corpora/selected-text-v1.json"
+
+
+def test_acceptance_collector_imports_canonical_dbus_coordinates():
+    source = (ROOT / "scripts/collect-selected-text-acceptance.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "omnitensor.dbus_transport"
+        for alias in node.names
+    }
+    rebound = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else (node.target,)
+        )
+        if isinstance(target, ast.Name)
+    }
+    copied_coordinates = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and node.value
+        in {"org.cinnamon.OmniTensor1", "/org/cinnamon/OmniTensor1"}
+    }
+
+    assert imports >= {"BUS_NAME", "OBJECT_PATH"}
+    assert rebound.isdisjoint({"BUS_NAME", "OBJECT_PATH"})
+    assert copied_coordinates == set()
 
 
 def _model(digest: str, layers: int):

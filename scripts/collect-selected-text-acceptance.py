@@ -14,6 +14,7 @@ from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
 
 from omnitensor.atomicio import write_json_atomic
+from omnitensor.dbus_transport import BUS_NAME, OBJECT_PATH
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
     QWEN_MODEL_SHA256,
@@ -21,8 +22,6 @@ from omnitensor.plugins.selected_text_acceptance import (
 )
 from omnitensor.preparation import file_digest
 
-BUS_NAME = "org.cinnamon.OmniTensor1"
-OBJECT_PATH = "/org/cinnamon/OmniTensor1"
 DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 
 
