@@ -58,6 +58,27 @@ from omnitensor.ports import (
     RuntimeHandler,
 )
 
+MUTMUT_TRAMPOLINE_MODULE = "mutmut.mutation.trampoline"
+MUTMUT_MAIN_WRAPPER_PREFIX = "x_main__mutmut_"
+
+
+def _top_level_service_owners(source: str) -> set[str]:
+    tree = ast.parse(source)
+    owners = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    mutmut_instrumented = any(
+        isinstance(node, ast.ImportFrom) and node.module == MUTMUT_TRAMPOLINE_MODULE
+        for node in tree.body
+    )
+    if mutmut_instrumented:
+        owners = {
+            name for name in owners if not name.startswith(MUTMUT_MAIN_WRAPPER_PREFIX)
+        }
+    return owners
+
 
 def test_service_public_facade_preserves_extracted_object_identity():
     assert service.RuntimeAPI is runtime_api.RuntimeAPI
@@ -89,12 +110,36 @@ def test_service_drops_only_private_compatibility_owners():
     ):
         assert not hasattr(service, name)
 
-    owned = {
-        node.name
-        for node in ast.parse(Path(service.__file__).read_text(encoding="utf-8")).body
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    owned = _top_level_service_owners(
+        Path(service.__file__).read_text(encoding="utf-8")
+    )
     assert owned == {"OmniTensorService", "main"}
+
+
+def test_service_owner_check_ignores_only_instrumented_main_wrappers():
+    instrumented = f"""
+from {MUTMUT_TRAMPOLINE_MODULE} import wrap_in_trampoline
+class OmniTensorService:
+    pass
+def main():
+    pass
+def x_main__mutmut_orig():
+    pass
+def x_main__mutmut_1():
+    pass
+def x_unexpected__mutmut_1():
+    pass
+"""
+    uninstrumented = instrumented.replace(
+        f"from {MUTMUT_TRAMPOLINE_MODULE} import wrap_in_trampoline\n", ""
+    )
+
+    assert _top_level_service_owners(instrumented) == {
+        "OmniTensorService",
+        "main",
+        "x_unexpected__mutmut_1",
+    }
+    assert "x_main__mutmut_orig" in _top_level_service_owners(uninstrumented)
 
 
 def test_extracted_service_owners_have_no_static_service_backedge():
