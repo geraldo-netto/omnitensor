@@ -6,6 +6,8 @@ import math
 import struct
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.index import (
     MAX_ATTRIBUTE_LENGTH,
@@ -17,9 +19,15 @@ from omnitensor.plugins.index import (
     ModelIdentity,
     decode_embedding,
     encode_embedding,
+    ingested_entry,
+    integer_attribute_error,
+    prefixed_entry_error,
+    prefixed_entry_id,
+    unsupported_attributes_error,
     validated_attributes,
     validated_tags,
 )
+from omnitensor.plugins.ingestion import IngestedFile
 
 MODEL = ModelIdentity("clip-small", "a" * 64, 4)
 
@@ -40,6 +48,105 @@ def entry(entry_id="e-1", **changes):
 
 def store(tmp_path, model=MODEL, **bounds):
     return BoundedIndexStore(tmp_path, "test.index.json", model, **bounds)
+
+
+@given(digest=st.text(min_size=64, max_size=64))
+def test_prefixed_entry_identity_preserves_any_64_character_digest(digest):
+    assert prefixed_entry_id(digest, "family-", "sample") == f"family-{digest}"
+
+
+@pytest.mark.parametrize("digest", [None, 7, "x" * 63, "x" * 65])
+def test_prefixed_entry_identity_preserves_exact_error_contract(digest):
+    with pytest.raises(IndexStoreError) as refusal:
+        prefixed_entry_id(digest, "family-", "sample")
+    assert refusal.value.code == "entry-invalid"
+    assert refusal.value.detail == "sample entry identity must be a sha256 digest"
+
+
+@pytest.mark.parametrize(("prefix", "family"), [("doc-", "document"), ("vis-", "visual")])
+def test_ingested_entry_is_shared_across_families_and_allows_caller_overrides(prefix, family):
+    item = IngestedFile("/owned/a.raw", 4096, 1234, ".raw", "not-hex".ljust(64, "!"))
+
+    result = ingested_entry(
+        item,
+        (1, 2),
+        ("b", "a", "a"),
+        {"sizeBytes": 7, "format": "caller"},
+        prefix=prefix,
+        family=family,
+    )
+
+    assert result.entry_id == f"{prefix}{item.digest}"
+    assert result.embedding == (1, 2)
+    assert result.tags == ("a", "b")
+    assert result.attributes == {"sizeBytes": 7, "format": "caller"}
+    assert result.updated_at_ms == 1234
+
+
+def test_ingested_entry_checks_the_source_before_constructing_attributes():
+    with pytest.raises(IndexStoreError, match="item must be an IngestedFile"):
+        ingested_entry(
+            object(),
+            (),
+            (),
+            object(),
+            prefix="doc-",
+            family="document",
+        )
+
+
+def test_prefixed_entry_policy_preserves_identity_then_slug_then_vocabulary_order():
+    candidate = entry("other", digest="d" * 64, tags=("Not Slug",))
+    options = {
+        "prefix": "doc-",
+        "family": "document",
+        "tag_name": "classification label",
+        "vocabulary": frozenset({"invoice"}),
+        "vocabulary_name": "declared set",
+    }
+    assert prefixed_entry_error(candidate, **options) == "document entry identity is invalid"
+    candidate = entry("doc-" + "a" * 64, digest="d" * 64, tags=("Not Slug",))
+    assert (
+        prefixed_entry_error(candidate, **options)
+        == "document entry identity must be derived from its digest"
+    )
+    candidate = entry("doc-" + "d" * 64, digest="d" * 64, tags=("Not Slug",))
+    assert (
+        prefixed_entry_error(candidate, **options)
+        == "classification label is not a slug: Not Slug"
+    )
+    candidate = entry("doc-" + "d" * 64, digest="d" * 64, tags=("contract",))
+    assert (
+        prefixed_entry_error(candidate, **options)
+        == "classification label is outside the declared set: contract"
+    )
+
+
+@given(value=st.integers(min_value=0, max_value=100))
+def test_integer_attribute_accepts_every_value_inside_inclusive_bounds(value):
+    assert integer_attribute_error({"count": value}, "count", 0, 100) == ""
+
+
+@pytest.mark.parametrize(
+    ("value", "detail"),
+    [
+        (None, ""),
+        (True, "count must be an integer"),
+        (1.5, "count must be an integer"),
+        (-1, "count is out of range"),
+        (101, "count is out of range"),
+    ],
+)
+def test_integer_attribute_preserves_optional_type_and_range_errors(value, detail):
+    assert integer_attribute_error({"count": value}, "count", 0, 100) == detail
+
+
+def test_unsupported_attributes_are_sorted_and_family_specific():
+    assert (
+        unsupported_attributes_error({"z": 1, "a": 2}, {"kept"}, "sample")
+        == "unsupported sample attributes: a, z"
+    )
+    assert unsupported_attributes_error({"kept": 1}, {"kept"}, "sample") == ""
 
 
 def test_an_absent_index_loads_empty_and_intact(tmp_path):

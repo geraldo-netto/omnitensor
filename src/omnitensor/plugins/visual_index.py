@@ -12,14 +12,17 @@ becoming a channel for image content.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 
 from .index import (
     BoundedIndexStore,
     IndexEntry,
-    IndexStoreError,
     ModelIdentity,
+    ingested_entry,
+    integer_attribute_error,
+    prefixed_entry_error,
+    prefixed_entry_id,
+    unsupported_attributes_error,
     validated_tags,
 )
 from .ingestion import IngestedFile
@@ -28,15 +31,12 @@ VISUAL_PLUGIN_ID = "visual-library"
 VISUAL_INDEX_NAME = "visual-library.index.json"
 VISUAL_INDEX_PERMISSION = "read:visual-library-index"
 MAX_PIXELS_PER_SIDE = 65_536
-_TAG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ALLOWED_ATTRIBUTES = frozenset({"width", "height", "format", "capturedAtMs", "sizeBytes"})
 
 
 def visual_entry_id(digest: str) -> str:
     """Content identity, so a move is an update rather than a churn event."""
-    if not isinstance(digest, str) or len(digest) != 64:
-        raise IndexStoreError("entry-invalid", "visual entry identity must be a sha256 digest")
-    return f"vis-{digest}"
+    return prefixed_entry_id(digest, "vis-", "visual")
 
 
 def visual_entry(
@@ -46,21 +46,13 @@ def visual_entry(
     attributes: Mapping[str, object] | None = None,
 ) -> IndexEntry:
     """Build an index entry from an ingested file and its computed vector."""
-    if not isinstance(item, IngestedFile):
-        raise IndexStoreError("entry-invalid", "item must be an IngestedFile")
-    merged = {
-        "sizeBytes": item.size_bytes,
-        "format": item.suffix.lstrip(".") or "unknown",
-        **dict(attributes or {}),
-    }
-    return IndexEntry(
-        visual_entry_id(item.digest),
-        item.digest,
-        item.path,
-        tuple(embedding),
-        validated_tags(tags),
-        merged,
-        item.modified_at_ms,
+    return ingested_entry(
+        item,
+        embedding,
+        tags,
+        attributes,
+        prefix="vis-",
+        family="visual",
     )
 
 
@@ -78,30 +70,23 @@ class VisualLibraryIndex(BoundedIndexStore):
         return self._vocabulary
 
     def entry_error(self, entry: IndexEntry) -> str:
-        if not entry.entry_id.startswith("vis-"):
-            return "visual entry identity is invalid"
-        if entry.entry_id != f"vis-{entry.digest}":
-            # Identity that is not derived from content lets two different
-            # images share an entry, or one image occupy two.
-            return "visual entry identity must be derived from its digest"
-        for tag in entry.tags:
-            if not _TAG.match(tag):
-                return f"tag is not a slug: {tag}"
-            if self._vocabulary and tag not in self._vocabulary:
-                return f"tag is outside the declared vocabulary: {tag}"
-        return _attribute_error(entry.attributes)
+        error = prefixed_entry_error(
+            entry,
+            prefix="vis-",
+            family="visual",
+            tag_name="tag",
+            vocabulary=self._vocabulary,
+            vocabulary_name="declared vocabulary",
+        )
+        return error or _attribute_error(entry.attributes)
 
 
 def _attribute_error(attributes: Mapping[str, object]) -> str:
-    unknown = set(attributes) - _ALLOWED_ATTRIBUTES
-    if unknown:
-        return f"unsupported visual attributes: {', '.join(sorted(unknown))}"
+    error = unsupported_attributes_error(attributes, _ALLOWED_ATTRIBUTES, "visual")
+    if error:
+        return error
     for name in ("width", "height"):
-        value = attributes.get(name)
-        if value is None:
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            return f"{name} must be an integer"
-        if not 0 < value <= MAX_PIXELS_PER_SIDE:
-            return f"{name} is out of range"
+        error = integer_attribute_error(attributes, name, 1, MAX_PIXELS_PER_SIDE)
+        if error:
+            return error
     return ""

@@ -21,8 +21,12 @@ from collections.abc import Mapping, Sequence
 from .index import (
     BoundedIndexStore,
     IndexEntry,
-    IndexStoreError,
     ModelIdentity,
+    ingested_entry,
+    integer_attribute_error,
+    prefixed_entry_error,
+    prefixed_entry_id,
+    unsupported_attributes_error,
     validated_tags,
 )
 from .ingestion import IngestedFile
@@ -32,7 +36,6 @@ DOCUMENT_INDEX_NAME = "document-intelligence.index.json"
 DOCUMENT_INDEX_PERMISSION = "read:document-intelligence-index"
 MAX_PAGES = 100_000
 MAX_WORDS = 100_000_000
-_LABEL = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _LANGUAGE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _ALLOWED_ATTRIBUTES = frozenset(
     {"sizeBytes", "format", "pageCount", "wordCount", "language", "createdAtMs"}
@@ -44,9 +47,7 @@ _CONTENT_ATTRIBUTES = frozenset(
 
 def document_entry_id(digest: str) -> str:
     """Content identity, so a renamed document keeps its place in the index."""
-    if not isinstance(digest, str) or len(digest) != 64:
-        raise IndexStoreError("entry-invalid", "document entry identity must be a sha256 digest")
-    return f"doc-{digest}"
+    return prefixed_entry_id(digest, "doc-", "document")
 
 
 def document_entry(
@@ -56,21 +57,13 @@ def document_entry(
     attributes: Mapping[str, object] | None = None,
 ) -> IndexEntry:
     """Build an index entry from an ingested document and its computed vector."""
-    if not isinstance(item, IngestedFile):
-        raise IndexStoreError("entry-invalid", "item must be an IngestedFile")
-    merged = {
-        "sizeBytes": item.size_bytes,
-        "format": item.suffix.lstrip(".") or "unknown",
-        **dict(attributes or {}),
-    }
-    return IndexEntry(
-        document_entry_id(item.digest),
-        item.digest,
-        item.path,
-        tuple(embedding),
-        validated_tags(labels),
-        merged,
-        item.modified_at_ms,
+    return ingested_entry(
+        item,
+        embedding,
+        labels,
+        attributes,
+        prefix="doc-",
+        family="document",
     )
 
 
@@ -88,16 +81,15 @@ class DocumentIntelligenceIndex(BoundedIndexStore):
         return self._labels
 
     def entry_error(self, entry: IndexEntry) -> str:
-        if not entry.entry_id.startswith("doc-"):
-            return "document entry identity is invalid"
-        if entry.entry_id != f"doc-{entry.digest}":
-            return "document entry identity must be derived from its digest"
-        for label in entry.tags:
-            if not _LABEL.match(label):
-                return f"classification label is not a slug: {label}"
-            if self._labels and label not in self._labels:
-                return f"classification label is outside the declared set: {label}"
-        return _attribute_error(entry.attributes)
+        error = prefixed_entry_error(
+            entry,
+            prefix="doc-",
+            family="document",
+            tag_name="classification label",
+            vocabulary=self._labels,
+            vocabulary_name="declared set",
+        )
+        return error or _attribute_error(entry.attributes)
 
 
 def _attribute_error(attributes: Mapping[str, object]) -> str:
@@ -106,21 +98,17 @@ def _attribute_error(attributes: Mapping[str, object]) -> str:
         # Truncating would not help: a snippet is still the document's text,
         # and it would outlive the document it was taken from.
         return f"the index must not carry document text: {', '.join(carried)}"
-    unknown = set(attributes) - _ALLOWED_ATTRIBUTES
-    if unknown:
-        return f"unsupported document attributes: {', '.join(sorted(unknown))}"
+    error = unsupported_attributes_error(attributes, _ALLOWED_ATTRIBUTES, "document")
+    if error:
+        return error
     return _count_error(attributes) or _language_error(attributes)
 
 
 def _count_error(attributes: Mapping[str, object]) -> str:
     for name, maximum in (("pageCount", MAX_PAGES), ("wordCount", MAX_WORDS)):
-        value = attributes.get(name)
-        if value is None:
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            return f"{name} must be an integer"
-        if not 0 <= value <= maximum:
-            return f"{name} is out of range"
+        error = integer_attribute_error(attributes, name, 0, maximum)
+        if error:
+            return error
     return ""
 
 

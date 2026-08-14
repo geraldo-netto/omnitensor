@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from omnitensor.plugins.index import IndexHealth, IndexStoreError, ModelIdentity
+from omnitensor.plugins.index import BoundedIndexStore, IndexHealth, IndexStoreError, ModelIdentity
 from omnitensor.plugins.ingestion import IngestedFile
 from omnitensor.plugins.visual_index import (
+    MAX_PIXELS_PER_SIDE,
+    VISUAL_INDEX_NAME,
     VisualLibraryIndex,
     visual_entry,
     visual_entry_id,
@@ -38,6 +40,12 @@ def test_an_ingested_image_becomes_an_indexable_entry():
     assert item.attributes["format"] == "png"
     assert item.attributes["sizeBytes"] == 2048
     assert item.updated_at_ms == 1_700_000_000_000
+
+
+def test_visual_entry_allows_the_caller_to_override_derived_size_and_format():
+    item = visual_entry(ingested(), VECTOR, attributes={"sizeBytes": 7, "format": "reviewed"})
+    assert item.attributes["sizeBytes"] == 7
+    assert item.attributes["format"] == "reviewed"
 
 
 def test_identity_follows_content_so_a_move_is_an_update(tmp_path):
@@ -85,6 +93,11 @@ def test_a_digest_that_is_not_a_digest_is_refused():
         visual_entry_id("short")
 
 
+def test_visual_identity_keeps_the_legacy_length_only_digest_contract():
+    digest = "not-hex".ljust(64, "!")
+    assert visual_entry_id(digest) == f"vis-{digest}"
+
+
 def test_a_tag_outside_the_declared_vocabulary_is_refused(tmp_path):
     """A classifier that can emit any string can emit the image's contents."""
     subject = index(tmp_path, vocabulary=("beach", "sunset"))
@@ -120,6 +133,32 @@ def test_an_unsupported_or_impossible_attribute_is_refused(tmp_path, attributes)
         index(tmp_path).upsert([visual_entry(ingested(), VECTOR, (), attributes)])
 
 
+@pytest.mark.parametrize(
+    ("attributes", "detail"),
+    [
+        ({"unknown": 1, "width": 0}, "unsupported visual attributes: unknown"),
+        ({"width": 0, "height": 0}, "width is out of range"),
+    ],
+)
+def test_visual_attribute_errors_keep_their_established_order(tmp_path, attributes, detail):
+    with pytest.raises(IndexStoreError) as refusal:
+        index(tmp_path).upsert([visual_entry(ingested(), VECTOR, (), attributes)])
+    assert refusal.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"width": 1},
+        {"width": MAX_PIXELS_PER_SIDE},
+        {"height": 1},
+        {"height": MAX_PIXELS_PER_SIDE},
+    ],
+)
+def test_visual_dimensions_accept_their_inclusive_boundaries(tmp_path, attributes):
+    assert index(tmp_path).upsert([visual_entry(ingested(), VECTOR, (), attributes)]).added == 1
+
+
 def test_a_non_ingested_file_is_refused():
     with pytest.raises(IndexStoreError, match="IngestedFile"):
         visual_entry({"path": "/home/u/a.png"}, VECTOR)
@@ -148,6 +187,15 @@ def test_the_index_survives_a_reload(tmp_path):
     assert state.health is IndexHealth.INTACT
     assert state.entries[0].tags == ("beach",)
     assert state.entries[0].attributes["width"] == 800
+
+
+def test_a_stored_entry_that_violates_visual_policy_recovers(tmp_path):
+    BoundedIndexStore(tmp_path, VISUAL_INDEX_NAME, MODEL).upsert(
+        [visual_entry(ingested(), VECTOR, (), {"width": 0})]
+    )
+    state = index(tmp_path).load()
+    assert state.health is IndexHealth.RECOVERED
+    assert state.entries == ()
 
 
 def test_a_new_model_invalidates_the_library(tmp_path):

@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import base64
 import math
+import re
 import struct
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -44,6 +45,7 @@ MAX_TAG_LENGTH = 64
 MAX_ATTRIBUTES = 32
 MAX_ATTRIBUTE_LENGTH = 512
 MAX_IDENTITY_LENGTH = 200
+_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class IndexHealth(StrEnum):
@@ -218,6 +220,91 @@ def validated_attributes(attributes: object) -> dict[str, object]:
             raise IndexStoreError("attributes-invalid", error)
         cleaned[key] = value
     return cleaned
+
+
+def prefixed_entry_id(digest: object, prefix: str, family: str) -> str:
+    """Return a family entry ID while preserving the established digest contract."""
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise IndexStoreError(
+            "entry-invalid", f"{family} entry identity must be a sha256 digest"
+        )
+    return f"{prefix}{digest}"
+
+
+def ingested_entry(
+    item: object,
+    embedding: Sequence[float],
+    tags: Sequence[str],
+    attributes: Mapping[str, object] | None,
+    *,
+    prefix: str,
+    family: str,
+) -> IndexEntry:
+    """Build a family-prefixed entry from one accepted file."""
+    from .ingestion import IngestedFile
+
+    if not isinstance(item, IngestedFile):
+        raise IndexStoreError("entry-invalid", "item must be an IngestedFile")
+    merged = {
+        "sizeBytes": item.size_bytes,
+        "format": item.suffix.lstrip(".") or "unknown",
+        **dict(attributes or {}),
+    }
+    return IndexEntry(
+        prefixed_entry_id(item.digest, prefix, family),
+        item.digest,
+        item.path,
+        tuple(embedding),
+        validated_tags(tags),
+        merged,
+        item.modified_at_ms,
+    )
+
+
+def prefixed_entry_error(
+    entry: IndexEntry,
+    *,
+    prefix: str,
+    family: str,
+    tag_name: str,
+    vocabulary: Collection[str],
+    vocabulary_name: str,
+) -> str:
+    """Return the first stable family identity or tag-policy error."""
+    if not entry.entry_id.startswith(prefix):
+        return f"{family} entry identity is invalid"
+    if entry.entry_id != f"{prefix}{entry.digest}":
+        return f"{family} entry identity must be derived from its digest"
+    for tag in entry.tags:
+        if _SLUG.match(tag) is None:
+            return f"{tag_name} is not a slug: {tag}"
+        if vocabulary and tag not in vocabulary:
+            return f"{tag_name} is outside the {vocabulary_name}: {tag}"
+    return ""
+
+
+def unsupported_attributes_error(
+    attributes: Mapping[str, object], allowed: Collection[str], family: str
+) -> str:
+    """Return the stable family error for the first unsupported attribute set."""
+    unknown = set(attributes) - set(allowed)
+    if unknown:
+        return f"unsupported {family} attributes: {', '.join(sorted(unknown))}"
+    return ""
+
+
+def integer_attribute_error(
+    attributes: Mapping[str, object], name: str, minimum: int, maximum: int
+) -> str:
+    """Validate one optional integer attribute against inclusive bounds."""
+    value = attributes.get(name)
+    if value is None:
+        return ""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return f"{name} must be an integer"
+    if not minimum <= value <= maximum:
+        return f"{name} is out of range"
+    return ""
 
 
 def _attribute_value_error(key: str, value: object) -> str:

@@ -5,11 +5,14 @@ import json
 import pytest
 
 from omnitensor.plugins.document_index import (
+    DOCUMENT_INDEX_NAME,
+    MAX_PAGES,
+    MAX_WORDS,
     DocumentIntelligenceIndex,
     document_entry,
     document_entry_id,
 )
-from omnitensor.plugins.index import IndexHealth, IndexStoreError, ModelIdentity
+from omnitensor.plugins.index import BoundedIndexStore, IndexHealth, IndexStoreError, ModelIdentity
 from omnitensor.plugins.ingestion import IngestedFile
 
 MODEL = ModelIdentity("minilm", "a" * 64, 4)
@@ -44,6 +47,14 @@ def test_an_ingested_document_becomes_an_indexable_entry():
     assert item.tags == ("invoice",)
 
 
+def test_document_entry_allows_the_caller_to_override_derived_size_and_format():
+    item = document_entry(
+        ingested(), VECTOR, attributes={"sizeBytes": 7, "format": "reviewed"}
+    )
+    assert item.attributes["sizeBytes"] == 7
+    assert item.attributes["format"] == "reviewed"
+
+
 @pytest.mark.parametrize(
     "attribute", ["text", "body", "snippet", "title", "content", "ocrText", "excerpt", "summary"]
 )
@@ -76,6 +87,18 @@ def test_an_unsupported_attribute_is_refused(tmp_path):
         index(tmp_path).upsert([document_entry(ingested(), VECTOR, (), {"authorEmail": "a@b"})])
 
 
+def test_forbidden_content_precedes_unknown_and_typed_attribute_errors(tmp_path):
+    item = document_entry(
+        ingested(),
+        VECTOR,
+        (),
+        {"text": "private", "authorEmail": "a@b", "pageCount": -1, "language": "english"},
+    )
+    with pytest.raises(IndexStoreError) as refusal:
+        index(tmp_path).upsert([item])
+    assert refusal.value.detail == "the index must not carry document text: text"
+
+
 def test_a_renamed_document_keeps_its_entry(tmp_path):
     subject = index(tmp_path)
     subject.upsert([document_entry(ingested("/home/u/docs/report.pdf"), VECTOR)])
@@ -100,6 +123,11 @@ def test_two_copies_of_one_document_are_one_entry(tmp_path):
 def test_a_digest_that_is_not_a_digest_is_refused():
     with pytest.raises(IndexStoreError, match="sha256"):
         document_entry_id("nope")
+
+
+def test_document_identity_keeps_the_legacy_length_only_digest_contract():
+    digest = "not-hex".ljust(64, "!")
+    assert document_entry_id(digest) == f"doc-{digest}"
 
 
 def test_an_identity_not_derived_from_content_is_refused(tmp_path):
@@ -148,11 +176,38 @@ def test_an_impossible_metadata_value_is_refused(tmp_path, attributes):
         index(tmp_path).upsert([document_entry(ingested(), VECTOR, (), attributes)])
 
 
+@pytest.mark.parametrize(
+    ("attributes", "detail"),
+    [
+        ({"unknown": 1, "pageCount": -1}, "unsupported document attributes: unknown"),
+        ({"pageCount": -1, "wordCount": -1}, "pageCount is out of range"),
+        ({"wordCount": -1, "language": "english"}, "wordCount is out of range"),
+    ],
+)
+def test_document_metadata_errors_keep_their_established_order(tmp_path, attributes, detail):
+    with pytest.raises(IndexStoreError) as refusal:
+        index(tmp_path).upsert([document_entry(ingested(), VECTOR, (), attributes)])
+    assert refusal.value.detail == detail
+
+
 @pytest.mark.parametrize("language", ["en", "pt-BR", "zh-Hans"])
 def test_a_well_formed_language_tag_is_accepted(tmp_path, language):
     assert index(tmp_path).upsert(
         [document_entry(ingested(), VECTOR, (), {"language": language})]
     ).added == 1
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"pageCount": 0},
+        {"pageCount": MAX_PAGES},
+        {"wordCount": 0},
+        {"wordCount": MAX_WORDS},
+    ],
+)
+def test_document_counts_accept_their_inclusive_boundaries(tmp_path, attributes):
+    assert index(tmp_path).upsert([document_entry(ingested(), VECTOR, (), attributes)]).added == 1
 
 
 def test_a_non_ingested_file_is_refused():
@@ -183,6 +238,15 @@ def test_the_index_survives_a_reload(tmp_path):
     assert state.health is IndexHealth.INTACT
     assert state.entries[0].tags == ("contract",)
     assert state.entries[0].attributes["pageCount"] == 12
+
+
+def test_a_stored_entry_that_violates_document_policy_recovers(tmp_path):
+    BoundedIndexStore(tmp_path, DOCUMENT_INDEX_NAME, MODEL).upsert(
+        [document_entry(ingested(), VECTOR, (), {"text": "must not survive"})]
+    )
+    state = index(tmp_path).load()
+    assert state.health is IndexHealth.RECOVERED
+    assert state.entries == ()
 
 
 def test_a_new_embedding_model_invalidates_the_index(tmp_path):
