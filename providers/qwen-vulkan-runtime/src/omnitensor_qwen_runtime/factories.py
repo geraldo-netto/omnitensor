@@ -29,7 +29,7 @@ from omnitensor.plugins.protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
-from omnitensor.plugins.qwen import LlamaCppVulkanQwenWorker
+from omnitensor.plugins.qwen_providers import LlamaCppVulkanQwenWorker
 from omnitensor.plugins.selected_text import SelectedTextPlugin, selected_text_task
 from omnitensor.plugins.selected_text_acceptance import (
     SELECTED_TEXT_WORKER_LOAD_RECEIPT,

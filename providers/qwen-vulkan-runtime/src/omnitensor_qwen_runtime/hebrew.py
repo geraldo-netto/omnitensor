@@ -6,9 +6,12 @@ import json
 import re
 from collections.abc import Mapping
 
-from omnitensor.plugins.generation import GenerationRequest, GenerationTask
+from omnitensor.plugins.generation import (
+    GenerationRequest,
+    GenerationTask,
+    ProviderGenerationError,
+)
 from omnitensor.plugins.protocol import CancellationToken
-from omnitensor.plugins.qwen import ProviderGenerationError
 
 from .runtime import LlamaVulkanRuntime, _output_token_limit
 

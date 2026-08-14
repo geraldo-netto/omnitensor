@@ -12,10 +12,14 @@ from pathlib import Path
 from typing import BinaryIO
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.event_workload import EventWorkloadError, MemoryFragmentStore
-from omnitensor.plugins.generation import GenerationRequest, GenerationTask
+from omnitensor.plugins.generation import (
+    GenerationRequest,
+    GenerationTask,
+    ProviderGenerationError,
+)
 from omnitensor.plugins.protocol import CancellationToken, ProgressReporter
-from omnitensor.plugins.qwen import NativeLoadReport, ProviderGenerationError
 
 from .grammar import grammar_schema
 from .grounding import bind_grounding_metadata, fragment_span

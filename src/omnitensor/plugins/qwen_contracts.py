@@ -1,0 +1,227 @@
+"""Stable value and port contracts shared by Qwen provider modules."""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+
+from .acceptance_kit import (
+    NativeLoadReport,
+    require_integer,
+    require_mapping,
+    require_sequence,
+    require_text,
+)
+from .generation import GenerationRequest, GenerationTask
+from .protocol import CancellationToken, ProgressReporter
+
+_LEGACY_MODULE = "omnitensor.plugins.qwen"
+
+
+class QwenProviderError(ValueError):
+    """Stable provider configuration or qualification refusal."""
+
+    def __init__(self, code: str, detail: str):
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}")
+
+
+@dataclass(frozen=True, slots=True)
+class QwenSource:
+    role: str
+    uri: str
+    revision: str
+    filename: str
+    sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class QwenCatalog:
+    model_id: str
+    version: str
+    upstream_revision: str
+    license_spdx: str
+    sources: tuple[QwenSource, ...]
+    providers: tuple[tuple[str, str, str, bool, str], ...]
+    evaluation: QwenEvaluation
+
+
+@runtime_checkable
+class NativeQwenRuntime(Protocol):
+    """Native SDK adapter hosted inside a killable plugin worker."""
+
+    async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport: ...
+
+    async def generate(
+        self,
+        task: GenerationTask,
+        request: GenerationRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> str: ...
+
+    async def terminate(self, request_id: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenEventCase:
+    case_id: str
+    modality: str
+    content: str
+    prompt_injection_probe: bool
+    expected: tuple[tuple[str, str, str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenEventCorpus:
+    corpus_id: str
+    sha256: str
+    cases: tuple[FrozenEventCase, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EventProviderObservation:
+    case_id: str
+    result: Mapping[str, object]
+    latency_ms: int
+    peak_memory_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class EventProviderEvidence:
+    provider_id: str
+    corpus_sha256: str
+    runtime_version: str
+    device_name: str
+    load: NativeLoadReport
+    observations: tuple[EventProviderObservation, ...]
+    cancellation_latency_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class EventQualificationPolicy:
+    minimum_precision: float = 0.9
+    minimum_recall: float = 0.9
+    maximum_p95_latency_ms: int = 30_000
+    maximum_peak_memory_bytes: int = 12 * 1024 * 1024 * 1024
+    maximum_cancellation_latency_ms: int = 2_000
+
+
+@dataclass(frozen=True, slots=True)
+class QwenEvaluation:
+    corpus: str
+    policy: EventQualificationPolicy
+
+
+@dataclass(frozen=True, slots=True)
+class EventQualificationReport:
+    provider_id: str
+    accelerator: str
+    corpus_sha256: str
+    runtime_version: str
+    device_name: str
+    precision: float
+    recall: float
+    p95_latency_ms: int
+    peak_memory_bytes: int
+    cancellation_latency_ms: int
+    qualified: bool
+
+
+def qwen_mapping(value: object, label: str, code: str) -> Mapping[str, object]:
+    return require_mapping(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be an object",
+    )
+
+
+def qwen_sequence(value: object, label: str, code: str) -> Sequence[object]:
+    return require_sequence(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be a non-empty sequence",
+        allow_empty=False,
+    )
+
+
+def qwen_positive_integer(value: object, label: str, code: str) -> int:
+    return require_integer(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be a positive integer",
+        minimum=1,
+    )
+
+
+def qwen_text(value: object, label: str, code: str, limit: int) -> str:
+    return require_text(
+        value,
+        error_type=QwenProviderError,
+        code=code,
+        detail=f"{label} must be bounded text",
+        maximum=limit,
+        allow_whitespace=True,
+    )
+
+
+def validate_event_policy(policy: EventQualificationPolicy) -> None:
+    if not isinstance(policy, EventQualificationPolicy):
+        raise QwenProviderError("policy-invalid", "qualification policy is invalid")
+    for name in ("minimum_precision", "minimum_recall"):
+        value = getattr(policy, name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+            raise QwenProviderError("policy-invalid", f"{name} must be in [0, 1]")
+    for name in (
+        "maximum_p95_latency_ms",
+        "maximum_peak_memory_bytes",
+        "maximum_cancellation_latency_ms",
+    ):
+        qwen_positive_integer(getattr(policy, name), name, "policy-invalid")
+
+
+def legacy_qwen_callback(
+    name: str, default: Callable[..., object]
+) -> Callable[..., object]:
+    """Resolve one audited facade monkeypatch without importing the facade."""
+    facade = sys.modules.get(_LEGACY_MODULE)
+    return default if facade is None else getattr(facade, name, default)
+
+
+for _legacy_type in (
+    QwenProviderError,
+    QwenSource,
+    QwenCatalog,
+    NativeQwenRuntime,
+    FrozenEventCase,
+    FrozenEventCorpus,
+    EventProviderObservation,
+    EventProviderEvidence,
+    EventQualificationPolicy,
+    QwenEvaluation,
+    EventQualificationReport,
+):
+    _legacy_type.__module__ = _LEGACY_MODULE
+
+
+__all__ = [
+    "EventProviderEvidence",
+    "EventProviderObservation",
+    "EventQualificationPolicy",
+    "EventQualificationReport",
+    "FrozenEventCase",
+    "FrozenEventCorpus",
+    "NativeQwenRuntime",
+    "QwenCatalog",
+    "QwenEvaluation",
+    "QwenProviderError",
+    "QwenSource",
+]

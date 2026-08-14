@@ -12,7 +12,8 @@ from .atomicio import JsonTooLargeError, read_json_bounded
 from .atomicio import write_bytes_atomic as _write_bytes_atomic
 from .plugins.event_workload import EventWorkloadError, confirmed_ics, select_sources
 from .plugins.events import EventResultError, parse_grounded_event_result
-from .plugins.qwen import QwenProviderError, load_qwen_catalog
+from .plugins.qwen_catalog import load_qwen_catalog
+from .plugins.qwen_contracts import QwenProviderError
 from .preparation import file_digest
 
 MAX_RESULT_BYTES = 1024 * 1024
