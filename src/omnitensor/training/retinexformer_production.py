@@ -16,7 +16,8 @@ from .production_pipeline import (
     run_production_pipeline,
     validate_onnx_io,
 )
-from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
+from .recipe_fetch import open_fetched_model_source
+from .recipe_model import FetchedModelSource, ModelRecipeError
 
 RETINEXFORMER_RECIPE_ID = "retinexformer-lol-v1"
 RETINEXFORMER_IMAGE_SIZE = 256

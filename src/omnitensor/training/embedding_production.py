@@ -16,7 +16,8 @@ from .production_pipeline import (
     run_production_pipeline,
     width_checked_dot,
 )
-from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
+from .recipe_fetch import open_fetched_model_source
+from .recipe_model import FetchedModelSource, ModelRecipeError
 
 EMBEDDING_RECIPE_IDS = frozenset({"all-minilm-l6-v2", "bge-small-en-v1-5"})
 EMBEDDING_WIDTH = 384

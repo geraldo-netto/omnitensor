@@ -34,12 +34,9 @@ from .embedding_production import (
     evaluate_embedding_gate,
     l2_normalize,
 )
-from .recipes import (
-    FetchedModelSource,
-    ModelRecipeError,
-    fetch_model_sources,
-    resolve_model_recipe_path,
-)
+from .recipe_fetch import fetch_model_sources
+from .recipe_model import FetchedModelSource, ModelRecipeError
+from .recipe_registry import resolve_model_recipe_path
 
 PROFILE_ID = "document-intelligence"
 RECIPE_ID = "bge-small-en-v1-5"

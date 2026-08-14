@@ -7,12 +7,9 @@ import json
 import sys
 from pathlib import Path
 
-from .recipes import (
-    ModelRecipeError,
-    fetch_model_sources,
-    load_bundled_model_recipes,
-    resolve_model_recipe_path,
-)
+from .recipe_fetch import fetch_model_sources
+from .recipe_model import ModelRecipeError
+from .recipe_registry import load_bundled_model_recipes, resolve_model_recipe_path
 
 DEFAULT_SOURCE_ROOT = "~/.local/share/omnitensor/model-sources"
 

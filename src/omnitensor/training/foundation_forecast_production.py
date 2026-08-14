@@ -15,7 +15,8 @@ from .production_pipeline import (
     run_production_pipeline,
     validate_onnx_io,
 )
-from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
+from .recipe_fetch import open_fetched_model_source
+from .recipe_model import FetchedModelSource, ModelRecipeError
 
 FORECAST_RECIPE_IDS = frozenset({"amazon-chronos-bolt-tiny", "ibm-granite-ttm-r2"})
 FORECAST_CONTEXT_WIDTH = 512

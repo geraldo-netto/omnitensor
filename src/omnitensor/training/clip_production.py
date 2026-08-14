@@ -17,7 +17,8 @@ from .production_pipeline import (
     validate_onnx_io,
     width_checked_dot,
 )
-from .recipes import FetchedModelSource, ModelRecipeError, open_fetched_model_source
+from .recipe_fetch import open_fetched_model_source
+from .recipe_model import FetchedModelSource, ModelRecipeError
 
 CLIP_RECIPE_ID = "clip-vit-b-32-image"
 CLIP_IMAGE_SIZE = 224

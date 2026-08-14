@@ -17,7 +17,6 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0273 | open | high | l | OMNI-0258 | Split training CLI responsibilities into record, train, install, and forecast modules behind stable import paths and a table-driven trainer dispatcher; move the live D-Bus forecast client to its own module. |
-| OMNI-0274 | open | high | l | — | Split training recipes into model, validation/producer registry, URI policy, transport, fetch, and registry modules; replace the validation chain and raw schema-property indexing with registry accessors. |
 | OMNI-0275 | open | high | l | OMNI-0254, OMNI-0261 | Split document-model runners, export, gate, install, and CLI; reuse the Vulkan executor's device selector, label and guard the producer-only CPU reference runner, and use the recipe tensor contract as the sole truth. |
 | OMNI-0276 | open | high | l | OMNI-0242, OMNI-0256 | Reduce `service.py` to lifecycle orchestration by extracting runtime API, profiles, artifact resolution, telemetry observation, dispatch routing, and environment composition; replace private compatibility re-exports with real module imports. |
 | OMNI-0277 | open | high | l | — | Split plugin supervision into process, recovery, session, and diagnostics modules while preserving its state machine and facade. |

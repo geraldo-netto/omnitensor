@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from .recipes import FetchedModelSource, ModelRecipeError
+from .recipe_model import FetchedModelSource, ModelRecipeError
 
 _GENERIC_NATIVE_REASON = (
     "no target compiler, native parity, or named-device evidence was run"

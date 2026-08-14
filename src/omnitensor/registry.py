@@ -70,6 +70,16 @@ def load_schema(name: str) -> dict:
     return json.loads(_schema_path(name).read_bytes())
 
 
+def workload_model_contract_schemas() -> dict[str, dict]:
+    """Return both public model-contract definitions from one schema snapshot."""
+    model = load_schema("workload-manifest.schema.json")["$defs"]["model"]
+    properties = model["properties"]
+    return {
+        field: copy.deepcopy(properties[field])
+        for field in ("tensorContract", "outputContract")
+    }
+
+
 def _schema_revision(name: str) -> tuple[str, int, int]:
     """Identify the on-disk schema cheaply enough to check on every call.
 
