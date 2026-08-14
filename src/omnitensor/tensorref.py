@@ -192,26 +192,36 @@ def verify_reference(
     and dispatch still re-reads what it will actually execute.
     """
     _permitted(reference, policy, max_tensor_bytes)
-    if _digest_and_finite(reference, max_tensor_bytes) != reference.sha256:
+    _payload, digest = _read_reference(
+        reference, max_tensor_bytes, retain_bytes=False
+    )
+    if digest != reference.sha256:
         raise TensorReferenceError(
             "input-ref-mismatch", "the file does not match the declared sha256"
         )
 
 
-def _digest_and_finite(reference: TensorReference, max_bytes: int) -> str:
-    """Digest a referenced buffer and refuse a non-finite value on the way past.
+def _read_reference(
+    reference: TensorReference,
+    max_bytes: int,
+    *,
+    retain_bytes: bool,
+) -> tuple[bytes | None, str]:
+    """Digest and validate one reference, optionally retaining the read bytes.
 
-    One pass, no retention: chunks are hashed and checked and dropped.  Only
-    whole elements are decoded, so a value split across a chunk boundary is
-    carried forward rather than half-read.
+    Float values are checked as whole elements, carrying a partial element
+    across chunk boundaries. Integer buffers need no finiteness scan.
     """
     element = DTYPE_SIZES[reference.dtype]
     code = _DTYPE_CODES[reference.dtype]
     checked = code in ("f", "d")
     digest = hashlib.sha256()
+    retained: list[bytes] | None = [] if retain_bytes else None
     carry = b""
     for chunk in _chunks(reference.path, max_bytes):
         digest.update(chunk)
+        if retained is not None:
+            retained.append(chunk)
         if not checked:
             continue
         carry += chunk
@@ -219,7 +229,8 @@ def _digest_and_finite(reference: TensorReference, max_bytes: int) -> str:
         if whole:
             _refuse_non_finite(carry[:whole], code, whole // element)
             carry = carry[whole:]
-    return digest.hexdigest()
+    payload = b"".join(retained) if retained is not None else None
+    return payload, digest.hexdigest()
 
 
 def _refuse_non_finite(payload: bytes, code: str, count: int) -> None:
@@ -245,11 +256,12 @@ def load_referenced_tensor(
     file re-read is a file that may have changed.
     """
     _permitted(reference, policy, max_tensor_bytes)
-    payload, digest = _read_digested(reference.path, max_tensor_bytes)
+    payload, digest = _read_reference(reference, max_tensor_bytes, retain_bytes=True)
     if digest != reference.sha256:
         raise TensorReferenceError(
             "input-ref-mismatch", "the file does not match the declared sha256"
         )
+    assert payload is not None
     return _reshape(_unpack(payload, reference), reference.shape)
 
 
@@ -309,24 +321,9 @@ def _digest_of(path: Path, max_bytes: int) -> str:
     return digest.hexdigest()
 
 
-def _read_digested(path: Path, max_bytes: int) -> tuple[bytes, str]:
-    digest = hashlib.sha256()
-    chunks: list[bytes] = []
-    for chunk in _chunks(path, max_bytes):
-        digest.update(chunk)
-        chunks.append(chunk)
-    return b"".join(chunks), digest.hexdigest()
-
-
 def _unpack(payload: bytes, reference: TensorReference) -> list:
     code = _DTYPE_CODES[reference.dtype]
     values = struct.unpack(f"<{reference.element_count}{code}", payload)
-    if code in ("f", "d") and any(not math.isfinite(value) for value in values):
-        # A NaN reaching a native library mid-inference is a failure with no
-        # useful diagnosis; refusing here keeps it a stable rejection.
-        raise TensorReferenceError(
-            "input-ref-invalid", "referenced tensors must contain finite numbers"
-        )
     return list(values)
 
 

@@ -640,6 +640,26 @@ def test_admission_accepts_a_reference_it_does_not_read(tmp_path):
     assert subject.admit("sample-workload", {"inputRefs": [reference]}) is None
 
 
+def test_dispatch_rereads_a_reference_after_admission(tmp_path):
+    import struct
+
+    from omnitensor.tensorref import OptedInInputRoots
+
+    reference = buffer_reference(tmp_path, [1.0, 2.0], (2,))
+    subject = dispatcher([workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path]))
+    payload = {"inputRefs": [reference]}
+
+    assert subject.admit("sample-workload", payload) is None
+    Path(reference["path"]).write_bytes(struct.pack("<2f", 3.0, 4.0))
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        subject.dispatch("job-1", "sample-workload", payload)
+    assert (excinfo.value.code, excinfo.value.message) == (
+        "input-ref-mismatch",
+        "the file does not match the declared sha256",
+    )
+
+
 def test_admission_refuses_a_referenced_tensor_over_the_element_budget(tmp_path):
     """Bounded from the declared shape, before the file is opened."""
     from omnitensor.tensorref import OptedInInputRoots

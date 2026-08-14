@@ -5,6 +5,8 @@ import struct
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from omnitensor.tensorref import (
     MAX_RANK,
@@ -12,6 +14,7 @@ from omnitensor.tensorref import (
     OptedInInputRoots,
     TensorReference,
     TensorReferenceError,
+    _read_reference,
     load_referenced_tensor,
     parse_reference,
     parse_references,
@@ -252,7 +255,7 @@ def test_the_policy_describes_what_it_permits(tmp_path):
     assert OptedInInputRoots([tmp_path]).roots == (Path(tmp_path).resolve(),)
 
 
-def test_an_unreadable_file_is_refused_as_denied(tmp_path, monkeypatch):
+def test_an_unreadable_file_is_refused_as_denied_by_both_reads(tmp_path, monkeypatch):
     path, digest = buffer_file(tmp_path, [1.0, 2.0])
     original = Path.open
 
@@ -263,8 +266,12 @@ def test_an_unreadable_file_is_refused_as_denied(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "open", explode)
 
-    with pytest.raises(TensorReferenceError, match="input-ref-denied"):
-        load_referenced_tensor(parse_reference(reference(path, digest, (2,))), roots(tmp_path))
+    parsed = parse_reference(reference(path, digest, (2,)))
+    for operation in (verify_reference, load_referenced_tensor):
+        with pytest.raises(TensorReferenceError) as excinfo:
+            operation(parsed, roots(tmp_path))
+        assert excinfo.value.code == "input-ref-denied"
+        assert "device error" in excinfo.value.detail
 
 
 def test_an_unresolvable_path_is_denied_rather_than_raising(tmp_path, monkeypatch):
@@ -436,13 +443,119 @@ def test_a_value_split_across_a_read_chunk_is_not_half_checked(tmp_path):
     assert excinfo.value.code == "input-ref-invalid"
 
 
-def test_an_integer_buffer_is_digested_without_a_finiteness_check(tmp_path):
+@pytest.mark.parametrize(
+    ("dtype", "code", "chunk_bytes"),
+    [("float32", "f", 3), ("float64", "d", 5)],
+)
+@pytest.mark.parametrize("retain_bytes", [False, True])
+def test_shared_reader_carries_float_elements_for_both_retention_modes(
+    tmp_path, monkeypatch, dtype, code, chunk_bytes, retain_bytes
+):
+    from omnitensor import tensorref
+
+    payload = struct.pack(f"<2{code}", 1.0, float("inf"))
+    path = tmp_path / f"split.{dtype}"
+    path.write_bytes(payload)
+    reference = TensorReference(path, (2,), dtype, _digest(path))
+    monkeypatch.setattr(tensorref, "_READ_CHUNK_BYTES", chunk_bytes)
+
+    with pytest.raises(TensorReferenceError) as excinfo:
+        _read_reference(reference, len(payload), retain_bytes=retain_bytes)
+
+    assert (excinfo.value.code, excinfo.value.detail) == (
+        "input-ref-invalid",
+        "referenced tensors must contain finite numbers",
+    )
+
+
+@given(
+    values=st.lists(
+        st.floats(width=32, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=64,
+    )
+)
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_shared_reader_property_hashes_finite_floats_and_controls_retention(
+    tmp_path, values
+):
+    payload = struct.pack(f"<{len(values)}f", *values)
+    path = tmp_path / "property.f32"
+    path.write_bytes(payload)
+    reference = TensorReference(path, (len(values),), "float32", "unused")
+
+    discarded, checked_digest = _read_reference(
+        reference, len(payload), retain_bytes=False
+    )
+    retained, loaded_digest = _read_reference(
+        reference, len(payload), retain_bytes=True
+    )
+
+    assert discarded is None
+    assert retained == payload
+    assert checked_digest == loaded_digest == hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.parametrize("retain_bytes", [False, True])
+def test_shared_reader_accepts_exact_max_and_refuses_one_byte_less(
+    tmp_path, retain_bytes
+):
+    payload = struct.pack("<2f", 1.0, 2.0)
+    path = tmp_path / "bounded.f32"
+    path.write_bytes(payload)
+    reference = TensorReference(path, (2,), "float32", _digest(path))
+
+    retained, digest = _read_reference(
+        reference, len(payload), retain_bytes=retain_bytes
+    )
+    assert retained == (payload if retain_bytes else None)
+    assert digest == hashlib.sha256(payload).hexdigest()
+
+    with pytest.raises(TensorReferenceError) as excinfo:
+        _read_reference(reference, len(payload) - 1, retain_bytes=retain_bytes)
+    assert (excinfo.value.code, excinfo.value.detail) == (
+        "input-ref-too-large",
+        f"file exceeds {len(payload) - 1} bytes",
+    )
+
+
+def test_wrong_digest_and_nonfinite_values_are_invalid_first_for_both_reads(tmp_path):
+    path = tmp_path / "invalid-first.f32"
+    path.write_bytes(struct.pack("<2f", float("nan"), 1.0))
+    reference = TensorReference(path, (2,), "float32", "0" * 64)
+
+    for operation in (verify_reference, load_referenced_tensor):
+        with pytest.raises(TensorReferenceError) as excinfo:
+            operation(reference, OptedInInputRoots([tmp_path]))
+        assert (excinfo.value.code, excinfo.value.detail) == (
+            "input-ref-invalid",
+            "referenced tensors must contain finite numbers",
+        )
+
+
+@pytest.mark.parametrize("retain_bytes", [False, True])
+def test_an_integer_buffer_is_digested_without_a_finiteness_check(
+    tmp_path, monkeypatch, retain_bytes
+):
     """There is no such thing as a non-finite int32; checking would be theatre."""
+    from omnitensor import tensorref
+
     path = tmp_path / "ints.i32"
-    path.write_bytes(struct.pack("<3i", 1, -2, 3))
+    payload = struct.pack("<3i", 1, -2, 3)
+    path.write_bytes(payload)
     reference = TensorReference(path, (3,), "int32", _digest(path))
 
-    verify_reference(reference, OptedInInputRoots([tmp_path]))
+    def unexpected_scan(*_args):
+        raise AssertionError("integer reference entered the finiteness scanner")
+
+    monkeypatch.setattr(tensorref, "_refuse_non_finite", unexpected_scan)
+
+    retained, digest = _read_reference(
+        reference, len(payload), retain_bytes=retain_bytes
+    )
+
+    assert retained == (payload if retain_bytes else None)
+    assert digest == reference.sha256
 
 
 def test_a_finite_buffer_still_verifies(tmp_path):
