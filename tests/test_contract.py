@@ -75,6 +75,37 @@ def test_contracts_the_service_never_puts_on_the_bus_are_not_announced():
     assert "runtime-job-submit" in announced
 
 
+def test_the_runtime_schema_prefix_surface_is_exact_and_sorted():
+    expected = (
+        "plugin-inventory.schema.json",
+        "runtime-acknowledgement.schema.json",
+        "runtime-command.schema.json",
+        "runtime-contract.schema.json",
+        "runtime-job-acknowledgement.schema.json",
+        "runtime-job-cancel.schema.json",
+        "runtime-job-result-request.schema.json",
+        "runtime-job-result.schema.json",
+        "runtime-job-submit.schema.json",
+        "runtime-refusal.schema.json",
+        "runtime-snapshot.schema.json",
+    )
+
+    assert wire_schema_names(schema_names()) == expected
+    assert wire_schema_names(
+        (
+            "workload-manifest.schema.json",
+            "xruntime-command.schema.json",
+            "runtime-z.schema.json",
+            "plugin-inventory.schema.json",
+            "runtime-a.schema.json",
+        )
+    ) == (
+        "plugin-inventory.schema.json",
+        "runtime-a.schema.json",
+        "runtime-z.schema.json",
+    )
+
+
 def test_a_schema_pinning_no_version_is_omitted_rather_than_guessed():
     """An announced version nobody enforces is worse than no announcement."""
     unpinned = {"runtime-command.schema.json": {"properties": {"version": {"type": "integer"}}}}

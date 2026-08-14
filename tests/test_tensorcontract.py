@@ -141,12 +141,16 @@ def test_a_nested_tensor_reports_its_shape():
     assert measured_shape([[1.0, 2.0], [3.0, 4.0]]) == (2, 2)
     assert measured_shape([1.0, 2.0, 3.0]) == (3,)
     assert measured_shape([[[1.0]]]) == (1, 1, 1)
+    assert measured_shape([[[1.0]], [[2.0]]]) == (2, 1, 1)
 
 
 def test_a_ragged_tensor_is_left_to_the_validator_that_can_explain_it():
     """Reporting "shape mismatch" for a ragged input would replace a precise
     message with a vaguer one."""
     assert measured_shape([[1.0, 2.0], [3.0]]) is None
+    assert measured_shape([1.0, [2.0]]) is None
+    assert measured_shape([[1.0], 2.0]) is None
+    assert measured_shape([[[1.0]], [[2.0, 3.0]]]) is None
     assert measured_shape([]) is None
     assert measured_shape([[]]) is None
     assert measured_shape(7.0) is None

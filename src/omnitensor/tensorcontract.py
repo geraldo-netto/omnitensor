@@ -153,19 +153,22 @@ def measured_shape(tensor: object) -> tuple[int, ...] | None:
     A ragged input is not reported as a shape mismatch: it is refused by the
     tensor validator with a better message than a shape comparison could give.
     """
-    dimensions: list[int] = []
-    current = tensor
-    while isinstance(current, list):
-        if not current:
-            return None
-        dimensions.append(len(current))
-        first = current[0]
-        if isinstance(first, list) and any(
-            not isinstance(item, list) or len(item) != len(first) for item in current
-        ):
-            return None
-        current = first
-    return tuple(dimensions) if dimensions else None
+    if not isinstance(tensor, list):
+        return None
+    return _rectangular_shape(tensor)
+
+
+def _rectangular_shape(value: object) -> tuple[int, ...] | None:
+    if not isinstance(value, list):
+        return ()
+    if not value:
+        return None
+    item_shape = _rectangular_shape(value[0])
+    if item_shape is None:
+        return None
+    if any(_rectangular_shape(item) != item_shape for item in value[1:]):
+        return None
+    return (len(value), *item_shape)
 
 
 def contract_error(

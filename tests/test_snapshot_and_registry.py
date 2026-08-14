@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 from conftest import add_pcie_tpu, sample_manifest, sample_plugin_manifest, write_workload
 
+import omnitensor.plugins.kernel_telemetry as kernel_telemetry
+import omnitensor.plugins.telemetry as plugin_telemetry
 import omnitensor.registry as registry
+import omnitensor.snapshot as snapshot_module
 from omnitensor.discovery import detect_devices
 from omnitensor.plugins import PluginTelemetryRegistry
 from omnitensor.registry import (
@@ -21,6 +24,59 @@ from omnitensor.registry import (
     validate_document,
 )
 from omnitensor.snapshot import build_snapshot, write_snapshot
+
+
+def test_snapshot_version_owners_match_the_exact_v1_schema():
+    schema = registry.load_schema("runtime-snapshot.schema.json")
+
+    assert snapshot_module.SNAPSHOT_VERSION == schema["properties"]["version"]["const"] == 1
+    assert (
+        plugin_telemetry.PLUGIN_TELEMETRY_CONTRACT_VERSION
+        == snapshot_module.PLUGIN_TELEMETRY_VERSION
+        == schema["properties"]["pluginTelemetry"]["properties"]["version"]["const"]
+        == 1
+    )
+    assert (
+        kernel_telemetry.AGGREGATE_VERSION
+        == schema["properties"]["kernelTelemetry"]["properties"]["version"]["const"]
+        == 1
+    )
+
+
+@pytest.mark.parametrize("epoch_seconds", [0.0, -1.0])
+def test_snapshot_default_timestamp_floors_at_the_first_epoch_millisecond(
+    fake_nodes, monkeypatch, epoch_seconds
+):
+    add_pcie_tpu(fake_nodes)
+    monkeypatch.setattr(snapshot_module.time, "time", lambda: epoch_seconds)
+
+    document = build_snapshot(
+        devices=detect_devices(fake_nodes), metrics={}, profiles={}
+    )
+
+    assert document["generatedAt"] == 1
+
+
+def test_snapshot_metric_conversion_and_refusal_are_exact(fake_nodes):
+    add_pcie_tpu(fake_nodes)
+    devices = detect_devices(fake_nodes)
+
+    document = build_snapshot(
+        devices=devices,
+        metrics={"queueDepth": 7.9, "runningProfiles": "3"},
+        profiles={},
+        generated_at_ms=1,
+    )
+
+    assert document["metrics"] == {"queueDepth": 7, "runningProfiles": 3}
+    with pytest.raises(ValueError) as caught:
+        build_snapshot(
+            devices=devices,
+            metrics={"queueDepth": None},
+            profiles={},
+            generated_at_ms=1,
+        )
+    assert str(caught.value) == "metrics queueDepth is not an integer: None"
 
 
 def test_snapshot_is_contract_valid_and_written_atomically(fake_nodes, tmp_path):

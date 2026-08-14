@@ -62,7 +62,10 @@ def test_extracted_codec_preserves_exact_wire_shapes():
     unknown = job_codec._result_reply(
         "result-1", "job-1", "unknown", "job-not-found", "No such job", 123
     )
-    running = job_codec._record_reply(
+    running_without_progress = job_codec._record_reply(
+        "result-1", JobRecord("job-1", None, None, 100.0), 123
+    )
+    running_with_progress = job_codec._record_reply(
         "result-1",
         JobRecord(
             "job-1",
@@ -88,6 +91,28 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         ),
         123,
     )
+    failed = job_codec._record_reply(
+        "result-1",
+        JobRecord(
+            "job-1",
+            None,
+            PluginResult(
+                "job-1", PluginResultStatus.FAILED, {}, "Accelerator lost", 100
+            ),
+            100.0,
+        ),
+        123,
+    )
+    cancelled = job_codec._record_reply(
+        "result-1",
+        JobRecord(
+            "job-1",
+            None,
+            PluginResult("job-1", PluginResultStatus.CANCELLED, {}, "", 100),
+            100.0,
+        ),
+        123,
+    )
 
     assert acknowledgement == (
         '{"version":1,"requestId":"request-1","jobId":"job-1",'
@@ -99,7 +124,12 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         '"state":"unknown","code":"job-not-found","message":"No such job",'
         '"timestamp":123,"progress":null,"output":null}'
     )
-    assert running == (
+    assert running_without_progress == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"running","code":"job-running","message":"Job is still running",'
+        '"timestamp":123,"progress":null,"output":null}'
+    )
+    assert running_with_progress == (
         '{"version":1,"requestId":"result-1","jobId":"job-1",'
         '"state":"running","code":"job-running","message":"Half way",'
         '"timestamp":123,"progress":{"fraction":0.5,"detail":"Half way"},'
@@ -110,10 +140,27 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         '"state":"succeeded","code":"job-succeeded","message":"Done",'
         '"timestamp":123,"progress":null,"output":{"value":7}}'
     )
+    assert failed == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"failed","code":"job-failed","message":"Accelerator lost",'
+        '"timestamp":123,"progress":null,"output":{}}'
+    )
+    assert cancelled == (
+        '{"version":1,"requestId":"result-1","jobId":"job-1",'
+        '"state":"cancelled","code":"job-cancelled","message":"Job finished",'
+        '"timestamp":123,"progress":null,"output":{}}'
+    )
     assert validate_document(
         "runtime-job-acknowledgement.schema.json", json.loads(acknowledgement)
     ) == []
-    for reply in (unknown, running, succeeded):
+    for reply in (
+        unknown,
+        running_without_progress,
+        running_with_progress,
+        succeeded,
+        failed,
+        cancelled,
+    ):
         assert validate_document(
             "runtime-job-result.schema.json", json.loads(reply)
         ) == []
