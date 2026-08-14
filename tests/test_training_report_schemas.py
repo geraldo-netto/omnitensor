@@ -222,7 +222,17 @@ def test_validated_writer_preserves_compact_bytes_and_fails_before_publication(t
 
 def test_every_training_report_producer_uses_the_validated_writer():
     training_root = Path(__file__).parents[1] / "src/omnitensor/training"
-    for name in ("forecast", "storage", "network", "build", "hardware", "desktop"):
+    forecast = (training_root / "forecast.py").read_text(encoding="utf-8")
+    assert "write_training_report(" in forecast
+    assert "write_json_atomic(" not in forecast
+
+    for name in ("storage", "network", "build", "hardware", "desktop"):
         source = (training_root / f"{name}.py").read_text(encoding="utf-8")
-        assert "write_training_report(" in source
+        assert "publish_numeric_training(" in source
+        assert "writer=write_training_report" in source
         assert "write_json_atomic(" not in source
+
+    shared = (training_root / "tabular/report.py").read_text(encoding="utf-8")
+    assert "writer(" in shared
+    assert "numeric=True" in shared
+    assert "write_json_atomic(" not in shared
