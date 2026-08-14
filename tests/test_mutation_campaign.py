@@ -548,6 +548,8 @@ def test_ci_matrix_is_derived_from_manifest_and_runs_the_same_campaign():
     assert '"mutation-selectors.json",' in project
     assert '"mutmut==3.7.0",' in project
     assert 'omnitensor-mutmut = "omnitensor.mutation_engine:main"' in project
+    project_document = tomllib.loads(project)
+    assert "scripts/" in project_document["tool"]["mutmut"]["also_copy"]
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "--selector-file mutation-selectors.json --shard scheduler" in readme
     for shard in ("acceptance", "document-binding", "event-workload", "grounded-answer"):

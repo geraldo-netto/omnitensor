@@ -162,6 +162,7 @@ only_mutate = [
 pytest_add_cli_args_test_selection = ["tests/"]
 also_copy = [
     "schemas/",
+    "scripts/",
     "systemd/",
     "workloads/",
     ".github/workflows/",
