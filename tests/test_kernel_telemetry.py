@@ -297,7 +297,18 @@ def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, t
         calls.append((arguments, options))
         if arguments[1:3] == ["prog", "loadall"]:
             pin_dir.mkdir()
-        return subprocess.CompletedProcess(arguments, 0)
+        name = Path(arguments[-2] if arguments[-1] == "-j" else arguments[-1]).name
+        layout = helper.REQUIRED_MAPS.get(name)
+        stdout = ""
+        if layout is not None:
+            stdout = json.dumps(
+                {
+                    "name": name[: helper.BPF_OBJECT_NAME_MAX],
+                    "type": layout[0],
+                    "max_entries": layout[1],
+                }
+            )
+        return subprocess.CompletedProcess(arguments, 0, stdout=stdout)
 
     monkeypatch.setattr(helper.subprocess, "run", run)
 
@@ -324,11 +335,56 @@ def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, t
         ["link", "show", "pinned"],
         ["link", "show", "pinned"],
     ]
-    assert [Path(arguments[-1]).name for arguments, _options in calls[1:]] == [
+    assert [
+        Path(arguments[-2] if arguments[-1] == "-j" else arguments[-1]).name
+        for arguments, _options in calls[1:]
+    ] == [
         *helper.REQUIRED_MAPS,
         *helper.REQUIRED_LINKS,
     ]
-    assert all(options == {"check": True, "capture_output": True} for _, options in calls)
+    assert calls[0][1] == {"check": True, "capture_output": True}
+    assert all(
+        options == {"check": True, "capture_output": True, "text": True}
+        for _, options in calls[1:4]
+    )
+    assert all(
+        options == {"check": True, "capture_output": True}
+        for _, options in calls[4:]
+    )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"name": "foreign"},
+        {"type": "hash"},
+        {"max_entries": 2**32},
+        {"document": []},
+    ],
+)
+def test_the_helper_refuses_foreign_or_malformed_map_layouts(monkeypatch, tmp_path, changed):
+    helper = load_helper()
+    pin_dir = tmp_path / "pins"
+    pin_dir.mkdir()
+
+    def run(arguments, **_options):
+        name = Path(arguments[-2]).name
+        expected_type, expected_entries = helper.REQUIRED_MAPS[name]
+        document = {
+            "name": name[: helper.BPF_OBJECT_NAME_MAX],
+            "type": expected_type,
+            "max_entries": expected_entries,
+        }
+        if "document" in changed:
+            document = changed["document"]
+        else:
+            document.update(changed)
+        return subprocess.CompletedProcess(arguments, 0, stdout=json.dumps(document))
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+
+    with pytest.raises(ValueError, match="BPF map layout is invalid"):
+        helper.verify_pins(pin_dir)
 
 
 def test_the_helper_refuses_partial_existing_pins_instead_of_reloading(monkeypatch, tmp_path):
@@ -377,13 +433,29 @@ def test_the_helper_decodes_little_endian_map_words_and_preserves_empty_slots(mo
 
     assert helper._packed(["0x34", "0x12"]) == 0x1234
     assert helper._packed([0x34, 0x12]) == 0x1234
-    assert helper.read_histogram(Path("/pins"), "runq_latency_us") == [2, 0, 5]
+    buckets = helper.read_histogram(Path("/pins"), "runq_latency_us")
+    assert buckets[:3] == [2, 0, 5]
+    assert buckets[3:] == [0] * (helper.MAX_SLOTS - 3)
     assert calls == [
         (
             [helper.BPFTOOL, "map", "dump", "pinned", "/pins/runq_latency_us", "-j"],
             {"check": True, "capture_output": True, "text": True},
         )
     ]
+
+
+def test_the_helper_bounds_a_foreign_histogram_key_without_allocating(monkeypatch):
+    helper = load_helper()
+    output = json.dumps([{"key": [255] * 8, "value": [1]}])
+    monkeypatch.setattr(
+        helper.subprocess,
+        "run",
+        lambda *_arguments, **_options: subprocess.CompletedProcess(
+            helper.BPFTOOL, 0, stdout=output
+        ),
+    )
+
+    assert helper.read_histogram(Path("/pins"), "runq_latency_us") == [0] * helper.MAX_SLOTS
 
 
 class FakeConnection:
@@ -490,13 +562,14 @@ def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_pat
     pin_dir = tmp_path / "pins"
     socket_path = tmp_path / "bpf.sock"
 
-    monkeypatch.setattr(
-        helper,
-        "load_probes",
-        lambda *_arguments: (_ for _ in ()).throw(OSError("denied")),
-    )
-    assert helper.main(["--object", str(object_path), "--pin-dir", str(pin_dir)]) == 1
-    assert capsys.readouterr().err == "could not load BPF probes: denied\n"
+    for failure in (OSError("denied"), ValueError("invalid map")):
+        monkeypatch.setattr(
+            helper,
+            "load_probes",
+            lambda *_arguments, failure=failure: (_ for _ in ()).throw(failure),
+        )
+        assert helper.main(["--object", str(object_path), "--pin-dir", str(pin_dir)]) == 1
+        assert capsys.readouterr().err == f"could not load BPF probes: {failure}\n"
 
     monkeypatch.setattr(helper, "load_probes", lambda *_arguments: None)
     monkeypatch.setattr(

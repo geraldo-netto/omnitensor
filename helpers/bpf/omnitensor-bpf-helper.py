@@ -29,7 +29,13 @@ DEFAULT_OBJECT = "/usr/lib/omnitensor/bpf/runq_latency.bpf.o"
 DEFAULT_PIN_DIR = "/sys/fs/bpf/omnitensor"
 DEFAULT_SOCKET = "/run/omnitensor/bpf-aggregate.sock"
 HISTOGRAMS = (("runq_latency_us", "us"), ("block_latency_us", "us"))
-REQUIRED_MAPS = ("runq_latency_us", "block_latency_us", "wakeup_at")
+MAX_SLOTS = 27
+BPF_OBJECT_NAME_MAX = 15
+REQUIRED_MAPS = {
+    "runq_latency_us": ("array", MAX_SLOTS),
+    "block_latency_us": ("array", MAX_SLOTS),
+    "wakeup_at": ("hash", 10_240),
+}
 REQUIRED_LINKS = ("on_wakeup", "on_switch", "on_block_complete")
 
 
@@ -37,12 +43,24 @@ def verify_pins(pin_dir: Path) -> None:
     """Require every map and attached link produced by the CO-RE object."""
     if not pin_dir.is_dir():
         raise OSError(f"BPF pin directory is absent: {pin_dir}")
-    for name in REQUIRED_MAPS:
-        subprocess.run(
-            [BPFTOOL, "map", "show", "pinned", str(pin_dir / name)],
+    for name, (expected_type, expected_entries) in REQUIRED_MAPS.items():
+        result = subprocess.run(
+            [BPFTOOL, "map", "show", "pinned", str(pin_dir / name), "-j"],
             check=True,
             capture_output=True,
+            text=True,
         )
+        document = json.loads(result.stdout)
+        if isinstance(document, list) and len(document) == 1:
+            document = document[0]
+        # libbpf pins maps under their full ELF names, while BPF_MAP_CREATE
+        # truncates the kernel-visible name to BPF_OBJ_NAME_LEN - 1 bytes.
+        if not isinstance(document, dict) or (
+            document.get("name"),
+            document.get("type"),
+            document.get("max_entries"),
+        ) != (name[:BPF_OBJECT_NAME_MAX], expected_type, expected_entries):
+            raise ValueError(f"BPF map layout is invalid: {name}")
     for name in REQUIRED_LINKS:
         subprocess.run(
             [BPFTOOL, "link", "show", "pinned", str(pin_dir / name)],
@@ -85,7 +103,7 @@ def read_histogram(pin_dir: Path, name: str) -> list[int]:
     for entry in json.loads(result.stdout):
         key = _packed(entry.get("key", []))
         buckets[key] = _packed(entry.get("value", []))
-    return [buckets.get(slot, 0) for slot in range(max(buckets, default=-1) + 1)]
+    return [buckets.get(slot, 0) for slot in range(MAX_SLOTS)]
 
 
 def _packed(words: list) -> int:
@@ -141,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     pin_dir = Path(arguments.pin_dir)
     try:
         load_probes(Path(arguments.object), pin_dir)
-    except (subprocess.CalledProcessError, OSError) as error:
+    except (subprocess.CalledProcessError, OSError, ValueError) as error:
         # Fail loudly: a helper that runs without its probes would serve empty
         # histograms, which a reader cannot tell from an idle kernel.
         print(f"could not load BPF probes: {error}", file=sys.stderr)
