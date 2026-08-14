@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Privileged eBPF helper: load the probes, export aggregates, hold nothing else.
 
 Runs as a *system* unit with CAP_BPF and CAP_PERFMON because the OmniTensor
@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 AGGREGATE_VERSION = 1
+BPFTOOL = "/usr/sbin/bpftool"
 DEFAULT_OBJECT = "/usr/lib/omnitensor/bpf/runq_latency.bpf.o"
 DEFAULT_PIN_DIR = "/sys/fs/bpf/omnitensor"
 DEFAULT_SOCKET = "/run/omnitensor/bpf-aggregate.sock"
@@ -38,13 +39,13 @@ def verify_pins(pin_dir: Path) -> None:
         raise OSError(f"BPF pin directory is absent: {pin_dir}")
     for name in REQUIRED_MAPS:
         subprocess.run(
-            ["bpftool", "map", "show", "pinned", str(pin_dir / name)],
+            [BPFTOOL, "map", "show", "pinned", str(pin_dir / name)],
             check=True,
             capture_output=True,
         )
     for name in REQUIRED_LINKS:
         subprocess.run(
-            ["bpftool", "link", "show", "pinned", str(pin_dir / name)],
+            [BPFTOOL, "link", "show", "pinned", str(pin_dir / name)],
             check=True,
             capture_output=True,
         )
@@ -57,7 +58,7 @@ def load_probes(object_path: Path, pin_dir: Path) -> None:
         return
     subprocess.run(
         [
-            "bpftool",
+            BPFTOOL,
             "prog",
             "loadall",
             str(object_path),
@@ -75,7 +76,7 @@ def load_probes(object_path: Path, pin_dir: Path) -> None:
 def read_histogram(pin_dir: Path, name: str) -> list[int]:
     """One map's bucket counts, in slot order."""
     result = subprocess.run(
-        ["bpftool", "map", "dump", "pinned", str(pin_dir / name), "-j"],
+        [BPFTOOL, "map", "dump", "pinned", str(pin_dir / name), "-j"],
         check=True,
         capture_output=True,
         text=True,

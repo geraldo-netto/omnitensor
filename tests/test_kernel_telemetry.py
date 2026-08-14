@@ -248,6 +248,18 @@ def load_helper():
     return module
 
 
+def test_the_privileged_helper_pins_every_executable_path():
+    helper = load_helper()
+    source = Path(HELPER).read_text(encoding="utf-8")
+    unit = Path("helpers/bpf/omnitensor-bpf.service").read_text(encoding="utf-8")
+
+    assert source.startswith("#!/usr/bin/python3\n")
+    assert helper.BPFTOOL == "/usr/sbin/bpftool"
+    assert 'BPFTOOL = "/usr/sbin/bpftool"' in source
+    assert '"bpftool"' not in source
+    assert "Environment=PATH=\n" in unit
+
+
 def test_the_helper_exports_only_aggregate_series(monkeypatch):
     """Checked by running it, not by reading its source for words."""
     helper = load_helper()
@@ -293,7 +305,7 @@ def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, t
 
     assert calls[0] == (
         [
-            "bpftool",
+            helper.BPFTOOL,
             "prog",
             "loadall",
             str(object_path),
@@ -368,7 +380,7 @@ def test_the_helper_decodes_little_endian_map_words_and_preserves_empty_slots(mo
     assert helper.read_histogram(Path("/pins"), "runq_latency_us") == [2, 0, 5]
     assert calls == [
         (
-            ["bpftool", "map", "dump", "pinned", "/pins/runq_latency_us", "-j"],
+            [helper.BPFTOOL, "map", "dump", "pinned", "/pins/runq_latency_us", "-j"],
             {"check": True, "capture_output": True, "text": True},
         )
     ]
