@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from conftest import sample_manifest
 
+from omnitensor.dispatch_routing import select_runtime_model
 from omnitensor.executors.base import (
     DEVICE_ABSENT,
     FORMAT_UNSUPPORTED,
@@ -69,6 +70,20 @@ def test_default_preference_chooses_tpu_then_npu_independent_of_model_order():
     assert select_backend(workload, executors) == BackendChoice("npu", "", "")
     assert runnable_model(workload, "npu", executors)["format"] == "openvino"
     assert (tpu.availability_calls, npu.availability_calls, gpu.availability_calls) == (2, 1, 0)
+
+
+def test_runtime_model_selection_matches_the_preferred_available_lane():
+    workload = _workload(
+        _model("ncnn"),
+        _model("openvino"),
+        preference=["npu", "gpu"],
+    )
+    executors = {
+        "gpu": _Lane("gpu", {"ncnn"}, Availability(True)),
+        "npu": _Lane("npu", {"openvino"}, Availability(True)),
+    }
+
+    assert select_runtime_model(workload, executors)["format"] == "openvino"
 
 
 def test_refusal_order_actionability_and_tie_breaks_are_stable():

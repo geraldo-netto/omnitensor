@@ -12,6 +12,7 @@ from .jobs import UnavailableJobDispatcher
 from .plugins.orchestration import RunnerSet, build_plugin_runners, required_permissions
 from .ports import PluginIdentitySource, PluginRuntime
 from .registry import Workload
+from .scheduler import runnable_model, select_backend
 from .tensorref import OptedInInputRoots
 
 
@@ -126,6 +127,7 @@ def build_runners(
     allows_permission,
     deliver,
     progress,
+    select_model=None,
 ) -> RunnerSet:
     return build_plugin_runners(
         workloads,
@@ -138,7 +140,16 @@ def build_runners(
         allows_permission=allows_permission,
         deliver=deliver,
         progress=progress,
+        select_model=select_model,
     )
+
+
+def select_runtime_model(workload: Workload, executors: dict):
+    """Model for the first available preferred lane, matching dispatch."""
+    choice = select_backend(workload, executors)
+    if choice.backend is None:
+        return None
+    return runnable_model(workload, choice.backend, executors)
 
 
 def profile_permissions_missing(workload: Workload, grants) -> tuple[str, ...]:

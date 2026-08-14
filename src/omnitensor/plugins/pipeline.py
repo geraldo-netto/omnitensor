@@ -56,6 +56,7 @@ class ResolvedOutput:
 
     artifact: ArtifactReference
     path: Path
+    model: JsonObject | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class InferenceOutput:
     """Raw bounded executor outputs."""
 
     tensors: JsonObject
+    model: JsonObject | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -302,6 +302,9 @@ class OmniTensorService:
             allows_permission=self._permitted,
             deliver=self._deliver_job_output,
             progress=self._note_job_progress,
+            select_model=lambda workload: routing.select_runtime_model(
+                workload, self._executors
+            ),
         )
 
     def _profile_permissions_missing(self, workload: Workload) -> tuple[str, ...]:

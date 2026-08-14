@@ -143,6 +143,12 @@ class ArtifactResolver(Protocol):
     def __call__(self, artifact_id: str): ...
 
 
+class ModelSelector(Protocol):
+    """Choose the model belonging to the accelerator lane that will run."""
+
+    def __call__(self, workload: Workload) -> Mapping[str, object] | None: ...
+
+
 class ProgressSink(Protocol):
     """Record where a running job has got to, against its owner."""
 
@@ -157,6 +163,7 @@ def inference_stages(
     encode_result: Callable[[object], dict],
     deliver: Callable[[str, dict], None] | None = None,
     progress: ProgressSink | None = None,
+    select_model: ModelSelector | None = None,
 ) -> dict[PipelineStage, Callable]:
     """Compose the six stages of an inference profile from existing parts."""
     try:
@@ -171,13 +178,17 @@ def inference_stages(
         raise OrchestrationError(
             "profile-has-no-model", f"{workload.id} declares no model and cannot run inference"
         )
+    model_of = select_model or (lambda selected_workload: selected_workload.model)
+    read_selected_labels = _selected_label_reader(resolve_artifact)
     stages = {
         PipelineStage.COLLECT: _collect_stage(),
         PipelineStage.PREPROCESS: _preprocess_stage(workload),
-        PipelineStage.RESOLVE: _resolve_stage(model, resolve_artifact),
+        PipelineStage.RESOLVE: _resolve_stage(workload, resolve_artifact, model_of),
         PipelineStage.INFER: _infer_stage(workload, dispatcher, encode_result),
         PipelineStage.POSTPROCESS: _postprocess_stage(
-            workload, _label_reader(model, resolve_artifact)
+            workload,
+            _label_reader(model, resolve_artifact),
+            read_selected_labels=read_selected_labels,
         ),
         PipelineStage.DELIVER: _deliver_stage(deliver),
     }
@@ -230,14 +241,28 @@ def _preprocess_stage(workload: Workload) -> Callable:
     return preprocess
 
 
-def _resolve_stage(model: Mapping[str, object], resolve_artifact: ArtifactResolver) -> Callable:
+def _resolve_stage(
+    workload: Workload,
+    resolve_artifact: ArtifactResolver,
+    select_model: ModelSelector,
+) -> Callable:
     async def resolve(preprocessed: PreprocessedOutput) -> ResolvedOutput:
+        model = select_model(workload)
+        if not isinstance(model, Mapping):
+            raise OrchestrationError(
+                "model-lane-unavailable",
+                f"{workload.id} has no model for an available accelerator lane",
+            )
         resolution = resolve_artifact(model["id"])
         if not getattr(resolution, "ready", False):
             raise OrchestrationError(
                 "artifact-unavailable", getattr(resolution, "detail", "artifact is not ready")
             )
-        return ResolvedOutput(_reference_of(resolution, model), Path(resolution.path))
+        return ResolvedOutput(
+            _reference_of(resolution, model),
+            Path(resolution.path),
+            dict(model),
+        )
 
     return resolve
 
@@ -250,20 +275,32 @@ def _infer_stage(
         # The dispatcher owns admission, routing, and queueing; re-deciding any
         # of that here would let two code paths disagree about the same job.
         future = dispatcher.dispatch(job_id, workload.id, job_payload)
-        return InferenceOutput(encode_result(await future))
+        return InferenceOutput(encode_result(await future), resolved.model)
 
     return infer
 
 
-def _postprocess_stage(workload: Workload, read_labels: Callable[[], tuple]) -> Callable:
-    spec = declared_output(workload.model)
+def _postprocess_stage(
+    workload: Workload,
+    read_labels: Callable[[], tuple],
+    *,
+    read_selected_labels: Callable[[Mapping[str, object]], tuple] | None = None,
+) -> Callable:
 
     async def postprocess(inferred: InferenceOutput) -> PostprocessedOutput:
+        carried = getattr(inferred, "model", None)
+        lane = carried if isinstance(carried, Mapping) else workload.model
+        spec = declared_output(lane)
         output = {"profileId": workload.id, **dict(inferred.tensors)}
         tensors = output.get("outputs") or ()
-        reading = forecast_reading(workload.model, tensors)
+        reading = forecast_reading(lane, tensors)
         if reading is None:
-            reading = reduce_output(spec, tensors, read_labels())
+            labels = (
+                read_selected_labels(lane)
+                if read_selected_labels is not None and isinstance(lane, Mapping)
+                else read_labels()
+            )
+            reading = reduce_output(spec, tensors, labels)
         if reading is not None:
             # Added beside the tensors, never in place of them: a consumer that
             # wants the raw scores must not lose them to a reduction, and a
@@ -272,6 +309,22 @@ def _postprocess_stage(workload: Workload, read_labels: Callable[[], tuple]) -> 
         return PostprocessedOutput(output)
 
     return postprocess
+
+
+def _selected_label_reader(
+    resolve_artifact: ArtifactResolver,
+) -> Callable[[Mapping[str, object]], tuple]:
+    readers: dict[tuple[object, object, object], Callable[[], tuple]] = {}
+
+    def read(model: Mapping[str, object]) -> tuple:
+        key = (model.get("id"), model.get("version"), model.get("format"))
+        reader = readers.get(key)
+        if reader is None:
+            reader = _label_reader(model, resolve_artifact)
+            readers[key] = reader
+        return reader()
+
+    return read
 
 
 def _label_reader(model: Mapping[str, object], resolve_artifact: ArtifactResolver) -> Callable:
@@ -338,6 +391,7 @@ def build_plugin_runners(
     allows_permission: Callable[[str, str], bool] = lambda _profile, _permission: True,
     deliver: Callable[[str, dict], None] | None = None,
     progress: ProgressSink | None = None,
+    select_model: ModelSelector | None = None,
     flow_options: Mapping[str, object] | None = None,
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> RunnerSet:
@@ -359,6 +413,7 @@ def build_plugin_runners(
                 encode_result=encode_result,
                 deliver=deliver,
                 progress=progress,
+                select_model=select_model,
             )
         except OrchestrationError as error:
             # A profile that cannot run is recorded, not given a runner that

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.cancellation import (
     Cancellation,
@@ -19,7 +21,7 @@ from omnitensor.plugins.orchestration import (
     recover_interrupted_jobs,
     with_recovery,
 )
-from omnitensor.plugins.pipeline import PipelineStage
+from omnitensor.plugins.pipeline import PipelineStage, PreprocessedOutput
 from omnitensor.plugins.protocol import PluginResultStatus
 from omnitensor.plugins.runner import STAGE_ORDER
 from omnitensor.registry import Workload
@@ -413,6 +415,81 @@ def test_the_resolved_path_is_the_one_the_store_reported(tmp_path):
     run(built)
 
     assert seen["artifactId"] == "visual-library-model"
+
+
+@given(st.integers(min_value=0, max_value=1))
+def test_resolve_stage_carries_the_selected_model_lane(index):
+    models = (
+        {"id": "gpu-model", "version": "1.0.0", "format": "ncnn"},
+        {"id": "npu-model", "version": "1.0.0", "format": "openvino"},
+    )
+    selected = models[index]
+    subject = workload()
+    requirements = subject.manifest["requirements"]
+    requirements.pop("model")
+    requirements["models"] = list(models)
+    stages = inference_stages(
+        subject,
+        dispatcher=Dispatcher(),
+        resolve_artifact=lambda artifact_id: Resolution(path=f"/models/{artifact_id}"),
+        encode_result=dict,
+        select_model=lambda _workload: selected,
+    )
+
+    resolved = asyncio.run(
+        stages[PipelineStage.RESOLVE](PreprocessedOutput({}, {}))
+    )
+
+    assert resolved.artifact.id == selected["id"]
+    assert resolved.path == Path(f"/models/{selected['id']}")
+    assert resolved.model == selected
+
+
+def test_preferred_lane_owns_resolution_and_labels_end_to_end(tmp_path):
+    gpu_model = {
+        "id": "gpu-model",
+        "version": "1.0.0",
+        "format": "ncnn",
+        "outputContract": {
+            "kind": "classification",
+            "topK": 1,
+            "labels": "labels.txt",
+        },
+    }
+    npu_model = {
+        **gpu_model,
+        "id": "npu-model",
+        "format": "openvino",
+    }
+    subject = workload()
+    requirements = subject.manifest["requirements"]
+    requirements.pop("model")
+    requirements["models"] = [gpu_model, npu_model]
+    npu_root = tmp_path / "npu"
+    npu_root.mkdir()
+    (npu_root / "labels.txt").write_text("npu-low\nnpu-high\n", encoding="utf-8")
+    resolved = []
+
+    def resolve(artifact_id):
+        resolved.append(artifact_id)
+        if artifact_id != "npu-model":
+            raise AssertionError("the unselected GPU artifact must not be resolved")
+        return Resolution(path=npu_root / "model.xml")
+
+    built, _registry = runners(
+        tmp_path,
+        {subject.id: subject},
+        dispatcher=Dispatcher({"outputs": [[0.1, 0.9]]}),
+        resolve=resolve,
+        select_model=lambda _workload: npu_model,
+    )
+
+    result = run(built)
+
+    assert result.output["reading"]["top"] == [
+        {"index": 1, "score": 0.9, "label": "npu-high"}
+    ]
+    assert resolved == ["npu-model", "npu-model"]
 
 
 def test_a_stage_reached_without_a_bound_job_is_refused():
