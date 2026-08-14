@@ -52,8 +52,10 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
 - Achieve at least 80% coverage for every changed or added module
   (`.venv/bin/python -m pytest --cov=omnitensor --cov-report=term`); aggregate project
   coverage does not replace the per-module requirement.
-- Run `ruff check`, the full pytest suite, coverage, and the applicable property and
-  mutation gates before declaring work complete.
+- Unless the user explicitly requests a long or full suite, run only tests and quality
+  gates scoped to the changed behavior; do not run the full pytest suite by default.
+- Parallelize independent scoped tests and gates whenever safe, provided their temporary
+  files, coverage data, and mutation reports cannot collide.
 - If a gate cannot run, record the blocker in `TODO.md`; the work is not complete.
 
 ## Git
