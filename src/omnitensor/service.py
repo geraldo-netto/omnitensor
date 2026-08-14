@@ -461,7 +461,7 @@ class OmniTensorService:
                     if self._snapshot_retracted:
                         LOGGER.info("Accelerator devices returned; publishing snapshots again")
                         self._snapshot_retracted = False
-                    snapshot = self._build_runtime_snapshot()
+                    snapshot = await asyncio.to_thread(self._build_runtime_snapshot)
                     await asyncio.to_thread(self._publisher_port.publish, snapshot)
                 elif not self._snapshot_retracted:
                     await asyncio.to_thread(self._publisher_port.retract)

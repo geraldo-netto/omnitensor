@@ -449,6 +449,43 @@ def test_publisher_persistence_runs_off_the_event_loop(tmp_path):
     assert publisher.publish_thread != loop_thread
 
 
+def test_snapshot_construction_runs_off_the_event_loop(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+    snapshot_thread = None
+
+    async def scenario():
+        nonlocal snapshot_thread
+        service = build_service(
+            tmp_path,
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=60.0,
+            discovery_interval_s=60.0,
+        )
+        build_snapshot = service._build_runtime_snapshot
+
+        def blocking_snapshot():
+            nonlocal snapshot_thread
+            snapshot_thread = threading.get_ident()
+            started.set()
+            assert release.wait(timeout=0.5)
+            return build_snapshot()
+
+        service._build_runtime_snapshot = blocking_snapshot
+        loop_thread = threading.get_ident()
+        task = asyncio.create_task(service._publisher())
+        assert await asyncio.to_thread(started.wait, 0.5)
+        release.set()
+        service._stopping.set()
+        await asyncio.wait_for(task, timeout=1)
+        return loop_thread
+
+    loop_thread = asyncio.run(scenario())
+    assert snapshot_thread != loop_thread
+
+
 def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
     class BlockingGrants:
         def __init__(self):
