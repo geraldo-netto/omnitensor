@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from omnitensor import mutation_campaign, mutation_engine
 from omnitensor.mutation_campaign import (
@@ -444,6 +446,28 @@ def test_campaign_runs_then_reports_and_gates_the_same_exact_selectors(tmp_path)
     )
 
 
+@given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ", max_size=512))
+@settings(max_examples=20, deadline=None)
+def test_campaign_report_replaces_symlink_without_touching_target(tmp_path_factory, suffix):
+    shard = MutationShard("subject", ("omnitensor.subject.x_alpha",))
+    root = tmp_path_factory.mktemp("mutation-report")
+    outside = root / "outside.txt"
+    outside.write_text("protected", encoding="utf-8")
+    report = root / "report.txt"
+    report.symlink_to(outside)
+    output = f"omnitensor.subject.x_alpha__mutmut_1: killed\n# {suffix}\n"
+
+    def runner(command, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="" if command[1] == "run" else output)
+
+    execute_mutation_shard(shard, report, runner=runner)
+
+    assert not report.is_symlink()
+    assert report.read_text(encoding="utf-8") == output
+    assert report.stat().st_mode & 0o777 == 0o600
+    assert outside.read_text(encoding="utf-8") == "protected"
+
+
 @pytest.mark.parametrize(
     ("stage", "message"),
     [("run", "run exited 9"), ("results", "results exited 9")],
@@ -460,6 +484,63 @@ def test_campaign_refuses_tool_failures_and_removes_stale_reports(tmp_path, stag
     with pytest.raises(RuntimeError, match=message):
         execute_mutation_shard(shard, report, runner=runner)
     assert not report.exists()
+
+
+def test_campaign_cli_control_flow_without_expanding_selector_inventory(
+    monkeypatch, tmp_path, capsys
+):
+    shard = MutationShard("subject", ("omnitensor.subject.x_alpha",))
+
+    def select(name):
+        if name != shard.name:
+            raise ValueError(f"mutation manifest has no shard named {name}")
+        return shard
+
+    manifest = SimpleNamespace(shard_names=lambda: (shard.name,), shard=select)
+    monkeypatch.setattr(
+        mutation_campaign,
+        "load_mutation_manifest",
+        lambda *_args, **_kwargs: manifest,
+    )
+
+    assert mutation_campaign.main(["manifest.json", "--list-shards"]) == 0
+    assert capsys.readouterr().out == '["subject"]\n'
+    assert mutation_campaign.main(
+        ["manifest.json", "--list-shards", "--report", str(tmp_path / "report")]
+    ) == 2
+    assert "--report is invalid" in capsys.readouterr().out
+    assert mutation_campaign.main(["manifest.json", "--shard", shard.name]) == 2
+    assert "--report is required" in capsys.readouterr().out
+
+    arguments = [
+        "manifest.json",
+        "--shard",
+        shard.name,
+        "--report",
+        str(tmp_path / "report"),
+        "--threshold",
+        "90",
+    ]
+    monkeypatch.setattr(
+        mutation_campaign,
+        "execute_mutation_shard",
+        lambda *_args, **_kwargs: (),
+    )
+    assert mutation_campaign.main(arguments) == 0
+    assert "1 callables at or above 90%" in capsys.readouterr().out
+    monkeypatch.setattr(
+        mutation_campaign,
+        "execute_mutation_shard",
+        lambda *_args, **_kwargs: ("selector 50.0% (1/2 detected)",),
+    )
+    assert mutation_campaign.main(arguments) == 1
+    assert "Per-callable mutation score below 90%" in capsys.readouterr().out
+    def deny_manifest(*_args, **_kwargs):
+        raise OSError("denied")
+
+    monkeypatch.setattr(mutation_campaign, "load_mutation_manifest", deny_manifest)
+    assert mutation_campaign.main(["manifest.json", "--list-shards"]) == 2
+    assert "mutation campaign failed: denied" in capsys.readouterr().out
 
 
 @pytest.mark.skipif(_MUTMUT_ACTIVE, reason="mutmut transforms the inspected source tree")

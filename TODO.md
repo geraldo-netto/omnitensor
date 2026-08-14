@@ -12,7 +12,7 @@ audit's dependency order without weakening the required status schema.
 - **Audit architecture hygiene:** OMNI-0285–OMNI-0289
 - **Audit regression and mutation gates:** OMNI-0290–OMNI-0297
 - **Mutation signal quality:** OMNI-0298–OMNI-0303
-- **SonarCloud remediation:** OMNI-0333–OMNI-0335
+- **SonarCloud remediation:** OMNI-0333–OMNI-0336
 
 ## Findings
 
