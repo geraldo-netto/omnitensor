@@ -561,6 +561,9 @@ def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_pat
     object_path = tmp_path / "probe.o"
     pin_dir = tmp_path / "pins"
     socket_path = tmp_path / "bpf.sock"
+    monkeypatch.setattr(helper, "DEFAULT_OBJECT", str(object_path))
+    monkeypatch.setattr(helper, "DEFAULT_PIN_DIR", str(pin_dir))
+    monkeypatch.setattr(helper, "DEFAULT_SOCKET", str(socket_path))
 
     for failure in (OSError("denied"), ValueError("invalid map")):
         monkeypatch.setattr(
@@ -568,7 +571,7 @@ def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_pat
             "load_probes",
             lambda *_arguments, failure=failure: (_ for _ in ()).throw(failure),
         )
-        assert helper.main(["--object", str(object_path), "--pin-dir", str(pin_dir)]) == 1
+        assert helper.main([]) == 1
         assert capsys.readouterr().err == f"could not load BPF probes: {failure}\n"
 
     monkeypatch.setattr(helper, "load_probes", lambda *_arguments: None)
@@ -577,13 +580,17 @@ def test_the_helper_cli_fails_closed_prints_once_and_serves(monkeypatch, tmp_pat
         "aggregate",
         lambda observed: {"version": 1, "pin": str(observed)},
     )
-    assert helper.main(["--pin-dir", str(pin_dir), "--print-once"]) == 0
+    assert helper.main(["--print-once"]) == 0
     assert json.loads(capsys.readouterr().out) == {"version": 1, "pin": str(pin_dir)}
 
     served = []
     monkeypatch.setattr(helper, "serve", lambda *arguments: served.append(arguments))
-    assert helper.main(["--pin-dir", str(pin_dir), "--socket", str(socket_path)]) == 0
+    assert helper.main([]) == 0
     assert served == [(socket_path, pin_dir)]
+
+    with pytest.raises(SystemExit) as excinfo:
+        helper.main(["--object", str(object_path)])
+    assert excinfo.value.code == 2
 
 
 @pytest.mark.skipif(

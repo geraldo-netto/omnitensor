@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from ..atomicio import write_bytes_atomic
 from .document_model_contracts import source_path
 from .document_model_types import RECIPE_ID, DocumentModelError, TokenizedText
 from .recipe_model import FetchedModelSource
@@ -23,13 +24,14 @@ def export_bge_ncnn(
     """Reconstruct pinned BERT weights and export a fixed precise ncnn graph."""
     if source.recipe.id != RECIPE_ID:
         raise DocumentModelError("recipe-incompatible", f"expected {RECIPE_ID}")
-    dependency_loader = dependencies or document_dependencies
-    pnnx, torch, load_file, bert_config, bert_model = dependency_loader()
     destination.mkdir(parents=True, exist_ok=True)
+    checkpoint = destination / "model.pt"
     param = destination / "model.ncnn.param"
     binary = destination / "model.ncnn.bin"
-    if param.exists() or binary.exists():
+    if any(path.exists() or path.is_symlink() for path in (checkpoint, param, binary)):
         raise DocumentModelError("producer-conflict", "native model output already exists")
+    dependency_loader = dependencies or document_dependencies
+    pnnx, torch, load_file, bert_config, bert_model = dependency_loader()
     config_path = source_resolver(source, "config")
     weights_path = source_resolver(source, "weights")
     config = bert_config.from_json_file(str(config_path))
@@ -47,12 +49,14 @@ def export_bge_ncnn(
     )
     try:
         model = (model_factory or fixed_bge_model)(torch, encoder)
-        pnnx.export(model, str(destination / "model.pt"), inputs, fp16=False)
+        pnnx.export(model, str(checkpoint), inputs, fp16=False)
     except Exception as error:  # noqa: BLE001 - pnnx failures vary by graph/toolchain
         raise DocumentModelError("compilation-failed", f"pnnx export failed: {error}") from error
     if (
         not param.is_file()
         or not binary.is_file()
+        or param.is_symlink()
+        or binary.is_symlink()
         or not param.stat().st_size
         or not binary.stat().st_size
     ):
@@ -63,6 +67,10 @@ def export_bge_ncnn(
 
 def append_ncnn_l2_normalization(param: Path) -> None:
     """Put BGE's declared L2 output meaning inside the native graph."""
+    if param.is_symlink():
+        raise DocumentModelError(
+            "compilation-incomplete", "ncnn graph output must not be a symlink"
+        )
     try:
         payload = param.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -104,7 +112,7 @@ def append_ncnn_l2_normalization(param: Path) -> None:
         )
     )
     try:
-        param.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        write_bytes_atomic(param, ("\n".join(lines) + "\n").encode("utf-8"), 0o600)
     except OSError as error:
         raise DocumentModelError(
             "compilation-incomplete", f"cannot write normalized ncnn graph: {error}"

@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from .atomicio import remove_durable, write_bytes_atomic
 from .mutation_manifest import MutationShard, load_mutation_manifest
 from .mutation_quality import mutation_failures
 from .quality import DEFAULT_THRESHOLD
@@ -45,7 +46,7 @@ def execute_mutation_shard(
 ) -> tuple[str, ...]:
     """Run one shard, persist its report, and return per-callable failures."""
     report = Path(report_path)
-    report.unlink(missing_ok=True)
+    remove_durable(report)
     run_command, results_command = mutation_commands(shard, executable=executable)
     completed = runner(run_command, check=False)
     if completed.returncode != 0:
@@ -58,7 +59,7 @@ def execute_mutation_shard(
     )
     if results.returncode != 0:
         raise RuntimeError(f"mutmut results exited {results.returncode}")
-    report.write_text(results.stdout, encoding="utf-8")
+    write_bytes_atomic(report, results.stdout.encode("utf-8"), 0o600)
     return mutation_failures(results.stdout, shard.selectors, threshold)
 
 

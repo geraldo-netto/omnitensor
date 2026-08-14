@@ -150,15 +150,16 @@ def serve(socket_path: Path, pin_dir: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--object", default=DEFAULT_OBJECT)
-    parser.add_argument("--pin-dir", default=DEFAULT_PIN_DIR)
-    parser.add_argument("--socket", default=DEFAULT_SOCKET)
     parser.add_argument("--print-once", action="store_true")
     arguments = parser.parse_args(argv)
 
-    pin_dir = Path(arguments.pin_dir)
+    # This process owns CAP_BPF and CAP_PERFMON. Its installed object, bpffs
+    # namespace, and socket are therefore policy, not command-line inputs.
+    # Tests inject temporary constants before calling main; production callers
+    # can only select the read-only one-shot output mode.
+    pin_dir = Path(DEFAULT_PIN_DIR)
     try:
-        load_probes(Path(arguments.object), pin_dir)
+        load_probes(Path(DEFAULT_OBJECT), pin_dir)
     except (subprocess.CalledProcessError, OSError, ValueError) as error:
         # Fail loudly: a helper that runs without its probes would serve empty
         # histograms, which a reader cannot tell from an idle kernel.
@@ -167,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.print_once:
         print(json.dumps(aggregate(pin_dir), indent=1))
         return 0
-    serve(Path(arguments.socket), pin_dir)
+    serve(Path(DEFAULT_SOCKET), pin_dir)
     return 0
 
 
