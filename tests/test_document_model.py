@@ -845,6 +845,32 @@ def test_export_reconstructs_pinned_weights_and_requires_complete_pair(  # noqa:
         )
 
 
+@pytest.mark.parametrize("filename", ["model.pt", "model.ncnn.param", "model.ncnn.bin"])
+def test_export_refuses_preexisting_output_symlinks_before_loading_dependencies(
+    tmp_path, filename, monkeypatch
+):
+    source = _source(tmp_path)
+    destination = tmp_path / f"symlink-{filename}"
+    destination.mkdir()
+    outside = tmp_path / f"outside-{filename}"
+    (destination / filename).symlink_to(outside)
+    monkeypatch.setattr(
+        document_model,
+        "_document_dependencies",
+        lambda: pytest.fail("conflicts must not load producer dependencies"),
+    )
+
+    with pytest.raises(DocumentModelError) as conflict:
+        export_bge_ncnn(source, destination, _tokens())
+
+    _assert_document_error(
+        conflict.value,
+        "producer-conflict",
+        "native model output already exists",
+    )
+    assert not outside.exists()
+
+
 def test_export_rejects_wrong_recipe_weights_compiler_and_incomplete_outputs(  # noqa: C901
     monkeypatch, tmp_path
 ):
@@ -1023,6 +1049,25 @@ def test_native_l2_graph_patch_bounds_and_contains_read_failure(tmp_path):
         _append_ncnn_l2_normalization(tmp_path)
     assert unreadable.value.code == "compilation-incomplete"
     assert unreadable.value.detail.startswith("cannot read ncnn graph:")
+
+
+def test_native_l2_graph_patch_refuses_symlink_without_touching_its_target(tmp_path):
+    outside = tmp_path / "outside.param"
+    payload = "7767517\n1 2\nSqueeze final 1 1 input out0 -23303=1,0\n"
+    outside.write_text(payload, encoding="utf-8")
+    graph = tmp_path / "model.ncnn.param"
+    graph.symlink_to(outside)
+
+    with pytest.raises(DocumentModelError) as caught:
+        _append_ncnn_l2_normalization(graph)
+
+    _assert_document_error(
+        caught.value,
+        "compilation-incomplete",
+        "ncnn graph output must not be a symlink",
+    )
+    assert graph.is_symlink()
+    assert outside.read_text(encoding="utf-8") == payload
 
 
 def test_document_dependency_loader_returns_the_exact_producer_stack(monkeypatch):
