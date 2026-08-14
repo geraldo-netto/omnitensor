@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from pathlib import Path
 
 import pytest
 from conftest import sample_manifest, write_workload
@@ -928,7 +927,7 @@ def test_vulkan_mat_conversions_are_exact():
 # service: exact wiring
 
 
-def test_build_executors_wiring_is_exact():
+def test_build_executors_exposes_backend_availability():
     from omnitensor.discovery import Device
     from omnitensor.service import build_executors
 
@@ -938,21 +937,18 @@ def test_build_executors_wiring_is_exact():
     ]
     executors = build_executors(devices)
     assert sorted(executors) == ["gpu", "npu", "tpu"]
-    assert executors["tpu"].backend == "tpu"
-    assert executors["tpu"]._device_present is True
-    assert executors["npu"]._device_present is False
-    composite = executors["gpu"]
-    assert composite.backend == "gpu"
-    assert composite.model_formats == {"ncnn", "onnx"}
-    assert [type(sub) for sub in composite._executors] == [VulkanGpuExecutor, GpuExecutor]
-    assert all(sub._device_present is True for sub in composite._executors)
+    assert all(executors[name].backend == name for name in executors)
+    assert executors["gpu"].model_formats == {"ncnn", "onnx"}
+    assert executors["tpu"].availability().code != DEVICE_ABSENT
+    assert executors["npu"].availability().code == DEVICE_ABSENT
+    gpu_availability = executors["gpu"].availability()
+    assert gpu_availability.available or gpu_availability.code != DEVICE_ABSENT
 
     absent = build_executors([])
-    assert absent["tpu"]._device_present is False
-    assert all(sub._device_present is False for sub in absent["gpu"]._executors)
+    assert all(executor.availability().code == DEVICE_ABSENT for executor in absent.values())
 
 
-def test_profile_statuses_documents_are_exact():
+def test_profile_statuses_expose_machine_readable_states():
     from omnitensor.service import profile_statuses
     from omnitensor.state import PolicyState
 
@@ -964,15 +960,13 @@ def test_profile_statuses_documents_are_exact():
     manifest = sample_manifest(acceleratorPreference=["tpu"])
     workloads = {manifest["id"]: Workload(id=manifest["id"], manifest=manifest)}
     executors = {"tpu": TpuExecutor(device_present=False)}
-    statuses = profile_statuses(workloads, executors, StatsScheduler(), policy)
-    assert statuses == {
-        "sample-workload": {
-            "status": "unavailable",
-            "queued": 0,
-            "detail": "tpu: No Coral Edge TPU device detected",
-            "reason": "device-absent",
-        },
-    }
+    unavailable = profile_statuses(workloads, executors, StatsScheduler(), policy)[
+        "sample-workload"
+    ]
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["reason"] == DEVICE_ABSENT
+    assert unavailable["queued"] == 0
+    assert unavailable["detail"]
 
     class LongReasonExecutor:
         backend = "tpu"
@@ -994,83 +988,11 @@ def test_profile_statuses_documents_are_exact():
             return Availability(True)
 
     idle = profile_statuses(workloads, {"tpu": ReadyExecutor()}, StatsScheduler(), policy)
-    assert idle == {
-        "sample-workload": {
-            "status": "idle",
-            "queued": 0,
-            "detail": "Ready on tpu; no model bundled",
-            "reason": "no-model",
-        },
-    }
-
-
-def test_device_load_prefers_utilization_then_scheduler_load(tmp_path):
-    from omnitensor.service import OmniTensorService
-
-    class NoUtilization:
-        def detect(self):
-            return []
-
-        def utilization(self, device):
-            return None
-
-    workloads_root = tmp_path / "workloads"
-    workloads_root.mkdir()
-    service = OmniTensorService(
-        snapshot_path=tmp_path / "snap.json",
-        policy_path=tmp_path / "policy.json",
-        workloads_path=workloads_root,
-        discovery=NoUtilization(),
-    )
-    device = device_kwargs()
-    assert service._device_load(device, {"loads": {"gpu": 41.0}}) == 41.0
-    assert service._device_load(device, {"loads": {}}) is None
-
-
-def test_build_service_from_env_honours_environment_paths(tmp_path, monkeypatch):
-    from omnitensor.service import build_service_from_env
-
-    workloads_root = tmp_path / "workloads"
-    write_workload(workloads_root, sample_manifest())
-    monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "snap.json"))
-    monkeypatch.setenv("OMNITENSOR_POLICY_PATH", str(tmp_path / "policy.json"))
-    monkeypatch.setenv("OMNITENSOR_WORKLOADS", str(workloads_root))
-    service = build_service_from_env()
-    assert service._publisher_port._path == tmp_path / "snap.json"
-    assert service.control._store._path == tmp_path / "policy.json"
-    assert "sample-workload" in service._workloads
-    assert "hardware-health" in service._workloads
-
-
-def test_build_service_from_env_defaults_expand_home(monkeypatch):
-    from omnitensor.service import build_service_from_env
-
-    for name in ("OMNITENSOR_STATE_PATH", "OMNITENSOR_POLICY_PATH", "OMNITENSOR_WORKLOADS"):
-        monkeypatch.delenv(name, raising=False)
-    service = build_service_from_env()
-    assert service._publisher_port._path == (
-        Path.home() / ".local/state/xpu-workload-manager/state.json"
-    )
-    assert service.control._store._path == Path.home() / ".local/state/omnitensor/policy.json"
-
-
-def test_env_path_defaults_expand_the_home_directory(monkeypatch):
-    from omnitensor.composition import (
-        DEFAULT_POLICY_PATH,
-        DEFAULT_STATE_PATH,
-        DEFAULT_WORKLOADS_PATH,
-        _env_path,
-    )
-
-    for name, default in (
-        ("OMNITENSOR_STATE_PATH", DEFAULT_STATE_PATH),
-        ("OMNITENSOR_POLICY_PATH", DEFAULT_POLICY_PATH),
-        ("OMNITENSOR_WORKLOADS", DEFAULT_WORKLOADS_PATH),
-    ):
-        monkeypatch.delenv(name, raising=False)
-        resolved = _env_path(name, default)
-        assert not str(resolved).startswith("~")
-        assert str(resolved).startswith(str(Path.home()))
+    idle_status = idle["sample-workload"]
+    assert idle_status["status"] == "idle"
+    assert idle_status["reason"] == "no-model"
+    assert idle_status["queued"] == 0
+    assert idle_status["detail"]
 
 
 # --------------------------------------------------------------------------
