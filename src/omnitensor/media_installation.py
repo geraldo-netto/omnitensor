@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .plugins.artifact_installation import ArtifactInstallationError, ArtifactInstaller
+from .plugins.artifact_installation import (
+    ArtifactInstallationError,
+    ArtifactInstaller,
+    PinnedArtifactInstallationError,
+    PinnedSourceErrors,
+    installed_artifact_document,
+    run_installation_cli,
+    verify_pinned_source,
+)
 from .plugins.artifacts import ArtifactReference
 from .preparation import file_digest
 
@@ -30,8 +37,15 @@ SPEECH_REFERENCE = ArtifactReference(
 )
 
 
-class MediaInstallationError(RuntimeError):
-    """Stable refusal before any media artifact is installed."""
+# Compatibility alias retained for callers that catch the old public name.
+MediaInstallationError = PinnedArtifactInstallationError
+
+_SOURCE_ERRORS = PinnedSourceErrors(
+    "media artifact is unavailable",
+    "media artifacts must be absolute regular files",
+    "media artifact size does not match its pinned release",
+    "media artifact digest does not match its manifest",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,28 +94,18 @@ def install_media_artifacts(
 
 
 def _verify_source(path: Path, digest: str, exact_size: int) -> None:
-    candidate = Path(path)
-    try:
-        status = candidate.stat()
-    except OSError as error:
-        raise MediaInstallationError("media artifact is unavailable") from error
-    if not candidate.is_absolute() or not candidate.is_file():
-        raise MediaInstallationError("media artifacts must be absolute regular files")
-    if status.st_size != exact_size:
-        raise MediaInstallationError("media artifact size does not match its pinned release")
-    if file_digest(candidate) != digest:
-        raise MediaInstallationError("media artifact digest does not match its manifest")
+    verify_pinned_source(
+        path,
+        digest,
+        exact_size,
+        errors=_SOURCE_ERRORS,
+        error_type=MediaInstallationError,
+        digest_file=file_digest,
+    )
 
 
 def _installed_document(reference: ArtifactReference, path: Path) -> dict[str, object]:
-    return {
-        "id": reference.id,
-        "version": reference.version,
-        "format": reference.format,
-        "sha256": reference.sha256,
-        "path": str(path),
-        "companions": reference.declared_companions,
-    }
+    return installed_artifact_document(reference, path, include_companions=True)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -118,9 +122,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    arguments = _parser().parse_args(argv)
-    try:
-        document = install_media_artifacts(
+    def invoke(arguments: argparse.Namespace) -> object:
+        return install_media_artifacts(
             arguments.artifact_root,
             MediaArtifactSources(
                 arguments.vision_model,
@@ -130,9 +133,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             accepted_qwen_license=arguments.accept_qwen_license,
             accepted_whisper_license=arguments.accept_whisper_license,
         )
-    except (MediaInstallationError, ArtifactInstallationError, OSError) as error:
-        raise SystemExit(str(error)) from error
-    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    run_installation_cli(
+        _parser(),
+        argv,
+        invoke,
+        errors=(MediaInstallationError, ArtifactInstallationError, OSError),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

@@ -9,6 +9,7 @@ import pytest
 
 import omnitensor.qwen_installation as installation
 from omnitensor.plugins import PluginMetadata, PluginSource, resolve_plugin_identities
+from omnitensor.plugins.artifact_installation import PinnedArtifactInstallationError
 from omnitensor.plugins.artifacts import ArtifactReference
 from omnitensor.qwen_installation import (
     QWEN_REFERENCE,
@@ -156,7 +157,8 @@ def test_installed_document_is_the_exact_bounded_public_receipt(tmp_path):
     )
     path = (tmp_path / "model.gguf").resolve()
 
-    assert installation._installed_document(reference, path) == {
+    document = installation._installed_document(reference, path)
+    assert document == {
         "id": "model-id",
         "version": "2.3.4",
         "format": "gguf",
@@ -164,6 +166,33 @@ def test_installed_document_is_the_exact_bounded_public_receipt(tmp_path):
         "path": str(path),
         "companions": {"tokenizer.json": "b" * 64},
     }
+    assert list(document) == ["id", "version", "format", "sha256", "path", "companions"]
+
+
+def test_qwen_error_name_is_a_compatible_shared_alias():
+    assert QwenInstallationError is PinnedArtifactInstallationError
+    assert str(QwenInstallationError("refused")) == "refused"
+
+
+def test_qwen_verifier_preserves_digest_and_error_monkeypatch_hooks(tmp_path, monkeypatch):
+    source = _source(tmp_path, "model.gguf", b"model")
+    digest = hashlib.sha256(b"model").hexdigest()
+    observed = []
+    monkeypatch.setattr(
+        installation,
+        "file_digest",
+        lambda path: observed.append(path) or digest,
+    )
+    installation._verify_source(source, digest, None)
+    assert observed == [source]
+
+    class HookError(PinnedArtifactInstallationError):
+        pass
+
+    monkeypatch.setattr(installation, "QwenInstallationError", HookError)
+    monkeypatch.setattr(installation, "file_digest", lambda _path: "0" * 64)
+    with pytest.raises(HookError, match="digest does not match"):
+        installation._verify_source(source, digest, None)
 
 
 def test_parser_exposes_the_exact_required_path_and_license_contract():

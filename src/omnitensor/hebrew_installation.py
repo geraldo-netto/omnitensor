@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from .plugins.artifact_installation import ArtifactInstallationError, ArtifactInstaller
+from .plugins.artifact_installation import (
+    ArtifactInstallationError,
+    ArtifactInstaller,
+    PinnedArtifactInstallationError,
+    PinnedSourceErrors,
+    installed_artifact_document,
+    run_installation_cli,
+    verify_pinned_source,
+)
 from .plugins.artifacts import ArtifactReference
 from .preparation import file_digest
 
@@ -20,8 +27,15 @@ DICTALM_REFERENCE = ArtifactReference(
 )
 
 
-class HebrewInstallationError(RuntimeError):
-    """Stable refusal before the optional artifact is installed."""
+# Compatibility alias retained for callers that catch the old public name.
+HebrewInstallationError = PinnedArtifactInstallationError
+
+_SOURCE_ERRORS = PinnedSourceErrors(
+    "DictaLM artifact is unavailable",
+    "DictaLM artifact must be an absolute regular file",
+    "DictaLM GGUF size does not match its pinned release",
+    "DictaLM digest does not match its manifest",
+)
 
 
 def install_hebrew_translation_model(
@@ -33,26 +47,22 @@ def install_hebrew_translation_model(
     if accepted_license != "Apache-2.0":
         raise HebrewInstallationError("license acceptance must explicitly name Apache-2.0")
     source = Path(model_path)
-    try:
-        status = source.stat()
-    except OSError as error:
-        raise HebrewInstallationError("DictaLM artifact is unavailable") from error
-    if not source.is_absolute() or not source.is_file():
-        raise HebrewInstallationError("DictaLM artifact must be an absolute regular file")
-    if status.st_size != DICTALM_SIZE_BYTES:
-        raise HebrewInstallationError("DictaLM GGUF size does not match its pinned release")
-    if file_digest(source) != DICTALM_REFERENCE.sha256:
-        raise HebrewInstallationError("DictaLM digest does not match its manifest")
+    verify_pinned_source(
+        source,
+        DICTALM_REFERENCE.sha256,
+        DICTALM_SIZE_BYTES,
+        errors=_SOURCE_ERRORS,
+        error_type=HebrewInstallationError,
+        digest_file=file_digest,
+    )
     installed = ArtifactInstaller(Path(artifact_root)).install(DICTALM_REFERENCE, source)
     return {
         "version": 1,
-        "artifact": {
-            "id": DICTALM_REFERENCE.id,
-            "version": DICTALM_REFERENCE.version,
-            "format": DICTALM_REFERENCE.format,
-            "sha256": DICTALM_REFERENCE.sha256,
-            "path": str(installed.path),
-        },
+        "artifact": installed_artifact_document(
+            DICTALM_REFERENCE,
+            installed.path,
+            include_companions=False,
+        ),
         "licenseAccepted": "Apache-2.0",
     }
 
@@ -68,16 +78,19 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    arguments = _parser().parse_args(argv)
-    try:
-        document = install_hebrew_translation_model(
+    def invoke(arguments: argparse.Namespace) -> object:
+        return install_hebrew_translation_model(
             arguments.artifact_root,
             arguments.model,
             accepted_license=arguments.accept_license,
         )
-    except (HebrewInstallationError, ArtifactInstallationError, OSError) as error:
-        raise SystemExit(str(error)) from error
-    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    run_installation_cli(
+        _parser(),
+        argv,
+        invoke,
+        errors=(HebrewInstallationError, ArtifactInstallationError, OSError),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point

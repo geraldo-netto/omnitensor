@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import functools
 import hashlib
@@ -9,7 +10,7 @@ import json
 import os
 import stat
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +52,20 @@ class ArtifactInstallationError(RuntimeError):
         super().__init__(f"{code}: {detail}")
 
 
+class PinnedArtifactInstallationError(RuntimeError):
+    """Stable refusal shared by the pinned-artifact installation commands."""
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedSourceErrors:
+    """Command-specific wording for the shared pinned-source verifier."""
+
+    unavailable: str
+    not_regular: str
+    size_mismatch: str
+    digest_mismatch: str
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactActivation:
     """One active version and its single deterministic rollback target."""
@@ -66,6 +81,71 @@ class ArtifactInstallation:
     reference: ArtifactReference
     path: Path
     previous: ArtifactReference | None
+
+
+def verify_pinned_source(
+    path: Path,
+    digest: str,
+    exact_size: int | None,
+    *,
+    errors: PinnedSourceErrors,
+    error_type: type[PinnedArtifactInstallationError] = PinnedArtifactInstallationError,
+    digest_file: Callable[[Path], str] | None = None,
+) -> None:
+    """Verify one absolute pinned source while retaining command error wording."""
+    candidate = Path(path)
+    try:
+        status = candidate.stat()
+    except OSError as error:
+        raise error_type(errors.unavailable) from error
+    if not candidate.is_absolute() or not candidate.is_file():
+        raise error_type(errors.not_regular)
+    if exact_size is not None and status.st_size != exact_size:
+        raise error_type(errors.size_mismatch)
+    if digest_file is None:
+        # Local import avoids preparation -> ArtifactInstaller -> preparation
+        # at module import time while retaining a convenient canonical default.
+        from omnitensor.preparation import file_digest
+
+        digest_file = file_digest
+
+    if digest_file(candidate) != digest:
+        raise error_type(errors.digest_mismatch)
+
+
+def installed_artifact_document(
+    reference: ArtifactReference,
+    path: Path,
+    *,
+    include_companions: bool,
+) -> dict[str, object]:
+    """Build the stable public receipt entry shared by pinned installers."""
+    document: dict[str, object] = {
+        "id": reference.id,
+        "version": reference.version,
+        "format": reference.format,
+        "sha256": reference.sha256,
+        "path": str(path),
+    }
+    if include_companions:
+        document["companions"] = reference.declared_companions
+    return document
+
+
+def run_installation_cli(
+    parser: argparse.ArgumentParser,
+    argv: Sequence[str] | None,
+    invoke: Callable[[argparse.Namespace], object],
+    *,
+    errors: tuple[type[BaseException], ...],
+) -> None:
+    """Run a pinned installer CLI with the shared compact JSON/error contract."""
+    arguments = parser.parse_args(argv)
+    try:
+        document = invoke(arguments)
+    except errors as error:
+        raise SystemExit(str(error)) from error
+    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
 
 
 def _store_locked(method):

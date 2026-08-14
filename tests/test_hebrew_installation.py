@@ -11,6 +11,7 @@ from omnitensor.hebrew_installation import (
     HebrewInstallationError,
     install_hebrew_translation_model,
 )
+from omnitensor.plugins.artifact_installation import PinnedArtifactInstallationError
 from omnitensor.plugins.artifacts import ArtifactReference
 
 ROOT = Path(__file__).parents[1]
@@ -49,6 +50,12 @@ def test_installer_verifies_and_atomically_installs_the_optional_model(tmp_path,
         "path": str(tmp_path / "artifacts" / reference.id / reference.version / "model.gguf"),
     }
     assert Path(receipt["artifact"]["path"]).read_bytes() == content
+    assert list(receipt["artifact"]) == ["id", "version", "format", "sha256", "path"]
+
+
+def test_hebrew_error_name_is_a_compatible_shared_alias():
+    assert HebrewInstallationError is PinnedArtifactInstallationError
+    assert str(HebrewInstallationError("refused")) == "refused"
 
 
 @pytest.mark.parametrize("license_name", ["", "MIT", "apache-2.0"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -11,6 +12,13 @@ from omnitensor.media_installation import (
     MediaArtifactSources,
     MediaInstallationError,
     install_media_artifacts,
+)
+from omnitensor.plugins.artifact_installation import (
+    PinnedArtifactInstallationError,
+    PinnedSourceErrors,
+    installed_artifact_document,
+    run_installation_cli,
+    verify_pinned_source,
 )
 from omnitensor.plugins.artifacts import ArtifactReference
 
@@ -111,6 +119,108 @@ def test_source_verifier_refuses_missing_relative_size_and_digest(tmp_path, monk
         installation._verify_source(relative.resolve(), digest, 6)
     with pytest.raises(MediaInstallationError, match="digest does not match"):
         installation._verify_source(relative.resolve(), "0" * 64, 5)
+
+
+def test_shared_verifier_preserves_alias_monkeypatch_and_symlink_contract(tmp_path, monkeypatch):
+    assert MediaInstallationError is PinnedArtifactInstallationError
+    assert str(MediaInstallationError("refused")) == "refused"
+    content = b"model"
+    source = _source(tmp_path, "source.bin", content)
+    symlink = tmp_path / "source-link.bin"
+    symlink.symlink_to(source)
+    digest = hashlib.sha256(content).hexdigest()
+    errors = PinnedSourceErrors("missing", "regular", "size", "digest")
+
+    verify_pinned_source(symlink, digest, len(content), errors=errors)
+
+    observed = []
+    monkeypatch.setattr(
+        installation,
+        "file_digest",
+        lambda path: observed.append(path) or digest,
+    )
+    installation._verify_source(source, digest, len(content))
+    assert observed == [source]
+
+    class HookError(PinnedArtifactInstallationError):
+        pass
+
+    monkeypatch.setattr(installation, "MediaInstallationError", HookError)
+    monkeypatch.setattr(installation, "file_digest", lambda _path: "0" * 64)
+    with pytest.raises(HookError, match="digest does not match"):
+        installation._verify_source(source, digest, len(content))
+
+    symlink.unlink()
+    symlink.symlink_to(tmp_path / "missing.bin")
+    with pytest.raises(PinnedArtifactInstallationError, match="missing"):
+        verify_pinned_source(symlink, digest, len(content), errors=errors)
+
+
+def test_shared_verifier_preserves_optional_size_and_exact_refusal_messages(tmp_path, monkeypatch):
+    content = b"model"
+    source = _source(tmp_path, "source.bin", content)
+    digest = hashlib.sha256(content).hexdigest()
+    errors = PinnedSourceErrors("missing", "regular", "size", "digest")
+
+    verify_pinned_source(source, digest, None, errors=errors)
+    with pytest.raises(PinnedArtifactInstallationError) as size:
+        verify_pinned_source(source, digest, len(content) + 1, errors=errors)
+    assert str(size.value) == "size"
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(PinnedArtifactInstallationError) as relative:
+        verify_pinned_source(Path(source.name), digest, len(content), errors=errors)
+    assert str(relative.value) == "regular"
+
+
+def test_shared_receipt_and_cli_have_direct_stable_contracts(tmp_path, capsys):
+    reference = ArtifactReference(
+        "model",
+        "1.0.0",
+        "gguf",
+        "a" * 64,
+        (("tokenizer.json", "b" * 64),),
+    )
+    path = tmp_path / "model.gguf"
+    with_companions = installed_artifact_document(
+        reference, path, include_companions=True
+    )
+    without_companions = installed_artifact_document(
+        reference, path, include_companions=False
+    )
+    assert list(with_companions) == [
+        "id",
+        "version",
+        "format",
+        "sha256",
+        "path",
+        "companions",
+    ]
+    assert with_companions["companions"] == {"tokenizer.json": "b" * 64}
+    assert list(without_companions) == ["id", "version", "format", "sha256", "path"]
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--value", required=True)
+    run_installation_cli(
+        parser,
+        ["--value", "kept"],
+        lambda arguments: {"z": arguments.value, "a": "first"},
+        errors=(PinnedArtifactInstallationError,),
+    )
+    assert capsys.readouterr().out == '{"a":"first","z":"kept"}\n'
+
+    def refused(_arguments):
+        raise PinnedArtifactInstallationError("refused")
+
+    with pytest.raises(SystemExit) as error:
+        run_installation_cli(
+            parser,
+            ["--value", "kept"],
+            refused,
+            errors=(PinnedArtifactInstallationError,),
+        )
+    assert str(error.value) == "refused"
+    assert isinstance(error.value.__cause__, PinnedArtifactInstallationError)
 
 
 def test_parser_exposes_exact_paths_and_licenses():

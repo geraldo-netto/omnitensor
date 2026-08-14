@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .plugins.artifact_installation import ArtifactInstallationError, ArtifactInstaller
+from .plugins.artifact_installation import (
+    ArtifactInstallationError,
+    ArtifactInstaller,
+    PinnedArtifactInstallationError,
+    PinnedSourceErrors,
+    installed_artifact_document,
+    run_installation_cli,
+    verify_pinned_source,
+)
 from .plugins.artifacts import ArtifactReference
 from .preparation import file_digest
 
@@ -37,8 +44,15 @@ BGE_REFERENCE = ArtifactReference(
 )
 
 
-class QwenInstallationError(RuntimeError):
-    """Stable refusal before any artifact is installed."""
+# Compatibility alias retained for callers that catch the old public name.
+QwenInstallationError = PinnedArtifactInstallationError
+
+_SOURCE_ERRORS = PinnedSourceErrors(
+    "provider artifact is unavailable",
+    "provider artifacts must be absolute regular files",
+    "Qwen GGUF size does not match its pinned release",
+    "provider artifact digest does not match its manifest",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,28 +110,18 @@ def install_qwen_artifacts(
 
 
 def _verify_source(path: Path, digest: str, exact_size: int | None) -> None:
-    candidate = Path(path)
-    try:
-        status = candidate.stat()
-    except OSError as error:
-        raise QwenInstallationError("provider artifact is unavailable") from error
-    if not candidate.is_absolute() or not candidate.is_file():
-        raise QwenInstallationError("provider artifacts must be absolute regular files")
-    if exact_size is not None and status.st_size != exact_size:
-        raise QwenInstallationError("Qwen GGUF size does not match its pinned release")
-    if file_digest(candidate) != digest:
-        raise QwenInstallationError("provider artifact digest does not match its manifest")
+    verify_pinned_source(
+        path,
+        digest,
+        exact_size,
+        errors=_SOURCE_ERRORS,
+        error_type=QwenInstallationError,
+        digest_file=file_digest,
+    )
 
 
 def _installed_document(reference: ArtifactReference, path: Path) -> dict[str, object]:
-    return {
-        "id": reference.id,
-        "version": reference.version,
-        "format": reference.format,
-        "sha256": reference.sha256,
-        "path": str(path),
-        "companions": reference.declared_companions,
-    }
+    return installed_artifact_document(reference, path, include_companions=True)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -135,9 +139,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    arguments = _parser().parse_args(argv)
-    try:
-        document = install_qwen_artifacts(
+    def invoke(arguments: argparse.Namespace) -> object:
+        return install_qwen_artifacts(
             arguments.artifact_root,
             QwenArtifactSources(
                 arguments.qwen_model,
@@ -148,9 +151,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             accepted_qwen_license=arguments.accept_qwen_license,
             accepted_bge_license=arguments.accept_bge_license,
         )
-    except (QwenInstallationError, ArtifactInstallationError, OSError) as error:
-        raise SystemExit(str(error)) from error
-    print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    run_installation_cli(
+        _parser(),
+        argv,
+        invoke,
+        errors=(QwenInstallationError, ArtifactInstallationError, OSError),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - console entry point
