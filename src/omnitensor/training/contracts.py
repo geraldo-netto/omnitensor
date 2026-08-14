@@ -167,7 +167,13 @@ def _validate_features(spec: TrainingSpec) -> None:
         raise TrainingError(
             "features-invalid", f"between 1 and {MAX_FEATURES} features are required"
         )
-    if len(set(spec.feature_names)) != len(spec.feature_names):
+    try:
+        unique_features = len(set(spec.feature_names))
+    except TypeError as error:
+        raise TrainingError(
+            "features-invalid", "feature names must be bounded strings"
+        ) from error
+    if unique_features != len(spec.feature_names):
         raise TrainingError("features-invalid", "feature names must be unique")
     for name in spec.feature_names:
         if not isinstance(name, str) or not 1 <= len(name) <= MAX_FEATURE_NAME:

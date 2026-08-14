@@ -1049,7 +1049,10 @@ def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_
 
     with pytest.raises(PluginWorkerError) as unavailable:
         asyncio.run(runtime(None).dispatch("job-1", "external-example", {"sources": [str(source)]}))
-    assert unavailable.value.code == "selected-files-unavailable"
+    assert (unavailable.value.code, unavailable.value.detail) == (
+        "selected-files-unavailable",
+        "selected-file broker is not configured",
+    )
 
 
 def test_selected_source_broker_refuses_missing_empty_and_unopenable_files(tmp_path, monkeypatch):

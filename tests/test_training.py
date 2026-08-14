@@ -201,6 +201,41 @@ def test_training_spec_refuses_ambiguous_or_unbounded_contracts(changes):
         spec(**changes)
 
 
+def test_training_spec_refuses_unhashable_features_with_the_stable_contract():
+    with pytest.raises(TrainingError) as caught:
+        spec(feature_names=(["load"],))
+
+    assert (caught.value.code, caught.value.detail) == (
+        "features-invalid",
+        "feature names must be bounded strings",
+    )
+
+
+@pytest.mark.parametrize("feature_names", [("", ""), (1, 1)])
+def test_duplicate_invalid_features_keep_the_uniqueness_precedence(feature_names):
+    with pytest.raises(TrainingError) as caught:
+        spec(feature_names=feature_names)
+
+    assert (caught.value.code, caught.value.detail) == (
+        "features-invalid",
+        "feature names must be unique",
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "detail"),
+    [
+        (None, "training spec must be an object"),
+        ({"featureNames": []}, "training spec fields are invalid"),
+    ],
+)
+def test_training_spec_document_shape_refusals_are_exact(document, detail):
+    with pytest.raises(TrainingError) as caught:
+        TrainingSpec.from_document(document)
+
+    assert (caught.value.code, caught.value.detail) == ("report-invalid", detail)
+
+
 def test_training_freezes_model_report_and_quality(tmp_path):
     record_history(tmp_path / "records")
     exporter = FakeExporter()

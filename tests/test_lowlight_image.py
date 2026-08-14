@@ -128,8 +128,11 @@ def test_empty_or_malformed_images_fail_closed(tmp_path, payload, code):
         prepare_low_light_input(workspace, source)
 
     assert caught.value.code == code
-    if code == "input-decode-failed":
-        assert caught.value.detail == "source image is malformed or cannot be normalized"
+    assert caught.value.detail == (
+        "source image is empty"
+        if code == "input-invalid"
+        else "source image is malformed or cannot be normalized"
+    )
 
 
 def test_decodable_but_unsupported_bmp_is_refused(tmp_path):
@@ -156,8 +159,10 @@ def test_byte_and_pixel_limits_are_enforced_before_tensor_allocation(tmp_path):
 
     with pytest.raises(LowLightWorkspaceError) as pixel_limit:
         prepare_low_light_input(workspace, source, max_source_pixels=11)
-    assert pixel_limit.value.code == "input-too-large"
-    assert "11 pixels" in pixel_limit.value.detail
+    assert (pixel_limit.value.code, pixel_limit.value.detail) == (
+        "input-too-large",
+        "source image exceeds 16384px per side or 11 pixels",
+    )
 
 
 @pytest.mark.parametrize(
@@ -223,7 +228,10 @@ def test_invalid_icc_profile_fails_instead_of_silently_changing_color(tmp_path):
     with pytest.raises(LowLightWorkspaceError) as caught:
         prepare_low_light_input(workspace, source)
 
-    assert caught.value.code == "input-decode-failed"
+    assert (caught.value.code, caught.value.detail) == (
+        "input-decode-failed",
+        "source image is malformed or cannot be normalized",
+    )
 
 
 @settings(max_examples=10, deadline=None)

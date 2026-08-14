@@ -104,6 +104,20 @@ def test_relative_key_root_and_non_regular_key_are_refused(tmp_path):
         load_or_create_publisher_identity(key_root=keys, trust_root=trusts)
 
 
+def test_regular_key_directory_has_the_stable_path_refusal(tmp_path):
+    keys, trusts = _roots(tmp_path)
+    keys.mkdir()
+    (keys / "xpuwlm").write_bytes(b"not a directory")
+
+    with pytest.raises(PublisherIdentityError) as caught:
+        load_or_create_publisher_identity(key_root=keys, trust_root=trusts)
+
+    assert (caught.value.code, caught.value.detail) == (
+        "path-invalid",
+        "publisher key root must be a directory",
+    )
+
+
 def test_incomplete_and_mismatched_keypairs_are_refused(tmp_path):
     keys, trusts = _roots(tmp_path)
     key_directory = keys / "xpuwlm"

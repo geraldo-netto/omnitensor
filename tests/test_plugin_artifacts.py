@@ -576,6 +576,20 @@ def test_stored_artifact_references_fail_closed(document):
     assert excinfo.value.code == "metadata-invalid"
 
 
+def test_regular_artifact_identity_path_has_a_stable_store_refusal(tmp_path):
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "sample-model").write_bytes(b"not a directory")
+
+    with pytest.raises(ArtifactInstallationError) as caught:
+        ArtifactInstaller(store).activation("sample-model")
+
+    assert (caught.value.code, caught.value.detail) == (
+        "store-path-invalid",
+        "artifact directory is invalid: sample-model",
+    )
+
+
 def ncnn_pair(tmp_path, graph=b"7767517\n2 2\n", weights=b"WEIGHTS" * 100):
     param = tmp_path / "src.param"
     param.write_bytes(graph)

@@ -207,7 +207,12 @@ def _secure_directory(path: Path) -> Path:
     candidate = path.expanduser()
     if not candidate.is_absolute():
         raise PublisherIdentityError("path-invalid", "publisher key root must be absolute")
-    candidate.mkdir(parents=True, mode=0o700, exist_ok=True)
+    try:
+        candidate.mkdir(parents=True, mode=0o700, exist_ok=True)
+    except FileExistsError as error:
+        raise PublisherIdentityError(
+            "path-invalid", "publisher key root must be a directory"
+        ) from error
     if candidate.is_symlink() or not candidate.is_dir():
         raise PublisherIdentityError("path-invalid", "publisher key root must be a directory")
     candidate.chmod(0o700)

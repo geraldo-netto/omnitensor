@@ -214,6 +214,19 @@ def test_the_fit_parameters_are_validated(changes):
                        **{k: v for k, v in changes.items() if k in ("ridge", "holdout")})
 
 
+@pytest.mark.parametrize("ridge", [float("nan"), float("inf"), 10**1000])
+def test_nonfinite_ridge_has_the_stable_bounds_refusal(ridge):
+    inputs, targets = ramp()
+
+    with pytest.raises(ForecastError) as caught:
+        fit_forecaster(inputs, targets, ("cpu",), 3, ridge=ridge)
+
+    assert (caught.value.code, caught.value.detail) == (
+        "bounds-invalid",
+        "ridge must be a non-negative number",
+    )
+
+
 def test_mismatched_training_shapes_are_refused():
     inputs, targets = ramp()
     with pytest.raises(ForecastError, match="same length"):
@@ -274,5 +287,14 @@ def test_a_tiny_holdout_still_scores_against_a_held_out_row():
     inputs, targets = ramp(count=MIN_TRAINING_ROWS)
 
     model = fit_forecaster(inputs, targets, ("cpu",), 3, holdout=0.01)
+
+    assert model.quality.samples == 1
+
+
+@pytest.mark.parametrize("holdout", [1e-20, 1e-300])
+def test_a_submachine_holdout_still_reserves_one_held_out_row(holdout):
+    inputs, targets = ramp(count=MIN_TRAINING_ROWS)
+
+    model = fit_forecaster(inputs, targets, ("cpu",), 3, holdout=holdout)
 
     assert model.quality.samples == 1

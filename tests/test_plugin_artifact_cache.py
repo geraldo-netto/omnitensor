@@ -232,6 +232,10 @@ def test_hidden_cache_entries_cannot_bypass_accounting(tmp_path):
             "artifact metadata version is invalid",
         ),
         (
+            lambda document: document.clear(),
+            "artifact metadata has invalid fields",
+        ),
+        (
             lambda document: document["artifact"].update(id="other"),
             "artifact cache identity does not match",
         ),
@@ -321,6 +325,21 @@ def test_symlinked_identity_directory_is_never_followed_or_deleted(tmp_path):
 
     assert excinfo.value.code == "cache-state-invalid"
     assert outside.is_dir()
+
+
+def test_non_directory_version_has_the_stable_cache_refusal(tmp_path):
+    store = tmp_path / "store"
+    version = store / "sample-model" / "1.0.0"
+    version.parent.mkdir(parents=True)
+    version.write_bytes(b"not a version directory")
+
+    with pytest.raises(ArtifactCacheError) as caught:
+        ArtifactCache(store, max_bytes=0, max_items=0).accounting()
+
+    assert (caught.value.code, caught.value.detail) == (
+        "cache-state-invalid",
+        "invalid artifact version directory: sample-model/1.0.0",
+    )
 
 
 def test_nested_or_symlinked_version_entries_are_never_collected(tmp_path):

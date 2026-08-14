@@ -463,7 +463,12 @@ class ArtifactInstaller:
             raise ArtifactInstallationError("reference-invalid", invalid)
         self._root.mkdir(parents=True, exist_ok=True)
         artifact_root = self._root / artifact_id
-        artifact_root.mkdir(exist_ok=True)
+        try:
+            artifact_root.mkdir(exist_ok=True)
+        except FileExistsError as error:
+            raise ArtifactInstallationError(
+                "store-path-invalid", f"artifact directory is invalid: {artifact_id}"
+            ) from error
         if artifact_root.resolve() != artifact_root:
             raise ArtifactInstallationError(
                 "store-path-invalid",

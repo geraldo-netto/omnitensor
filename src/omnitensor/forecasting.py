@@ -46,14 +46,24 @@ def fit_forecaster(
 ) -> LinearForecaster:
     """Fit and honestly score a forecaster over recorded windows."""
     _validate_shape(inputs, targets, feature_names, window)
-    if isinstance(ridge, bool) or not isinstance(ridge, (int, float)) or ridge < 0:
+    try:
+        valid_ridge = (
+            not isinstance(ridge, bool)
+            and isinstance(ridge, (int, float))
+            and math.isfinite(ridge)
+            and ridge >= 0
+        )
+    except OverflowError:
+        valid_ridge = False
+    if not valid_ridge:
         raise ForecastError("bounds-invalid", "ridge must be a non-negative number")
     if not isinstance(holdout, float) or not 0 < holdout < 1:
         raise ForecastError("bounds-invalid", "holdout must be a fraction in (0, 1)")
 
-    # At least one row is always held out: holdout is in (0, 1), so the
-    # truncated split is strictly smaller than the number of windows.
-    split = max(1, int(len(inputs) * (1 - holdout)))
+    # At least one row is always held out.  A tiny valid holdout can make
+    # floating subtraction round ``1 - holdout`` back to 1.0, so cap the
+    # truncated split explicitly instead of relying on real-number arithmetic.
+    split = min(len(inputs) - 1, max(1, int(len(inputs) * (1 - holdout))))
     # Split by time, never at random: shuffling lets the model see the future
     # of the very window it is scored on, which flatters it enormously.
     train_inputs, test_inputs = list(inputs[:split]), list(inputs[split:])

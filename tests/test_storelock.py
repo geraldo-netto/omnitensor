@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import time
 from pathlib import Path
 
@@ -44,6 +45,16 @@ def test_lock_refuses_a_lock_path_that_is_not_a_regular_file(tmp_path):
     (tmp_path / ".store.lock").mkdir()
     with pytest.raises(OSError), store_lock(tmp_path, ".store.lock"):
         pass
+
+
+def test_lock_refuses_a_fifo_with_the_stable_nonregular_detail(tmp_path):
+    lock = tmp_path / ".store.lock"
+    os.mkfifo(lock)
+
+    with pytest.raises(OSError) as caught, store_lock(tmp_path, lock.name):
+        pass
+
+    assert str(caught.value) == "store lock is not a regular file: .store.lock"
 
 
 def _hold_then_append(root: str, name: str, log: str, started, hold: float) -> None:
