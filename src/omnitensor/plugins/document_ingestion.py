@@ -23,6 +23,7 @@ from .ingestion import (
     IngestionRejection,
     IngestionScan,
     OptedInRootScanner,
+    positive_integer_bound,
 )
 
 DEFAULT_MAX_DOCUMENT_BYTES = 128 * 1024 * 1024
@@ -92,8 +93,7 @@ class DocumentIngestor:
             ("max_expansion_ratio", max_expansion_ratio),
             ("max_container_depth", max_container_depth),
         ):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"{name} must be a positive integer")
+            positive_integer_bound(value, name)
         self._scanner = OptedInRootScanner(
             roots,
             suffixes=suffixes,

@@ -199,6 +199,19 @@ def test_the_record_bound_is_validated(value):
     )
 
 
+def test_build_constructor_keeps_permission_then_bound_then_root_order():
+    with pytest.raises(TypeError) as permission_error:
+        BuildMetadataIngestor([], object(), max_records=0)
+    assert str(permission_error.value) == "permissions must implement CollectionPermissionGate"
+
+    with pytest.raises(IngestionError) as bound_error:
+        BuildMetadataIngestor([], permission_view(), max_records=0)
+    assert (bound_error.value.code, bound_error.value.detail) == (
+        "bounds-invalid",
+        "max_records must be a positive integer",
+    )
+
+
 def test_one_build_record_is_a_valid_bound():
     ingestor = BuildMetadataIngestor(["/tmp"], permission_view(), max_records=1)
 

@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.ingestion import (
     MAX_ROOTS,
@@ -13,6 +15,7 @@ from omnitensor.plugins.ingestion import (
     IngestionRejection,
     OptedInRootScanner,
     RejectedFile,
+    positive_integer_bound,
 )
 
 
@@ -253,6 +256,53 @@ def test_roots_are_validated(roots, message):
 def test_bounds_are_validated(tmp_path, changes):
     with pytest.raises(IngestionError, match="must be a positive integer"):
         OptedInRootScanner([tmp_path], **changes)
+
+
+class PositiveInt(int):
+    pass
+
+
+def test_positive_integer_bound_preserves_int_subclasses():
+    value = PositiveInt(7)
+
+    assert positive_integer_bound(value, "limit") is value
+
+
+@given(
+    value=st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(),
+        st.floats(allow_nan=True, allow_infinity=True),
+        st.text(max_size=20),
+        st.binary(max_size=20),
+    )
+)
+def test_positive_integer_bound_accepts_only_positive_non_boolean_integers(value):
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 1:
+        assert positive_integer_bound(value, "limit") is value
+        return
+
+    with pytest.raises(ValueError) as excinfo:
+        positive_integer_bound(value, "limit")
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "limit must be a positive integer"
+
+
+def test_scanner_keeps_root_then_declared_bound_order(tmp_path):
+    with pytest.raises(IngestionError) as roots_error:
+        OptedInRootScanner([], max_file_bytes=0, max_files=0, max_depth=0)
+    assert (roots_error.value.code, roots_error.value.detail) == (
+        "roots-invalid",
+        "at least one opted-in root is required",
+    )
+
+    with pytest.raises(IngestionError) as bounds_error:
+        OptedInRootScanner([tmp_path], max_file_bytes=0, max_files=0, max_depth=0)
+    assert (bounds_error.value.code, bounds_error.value.detail) == (
+        "bounds-invalid",
+        "max_file_bytes must be a positive integer",
+    )
 
 
 def test_nothing_here_decodes_or_parses(tmp_path):

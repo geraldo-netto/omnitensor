@@ -46,6 +46,21 @@ class IngestionError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
+def positive_integer_bound(
+    value: object,
+    name: str,
+    *,
+    error_code: str | None = None,
+) -> int:
+    """Return one positive non-boolean integer or raise the caller's stable error."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        detail = f"{name} must be a positive integer"
+        if error_code is not None:
+            raise IngestionError(error_code, detail)
+        raise ValueError(detail)
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class IngestedFile:
     """One accepted file, identified by content rather than by path."""
@@ -111,8 +126,7 @@ class OptedInRootScanner:
             ("max_files", max_files),
             ("max_depth", max_depth),
         ):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise IngestionError("bounds-invalid", f"{name} must be a positive integer")
+            positive_integer_bound(value, name, error_code="bounds-invalid")
         self._roots = tuple(Path(root).resolve() for root in roots)
         self._suffixes = frozenset(suffix.lower() for suffix in suffixes)
         self._max_file_bytes = max_file_bytes

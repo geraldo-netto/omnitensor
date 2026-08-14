@@ -147,6 +147,23 @@ def test_container_bounds_are_validated(tmp_path, changes):
         DocumentIngestor([tmp_path], **changes)
 
 
+def test_document_bounds_keep_their_order_before_scanner_validation():
+    with pytest.raises(ValueError) as expansion_error:
+        DocumentIngestor(
+            [],
+            max_expansion_ratio=0,
+            max_container_depth=0,
+            max_document_bytes=0,
+        )
+    assert type(expansion_error.value) is ValueError
+    assert str(expansion_error.value) == "max_expansion_ratio must be a positive integer"
+
+    with pytest.raises(ValueError) as depth_error:
+        DocumentIngestor([], max_container_depth=0, max_document_bytes=0)
+    assert type(depth_error.value) is ValueError
+    assert str(depth_error.value) == "max_container_depth must be a positive integer"
+
+
 def test_an_unreadable_document_is_reported_rather_than_raising(tmp_path, monkeypatch):
     """The scanner reaches it first, so the refusal surfaces there."""
     root = tmp_path / "docs"

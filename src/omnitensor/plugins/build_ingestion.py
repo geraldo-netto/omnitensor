@@ -20,7 +20,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from .collection import CollectionPermissionGate
-from .ingestion import IngestionError, IngestionScan, OptedInRootScanner
+from .ingestion import (
+    IngestionError,
+    IngestionScan,
+    OptedInRootScanner,
+    positive_integer_bound,
+)
 
 BUILD_PLUGIN_ID = "build-advisor"
 BUILD_METADATA_PERMISSION = "read:build-metadata"
@@ -100,8 +105,7 @@ class BuildMetadataIngestor:
     ) -> None:
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
-        if isinstance(max_records, bool) or not isinstance(max_records, int) or max_records < 1:
-            raise IngestionError("bounds-invalid", "max_records must be a positive integer")
+        positive_integer_bound(max_records, "max_records", error_code="bounds-invalid")
         self._scanner = OptedInRootScanner(roots, **scanner_options)
         self._permissions = permissions
         self._max_records = max_records
