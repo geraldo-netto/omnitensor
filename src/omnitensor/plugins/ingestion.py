@@ -14,7 +14,6 @@ what is inside.
 
 from __future__ import annotations
 
-import hashlib
 import os
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -25,7 +24,6 @@ DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024
 DEFAULT_MAX_FILES = 10_000
 DEFAULT_MAX_DEPTH = 8
 MAX_ROOTS = 32
-_READ_CHUNK_BYTES = 1024 * 1024
 
 
 class IngestionRejection(StrEnum):
@@ -158,6 +156,10 @@ class OptedInRootScanner:
                     yield current / name
 
     def _accept(self, path: Path) -> tuple[IngestedFile | None, RejectedFile | None]:
+        # Local import avoids loading the artifact installer through
+        # preparation while the plugin package is still initializing.
+        from omnitensor.preparation import FileDigestTooLargeError, file_digest
+
         try:
             if not self._within_roots(path):
                 return None, RejectedFile(
@@ -179,7 +181,13 @@ class OptedInRootScanner:
                 return None, RejectedFile(
                     str(path), IngestionRejection.UNSUPPORTED_TYPE, f"unsupported type: {suffix}"
                 )
-            digest = self._digest(path)
+            digest = file_digest(path, max_bytes=self._max_file_bytes)
+        except FileDigestTooLargeError as error:
+            return None, RejectedFile(
+                str(path),
+                IngestionRejection.TOO_LARGE,
+                f"{error.observed_bytes} bytes exceeds {self._max_file_bytes}",
+            )
         except OSError as error:
             # A file deleted or renamed mid-scan is ordinary, not a failure of
             # the scan: it is reported and the pass continues.
@@ -201,11 +209,3 @@ class OptedInRootScanner:
         except OSError:
             return False
         return any(resolved == root or root in resolved.parents for root in self._roots)
-
-    def _digest(self, path: Path) -> str:
-        """Content identity, so a rename is a rename and not a delete plus add."""
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for block in iter(lambda: stream.read(_READ_CHUNK_BYTES), b""):
-                digest.update(block)
-        return digest.hexdigest()

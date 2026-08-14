@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
 import pytest
 
 from omnitensor.plugins.ingestion import (
     MAX_ROOTS,
+    IngestedFile,
     IngestionError,
     IngestionRejection,
     OptedInRootScanner,
+    RejectedFile,
 )
 
 
@@ -39,7 +43,26 @@ def test_a_symlink_escaping_its_root_is_refused_not_followed(tmp_path):
     scan = OptedInRootScanner([opted]).scan()
 
     assert scan.files == ()
-    assert [item.reason for item in scan.rejected] == [IngestionRejection.OUTSIDE_ROOT]
+    assert scan.rejected == (
+        RejectedFile(
+            str(opted / "link.txt"),
+            IngestionRejection.OUTSIDE_ROOT,
+            "path escapes its opted-in root",
+        ),
+    )
+
+
+def test_a_symlink_within_its_root_is_still_not_a_regular_file(tmp_path):
+    root = tmp_path / "opted"
+    target = write(root, "target.txt")
+    link = root / "link.txt"
+    link.symlink_to(target)
+
+    scan = OptedInRootScanner([root]).scan()
+
+    assert scan.rejected == (
+        RejectedFile(str(link), IngestionRejection.NOT_A_FILE, "not a regular file"),
+    )
 
 
 def test_a_file_beyond_the_size_bound_is_refused_before_it_is_read(tmp_path):
@@ -49,7 +72,37 @@ def test_a_file_beyond_the_size_bound_is_refused_before_it_is_read(tmp_path):
     scan = OptedInRootScanner([root], max_file_bytes=10).scan()
 
     assert scan.files == ()
-    assert scan.rejected[0].reason is IngestionRejection.TOO_LARGE
+    assert scan.rejected == (
+        RejectedFile(
+            str(root / "big.txt"),
+            IngestionRejection.TOO_LARGE,
+            "100 bytes exceeds 10",
+        ),
+    )
+
+
+def test_a_file_that_grows_during_digest_maps_to_too_large(tmp_path, monkeypatch):
+    import omnitensor.preparation as preparation
+    from omnitensor.preparation import FileDigestTooLargeError
+
+    root = tmp_path / "opted"
+    source = write(root, "growing.txt", b"12345")
+
+    def grew(path, *, max_bytes):
+        assert path == source
+        raise FileDigestTooLargeError(max_bytes, max_bytes + 1)
+
+    monkeypatch.setattr(preparation, "file_digest", grew)
+    scan = OptedInRootScanner([root], max_file_bytes=5).scan()
+
+    assert scan.files == ()
+    assert scan.rejected == (
+        RejectedFile(
+            str(source),
+            IngestionRejection.TOO_LARGE,
+            "6 bytes exceeds 5",
+        ),
+    )
 
 
 def test_an_unsupported_type_is_refused(tmp_path):
@@ -60,7 +113,13 @@ def test_an_unsupported_type_is_refused(tmp_path):
     scan = OptedInRootScanner([root], suffixes=(".png",)).scan()
 
     assert [Path(item.path).name for item in scan.files] == ["b.png"]
-    assert scan.rejected[0].reason is IngestionRejection.UNSUPPORTED_TYPE
+    assert scan.rejected == (
+        RejectedFile(
+            str(root / "a.txt"),
+            IngestionRejection.UNSUPPORTED_TYPE,
+            "unsupported type: .txt",
+        ),
+    )
 
 
 def test_depth_is_bounded(tmp_path):
@@ -114,7 +173,32 @@ def test_a_file_removed_mid_scan_is_reported_and_the_pass_continues(tmp_path, mo
     scan = OptedInRootScanner([root]).scan()
 
     assert [Path(item.path).name for item in scan.files] == ["b.txt"]
-    assert scan.rejected[0].reason is IngestionRejection.UNREADABLE
+    assert scan.rejected == (
+        RejectedFile(
+            str(root / "a.txt"),
+            IngestionRejection.UNREADABLE,
+            "[Errno 2] removed mid-scan",
+        ),
+    )
+
+
+def test_an_accepted_file_preserves_exact_metadata_and_digest(tmp_path):
+    root = tmp_path / "opted"
+    source = write(root, "sample.TXT", b"sample")
+    os.utime(source, ns=(1_234_000_000, 1_234_000_000))
+
+    scan = OptedInRootScanner([root]).scan()
+
+    assert scan.rejected == ()
+    assert scan.files == (
+        IngestedFile(
+            str(source),
+            6,
+            1_234,
+            ".txt",
+            hashlib.sha256(b"sample").hexdigest(),
+        ),
+    )
 
 
 def test_the_file_count_is_bounded_and_truncation_is_reported(tmp_path):

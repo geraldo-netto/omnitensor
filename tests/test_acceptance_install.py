@@ -332,8 +332,7 @@ def applet_tree(tmp_path, files):
 def test_a_matching_applet_tree_passes(tmp_path):
     root, checksums = applet_tree(tmp_path, {"applet.js": b"code", "lib/x.js": b"more"})
     check = check_applet(root, checksums)
-    assert check.ok is True
-    assert "2 applet files" in check.detail
+    assert check == Check("applet", True, "2 applet files match their checksums")
 
 
 def test_a_half_copied_applet_tree_fails(tmp_path):
@@ -353,9 +352,26 @@ def test_an_altered_applet_file_fails(tmp_path):
 
 
 def test_an_absent_applet_directory_fails(tmp_path):
-    check = check_applet(tmp_path / "absent", {"applet.js": "0" * 64})
-    assert check.ok is False
-    assert "no applet installed" in check.detail
+    root = tmp_path / "absent"
+    assert check_applet(root, {"applet.js": "0" * 64}) == Check(
+        "applet", False, f"no applet installed at {root}"
+    )
+
+
+def test_applet_check_reports_all_missing_and_altered_categories_exactly(tmp_path):
+    root, checksums = applet_tree(
+        tmp_path,
+        {"a.js": b"a", "b.js": b"b", "c.js": b"c"},
+    )
+    (root / "a.js").unlink()
+    (root / "b.js").unlink()
+    (root / "c.js").write_bytes(b"altered")
+
+    assert check_applet(root, checksums) == Check(
+        "applet",
+        False,
+        "missing 2 file(s): a.js; altered 1 file(s): c.js",
+    )
 
 
 def test_checksum_manifests_are_parsed_and_validated(tmp_path):

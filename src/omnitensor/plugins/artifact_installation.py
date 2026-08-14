@@ -299,6 +299,9 @@ class ArtifactInstaller:
         publisher accountable for those bytes — only the manifest could — so it
         is reported as an integrity check, not as provenance.
         """
+        # Local import avoids preparation -> ArtifactInstaller at module load.
+        from omnitensor.preparation import file_digest
+
         metadata_path = Path(version_root) / _ARTIFACT_METADATA_FILE
         try:
             document = read_json_bounded(metadata_path, _MAX_METADATA_BYTES)
@@ -314,7 +317,7 @@ class ArtifactInstaller:
             if not path.is_file():
                 return f"companion file is missing: {name}"
             try:
-                observed = _digest_file(path, self._max_artifact_bytes)
+                observed = file_digest(path, max_bytes=self._max_artifact_bytes)
             except OSError as error:
                 return f"companion file is unreadable: {name}: {error}"
             if observed != expected:
@@ -330,12 +333,14 @@ class ArtifactInstaller:
         before installation — the store would have recorded the substitute and
         happily re-verified it ever after.
         """
+        from omnitensor.preparation import file_digest
+
         for name, expected in sorted(reference.declared_companions.items()):
             path = Path(version_root) / name
             if not path.is_file():
                 return f"companion file the manifest declares is missing: {name}"
             try:
-                observed = _digest_file(path, self._max_artifact_bytes)
+                observed = file_digest(path, max_bytes=self._max_artifact_bytes)
             except OSError as error:
                 return f"companion file is unreadable: {name}: {error}"
             if observed != expected:
@@ -535,8 +540,10 @@ class ArtifactInstaller:
 
     def _file_digests(self, root: Path) -> dict[str, str]:
         """Every artifact file in one directory, by name and content."""
+        from omnitensor.preparation import file_digest
+
         return {
-            path.name: _digest_file(path, self._max_artifact_bytes)
+            path.name: file_digest(path, max_bytes=self._max_artifact_bytes)
             for path in root.iterdir()
             if path.is_file() and path.name not in _GENERATED_FILES
         }
@@ -686,16 +693,4 @@ def _copy_digested(source: Path, destination: Path, max_bytes: int) -> str:
         with contextlib.suppress(OSError):
             destination.unlink()
         raise
-    return digest.hexdigest()
-
-
-def _digest_file(path: Path, max_bytes: int) -> str:
-    digest = hashlib.sha256()
-    total = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(_READ_CHUNK_BYTES):
-            total += len(chunk)
-            if total > max_bytes:
-                raise OSError(f"file exceeds {max_bytes} bytes")
-            digest.update(chunk)
     return digest.hexdigest()

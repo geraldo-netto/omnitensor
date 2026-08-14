@@ -57,6 +57,15 @@ class PreparationError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
+class FileDigestTooLargeError(OSError):
+    """A bounded digest observed at least one byte beyond its limit."""
+
+    def __init__(self, max_bytes: int, observed_bytes: int):
+        self.max_bytes = max_bytes
+        self.observed_bytes = observed_bytes
+        super().__init__(f"file exceeds {max_bytes} bytes")
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedArtifact:
     """One model file, described exactly as a manifest must declare it."""
@@ -99,11 +108,25 @@ class PreparedArtifact:
         }
 
 
-def file_digest(path: Path) -> str:
-    """The sha256 of a file, read in bounded chunks."""
+def file_digest(path: Path, max_bytes: int | None = None) -> str:
+    """Return a complete SHA-256, explicitly refusing bounded overflow."""
+    if max_bytes is not None and (
+        isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1
+    ):
+        raise ValueError("max_bytes must be a positive integer")
     digest = hashlib.sha256()
+    total = 0
     with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(READ_CHUNK_BYTES), b""):
+        while True:
+            read_bytes = READ_CHUNK_BYTES
+            if max_bytes is not None:
+                read_bytes = min(read_bytes, max_bytes - total + 1)
+            block = stream.read(read_bytes)
+            if not block:
+                break
+            total += len(block)
+            if max_bytes is not None and total > max_bytes:
+                raise FileDigestTooLargeError(max_bytes, total)
             digest.update(block)
     return digest.hexdigest()
 

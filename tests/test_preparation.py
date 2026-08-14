@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.preparation import (
     FORMAT_ACCELERATORS,
+    FileDigestTooLargeError,
     PreparationError,
     file_digest,
     install_prepared,
@@ -40,6 +44,64 @@ def test_the_digest_is_computed_from_the_file_not_supplied(tmp_path):
 
     assert prepared.reference.sha256 == file_digest(source)
     assert prepared.reference.sha256 == hashlib.sha256(b"a" * 5000).hexdigest()
+
+
+@given(payload=st.binary(min_size=1, max_size=256))
+def test_bounded_digest_accepts_exact_size_and_refuses_one_byte_more(payload):
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "payload.bin"
+        path.write_bytes(payload)
+        assert file_digest(path, max_bytes=len(payload)) == hashlib.sha256(payload).hexdigest()
+
+        path.write_bytes(payload + b"x")
+        with pytest.raises(FileDigestTooLargeError) as overflow:
+            file_digest(path, max_bytes=len(payload))
+        assert (overflow.value.max_bytes, overflow.value.observed_bytes) == (
+            len(payload),
+            len(payload) + 1,
+        )
+        assert str(overflow.value) == f"file exceeds {len(payload)} bytes"
+
+
+@pytest.mark.parametrize("max_bytes", [0, -1, True, 1.5, "1"])
+def test_bounded_digest_requires_a_positive_integer_limit(tmp_path, max_bytes):
+    source = model_file(tmp_path)
+    with pytest.raises(ValueError, match="max_bytes must be a positive integer"):
+        file_digest(source, max_bytes=max_bytes)
+
+
+def test_bounded_digest_reads_only_through_the_first_overflow_byte(monkeypatch):
+    chunks = [b"ab", b"cd"]
+    requested = []
+
+    class Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size):
+            requested.append(size)
+            return chunks.pop(0)
+
+    monkeypatch.setattr(Path, "open", lambda _path, _mode: Stream())
+    with pytest.raises(FileDigestTooLargeError) as overflow:
+        file_digest(Path("model"), max_bytes=3)
+    assert overflow.value.observed_bytes == 4
+    assert requested == [4, 2]
+
+
+def test_file_hashing_has_one_canonical_implementation():
+    from omnitensor import acceptance
+    from omnitensor.plugins import artifact_installation
+    from omnitensor.plugins.artifacts import ArtifactResolver
+    from omnitensor.plugins.ingestion import OptedInRootScanner
+
+    assert not hasattr(acceptance, "_sha256")
+    assert not hasattr(artifact_installation, "_digest_file")
+    assert not hasattr(ArtifactResolver, "_digest")
+    assert not hasattr(OptedInRootScanner, "_digest")
 
 
 def test_the_manifest_fragment_matches_the_installed_bytes(tmp_path):

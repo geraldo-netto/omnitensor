@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +9,6 @@ from pathlib import Path
 # Qwen2.5-VL-7B Q4_K_M is 4,683,072,032 bytes. Keep the service-wide bound
 # finite while admitting that pinned vision model and no unbounded input.
 DEFAULT_MAX_ARTIFACT_BYTES = 6 * 1024 * 1024 * 1024
-_READ_CHUNK_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
@@ -169,6 +167,10 @@ class ArtifactResolver:
         path: Path,
         reference: ArtifactReference,
     ) -> ArtifactResolution:
+        # Local import avoids preparation -> artifact installer -> resolver at
+        # module import time while keeping hashing canonical.
+        from omnitensor.preparation import FileDigestTooLargeError, file_digest
+
         if not path.is_file():
             return ArtifactResolution(False, None, f"artifact is not a regular file: {path}", 0)
         try:
@@ -180,27 +182,16 @@ class ArtifactResolver:
                     f"artifact exceeds {self._max_artifact_bytes} bytes",
                     size,
                 )
-            digest, read_size = self._digest(path)
-        except OSError as error:
-            return ArtifactResolution(False, None, f"artifact cannot be read: {error}", 0)
-        if read_size > self._max_artifact_bytes:
+            digest = file_digest(path, max_bytes=self._max_artifact_bytes)
+        except FileDigestTooLargeError as error:
             return ArtifactResolution(
                 False,
                 None,
                 f"artifact exceeds {self._max_artifact_bytes} bytes",
-                read_size,
+                error.observed_bytes,
             )
+        except OSError as error:
+            return ArtifactResolution(False, None, f"artifact cannot be read: {error}", 0)
         if digest != reference.sha256:
-            return ArtifactResolution(False, None, "artifact sha256 mismatch", read_size)
-        return ArtifactResolution(True, path, "", read_size)
-
-    def _digest(self, path: Path) -> tuple[str, int]:
-        digest = hashlib.sha256()
-        size = 0
-        with path.open("rb") as stream:
-            while chunk := stream.read(_READ_CHUNK_BYTES):
-                size += len(chunk)
-                if size > self._max_artifact_bytes:
-                    break
-                digest.update(chunk)
-        return digest.hexdigest(), size
+            return ArtifactResolution(False, None, "artifact sha256 mismatch", size)
+        return ArtifactResolution(True, path, "", size)

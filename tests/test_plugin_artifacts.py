@@ -164,14 +164,17 @@ def test_resolver_rejects_a_directory_at_the_artifact_path(tmp_path):
 
 
 def test_resolver_reports_read_errors_without_exposing_the_path(tmp_path, monkeypatch):
+    import omnitensor.preparation as preparation
+
     artifact = reference()
     install(tmp_path, artifact)
     resolver = ArtifactResolver([tmp_path])
 
-    def denied(_path):
+    def denied(_path, *, max_bytes):
+        assert max_bytes == resolver._max_artifact_bytes
         raise OSError("denied")
 
-    monkeypatch.setattr(resolver, "_digest", denied)
+    monkeypatch.setattr(preparation, "file_digest", denied)
     assert resolver.resolve(artifact) == ArtifactResolution(
         False,
         None,
@@ -181,10 +184,17 @@ def test_resolver_reports_read_errors_without_exposing_the_path(tmp_path, monkey
 
 
 def test_resolver_rechecks_the_bytes_read_when_a_file_grows(tmp_path, monkeypatch):
+    import omnitensor.preparation as preparation
+    from omnitensor.preparation import FileDigestTooLargeError
+
     artifact = reference()
     install(tmp_path, artifact)
     resolver = ArtifactResolver([tmp_path], max_artifact_bytes=5)
-    monkeypatch.setattr(resolver, "_digest", lambda _path: (artifact.sha256, 6))
+
+    def grew(_path, *, max_bytes):
+        raise FileDigestTooLargeError(max_bytes, max_bytes + 1)
+
+    monkeypatch.setattr(preparation, "file_digest", grew)
     assert resolver.resolve(artifact) == ArtifactResolution(
         False,
         None,
@@ -234,25 +244,8 @@ def test_resolver_rejects_an_invalid_reference_before_path_lookup(tmp_path):
     )
 
 
-def test_digest_reads_bounded_chunks_and_accumulates_the_total(monkeypatch):
-    chunks = [b"ab", b"cd", b""]
-    requested = []
-
-    class Stream:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self, size):
-            requested.append(size)
-            return chunks.pop(0)
-
-    monkeypatch.setattr(Path, "open", lambda _path, _mode: Stream())
-    resolver = ArtifactResolver([Path("models")], max_artifact_bytes=3)
-    assert resolver._digest(Path("model")) == (hashlib.sha256(b"ab").hexdigest(), 4)
-    assert requested == [1024 * 1024, 1024 * 1024]
+def test_resolver_has_no_private_partial_digest_path():
+    assert not hasattr(ArtifactResolver, "_digest")
 
 
 @given(
@@ -826,6 +819,34 @@ def test_a_companion_the_manifest_declares_is_checked_against_the_manifest(tmp_p
 
     absent = ArtifactReference("m", "1.0.0", "ncnn", digest, (("labels.txt", "b" * 64),))
     assert "the manifest declares is missing" in installer.resolve(absent).reason
+
+
+def test_declared_companion_digest_forwards_the_store_bound_exactly(tmp_path):
+    from omnitensor.preparation import FileDigestTooLargeError
+
+    version_root = tmp_path / "version"
+    version_root.mkdir()
+    companion = version_root / "model.bin"
+    companion.write_bytes(b"12345")
+    reference = ArtifactReference(
+        "model",
+        "1.0.0",
+        "ncnn",
+        "a" * 64,
+        (("model.bin", hashlib.sha256(b"12345").hexdigest()),),
+    )
+    installer = ArtifactInstaller(tmp_path / "store", max_artifact_bytes=4)
+
+    assert installer.verify_declared_companions(version_root, reference) == (
+        "companion file is unreadable: model.bin: file exceeds 4 bytes"
+    )
+    with pytest.raises(FileDigestTooLargeError, match="file exceeds 4 bytes"):
+        installer._file_digests(version_root)  # noqa: SLF001
+
+    companion.write_bytes(b"1234")
+    assert installer.verify_declared_companions(version_root, reference) == (
+        "companion file does not match the digest its manifest declares: model.bin"
+    )
 
 
 def test_reinstalling_a_version_with_different_companion_bytes_is_refused(tmp_path):

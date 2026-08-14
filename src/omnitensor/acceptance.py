@@ -262,6 +262,10 @@ def check_snapshot(
 
 def check_applet(root: Path, checksums: dict[str, str]) -> Check:
     """The installed applet tree must match the payload it was built from."""
+    # Local import keeps acceptance probes light and avoids preparation's
+    # artifact-installer imports while the package is initializing.
+    from .preparation import file_digest
+
     root = Path(root)
     if not root.is_dir():
         return Check("applet", False, f"no applet installed at {root}")
@@ -272,7 +276,7 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
         if not installed.is_file():
             missing.append(relative)
             continue
-        if _sha256(installed) != digest:
+        if file_digest(installed) != digest:
             altered.append(relative)
     if missing or altered:
         parts = []
@@ -472,16 +476,6 @@ def _runtime_verdict(module: str) -> str | None:
 def verify_installation(checks: Sequence[Check]) -> InstallationReport:
     """Collect the individual probes into one ordered report."""
     return InstallationReport(tuple(checks))
-
-
-def _sha256(path: Path) -> str:
-    import hashlib  # noqa: PLC0415 - only needed when an applet is being verified
-
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 class SystemdUserServiceProbe:
