@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from omnitensor.preparation import file_digest
+
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import file_digest
 from ..registry import load_schema
 from ..sdk import (
     ManagedPlugin,

@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from ..telemetry_types import SourceStatus
+from omnitensor.telemetry_types import SourceStatus
+
 from .pipeline import CollectedOutput
 from .protocol import JsonObject
 

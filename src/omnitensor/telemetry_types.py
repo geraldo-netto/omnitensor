@@ -17,7 +17,8 @@ MAX_TEMPERATURE_MILLIDEGREES = 200_000
 MAX_ERROR_COUNT = 2**53
 MAX_PERCENT = 100
 STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._:@/-]{0,78}[a-z0-9])?")
-_NETWORK_STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
+NETWORK_STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
+PERIPHERAL_STABLE_ID = NETWORK_STABLE_ID
 
 
 class RecorderError(ValueError):
@@ -347,7 +348,7 @@ def _network_snapshot_shape_error(snapshot: object) -> str:
 def _network_link_error(link: object, snapshot_time_ms: int) -> str:
     if not isinstance(link, NetworkLinkSample):
         return "network link sample is not typed"
-    if not isinstance(link.stable_id, str) or not _NETWORK_STABLE_ID.fullmatch(link.stable_id):
+    if not isinstance(link.stable_id, str) or not NETWORK_STABLE_ID.fullmatch(link.stable_id):
         return "network link stable identity is invalid"
     enum_error = _network_link_enum_error(link)
     if enum_error:

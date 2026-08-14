@@ -9,8 +9,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from omnitensor.preparation import PreparedArtifact, install_prepared, prepare_artifact
+
 from ..atomicio import write_json_atomic
-from ..preparation import PreparedArtifact, install_prepared, prepare_artifact
 from ..registry import (
     bundled_workloads_path,
     load_workloads,
@@ -26,6 +27,7 @@ from .compilers import (
     compatible_available_targets,
     compiler_catalog,
     default_target_compilers,
+    resolve_compiler_tool,
 )
 from .contracts import TrainingError, TrainingReport
 
@@ -200,8 +202,10 @@ def _binding_manifest(
 
 
 def _tool(name: str) -> Path | None:
-    sibling = Path(sys.executable).with_name(name)
-    if sibling.is_file() and os.access(sibling, os.X_OK):
-        return sibling
-    found = shutil.which(name)
-    return Path(found) if found else None
+    """Compatibility seam for callers patching installation host discovery."""
+    return resolve_compiler_tool(
+        name,
+        python_executable=sys.executable,
+        executable_check=os.access,
+        path_search=shutil.which,
+    )

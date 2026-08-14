@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
+
+from omnitensor.telemetry_types import PERIPHERAL_STABLE_ID as _STABLE_ID
 
 from .collection import (
     BoundedCollector,
@@ -26,9 +27,6 @@ DEFAULT_MAX_PERIPHERAL_DEVICES = 32
 MAX_PERIPHERAL_DEVICES = 64
 MAX_PERIPHERAL_SOURCE_DEVICES = 256
 MAX_PERIPHERAL_ERROR_COUNT = 2**31 - 1
-_STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
-
-
 class PeripheralBus(StrEnum):
     USB = "usb"
     BLUETOOTH = "bluetooth"

@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ..preparation import file_digest
+from omnitensor.preparation import file_digest
+
 from .acceptance_kit import NativeLoadReport, validate_gpu_load, validate_npu_load
 from .generation import (
     GenerationProviderDescriptor,

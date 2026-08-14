@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from .telemetry_types import ForecastError, ForecastQuality, LinearForecaster
+from omnitensor.telemetry_types import ForecastError, ForecastQuality, LinearForecaster
 
 DEFAULT_RIDGE = 1e-6
 MAX_FEATURES_PER_FIT = 512

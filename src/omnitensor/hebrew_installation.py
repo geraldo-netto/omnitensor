@@ -6,6 +6,8 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
+from omnitensor.preparation import file_digest
+
 from .plugins.artifact_installation import (
     ArtifactInstallationError,
     ArtifactInstaller,
@@ -16,7 +18,6 @@ from .plugins.artifact_installation import (
     verify_pinned_source,
 )
 from .plugins.artifacts import ArtifactReference
-from .preparation import file_digest
 
 DICTALM_SIZE_BYTES = 4_374_991_808
 DICTALM_REFERENCE = ArtifactReference(

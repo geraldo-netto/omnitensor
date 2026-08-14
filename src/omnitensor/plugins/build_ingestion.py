@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import telemetry_types as _telemetry_types
+import omnitensor.telemetry_types as _telemetry_types
+
 from .collection import CollectionPermissionGate
 from .ingestion import (
     IngestionError,

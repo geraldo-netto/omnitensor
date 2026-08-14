@@ -1,6 +1,6 @@
 """Compatibility facade for neutral forecasting mechanics."""
 
-from .. import forecasting as _forecasting
+import omnitensor.forecasting as _forecasting
 
 DEFAULT_RIDGE = _forecasting.DEFAULT_RIDGE
 MAX_FEATURES_PER_FIT = _forecasting.MAX_FEATURES_PER_FIT

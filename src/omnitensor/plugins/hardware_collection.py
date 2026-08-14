@@ -13,7 +13,8 @@ whole point of collecting this at all.
 
 from __future__ import annotations
 
-from .. import telemetry_types as _telemetry_types
+import omnitensor.telemetry_types as _telemetry_types
+
 from .collection import BoundedCollector, CollectionError, SourceSnapshot
 
 HARDWARE_HEALTH_PLUGIN_ID = "hardware-health"
@@ -31,9 +32,7 @@ hardware_sample_error = _telemetry_types.hardware_sample_error
 
 def hardware_sensor_permission(stable_id: str) -> str:
     """The scoped grant for one sensor."""
-    from .collection import STABLE_ID  # noqa: PLC0415 - local to keep the module flat
-
-    if not isinstance(stable_id, str) or not STABLE_ID.fullmatch(stable_id):
+    if not isinstance(stable_id, str) or not _telemetry_types.STABLE_ID.fullmatch(stable_id):
         raise ValueError("hardware sensor identity is invalid")
     return f"{HARDWARE_SENSOR_PERMISSION_PREFIX}{stable_id}"
 

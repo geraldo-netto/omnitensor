@@ -7,8 +7,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from omnitensor.preparation import ArtifactReference, artifact_reference_error, file_digest
+
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import ArtifactReference, artifact_reference_error, file_digest
 from ..registry import validate_document
 
 TRAINING_REPORT_VERSION = 1

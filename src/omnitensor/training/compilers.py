@@ -7,8 +7,11 @@ that the resulting artifact has passed hardware acceptance on this host.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -223,6 +226,26 @@ class EdgeTpuTargetCompiler:
 
 
 ToolResolver = Callable[[str], Path | None]
+ExecutableCheck = Callable[[Path, int], bool]
+PathSearch = Callable[[str], str | None]
+
+
+def resolve_compiler_tool(
+    name: str,
+    *,
+    python_executable: str | Path | None = None,
+    executable_check: ExecutableCheck | None = None,
+    path_search: PathSearch | None = None,
+) -> Path | None:
+    """Resolve one producer tool beside Python before consulting ``PATH``."""
+    interpreter = sys.executable if python_executable is None else python_executable
+    check = os.access if executable_check is None else executable_check
+    search = shutil.which if path_search is None else path_search
+    sibling = Path(interpreter).with_name(name)
+    if sibling.is_file() and check(sibling, os.X_OK):
+        return sibling
+    found = search(name)
+    return Path(found) if found else None
 
 
 def default_target_compilers(resolve: ToolResolver) -> tuple[TargetCompiler, ...]:

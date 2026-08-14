@@ -33,8 +33,9 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
+from omnitensor.telemetry_types import RECORD_VERSION, FeatureRow, RecorderError
+
 from .storelock import store_lock
-from .telemetry_types import RECORD_VERSION, FeatureRow, RecorderError
 
 DEFAULT_MAX_SEGMENT_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_SEGMENTS = 8

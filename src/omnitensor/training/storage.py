@@ -21,7 +21,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
 
-from ..preparation import file_digest
+from omnitensor.preparation import file_digest
+
 from .contracts import TrainingError, write_training_report
 from .tabular import (
     checked_model,

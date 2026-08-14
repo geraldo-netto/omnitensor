@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..preparation import file_digest
-from ..storelock import store_lock
+import omnitensor.training.desktop_history as _desktop_history
+from omnitensor.preparation import file_digest
+
 from .build import _fit_output
 from .contracts import TrainingError, write_training_report
 from .tabular import (
@@ -30,7 +31,9 @@ from .tabular import unit_interval as _unit_metric
 
 DESKTOP_RECIPE = "confirmed-layout-suggestion-v1"
 DESKTOP_CONFIRMATION = "user-confirmed"
-DESKTOP_REVOCATION_CONFIRMATION = "I-confirm-delete-desktop-training-history"
+DESKTOP_REVOCATION_CONFIRMATION = _desktop_history.DESKTOP_REVOCATION_CONFIRMATION
+revoke_desktop_history = _desktop_history.revoke_desktop_history
+store_lock = _desktop_history.store_lock
 MAX_HISTORY_BYTES = 64 * 1024 * 1024
 MAX_HISTORY_LINE_BYTES = 64 * 1024
 MAX_HISTORY_EXAMPLES = 100_000
@@ -281,24 +284,6 @@ class OnnxDesktopExporter:
             helper=helper,
         )
         save_onnx_atomic(portable, destination, onnx, prefix=".desktop-model-")
-
-
-def revoke_desktop_history(path: Path | str, confirmation: str) -> bool:
-    if confirmation != DESKTOP_REVOCATION_CONFIRMATION:
-        raise TrainingError(
-            "revocation-not-confirmed",
-            f"pass exactly {DESKTOP_REVOCATION_CONFIRMATION}",
-        )
-    source = Path(path).expanduser()
-    if source.is_symlink() or (source.exists() and not source.is_file()):
-        raise TrainingError("history-invalid", "desktop history is not a safe regular file")
-    with store_lock(source.parent, ".desktop-training.lock"):
-        if not source.exists():
-            return False
-        if source.is_symlink() or not source.is_file():
-            raise TrainingError("history-invalid", "desktop history changed during revocation")
-        source.unlink()
-    return True
 
 
 def _time_split(

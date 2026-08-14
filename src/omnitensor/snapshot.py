@@ -12,13 +12,15 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from omnitensor.plugins.telemetry import PLUGIN_TELEMETRY_CONTRACT_VERSION
+
 from .atomicio import remove_durable, write_json_atomic
 from .discovery import Device
 from .registry import validate_document
 from .tensorref import DEFAULT_MAX_TENSOR_BYTES
 
 SNAPSHOT_VERSION = 1
-PLUGIN_TELEMETRY_VERSION = 1
+PLUGIN_TELEMETRY_VERSION = PLUGIN_TELEMETRY_CONTRACT_VERSION
 MAX_DEVICE_ENTRIES = 16
 
 

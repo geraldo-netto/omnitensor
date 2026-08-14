@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import (
+from omnitensor.preparation import (
     ArtifactProvenance,
     ArtifactReference,
     ArtifactTrustVerifier,
@@ -27,6 +26,8 @@ from ..preparation import (
     prepare_artifact,
     trusted_prepared_installer,
 )
+
+from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..registry import bundled_workloads_path, load_workloads, validate_workload_document
 from .binding import binding_manifest, model_fragment, native_evidence, publish_binding
 from .compilers import (

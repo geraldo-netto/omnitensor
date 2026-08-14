@@ -15,6 +15,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from omnitensor.telemetry_recorder import TelemetryRecorder
+from omnitensor.telemetry_types import FeatureRow
+
 from ..contract import schema_versions
 from ..registry import (
     ManifestError,
@@ -24,8 +27,6 @@ from ..registry import (
     load_workloads,
     validate_document,
 )
-from ..telemetry_recorder import TelemetryRecorder
-from ..telemetry_types import FeatureRow
 
 BUS_NAME = "org.cinnamon.OmniTensor1"
 OBJECT_PATH = "/org/cinnamon/OmniTensor1"

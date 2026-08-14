@@ -19,8 +19,9 @@ from pathlib import Path
 
 from jsonschema.exceptions import SchemaError
 
+from omnitensor.preparation import file_digest, install_prepared, prepare_artifact
+
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
-from ..preparation import file_digest, install_prepared, prepare_artifact
 from ..registry import (
     bundled_workloads_path,
     load_workloads,

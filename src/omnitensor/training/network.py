@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..preparation import file_digest
-from ..telemetry_types import (
+from omnitensor.preparation import file_digest
+from omnitensor.telemetry_types import (
     MAX_NETWORK_COUNTER,
     NetworkConnectivity,
     NetworkCounters,
@@ -26,6 +26,7 @@ from ..telemetry_types import (
     SourceStatus,
     network_snapshot_error,
 )
+
 from .contracts import TrainingError, write_training_report
 from .tabular import (
     JsonlPolicy,

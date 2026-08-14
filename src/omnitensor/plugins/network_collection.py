@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
-from .. import telemetry_types as _telemetry_types
+import omnitensor.telemetry_types as _telemetry_types
+
 from .collection import (
     BoundedCollector,
     CollectionError,
@@ -29,7 +29,7 @@ NetworkLinkState = _telemetry_types.NetworkLinkState
 NetworkSnapshot = _telemetry_types.NetworkSnapshot
 SourceStatus = _telemetry_types.SourceStatus
 network_snapshot_error = _telemetry_types.network_snapshot_error
-_STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
+_STABLE_ID = _telemetry_types.NETWORK_STABLE_ID
 
 
 class NetworkCollectionError(CollectionError):

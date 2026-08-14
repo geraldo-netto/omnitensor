@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..forecasting import fit_forecaster
-from ..preparation import file_digest
-from ..telemetry_recorder import TelemetryRecorder
-from ..telemetry_types import FeatureRow, LinearForecaster
+from omnitensor.forecasting import fit_forecaster
+from omnitensor.preparation import file_digest
+from omnitensor.telemetry_recorder import TelemetryRecorder
+from omnitensor.telemetry_types import FeatureRow, LinearForecaster
+
 from .contracts import TrainingError, TrainingReport, TrainingSpec, write_training_report
 
 SUPPORTED_PROFILES = frozenset({"resource-scheduler"})

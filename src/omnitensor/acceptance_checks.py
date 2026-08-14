@@ -196,7 +196,7 @@ def check_snapshot(
 
 
 def check_applet(root: Path, checksums: dict[str, str]) -> Check:
-    from .preparation import file_digest  # noqa: PLC0415 - acceptance-only import
+    from omnitensor.preparation import file_digest  # noqa: PLC0415 - acceptance-only import
 
     root = Path(root)
     if not root.is_dir():

@@ -20,8 +20,9 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from omnitensor.telemetry_types import STABLE_ID
+
 from ..registry import validate_document
-from ..telemetry_types import STABLE_ID
 from .pipeline import CollectedOutput
 from .triggers import CollectorReadiness, SourceStatus, Trigger
 

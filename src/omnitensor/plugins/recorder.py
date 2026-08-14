@@ -1,6 +1,6 @@
 """Compatibility facade for the neutral telemetry recorder."""
 
-from .. import telemetry_recorder as _recorder
+import omnitensor.telemetry_recorder as _recorder
 
 DEFAULT_MAX_SEGMENT_BYTES = _recorder.DEFAULT_MAX_SEGMENT_BYTES
 DEFAULT_MAX_SEGMENTS = _recorder.DEFAULT_MAX_SEGMENTS

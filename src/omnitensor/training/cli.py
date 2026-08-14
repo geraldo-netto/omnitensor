@@ -9,12 +9,17 @@ import os
 import sys
 from pathlib import Path
 
+from omnitensor.forecasting import ForecastError
+from omnitensor.preparation import ArtifactInstallationError, PreparationError
+from omnitensor.telemetry_recorder import TelemetryRecorder
+from omnitensor.telemetry_types import RecorderError
+from omnitensor.training.desktop_history import (
+    DESKTOP_REVOCATION_CONFIRMATION,
+    revoke_desktop_history,
+)
+
 from ..conversion import ConversionError
-from ..forecasting import ForecastError
 from ..forecastresult import parse_forecast_reading
-from ..preparation import ArtifactInstallationError, PreparationError
-from ..telemetry_recorder import TelemetryRecorder
-from ..telemetry_types import RecorderError
 from .build import (
     BUILD_PROVENANCE_CONFIRMATION,
     BuildAdvisorTrainer,
@@ -22,10 +27,8 @@ from .build import (
 )
 from .contracts import TrainingError, TrainingSpec
 from .desktop import (
-    DESKTOP_REVOCATION_CONFIRMATION,
     DesktopSuggestionTrainer,
     load_desktop_history,
-    revoke_desktop_history,
 )
 from .forecast import ForecastTrainer
 from .hardware import (

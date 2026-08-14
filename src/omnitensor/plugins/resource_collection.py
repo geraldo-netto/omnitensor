@@ -15,6 +15,8 @@ import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 
+from omnitensor.telemetry_types import STABLE_ID as _STABLE_ID
+
 from .collection import (
     BoundedCollector,
     CollectionError,
@@ -75,9 +77,7 @@ class ResourceSample:
 
 
 def resource_unit_permission(stable_id: str) -> str:
-    from .collection import STABLE_ID  # noqa: PLC0415
-
-    if not isinstance(stable_id, str) or not STABLE_ID.fullmatch(stable_id):
+    if not isinstance(stable_id, str) or not _STABLE_ID.fullmatch(stable_id):
         raise ValueError("resource unit identity is invalid")
     return f"{RESOURCE_UNIT_PERMISSION_PREFIX}{stable_id}"
 

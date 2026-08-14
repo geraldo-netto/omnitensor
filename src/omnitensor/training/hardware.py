@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..preparation import file_digest
-from ..telemetry_types import (
+from omnitensor.preparation import file_digest
+from omnitensor.telemetry_types import (
     STABLE_ID,
     HardwareSample,
     SensorHealth,
@@ -18,6 +18,7 @@ from ..telemetry_types import (
     SourceStatus,
     hardware_sample_error,
 )
+
 from .build import _fit_output
 from .contracts import MAX_INPUT_WIDTH, TrainingError, write_training_report
 from .tabular import (

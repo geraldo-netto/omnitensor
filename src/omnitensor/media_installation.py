@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from omnitensor.preparation import file_digest
+
 from .plugins.artifact_installation import (
     ArtifactInstallationError,
     ArtifactInstaller,
@@ -17,7 +19,6 @@ from .plugins.artifact_installation import (
     verify_pinned_source,
 )
 from .plugins.artifacts import ArtifactReference
-from .preparation import file_digest
 
 VISION_MODEL_SIZE_BYTES = 4_683_072_032
 VISION_PROJECTOR_SIZE_BYTES = 1_354_162_912

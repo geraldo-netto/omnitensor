@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from omnitensor.preparation import file_digest
+
 from .plugins.artifact_installation import (
     ArtifactInstallationError,
     ArtifactInstaller,
@@ -17,7 +19,6 @@ from .plugins.artifact_installation import (
     verify_pinned_source,
 )
 from .plugins.artifacts import ArtifactReference
-from .preparation import file_digest
 
 QWEN_SIZE_BYTES = 5_027_783_488
 QWEN_REFERENCE = ArtifactReference(

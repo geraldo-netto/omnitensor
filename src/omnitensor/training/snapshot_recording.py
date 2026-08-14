@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from omnitensor.telemetry_recorder import TelemetryRecorder
+from omnitensor.telemetry_types import FeatureRow, RecorderError
+
 from ..atomicio import read_json_bounded
 from ..registry import validate_document
-from ..telemetry_recorder import TelemetryRecorder
-from ..telemetry_types import FeatureRow, RecorderError
 
 MAX_RUNTIME_SNAPSHOT_BYTES = 1024 * 1024
 RUNTIME_SNAPSHOT_SELECTORS = (
