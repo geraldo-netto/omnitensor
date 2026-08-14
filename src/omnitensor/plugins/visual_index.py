@@ -26,10 +26,12 @@ from .index import (
     validated_tags,
 )
 from .ingestion import IngestedFile
+from .search import IndexQueryService
 
 VISUAL_PLUGIN_ID = "visual-library"
 VISUAL_INDEX_NAME = "visual-library.index.json"
 VISUAL_INDEX_PERMISSION = "read:visual-library-index"
+VISUAL_TAG_PERMISSION = "write:visual-library-tags"
 MAX_PIXELS_PER_SIDE = 65_536
 _ALLOWED_ATTRIBUTES = frozenset({"width", "height", "format", "capturedAtMs", "sizeBytes"})
 
@@ -79,6 +81,23 @@ class VisualLibraryIndex(BoundedIndexStore):
             vocabulary_name="declared vocabulary",
         )
         return error or _attribute_error(entry.attributes)
+
+
+class VisualLibraryResults(IndexQueryService):
+    """Authorized, paginated, path-redacted access to the visual library."""
+
+    read_permission = VISUAL_INDEX_PERMISSION
+    write_permission = VISUAL_TAG_PERMISSION
+    label = "visual library results"
+
+    def __init__(self, store: VisualLibraryIndex, permissions, **options) -> None:
+        if not isinstance(store, VisualLibraryIndex):
+            raise TypeError("store must be a VisualLibraryIndex")
+        super().__init__(store, permissions, **options)
+
+    @property
+    def plugin_id(self) -> str:
+        return VISUAL_PLUGIN_ID
 
 
 def _attribute_error(attributes: Mapping[str, object]) -> str:

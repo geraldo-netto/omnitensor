@@ -195,6 +195,7 @@ from .ipc import (
     result_frame,
     write_frame,
 )
+from .job_results import JobRecord, JobResultError, JobResultStore
 from .loading import (
     MAX_WORKER_IMPORT_PATHS,
     InstalledPluginRuntime,
@@ -302,7 +303,6 @@ from .resource_collection import (
     resource_sample_error,
     resource_unit_permission,
 )
-from .results import JobRecord, JobResultError, JobResultStore
 from .revocation import (
     DEFAULT_REVOCATION_POLL_SECONDS,
     MAX_REVOCATION_POLL_SECONDS,

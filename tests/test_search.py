@@ -19,10 +19,11 @@ from omnitensor.plugins.search import (
 )
 from omnitensor.plugins.visual_index import (
     VISUAL_INDEX_PERMISSION,
+    VISUAL_TAG_PERMISSION,
     VisualLibraryIndex,
+    VisualLibraryResults,
     visual_entry,
 )
-from omnitensor.plugins.visual_results import VISUAL_TAG_PERMISSION, VisualLibraryResults
 from omnitensor.sdk.helpers import PermissionView, SDKContractError
 
 MODEL = ModelIdentity("mobileclip", "a" * 64, 4)

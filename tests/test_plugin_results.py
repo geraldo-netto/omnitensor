@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
-from omnitensor.plugins.results import (
+from omnitensor.plugins.job_results import (
     MAX_RETAINED_JOBS_LIMIT,
     JobResultError,
     JobResultStore,
 )
+from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
 
 OWNER = ":1.42"
 OTHER = ":1.99"

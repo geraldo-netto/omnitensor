@@ -19,8 +19,8 @@ from omnitensor.job_lifecycle import (
     PredicateJobAuthorizer,
 )
 from omnitensor.job_ports import JobDispatchError
+from omnitensor.plugins.job_results import JobRecord, JobResultStore
 from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
-from omnitensor.plugins.results import JobRecord, JobResultStore
 from omnitensor.registry import validate_document
 
 T = TypeVar("T")
@@ -835,7 +835,7 @@ def decode_result(text):
 
 def test_a_submitted_job_can_be_asked_about_until_it_finishes():
     """Submission only answers 'accepted'; without this the outcome is lost."""
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     dispatcher = BlockingDispatcher()
 
@@ -866,7 +866,7 @@ def test_a_submitted_job_can_be_asked_about_until_it_finishes():
 
 
 def test_a_failed_job_reports_why_rather_than_vanishing():
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     class FailingDispatcher:
         def dispatch(self, job_id, workload_id, payload):
@@ -896,7 +896,7 @@ def test_a_failed_job_reports_why_rather_than_vanishing():
 
 def test_another_caller_cannot_read_a_job_it_does_not_own():
     """Identical to a job that never existed, so ids are never confirmed."""
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     dispatcher = BlockingDispatcher()
 
@@ -960,7 +960,7 @@ def test_a_service_without_a_result_store_still_answers_about_a_live_job():
 
 def test_a_running_job_reports_where_it_has_got_to():
     """Without progress a slow job is indistinguishable from a hung one."""
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     dispatcher = BlockingDispatcher()
 
@@ -995,7 +995,7 @@ def test_a_running_job_reports_where_it_has_got_to():
 )
 def test_an_impossible_fraction_is_clamped_rather_than_losing_the_update(fraction, expected):
     """A stage reporting nonsense is a bug in the stage, not a reason to go silent."""
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     dispatcher = BlockingDispatcher()
 
@@ -1154,7 +1154,7 @@ def test_job_result_timestamp_is_clamped_to_the_schema_minimum():
 
 
 def test_progress_for_an_unknown_job_is_ignored_not_filed_under_a_guess():
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     store = JobResultStore()
     service = JobSubmissionService(BlockingDispatcher(), allows_all(), results=store)
@@ -1165,7 +1165,7 @@ def test_progress_for_an_unknown_job_is_ignored_not_filed_under_a_guess():
 
 
 def test_progress_after_a_result_does_not_reopen_a_finished_job():
-    from omnitensor.plugins.results import JobResultStore
+    from omnitensor.plugins.job_results import JobResultStore
 
     async def scenario():
         service = JobSubmissionService(InstantDispatcher(), allows_all(), results=JobResultStore())

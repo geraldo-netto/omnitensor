@@ -102,6 +102,7 @@ from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution, artifact_filename
 from .plugins.cancellation import JobCancellationRegistry
 from .plugins.grants import GrantLedger
+from .plugins.job_results import JobResultStore
 from .plugins.kernel_telemetry import UnixSocketAggregateSource
 from .plugins.loading import InstalledPluginRuntime
 from .plugins.orchestration import (
@@ -111,7 +112,6 @@ from .plugins.orchestration import (
     required_permissions,
     with_recovery,
 )
-from .plugins.results import JobResultStore
 from .plugins.secrets import SecretRedactor
 from .plugins.summaries import ResultSummaryRegistry, SummaryError
 from .plugins.telemetry import PluginTelemetryRegistry

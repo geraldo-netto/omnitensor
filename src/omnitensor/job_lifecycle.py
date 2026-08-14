@@ -32,8 +32,8 @@ from .job_ports import (
     JobDispatchError,
     JobLifecycleObserver,
 )
+from .plugins.job_results import JobRecord, JobResultError, JobResultStore
 from .plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
-from .plugins.results import JobRecord, JobResultError, JobResultStore
 
 DEFAULT_MAX_ACTIVE_JOBS = 128
 MAX_ACTIVE_JOBS_LIMIT = 1024

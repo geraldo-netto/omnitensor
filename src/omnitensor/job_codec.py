@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 
 from .job_ports import MAX_JOB_MESSAGE_CHARS
-from .plugins.results import JobRecord
+from .plugins.job_results import JobRecord
 from .registry import validate_document
 
 JOB_API_VERSION = 1
