@@ -40,6 +40,13 @@ from omnitensor.plugins.generation import GenerationLimits, GenerationRequest, G
 from omnitensor.plugins.protocol import PluginContext, PluginProgress
 from omnitensor.plugins.qwen import NativeLoadReport, ProviderGenerationError
 from omnitensor.plugins.selected_text import selected_text_task
+from omnitensor.plugins.selected_text_acceptance import (
+    HEBREW_MODEL_SHA256,
+    QWEN_MODEL_SHA256,
+    SELECTED_TEXT_WORKER_LOAD_RECEIPT,
+    SelectedTextAcceptanceError,
+    parse_selected_text_worker_load_receipt,
+)
 from omnitensor.sdk import BootstrapArtifact, CancellationController, SDKContractError
 
 
@@ -536,7 +543,7 @@ def test_native_runtime_verification_binds_version_and_binary_bytes(tmp_path, mo
     monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.34")
     monkeypatch.setattr(qualification.importlib.resources, "files", lambda _name: package)
 
-    qualification.verify_native_runtime(expected)
+    assert qualification.verify_native_runtime(expected) == "llama-cpp-python-0.3.34"
 
     monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.35")
     with pytest.raises(RuntimeError) as excinfo:
@@ -1968,6 +1975,32 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
         factories.create_ask_selected_files()
 
 
+def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    model = BootstrapArtifact(
+        factories.QWEN_ARTIFACT_ID,
+        "1.0.0",
+        "gguf",
+        QWEN_MODEL_SHA256,
+        tmp_path / "qwen.gguf",
+    )
+
+    class Bootstrap:
+        accelerator_lease_path = lease
+        state_path = None
+
+        @staticmethod
+        def require_artifact(_artifact_id):
+            return model
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
+    monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification(layers=37))
+
+    with pytest.raises(RuntimeError, match="load receipt state is unavailable"):
+        factories.create_selected_text_tools()
+
+
 def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
@@ -2004,7 +2037,7 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
     ):
         _bootstrap, _store, _native, model, receipt, router = factories._generation(plugin_id)
         descriptor = router._workers["gpu"].descriptor
-        assert descriptor.provenance.model_id == model.stem
+        assert descriptor.provenance.model_id == model.path.stem
         assert descriptor.accelerator == "gpu"
         assert descriptor.provider_id == "qwen3-workloads-gpu"
         assert descriptor.runtime == "llama.cpp-vulkan"
@@ -2123,6 +2156,11 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         "qwen3-workloads-gpu"
     )
     assert len(created[2]._runtimes) == 2
+    assert created[2]._load_receipt_path == state / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    assert created[2]._load_receipt_models == (
+        ("primary", qwen.sha256),
+        ("hebrewTranslation", hebrew_model.sha256),
+    )
 
 
 def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
@@ -2187,6 +2225,381 @@ def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
         ("terminate", "__startup__"),
         ("stop",),
     ]
+
+
+def test_qualified_workload_refuses_incomplete_receipt_configuration():
+    with pytest.raises(ValueError, match="receipt configuration is invalid"):
+        factories.QualifiedWorkload(
+            object(),
+            object(),
+            Path("model.gguf"),
+            _qualification(),
+            load_receipt_path=Path("receipt.json"),
+        )
+
+
+def test_selected_workload_publishes_measured_receipt_only_after_both_loads(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def start(self, context):
+            assert not receipt_path.exists()
+            calls.append(("start", context))
+
+        async def stop(self):
+            calls.append(("stop",))
+
+    class Native:
+        physical_device = bge.QUALIFIED_DEVICE
+
+        def __init__(self, layers):
+            self.layers = layers
+
+        async def load(self, paths, accelerator):
+            calls.append(("load", self.layers, paths, accelerator))
+            return NativeLoadReport(
+                "llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False
+            )
+
+        async def terminate(self, request_id):
+            calls.append(("terminate", self.layers, request_id))
+
+    qwen = Native(37)
+    hebrew_runtime = Native(33)
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    receipt_path.write_text("stale", encoding="utf-8")
+    real_write = factories.write_json_atomic
+    real_remove = factories.remove_durable
+
+    def write_receipt(*args, **kwargs):
+        calls.append(("write",))
+        return real_write(*args, **kwargs)
+
+    def remove_receipt(path):
+        calls.append(("remove", path.exists()))
+        return real_remove(path)
+
+    monkeypatch.setattr(
+        factories,
+        "verify_native_runtime",
+        lambda value: f"llama-cpp-python-{value.runtime_version}",
+    )
+    monkeypatch.setattr(factories, "write_json_atomic", write_receipt)
+    monkeypatch.setattr(factories, "remove_durable", remove_receipt)
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        qwen,
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=(
+            (hebrew_runtime, Path("hebrew.gguf"), _qualification(layers=33)),
+        ),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(
+            ("primary", QWEN_MODEL_SHA256),
+            ("hebrewTranslation", HEBREW_MODEL_SHA256),
+        ),
+    )
+    context = PluginContext("selected-text-tools", 1, {}, frozenset())
+
+    asyncio.run(wrapper.start(context))
+
+    document = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt = parse_selected_text_worker_load_receipt(document)
+    assert receipt.document() == document
+    assert receipt.primary.load.total_model_layers == 37
+    assert receipt.hebrew.load.total_model_layers == 33
+    assert receipt.primary.device_name == receipt.hebrew.device_name == bge.QUALIFIED_DEVICE
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+    assert calls == [
+        ("remove", True),
+        ("start", context),
+        ("load", 37, (Path("qwen.gguf"),), "gpu"),
+        ("terminate", 37, "__startup__"),
+        ("load", 33, (Path("hebrew.gguf"),), "gpu"),
+        ("terminate", 33, "__startup__"),
+        ("write",),
+    ]
+
+    asyncio.run(wrapper.stop())
+    assert not receipt_path.exists()
+    assert calls[-4:] == [
+        ("remove", True),
+        ("terminate", 37, "__startup__"),
+        ("terminate", 33, "__startup__"),
+        ("stop",),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("hebrew_report", "hebrew_digest"),
+    [
+        (
+            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 32, 32, False),
+            HEBREW_MODEL_SHA256,
+        ),
+        (
+            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 33, 33, True),
+            HEBREW_MODEL_SHA256,
+        ),
+        (NativeLoadReport("wrong", "Vulkan", 33, 33, False), HEBREW_MODEL_SHA256),
+        (
+            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 33, 33, False),
+            "0" * 64,
+        ),
+    ],
+)
+def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
+    tmp_path, monkeypatch, hebrew_report, hebrew_digest
+):
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def start(self, _context):
+            calls.append("start")
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        physical_device = bge.QUALIFIED_DEVICE
+
+        def __init__(self, report):
+            self.report = report
+
+        async def load(self, _paths, _accelerator):
+            return self.report
+
+        async def terminate(self, request_id):
+            calls.append(request_id)
+
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    receipt_path.write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(
+        factories,
+        "verify_native_runtime",
+        lambda _value: "llama-cpp-python-0.3.34",
+    )
+    monkeypatch.setattr(
+        factories,
+        "write_json_atomic",
+        lambda *_args, **_kwargs: pytest.fail("receipt published"),
+    )
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        Native(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 37, 37, False)),
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=(
+            (Native(hebrew_report), Path("hebrew.gguf"), _qualification(layers=33)),
+        ),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(
+            ("primary", QWEN_MODEL_SHA256),
+            ("hebrewTranslation", hebrew_digest),
+        ),
+    )
+
+    with pytest.raises(
+        (RuntimeError, ProviderGenerationError, SelectedTextAcceptanceError)
+    ):
+        asyncio.run(wrapper.start(PluginContext("selected-text-tools", 1, {}, frozenset())))
+
+    assert not receipt_path.exists()
+    assert calls[0] == "start"
+    assert calls[-1] == "stop"
+
+
+def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def start(self, _context):
+            calls.append("start")
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        physical_device = bge.QUALIFIED_DEVICE
+
+        def __init__(self, layers):
+            self.layers = layers
+
+        async def load(self, _paths, _accelerator):
+            return NativeLoadReport(
+                "llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False
+            )
+
+        async def terminate(self, request_id):
+            calls.append((self.layers, request_id))
+
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    monkeypatch.setattr(
+        factories,
+        "verify_native_runtime",
+        lambda _value: "llama-cpp-python-0.3.34",
+    )
+    monkeypatch.setattr(
+        factories,
+        "write_json_atomic",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("write failed")),
+    )
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        Native(37),
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(
+            ("primary", QWEN_MODEL_SHA256),
+            ("hebrewTranslation", HEBREW_MODEL_SHA256),
+        ),
+    )
+
+    with pytest.raises(OSError, match="write failed"):
+        asyncio.run(wrapper.start(PluginContext("selected-text-tools", 1, {}, frozenset())))
+
+    assert not receipt_path.exists()
+    assert calls[-1] == "stop"
+
+
+def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def start(self, _context):
+            calls.append("start")
+
+        async def stop(self):
+            calls.append("stop")
+
+    class FailingNative:
+        physical_device = bge.QUALIFIED_DEVICE
+
+        async def load(self, _paths, _accelerator):
+            calls.append(("load", 37))
+            raise RuntimeError("original load failure")
+
+        async def terminate(self, _request_id):
+            calls.append(("terminate", 37))
+            raise OSError("terminate failed")
+
+    class HebrewNative:
+        async def terminate(self, _request_id):
+            calls.append(("terminate", 33))
+
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    receipt_path.write_text("stale", encoding="utf-8")
+    real_remove = factories.remove_durable
+    removals = 0
+
+    def remove_receipt(path):
+        nonlocal removals
+        removals += 1
+        calls.append(("remove", removals))
+        if removals == 2:
+            raise OSError("cleanup remove failed")
+        real_remove(path)
+
+    monkeypatch.setattr(factories, "remove_durable", remove_receipt)
+    monkeypatch.setattr(
+        factories,
+        "verify_native_runtime",
+        lambda _value: "llama-cpp-python-0.3.34",
+    )
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        FailingNative(),
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=(
+            (HebrewNative(), Path("hebrew.gguf"), _qualification(layers=33)),
+        ),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(
+            ("primary", QWEN_MODEL_SHA256),
+            ("hebrewTranslation", HEBREW_MODEL_SHA256),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="original load failure"):
+        asyncio.run(wrapper.start(PluginContext("selected-text-tools", 1, {}, frozenset())))
+
+    assert calls == [
+        ("remove", 1),
+        "start",
+        ("load", 37),
+        ("terminate", 37),
+        ("terminate", 33),
+        "stop",
+        ("remove", 2),
+    ]
+    assert not receipt_path.exists()
+
+
+def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        def __init__(self, layers, fail=False):
+            self.layers = layers
+            self.fail = fail
+
+        async def terminate(self, _request_id):
+            calls.append(("terminate", self.layers))
+            if self.fail:
+                raise RuntimeError("terminate failed")
+
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+
+    def refuse_remove(_path):
+        calls.append("remove")
+        raise OSError("remove failed")
+
+    monkeypatch.setattr(factories, "remove_durable", refuse_remove)
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        Native(37, fail=True),
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=(
+            (Native(33), Path("hebrew.gguf"), _qualification(layers=33)),
+        ),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(
+            ("primary", QWEN_MODEL_SHA256),
+            ("hebrewTranslation", HEBREW_MODEL_SHA256),
+        ),
+    )
+
+    with pytest.raises(OSError, match="remove failed"):
+        asyncio.run(wrapper.stop())
+
+    assert calls == ["remove", ("terminate", 37), ("terminate", 33), "stop"]
 
 
 def test_qualified_workload_start_failure_terminates_and_stops(monkeypatch):

@@ -434,6 +434,29 @@ privacy, full-offload, and no-CPU-fallback gates. Verify newly collected
 evidence with:
 
 ```sh
+OMNI_STATE=~/.local/state/xpu-workload-manager
+OMNI_SELECTED_LOAD="$OMNI_STATE/plugin-state/selected-text-tools/selected-text-worker-load.json"
+
+"$OMNI_SERVICE/python" "$OMNI_SOURCE/scripts/collect-selected-text-acceptance.py" \
+  --worker-load-receipt "$OMNI_SELECTED_LOAD" \
+  --qwen-model "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" \
+  --hebrew-model "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf" \
+  --output /absolute/path/to/selected-text-evidence.json
+```
+
+The private receipt is usable only while D-Bus reports the current
+selected-text worker ready. The worker writes it after both actual model loads
+prove the exact runtime, named GPU, full 37/37 and 33/33 Vulkan layer counts,
+and no CPU fallback. Startup clears stale bytes; startup failure and normal
+worker stop remove them. If `OMNITENSOR_STATE_PATH` is customized, locate
+`plugin-state` beside that snapshot instead of using the default path above.
+The collector refuses a missing, stale, malformed, or disagreeing receipt
+before it runs the corpus or writes evidence. It then copies the measured model
+records into the unchanged evidence contract.
+
+Qualify the resulting document with:
+
+```sh
 "$OMNI_SERVICE/omnitensor-qualify-selected-text" \
   --evidence /absolute/path/to/selected-text-evidence.json \
   --output /absolute/path/to/selected-text-acceptance.json
@@ -441,7 +464,10 @@ evidence with:
 
 That qualification is digest-bound to both model artifacts, runtime 0.3.34,
 the frozen corpus, and the named GPU. It is not an arbitrary-text benchmark and
-does not authorize silently inferred or globally fixed language routing.
+does not authorize silently inferred or globally fixed language routing. This
+code change does not recollect or rewrite the archived run: a fresh evidence
+artifact requires reinstalling the matching wheels and observing the current
+worker on the named hardware.
 
 The provider wheel contains `qualification.json`. It binds the exact task
 contract hashes, Qwen hashes, `llama-cpp-python` version and native-library

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib.metadata
 import json
 import time
 from pathlib import Path
@@ -16,16 +15,13 @@ from dbus_fast.aio import MessageBus
 from omnitensor.atomicio import write_json_atomic
 from omnitensor.dbus_transport import BUS_NAME, OBJECT_PATH
 from omnitensor.plugins.selected_text_acceptance import (
-    HEBREW_MODEL_SHA256,
-    QWEN_MODEL_SHA256,
     load_selected_text_corpus,
+    load_selected_text_worker_load_receipt,
 )
 from omnitensor.preparation import file_digest
 
-DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 
-
-def _arguments():
+def _arguments(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         description="Run the frozen selected-text corpus through the installed D-Bus service"
     )
@@ -33,8 +29,9 @@ def _arguments():
     parser.add_argument("--corpus", type=Path)
     parser.add_argument("--qwen-model", type=Path, required=True)
     parser.add_argument("--hebrew-model", type=Path, required=True)
+    parser.add_argument("--worker-load-receipt", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 async def _terminal(interface, job_id: str, timeout: float, prefix: str):
@@ -138,33 +135,19 @@ def _require_ready(inventory):
         raise RuntimeError("selected-text model artifacts are not ready")
 
 
-def _model(digest: str, layers: int, runtime_version: str):
-    return {
-        "modelSha256": digest,
-        "runtimeVersion": runtime_version,
-        "deviceName": DEVICE,
-        "load": {
-            "backend": "llama.cpp-vulkan",
-            "device": "Vulkan",
-            "totalModelLayers": layers,
-            "acceleratorLayers": layers,
-            "cpuFallback": False,
-        },
-    }
-
-
 async def _collect(arguments):
-    corpus = load_selected_text_corpus(arguments.corpus)
-    if file_digest(arguments.qwen_model) != QWEN_MODEL_SHA256:
-        raise RuntimeError("Qwen model path differs from the frozen digest")
-    if file_digest(arguments.hebrew_model) != HEBREW_MODEL_SHA256:
-        raise RuntimeError("Hebrew model path differs from the frozen digest")
     bus = await MessageBus(bus_type=BusType.SESSION).connect()
     try:
         introspection = await bus.introspect(BUS_NAME, OBJECT_PATH)
         proxy = bus.get_proxy_object(BUS_NAME, OBJECT_PATH, introspection)
         interface = proxy.get_interface(BUS_NAME)
         _require_ready(json.loads(await interface.call_describe_plugins()))
+        receipt = load_selected_text_worker_load_receipt(arguments.worker_load_receipt)
+        if file_digest(arguments.qwen_model) != receipt.primary.model_sha256:
+            raise RuntimeError("Qwen model path differs from the worker load receipt")
+        if file_digest(arguments.hebrew_model) != receipt.hebrew.model_sha256:
+            raise RuntimeError("Hebrew model path differs from the worker load receipt")
+        corpus = load_selected_text_corpus(arguments.corpus)
         observations = []
         for index, case in enumerate(corpus.cases):
             observations.append(
@@ -173,7 +156,6 @@ async def _collect(arguments):
         cancellation = await _cancellation_latency(interface, arguments.timeout_seconds)
     finally:
         bus.disconnect()
-    runtime_version = f"llama-cpp-python-{importlib.metadata.version('llama-cpp-python')}"
     public = json.dumps(observations, ensure_ascii=False)
     route_preserved = all(
         observation["result"]["providerId"] == case.expected_provider_id
@@ -182,10 +164,7 @@ async def _collect(arguments):
     return {
         "evidenceVersion": 1,
         "corpusSha256": corpus.sha256,
-        "models": {
-            "primary": _model(QWEN_MODEL_SHA256, 37, runtime_version),
-            "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33, runtime_version),
-        },
+        "models": receipt.models_document(),
         "observations": observations,
         "safety": {
             "cancellationLatencyMs": cancellation,
@@ -195,8 +174,8 @@ async def _collect(arguments):
     }
 
 
-def main():
-    arguments = _arguments()
+def main(argv: list[str] | None = None):
+    arguments = _arguments(argv)
     document = asyncio.run(_collect(arguments))
     write_json_atomic(arguments.output, document, prefix=".selected-text-evidence-")
     print(json.dumps(document, indent=2, ensure_ascii=False))

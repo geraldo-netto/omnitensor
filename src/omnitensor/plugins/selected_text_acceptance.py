@@ -17,6 +17,8 @@ from .acceptance_kit import (
     BoundedJsonDocument,
     NativeLoadReport,
     discover_resource,
+    native_load_report_document,
+    parse_native_load_report,
     read_bounded_json,
     require_boolean,
     require_integer,
@@ -33,10 +35,14 @@ from .selected_text import OPERATIONS
 
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
+MAX_WORKER_LOAD_RECEIPT_BYTES = 64 * 1024
+SELECTED_TEXT_WORKER_LOAD_RECEIPT = "selected-text-worker-load.json"
 QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
 QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
 HEBREW_MODEL_ID = "dictalm2-hebrew-q4-k-m"
 HEBREW_MODEL_SHA256 = "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735"
+SELECTED_TEXT_RUNTIME_VERSION = "llama-cpp-python-0.3.34"
+SELECTED_TEXT_GPU_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 _HEBREW = re.compile(r"[\u0590-\u05ff]")
 _DISALLOWED_SCRIPT = re.compile(r"[\u0400-\u052f\u0600-\u06ff]")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -77,6 +83,25 @@ class ModelEvidence:
     runtime_version: str
     device_name: str
     load: NativeLoadReport
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedTextWorkerLoadReceipt:
+    primary: ModelEvidence
+    hebrew: ModelEvidence
+
+    def models_document(self) -> dict[str, object]:
+        return {
+            "primary": _model_evidence_document(self.primary),
+            "hebrewTranslation": _model_evidence_document(self.hebrew),
+        }
+
+    def document(self) -> dict[str, object]:
+        return {
+            "receiptVersion": 1,
+            "pluginId": "selected-text-tools",
+            "models": self.models_document(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +249,66 @@ def load_selected_text_evidence(path: Path | str) -> SelectedTextEvidence:
     )
 
 
+def load_selected_text_worker_load_receipt(
+    path: Path | str,
+) -> SelectedTextWorkerLoadReceipt:
+    """Load one private, bounded receipt emitted by the ready worker."""
+    try:
+        document = read_bounded_json(Path(path), MAX_WORKER_LOAD_RECEIPT_BYTES).document
+    except (OSError, ValueError, JsonTooLargeError) as error:
+        raise SelectedTextAcceptanceError(
+            "receipt-invalid", "cannot read worker load receipt"
+        ) from error
+    return parse_selected_text_worker_load_receipt(document)
+
+
+def parse_selected_text_worker_load_receipt(
+    value: object,
+) -> SelectedTextWorkerLoadReceipt:
+    """Parse and validate the closed selected-text live-load receipt."""
+    document = _mapping(value, "worker load receipt", "receipt-invalid")
+    if set(document) != {"receiptVersion", "pluginId", "models"}:
+        raise SelectedTextAcceptanceError(
+            "receipt-invalid", "worker load receipt fields are invalid"
+        )
+    if (
+        _integer(
+            document["receiptVersion"],
+            "worker load receipt version",
+            1,
+            1,
+            "receipt-invalid",
+        )
+        != 1
+        or document["pluginId"] != "selected-text-tools"
+    ):
+        raise SelectedTextAcceptanceError(
+            "receipt-invalid", "worker load receipt identity is invalid"
+        )
+    models = _mapping(document["models"], "worker load receipt models", "receipt-invalid")
+    if set(models) != {"primary", "hebrewTranslation"}:
+        raise SelectedTextAcceptanceError(
+            "receipt-invalid", "worker load receipt models are invalid"
+        )
+    return build_selected_text_worker_load_receipt(
+        _parse_model(models["primary"], "receipt-invalid"),
+        _parse_model(models["hebrewTranslation"], "receipt-invalid"),
+    )
+
+
+def build_selected_text_worker_load_receipt(
+    primary: ModelEvidence,
+    hebrew: ModelEvidence,
+) -> SelectedTextWorkerLoadReceipt:
+    """Build a receipt only from the exact qualified live model loads."""
+    if not isinstance(primary, ModelEvidence) or not isinstance(hebrew, ModelEvidence):
+        raise SelectedTextAcceptanceError(
+            "receipt-invalid", "worker load receipt models are invalid"
+        )
+    _validate_selected_text_models(primary, hebrew, identity_code="receipt-invalid")
+    return SelectedTextWorkerLoadReceipt(primary, hebrew)
+
+
 def qualify_selected_text(
     corpus: SelectedTextCorpus,
     evidence: SelectedTextEvidence,
@@ -321,21 +406,33 @@ def _score(
 def _validate_identity(corpus: SelectedTextCorpus, evidence: SelectedTextEvidence) -> None:
     if evidence.corpus_sha256 != corpus.sha256:
         raise SelectedTextAcceptanceError("evidence-stale", "evidence names another corpus")
-    if evidence.primary.model_sha256 != QWEN_MODEL_SHA256:
-        raise SelectedTextAcceptanceError("evidence-stale", "primary model bytes changed")
-    if evidence.hebrew.model_sha256 != HEBREW_MODEL_SHA256:
-        raise SelectedTextAcceptanceError("evidence-stale", "Hebrew model bytes changed")
-    for model, layers in ((evidence.primary, 37), (evidence.hebrew, 33)):
+    _validate_selected_text_models(evidence.primary, evidence.hebrew)
+
+
+def _validate_selected_text_models(
+    primary: ModelEvidence,
+    hebrew: ModelEvidence,
+    *,
+    identity_code: str = "evidence-stale",
+) -> None:
+    if primary.model_sha256 != QWEN_MODEL_SHA256:
+        raise SelectedTextAcceptanceError(identity_code, "primary model bytes changed")
+    if hebrew.model_sha256 != HEBREW_MODEL_SHA256:
+        raise SelectedTextAcceptanceError(identity_code, "Hebrew model bytes changed")
+    if (
+        primary.runtime_version != SELECTED_TEXT_RUNTIME_VERSION
+        or hebrew.runtime_version != SELECTED_TEXT_RUNTIME_VERSION
+    ):
+        raise SelectedTextAcceptanceError(identity_code, "worker runtime identity differs")
+    for model, layers in ((primary, 37), (hebrew, 33)):
         try:
             validate_gpu_load(model.load)
         except ProviderGenerationError as error:
             raise SelectedTextAcceptanceError("device-unqualified", error.detail) from error
-        if model.load.total_model_layers != layers or model.device_name.strip().lower() in {
-            "",
-            "cpu",
-            "llvmpipe",
-            "vulkan",
-        }:
+        if (
+            model.load.total_model_layers != layers
+            or model.device_name != SELECTED_TEXT_GPU_DEVICE
+        ):
             raise SelectedTextAcceptanceError("device-unqualified", "named GPU load differs")
 
 
@@ -373,29 +470,20 @@ def _parse_case(value: object) -> SelectedTextCase:
     )
 
 
-def _parse_model(value: object) -> ModelEvidence:
-    item = _mapping(value, "model")
+def _parse_model(value: object, code: str = "evidence-invalid") -> ModelEvidence:
+    item = _mapping(value, "model", code)
     if set(item) != {"modelSha256", "runtimeVersion", "deviceName", "load"}:
-        raise SelectedTextAcceptanceError("evidence-invalid", "model fields are invalid")
-    load = _mapping(item["load"], "model load")
-    if set(load) != {
-        "backend",
-        "device",
-        "totalModelLayers",
-        "acceleratorLayers",
-        "cpuFallback",
-    }:
-        raise SelectedTextAcceptanceError("evidence-invalid", "load fields are invalid")
+        raise SelectedTextAcceptanceError(code, "model fields are invalid")
     return ModelEvidence(
-        _digest(item["modelSha256"], "model digest"),
-        _text(item["runtimeVersion"], "runtime version", 200, "evidence-invalid"),
-        _text(item["deviceName"], "device name", 200, "evidence-invalid"),
-        NativeLoadReport(
-            _text(load["backend"], "backend", 120, "evidence-invalid"),
-            _text(load["device"], "device", 120, "evidence-invalid"),
-            _integer(load["totalModelLayers"], "total layers", 1, 65_535),
-            _integer(load["acceleratorLayers"], "accelerator layers", 1, 65_535),
-            _boolean(load["cpuFallback"], "CPU fallback"),
+        _digest(item["modelSha256"], "model digest", code),
+        _text(item["runtimeVersion"], "runtime version", 200, code),
+        _text(item["deviceName"], "device name", 200, code),
+        parse_native_load_report(
+            item["load"],
+            error_type=SelectedTextAcceptanceError,
+            code=code,
+            object_detail="model load must be an object",
+            fields_detail="load fields are invalid",
         ),
     )
 
@@ -447,6 +535,15 @@ def _model_document(model_id: str, evidence: ModelEvidence) -> dict[str, object]
         "runtimeVersion": evidence.runtime_version,
         "deviceName": evidence.device_name,
         "fullyOffloadedLayers": evidence.load.total_model_layers,
+    }
+
+
+def _model_evidence_document(evidence: ModelEvidence) -> dict[str, object]:
+    return {
+        "modelSha256": evidence.model_sha256,
+        "runtimeVersion": evidence.runtime_version,
+        "deviceName": evidence.device_name,
+        "load": native_load_report_document(evidence.load),
     }
 
 
@@ -528,32 +625,38 @@ def _identifier(value: object, label: str, code: str) -> str:
     )
 
 
-def _digest(value: object, label: str) -> str:
+def _digest(value: object, label: str, code: str = "evidence-invalid") -> str:
     return require_match(
         value,
         _DIGEST,
         error_type=SelectedTextAcceptanceError,
-        code="evidence-invalid",
+        code=code,
         detail=f"{label} is invalid",
     )
 
 
-def _integer(value: object, label: str, minimum: int, maximum: int) -> int:
+def _integer(
+    value: object,
+    label: str,
+    minimum: int,
+    maximum: int,
+    code: str = "evidence-invalid",
+) -> int:
     return require_integer(
         value,
         error_type=SelectedTextAcceptanceError,
-        code="evidence-invalid",
+        code=code,
         detail=f"{label} is invalid",
         minimum=minimum,
         maximum=maximum,
     )
 
 
-def _boolean(value: object, label: str) -> bool:
+def _boolean(value: object, label: str, code: str = "evidence-invalid") -> bool:
     return require_boolean(
         value,
         error_type=SelectedTextAcceptanceError,
-        code="evidence-invalid",
+        code=code,
         detail=f"{label} must be boolean",
     )
 
@@ -589,10 +692,19 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "HEBREW_MODEL_SHA256",
+    "MAX_WORKER_LOAD_RECEIPT_BYTES",
+    "ModelEvidence",
     "QWEN_MODEL_SHA256",
+    "SELECTED_TEXT_GPU_DEVICE",
+    "SELECTED_TEXT_RUNTIME_VERSION",
+    "SELECTED_TEXT_WORKER_LOAD_RECEIPT",
     "SelectedTextAcceptanceError",
     "SelectedTextPolicy",
+    "SelectedTextWorkerLoadReceipt",
+    "build_selected_text_worker_load_receipt",
     "load_selected_text_corpus",
     "load_selected_text_evidence",
+    "load_selected_text_worker_load_receipt",
+    "parse_selected_text_worker_load_receipt",
     "qualify_selected_text",
 ]

@@ -14,14 +14,20 @@ import pytest
 import omnitensor.plugins.selected_text_acceptance as acceptance
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
+    MAX_WORKER_LOAD_RECEIPT_BYTES,
     QWEN_MODEL_SHA256,
+    SELECTED_TEXT_GPU_DEVICE,
+    SELECTED_TEXT_RUNTIME_VERSION,
     SelectedTextAcceptanceError,
     SelectedTextPolicy,
     _fold,
     _valid_hebrew,
+    build_selected_text_worker_load_receipt,
     load_selected_text_corpus,
     load_selected_text_evidence,
+    load_selected_text_worker_load_receipt,
     main,
+    parse_selected_text_worker_load_receipt,
     qualify_selected_text,
 )
 from omnitensor.registry import validate_document, validate_workload_document
@@ -57,10 +63,28 @@ def test_acceptance_collector_imports_canonical_dbus_coordinates():
         and node.value
         in {"org.cinnamon.OmniTensor1", "/org/cinnamon/OmniTensor1"}
     }
+    acceptance_imports = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "omnitensor.plugins.selected_text_acceptance"
+        for alias in node.names
+    }
+    functions = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
 
     assert imports >= {"BUS_NAME", "OBJECT_PATH"}
     assert rebound.isdisjoint({"BUS_NAME", "OBJECT_PATH"})
     assert copied_coordinates == set()
+    assert "load_selected_text_worker_load_receipt" in acceptance_imports
+    assert "_model" not in functions
+    assert SELECTED_TEXT_GPU_DEVICE not in literals
 
 
 def _model(digest: str, layers: int):
@@ -76,6 +100,141 @@ def _model(digest: str, layers: int):
             "cpuFallback": False,
         },
     }
+
+
+def _worker_receipt_document():
+    return {
+        "receiptVersion": 1,
+        "pluginId": "selected-text-tools",
+        "models": {
+            "primary": _model(QWEN_MODEL_SHA256, 37),
+            "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33),
+        },
+    }
+
+
+def test_worker_load_receipt_round_trips_the_exact_evidence_models():
+    document = _worker_receipt_document()
+
+    receipt = parse_selected_text_worker_load_receipt(document)
+
+    assert receipt.document() == document
+    assert receipt.models_document() == document["models"]
+    assert receipt.primary.runtime_version == SELECTED_TEXT_RUNTIME_VERSION
+    assert receipt.hebrew.device_name == SELECTED_TEXT_GPU_DEVICE
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (lambda value: value.update(extra=True), "receipt-invalid"),
+        (lambda value: value.pop("models"), "receipt-invalid"),
+        (lambda value: value.update(receiptVersion=True), "receipt-invalid"),
+        (lambda value: value.update(pluginId="other"), "receipt-invalid"),
+        (lambda value: value["models"].update(extra={}), "receipt-invalid"),
+        (lambda value: value["models"].pop("primary"), "receipt-invalid"),
+        (lambda value: value["models"]["primary"].update(extra=True), "receipt-invalid"),
+        (
+            lambda value: value["models"]["primary"].pop("runtimeVersion"),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(extra=True),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].pop("backend"),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["primary"].update(modelSha256="0" * 64),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["hebrewTranslation"].update(
+                modelSha256="0" * 64
+            ),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["primary"].update(runtimeVersion="other"),
+            "receipt-invalid",
+        ),
+        (
+            lambda value: value["models"]["primary"].update(deviceName="different GPU"),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(backend="wrong"),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(device="CPU"),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(cpuFallback=True),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(
+                totalModelLayers=36, acceleratorLayers=36
+            ),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["hebrewTranslation"]["load"].update(
+                totalModelLayers=32, acceleratorLayers=32
+            ),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(
+                totalModelLayers=38, acceleratorLayers=38
+            ),
+            "device-unqualified",
+        ),
+        (
+            lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=36),
+            "device-unqualified",
+        ),
+    ],
+)
+def test_worker_load_receipt_refuses_field_identity_and_device_drift(mutate, code):
+    document = _worker_receipt_document()
+    mutate(document)
+
+    with pytest.raises(SelectedTextAcceptanceError) as caught:
+        parse_selected_text_worker_load_receipt(document)
+    assert caught.value.code == code
+
+
+def test_worker_load_receipt_loader_enforces_exact_byte_boundaries(tmp_path):
+    exact = tmp_path / "exact.json"
+    oversized = tmp_path / "oversized.json"
+    malformed = tmp_path / "malformed.json"
+    exact.write_bytes(b"{}" + b" " * (MAX_WORKER_LOAD_RECEIPT_BYTES - 2))
+    oversized.write_bytes(b"{}" + b" " * (MAX_WORKER_LOAD_RECEIPT_BYTES - 1))
+    malformed.write_text("{", encoding="utf-8")
+
+    with pytest.raises(SelectedTextAcceptanceError, match="receipt fields"):
+        load_selected_text_worker_load_receipt(exact)
+    for path in (tmp_path / "missing", oversized, malformed):
+        with pytest.raises(SelectedTextAcceptanceError) as caught:
+            load_selected_text_worker_load_receipt(path)
+        assert (caught.value.code, caught.value.detail) == (
+            "receipt-invalid",
+            "cannot read worker load receipt",
+        )
+
+
+def test_worker_load_receipt_builder_requires_typed_exact_models():
+    receipt = parse_selected_text_worker_load_receipt(_worker_receipt_document())
+    assert build_selected_text_worker_load_receipt(
+        receipt.primary, receipt.hebrew
+    ) == receipt
+    with pytest.raises(SelectedTextAcceptanceError, match="receipt models"):
+        build_selected_text_worker_load_receipt(object(), receipt.hebrew)
 
 
 def _result(case, index: int):
@@ -177,6 +336,47 @@ def test_complete_named_gpu_evidence_qualifies_and_emits_the_closed_report(tmp_p
     assert validate_document("selected-text-acceptance.schema.json", report) == []
 
 
+def test_archived_selected_text_report_remains_byte_compatible():
+    evidence_path = ROOT / "acceptance-evidence/selected-text-rx6600xt-evidence.json"
+    report_path = ROOT / "acceptance-evidence/selected-text-rx6600xt-report.json"
+
+    report = qualify_selected_text(
+        load_selected_text_corpus(), load_selected_text_evidence(evidence_path)
+    ).document()
+    produced = json.dumps(report, separators=(",", ":")).encode("utf-8")
+
+    assert hashlib.sha256(evidence_path.read_bytes()).hexdigest() == (
+        "b399931d77b43e3131dc77566b3394a16307319527b7b0ad182f7491506e7b8c"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "4ed2739640bb634576ee722722ccfd24defd3bbe4c2f46de26c566e1596f3d5c"
+    )
+    assert produced + b"\n" == report_path.read_bytes()
+
+
+def test_qualification_report_agrees_with_the_live_worker_receipt(tmp_path):
+    corpus = load_selected_text_corpus()
+    receipt = parse_selected_text_worker_load_receipt(_worker_receipt_document())
+    document = _evidence_document(corpus)
+    document["models"] = receipt.models_document()
+    path = tmp_path / "live-evidence.json"
+    path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+
+    report = qualify_selected_text(
+        corpus, load_selected_text_evidence(path)
+    ).document()
+
+    for role, model in (
+        ("primary", receipt.primary),
+        ("hebrewTranslation", receipt.hebrew),
+    ):
+        published = report["models"][role]
+        assert published["artifactSha256"] == model.model_sha256
+        assert published["runtimeVersion"] == model.runtime_version
+        assert published["deviceName"] == model.device_name
+        assert published["fullyOffloadedLayers"] == model.load.total_model_layers
+
+
 def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, monkeypatch):
     _corpus, path = _write_evidence(tmp_path)
     original = path.read_bytes()
@@ -222,6 +422,11 @@ def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, mo
             ),
             "evidence-stale",
             "Hebrew model bytes",
+        ),
+        (
+            lambda value: value["models"]["primary"].update(runtimeVersion="other"),
+            "evidence-stale",
+            "runtime identity",
         ),
         (
             lambda value: value["models"]["primary"]["load"].update(

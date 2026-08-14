@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_qa import DocumentQuestionPlugin, document_question_task
 from omnitensor.plugins.event_workload import (
@@ -29,6 +31,11 @@ from omnitensor.plugins.protocol import (
 )
 from omnitensor.plugins.qwen import LlamaCppVulkanQwenWorker
 from omnitensor.plugins.selected_text import SelectedTextPlugin, selected_text_task
+from omnitensor.plugins.selected_text_acceptance import (
+    SELECTED_TEXT_WORKER_LOAD_RECEIPT,
+    ModelEvidence,
+    build_selected_text_worker_load_receipt,
+)
 from omnitensor.sdk import current_plugin_bootstrap
 
 from .bge import BgeVulkanEmbedder
@@ -67,20 +74,36 @@ class QualifiedWorkload:
         additional_runtimes: tuple[
             tuple[LlamaVulkanRuntime, Path, Qualification], ...
         ] = (),
+        load_receipt_path: Path | None = None,
+        load_receipt_models: tuple[tuple[str, str], ...] = (),
     ) -> None:
+        runtimes = ((runtime, model_path, qualification), *additional_runtimes)
+        if (load_receipt_path is None) == bool(load_receipt_models) or (
+            load_receipt_path is not None
+            and (
+                tuple(role for role, _digest in load_receipt_models)
+                != ("primary", "hebrewTranslation")
+                or len(load_receipt_models) != len(runtimes)
+            )
+        ):
+            raise ValueError("selected-text load receipt configuration is invalid")
         self.plugin_id = plugin.plugin_id
         self._plugin = plugin
         self._runtime = runtime
         self._model_path = model_path
         self._qualification = qualification
-        self._runtimes = ((runtime, model_path, qualification), *additional_runtimes)
+        self._runtimes = runtimes
         self._embedder = embedder
+        self._load_receipt_path = load_receipt_path
+        self._load_receipt_models = load_receipt_models
 
     async def start(self, context: PluginContext) -> None:
+        self._clear_load_receipt()
         await self._plugin.start(context)
+        measured: list[ModelEvidence] = []
         try:
-            for runtime, model_path, qualification in self._runtimes:
-                verify_native_runtime(qualification)
+            for index, (runtime, model_path, qualification) in enumerate(self._runtimes):
+                runtime_version = verify_native_runtime(qualification)
                 report = await runtime.load((model_path,), "gpu")
                 validate_gpu_load(report)
                 if (
@@ -88,22 +111,56 @@ class QualifiedWorkload:
                     or runtime.physical_device != qualification.device
                 ):
                     raise RuntimeError("native model load differs from qualification")
+                if self._load_receipt_path is not None:
+                    _role, digest = self._load_receipt_models[index]
+                    measured.append(
+                        ModelEvidence(digest, runtime_version, runtime.physical_device, report)
+                    )
                 await runtime.terminate("__startup__")
             if self._embedder is not None:
                 await self._embedder.preflight()
+            self._publish_load_receipt(measured)
         except BaseException:
-            for runtime, _model_path, _qualification in self._runtimes:
-                await runtime.terminate("__startup__")
-            await self._plugin.stop()
+            await self._cleanup_failed_start()
             raise
+
+    def _clear_load_receipt(self) -> None:
+        if self._load_receipt_path is not None:
+            remove_durable(self._load_receipt_path)
+
+    def _publish_load_receipt(self, measured: list[ModelEvidence]) -> None:
+        if self._load_receipt_path is None:
+            return
+        receipt = build_selected_text_worker_load_receipt(*measured)
+        write_json_atomic(
+            self._load_receipt_path,
+            receipt.document(),
+            prefix=".selected-text-worker-load-",
+        )
+
+    async def _cleanup_failed_start(self) -> None:
+        await self._cleanup(clear_receipt_first=False)
 
     async def health(self) -> PluginHealth:
         return await self._plugin.health()
 
     async def stop(self) -> None:
+        failure = await self._cleanup(clear_receipt_first=True)
+        if failure is not None:
+            raise failure
+
+    async def _cleanup(self, *, clear_receipt_first: bool) -> BaseException | None:
+        failure = None
+        if clear_receipt_first:
+            failure = _capture_sync_failure(self._clear_load_receipt, failure)
         for runtime, _model_path, _qualification in self._runtimes:
-            await runtime.terminate("__startup__")
-        await self._plugin.stop()
+            failure = await _capture_async_failure(
+                runtime.terminate("__startup__"), failure
+            )
+        failure = await _capture_async_failure(self._plugin.stop(), failure)
+        if not clear_receipt_first:
+            failure = _capture_sync_failure(self._clear_load_receipt, failure)
+        return failure
 
     async def execute(
         self,
@@ -112,6 +169,26 @@ class QualifiedWorkload:
         progress: ProgressReporter,
     ) -> PluginResult:
         return await self._plugin.execute(request, cancellation, progress)
+
+
+def _capture_sync_failure(
+    operation: Callable[[], None], failure: BaseException | None
+) -> BaseException | None:
+    try:
+        operation()
+    except BaseException as error:
+        return failure if failure is not None else error
+    return failure
+
+
+async def _capture_async_failure(
+    operation: Awaitable[object], failure: BaseException | None
+) -> BaseException | None:
+    try:
+        await operation
+    except BaseException as error:
+        return failure if failure is not None else error
+    return failure
 
 
 def _generation(plugin_id: str):
@@ -141,7 +218,7 @@ def _generation(plugin_id: str):
         ),
     )
     worker = LlamaCppVulkanQwenWorker(descriptor, runtime, (model.path,))
-    return bootstrap, store, runtime, model.path, qualification, GenerationRouter((worker,))
+    return bootstrap, store, runtime, model, qualification, GenerationRouter((worker,))
 
 
 _TASKS = {
@@ -161,7 +238,7 @@ def create_event_extraction() -> QualifiedWorkload:
         store,
         EventRecoveryJournal(bootstrap.state_path / "event-recovery.json"),
     )
-    return QualifiedWorkload(plugin, runtime, model, qualification)
+    return QualifiedWorkload(plugin, runtime, model.path, qualification)
 
 
 def create_ask_selected_files() -> QualifiedWorkload:
@@ -179,7 +256,7 @@ def create_ask_selected_files() -> QualifiedWorkload:
     return QualifiedWorkload(
         DocumentQuestionPlugin(embedder, router, store),
         runtime,
-        model,
+        model.path,
         qualification,
         embedder,
     )
@@ -187,6 +264,8 @@ def create_ask_selected_files() -> QualifiedWorkload:
 
 def create_selected_text_tools() -> QualifiedWorkload:
     bootstrap, store, runtime, model, qualification, router = _generation("selected-text-tools")
+    if bootstrap.state_path is None:
+        raise RuntimeError("selected-text load receipt state is unavailable")
     hebrew_model = bootstrap.require_artifact(HEBREW_ARTIFACT_ID)
     hebrew_qualification = load_model_qualification(
         hebrew_model.id, hebrew_model.sha256
@@ -217,12 +296,17 @@ def create_selected_text_tools() -> QualifiedWorkload:
     return QualifiedWorkload(
         plugin,
         runtime,
-        model,
+        model.path,
         qualification,
         additional_runtimes=((hebrew_runtime, hebrew_model.path, hebrew_qualification),),
+        load_receipt_path=bootstrap.state_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT,
+        load_receipt_models=(
+            ("primary", model.sha256),
+            ("hebrewTranslation", hebrew_model.sha256),
+        ),
     )
 
 
 def create_file_organizer() -> QualifiedWorkload:
     _bootstrap, store, runtime, model, qualification, router = _generation("file-organizer")
-    return QualifiedWorkload(FileOrganizerPlugin(router, store), runtime, model, qualification)
+    return QualifiedWorkload(FileOrganizerPlugin(router, store), runtime, model.path, qualification)

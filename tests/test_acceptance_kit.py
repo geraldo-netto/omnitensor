@@ -19,6 +19,8 @@ from omnitensor.plugins.acceptance_kit import (
     JsonDigestMismatchError,
     NativeLoadReport,
     discover_resource,
+    native_load_report_document,
+    parse_native_load_report,
     read_bounded_json,
     require_boolean,
     require_integer,
@@ -391,6 +393,44 @@ def test_qwen_reexports_native_report_and_private_validators_by_identity():
     assert qwen._validate_npu_load is validate_npu_load
     assert NativeLoadReport.__module__ == "omnitensor.plugins.qwen"
     assert pickle.loads(pickle.dumps(report)) == report
+
+
+def test_native_load_report_codec_round_trips_and_injects_family_errors():
+    report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", 37, 37, False)
+    document = native_load_report_document(report)
+
+    assert document == {
+        "backend": "llama.cpp-vulkan",
+        "device": "Vulkan",
+        "totalModelLayers": 37,
+        "acceleratorLayers": 37,
+        "cpuFallback": False,
+    }
+    assert parse_native_load_report(
+        document,
+        error_type=KitError,
+        code="load-invalid",
+        object_detail="load must be object",
+        fields_detail="load fields differ",
+    ) == report
+    with pytest.raises(TypeError, match="report must be NativeLoadReport"):
+        native_load_report_document(object())
+    with pytest.raises(KitError, match="load must be object"):
+        parse_native_load_report(
+            [],
+            error_type=KitError,
+            code="load-invalid",
+            object_detail="load must be object",
+            fields_detail="load fields differ",
+        )
+    with pytest.raises(KitError, match="load fields differ"):
+        parse_native_load_report(
+            {**document, "extra": True},
+            error_type=KitError,
+            code="load-invalid",
+            object_detail="load must be object",
+            fields_detail="load fields differ",
+        )
 
 
 def test_external_provider_factory_imports_only_the_public_load_validator():

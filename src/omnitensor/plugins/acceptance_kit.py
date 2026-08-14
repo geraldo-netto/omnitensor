@@ -229,11 +229,91 @@ def validate_npu_load(report: NativeLoadReport) -> None:
         )
 
 
+def native_load_report_document(report: NativeLoadReport) -> dict[str, object]:
+    """Return the canonical camel-case load evidence document."""
+    if not isinstance(report, NativeLoadReport):
+        raise TypeError("report must be NativeLoadReport")
+    return {
+        "backend": report.backend,
+        "device": report.device,
+        "totalModelLayers": report.total_model_layers,
+        "acceleratorLayers": report.accelerator_layers,
+        "cpuFallback": report.cpu_fallback,
+    }
+
+
+def parse_native_load_report(
+    value: object,
+    *,
+    error_type: AcceptanceError,
+    code: str,
+    object_detail: str,
+    fields_detail: str,
+) -> NativeLoadReport:
+    """Parse a closed camel-case load report with family-owned errors."""
+    item = require_mapping(
+        value,
+        error_type=error_type,
+        code=code,
+        detail=object_detail,
+    )
+    if set(item) != {
+        "backend",
+        "device",
+        "totalModelLayers",
+        "acceleratorLayers",
+        "cpuFallback",
+    }:
+        raise error_type(code, fields_detail)
+    return NativeLoadReport(
+        require_text(
+            item["backend"],
+            error_type=error_type,
+            code=code,
+            detail="backend must be bounded text",
+            maximum=120,
+            allow_whitespace=False,
+        ),
+        require_text(
+            item["device"],
+            error_type=error_type,
+            code=code,
+            detail="device must be bounded text",
+            maximum=120,
+            allow_whitespace=False,
+        ),
+        require_integer(
+            item["totalModelLayers"],
+            error_type=error_type,
+            code=code,
+            detail="total layers is invalid",
+            minimum=1,
+            maximum=65_535,
+        ),
+        require_integer(
+            item["acceleratorLayers"],
+            error_type=error_type,
+            code=code,
+            detail="accelerator layers is invalid",
+            minimum=1,
+            maximum=65_535,
+        ),
+        require_boolean(
+            item["cpuFallback"],
+            error_type=error_type,
+            code=code,
+            detail="CPU fallback must be boolean",
+        ),
+    )
+
+
 __all__ = [
     "BoundedJsonDocument",
     "JsonDigestMismatchError",
     "NativeLoadReport",
     "discover_resource",
+    "native_load_report_document",
+    "parse_native_load_report",
     "read_bounded_json",
     "require_boolean",
     "require_integer",

@@ -67,6 +67,19 @@ and 802 ms cancellation. These measurements qualify the frozen cases and exact
 artifact/runtime bytes; they do not claim arbitrary-selection quality or a
 different GPU/runtime.
 
+New collection never reconstructs accelerator claims from installed metadata
+or collector constants. After the worker has actually loaded both models, it
+atomically publishes a private, mode-0600 receipt in its service-provided state
+directory. That receipt records the artifact digests, runtime, physical device,
+backend, device API, total and accelerator layer counts, and CPU-fallback flag
+reported by the live worker. Startup clears stale bytes, normal stop removes
+them, and the collector accepts a receipt only after D-Bus reports the current
+worker ready. The collector requires the receipt, verifies the local model
+paths against it, and copies its two measured model records verbatim into
+evidence before the normal acceptance gate runs. Invalid or absent live-load
+evidence aborts before the corpus or output file; no public D-Bus inventory
+field is added.
+
 GPU is the only accepted route. An operator may configure an NPU-first provider only
 after separately qualifying its artifact, tokenizer, native runtime, output
 contract, and device behavior; pre-generation admission may then fall back to

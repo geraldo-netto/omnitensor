@@ -80,7 +80,7 @@ def _model_qualification(document: dict, model_id: str, model_sha256: str) -> Qu
     return Qualification(device, model_layers, runtime[0], runtime[1])
 
 
-def verify_native_runtime(qualification: Qualification) -> None:
+def verify_native_runtime(qualification: Qualification) -> str:
     try:
         version = importlib.metadata.version("llama-cpp-python")
         package = importlib.resources.files("llama_cpp")
@@ -92,6 +92,7 @@ def verify_native_runtime(qualification: Qualification) -> None:
         path = Path(str(package.joinpath("lib", name)))
         if not path.is_file() or file_digest(path) != digest:
             raise RuntimeError("llama.cpp native bytes differ from qualification")
+    return f"llama-cpp-python-{version}"
 
 
 def _runtime(value: object) -> tuple[str, tuple[tuple[str, str], ...]]:
