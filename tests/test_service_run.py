@@ -23,7 +23,7 @@ from omnitensor.discovery import Device
 from omnitensor.dispatch_routing import PluginAwareDispatcher, admit_plugin_job
 from omnitensor.plugins.artifacts import ArtifactResolution
 from omnitensor.plugins.loading import InstalledPluginRuntime
-from omnitensor.registry import validate_document
+from omnitensor.registry import bundled_workloads_path, validate_document
 from omnitensor.service import (
     GRANT_REFRESH_INTERVAL_S,
     FileSnapshotPublisher,
@@ -2240,6 +2240,11 @@ def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):
         discovery=FakeDiscovery([tpu_device()]),
         publisher=FakePublisher(),
         transport=FakeTransport(),
+        plugin_runtime=InstalledPluginRuntime(
+            bundled_workloads_path(),
+            entry_points_provider=lambda **_kwargs: (),
+            require_worker_cgroup=False,
+        ),
     )
 
     # The catalogue is discovered on start, so the inventory before it is
