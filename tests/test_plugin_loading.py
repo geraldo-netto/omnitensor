@@ -1135,6 +1135,76 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
     ]
 
 
+def test_worker_cancel_frame_cancels_a_request_that_ignores_its_token(monkeypatch):
+    monkeypatch.setattr(worker_module, "WORKER_CANCEL_GRACE_SECONDS", 0.001)
+    request = PluginRequest("job-1", "external-example", "manual", {}, 1, None)
+
+    class TokenIgnoringPlugin:
+        plugin_id = "external-example"
+
+        async def execute(self, _request, cancellation, _progress):
+            self.cancellation = cancellation
+            await asyncio.Event().wait()
+
+    async def scenario():
+        plugin = TokenIgnoringPlugin()
+        writer = io.BytesIO()
+        active = {}
+        await worker_module._handle_request_frame(
+            plugin, execute_frame(request), writer, 1, active
+        )
+        task, _token = active[request.job_id]
+        await worker_module._handle_request_frame(
+            plugin,
+            IPCFrame(1, WorkerMessageType.CANCEL, request.job_id, {"reason": "user"}),
+            writer,
+            1,
+            active,
+        )
+        await asyncio.sleep(0.02)
+        assert task.done() is True
+        await task
+        return plugin, writer
+
+    plugin, writer = asyncio.run(scenario())
+    terminal = _frames(writer.getvalue())[-1]
+    assert plugin.cancellation.cancelled is True
+    assert terminal.type is WorkerMessageType.RESULT
+    assert terminal.request_id == request.job_id
+    assert terminal.payload["status"] == "cancelled"
+
+
+def test_worker_shutdown_wait_is_bounded_after_task_cancellation(monkeypatch):
+    monkeypatch.setattr(worker_module, "WORKER_CANCEL_GRACE_SECONDS", 0.001)
+    monkeypatch.setattr(worker_module, "WORKER_SHUTDOWN_CANCEL_SECONDS", 0.001)
+
+    async def scenario():
+        release = asyncio.Event()
+        cancellation_seen = asyncio.Event()
+
+        async def stubborn():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+                await release.wait()
+
+        task = asyncio.create_task(stubborn())
+        token = CancellationController()
+        await asyncio.wait_for(
+            worker_module._cancel_active_requests({"job-1": (task, token)}),
+            timeout=0.05,
+        )
+        assert token.cancelled is True
+        assert token.reason == "worker shutting down"
+        assert cancellation_seen.is_set()
+        assert task.done() is False
+        release.set()
+        await task
+
+    asyncio.run(scenario())
+
+
 def test_worker_progress_and_terminal_failures_stay_correlated():
     request = PluginRequest("job-1", "external-example", "manual", {}, 1, None)
 

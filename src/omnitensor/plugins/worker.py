@@ -41,6 +41,8 @@ from .protocol import PluginContext, PluginProgress, PluginRequest, WorkloadPlug
 from .seccomp import confinement_error, install_filter
 
 WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
+WORKER_CANCEL_GRACE_SECONDS = 0.05
+WORKER_SHUTDOWN_CANCEL_SECONDS = 0.05
 
 
 class ExternalPluginLoadError(RuntimeError):
@@ -176,12 +178,7 @@ async def serve_worker_requests(
             ):
                 break
     finally:
-        for _task, token in active.values():
-            token.cancel("worker shutting down")
-        if active:
-            await asyncio.gather(
-                *(task for task, _token in active.values()), return_exceptions=True
-            )
+        await _cancel_active_requests(active)
         await plugin.stop()
     return agreement
 
@@ -220,11 +217,35 @@ async def _handle_request_frame(
         return True
     if frame.type is WorkerMessageType.CANCEL and frame.request_id is not None:
         current = active.get(frame.request_id)
-        if current is not None:
-            current[1].cancel("cancelled by service")
+        if current is not None and current[1].cancel("cancelled by service"):
+            asyncio.create_task(_cancel_after_grace(current[0], WORKER_CANCEL_GRACE_SECONDS))
         return True
     _write_error(writer, protocol_version, frame.request_id, "unsupported-message")
     return True
+
+
+async def _cancel_after_grace(task: asyncio.Task, grace_seconds: float) -> None:
+    """Give cooperative cancellation a brief head start, then cancel the task."""
+    await asyncio.sleep(grace_seconds)
+    if not task.done():
+        task.cancel()
+
+
+async def _cancel_active_requests(
+    active: dict[str, tuple[asyncio.Task, CancellationController]],
+) -> None:
+    """Bound worker shutdown even when a plugin ignores its cancellation token."""
+    current = tuple(active.values())
+    for _task, token in current:
+        token.cancel("worker shutting down")
+    pending = {task for task, _token in current if not task.done()}
+    if not pending:
+        return
+    _done, pending = await asyncio.wait(pending, timeout=WORKER_CANCEL_GRACE_SECONDS)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=WORKER_SHUTDOWN_CANCEL_SECONDS)
 
 
 class _WorkerProgress:
