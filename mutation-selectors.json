@@ -53,7 +53,6 @@
       "selectors": [
         "omnitensor.training.binding.x_binding_manifest",
         "omnitensor.training.binding.x_model_fragment",
-        "omnitensor.training.binding.x_native_evidence",
         "omnitensor.training.binding.x_publish_binding"
       ]
     },

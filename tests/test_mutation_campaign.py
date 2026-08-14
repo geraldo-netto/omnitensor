@@ -17,6 +17,10 @@ from omnitensor.mutation_campaign import (
     mutation_commands,
     mutation_patterns,
 )
+from omnitensor.mutation_engine import (
+    disable_string_literal_mutations,
+    without_string_literal_mutations,
+)
 from omnitensor.mutation_manifest import (
     MutationShard,
     _module_path,
@@ -86,7 +90,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     )
     assert [len(shard.selectors) for shard in manifest.shards] == [
         42,
-        4,
+        3,
         30,
         21,
         15,
@@ -95,7 +99,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 163
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 162
     assert {
         selector.split(".x", 1)[0]
         for shard in manifest.shards
@@ -182,6 +186,18 @@ def test_mutable_inventory_resolves_modules_and_requires_the_pinned_engine(
     )
     with pytest.raises(ValueError, match="3.7.0 is required"):
         mutable_selector_inventory(root, frozenset({"omnitensor.subject"}))
+
+
+def test_project_mutation_engine_disables_only_string_literals():
+    from mutmut.mutation import mutators
+
+    original = list(mutators.mutation_operators)
+    expected = [entry for entry in original if entry[1] is not mutators.operator_string]
+    with without_string_literal_mutations():
+        assert mutators.mutation_operators == expected
+        disable_string_literal_mutations()
+        assert mutators.mutation_operators == expected
+    assert mutators.mutation_operators == original
 
 
 def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
@@ -292,7 +308,10 @@ def test_campaign_builds_deterministic_shell_free_exact_commands():
         ("/venv/bin/mutmut", "results", "--all", "true"),
     )
     assert mutation_commands(shard)[0][0] == DEFAULT_MUTMUT_EXECUTABLE
-    assert str(Path(sys.executable).with_name("mutmut")) == DEFAULT_MUTMUT_EXECUTABLE
+    assert (
+        str(Path(sys.executable).with_name("omnitensor-mutmut"))
+        == DEFAULT_MUTMUT_EXECUTABLE
+    )
     assert Path(DEFAULT_MUTMUT_EXECUTABLE).is_file()
     with pytest.raises(ValueError, match="no selectors"):
         mutation_patterns(())
@@ -459,6 +478,7 @@ def test_ci_matrix_is_derived_from_manifest_and_runs_the_same_campaign():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"mutation-selectors.json",' in project
     assert '"mutmut==3.7.0",' in project
+    assert 'omnitensor-mutmut = "omnitensor.mutation_engine:main"' in project
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "--selector-file mutation-selectors.json --shard scheduler" in readme
     for shard in ("acceptance", "document-binding", "event-workload", "grounded-answer"):

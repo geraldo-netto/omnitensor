@@ -144,6 +144,8 @@ each shard contains every mutation-bearing callable in its named owner modules:
 
 The runner passes every `__mutmut_*` pattern directly as an argument, never
 through shell expansion, and gates the resulting report at 80% per callable.
+Its `omnitensor-mutmut` wrapper disables only mutmut's string-literal operator,
+so prose case and wording changes do not manufacture brittle exact-text tests.
 The development extra pins mutmut 3.7.0 because selector mangling and result
 text are part of this checked contract; upgrade that pin together with the
 manifest and parser tests.

@@ -127,6 +127,7 @@ omnitensor-configure-low-light = "omnitensor.lowlight:configure_main"
 omnitensor-setup-publisher-key = "omnitensor.publisher_identity:setup_main"
 omnitensor-check-function-coverage = "omnitensor.quality:main"
 omnitensor-check-mutation-coverage = "omnitensor.mutation_quality:main"
+omnitensor-mutmut = "omnitensor.mutation_engine:main"
 omnitensor-grant = "omnitensor.consent:main"
 omnitensor-import-events = "omnitensor.event_cli:main"
 

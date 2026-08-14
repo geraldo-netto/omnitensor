@@ -11,12 +11,18 @@ audit's dependency order without weakening the required status schema.
 - **Audit module splits:** OMNI-0273–OMNI-0284
 - **Audit architecture hygiene:** OMNI-0285–OMNI-0289
 - **Audit regression and mutation gates:** OMNI-0290–OMNI-0297
+- **Mutation signal quality:** OMNI-0298–OMNI-0303
 
 ## Findings
 
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0296 | open | medium | l | OMNI-0264, OMNI-0295 | Re-measure and burn down remaining acceptance, event-workload, document-binding, and grounded-answer survivor hotspots until every changed callable meets the 80% mutation threshold; do not re-add already-fixed low-light hotspots without fresh evidence. |
+| OMNI-0299 | open | medium | m | OMNI-0298, OMNI-0296 | Replace exact-prose mutation regressions for availability, scheduling, schema, control, and policy results with machine-readable error-code or structural assertions while preserving genuine boundary and lifecycle pins. |
+| OMNI-0300 | open | medium | m | OMNI-0299 | Remove or rewrite implementation-mirror function-coverage regressions; retain property tests and rejection tables, and replace private-attribute wiring assertions with public behavior. |
+| OMNI-0301 | open | medium | s | OMNI-0300 | Decide whether to enforce the per-function coverage gate in CI after pruning filler or delete the unused gate and its dedicated filler. |
+| OMNI-0302 | open | medium | m | OMNI-0297 | Rescope the generated mutant corpus to the selector manifest, record that the scope is partial until OMNI-0297 expands it, and prioritize training, Qwen, and document-acceptance callables in later expansion. |
+| OMNI-0303 | open | low | s | OMNI-0296 | Re-baseline survivor statistics after operator and assertion cleanup before further burn-down; do not chase prose survivors removed by the operator change. |
 
 ## Blocked
 

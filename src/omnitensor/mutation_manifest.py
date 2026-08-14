@@ -118,6 +118,8 @@ def mutable_selector_inventory(
     try:
         version = importlib.metadata.version("mutmut")
         from mutmut.mutation.file_mutation import mutate_file_contents  # noqa: PLC0415
+
+        from .mutation_engine import without_string_literal_mutations  # noqa: PLC0415
     except (ImportError, importlib.metadata.PackageNotFoundError) as error:
         raise ValueError(f"mutmut {MUTMUT_VERSION} is required to validate selectors") from error
     if version != MUTMUT_VERSION:
@@ -129,7 +131,8 @@ def mutable_selector_inventory(
     for module in sorted(modules):
         path = _module_path(root, module)
         try:
-            mutated = mutate_file_contents(str(path), path.read_text(encoding="utf-8"))
+            with without_string_literal_mutations():
+                mutated = mutate_file_contents(str(path), path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError) as error:
             raise ValueError(f"cannot generate mutation selectors for {module}: {error}") from error
         selectors.update(f"{module}.{name}" for name in mutated.hash_by_function_name)

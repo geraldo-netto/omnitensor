@@ -13,7 +13,7 @@ from .mutation_manifest import MutationShard, load_mutation_manifest
 from .mutation_quality import mutation_failures
 from .quality import DEFAULT_THRESHOLD
 
-DEFAULT_MUTMUT_EXECUTABLE = str(Path(sys.executable).with_name("mutmut"))
+DEFAULT_MUTMUT_EXECUTABLE = str(Path(sys.executable).with_name("omnitensor-mutmut"))
 
 
 def mutation_patterns(selectors: Sequence[str]) -> tuple[str, ...]:
