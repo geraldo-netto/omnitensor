@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-import os
 import re
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +18,25 @@ from ..plugins.hardware_collection import (
 )
 from ..plugins.triggers import SourceStatus
 from ..preparation import file_digest
-from .build import BuildAdvisorModel, BuildExample, _auc, _fit_output, _normalization
+from .build import _fit_output
 from .contracts import MAX_INPUT_WIDTH, TrainingError, write_training_report
+from .tabular import (
+    BuildAdvisorModel,
+    BuildExample,
+    JsonlPolicy,
+    chronological_split,
+    load_bounded_jsonl,
+    load_onnx_dependency,
+    normalized_logistic_model,
+    numeric_training_report,
+    parse_jsonl_line,
+    publish_numeric_training,
+    require_binary_class_floor,
+    save_onnx_atomic,
+)
+from .tabular import binary_auc as _auc
+from .tabular import normalization as _normalization
+from .tabular import unit_interval as _unit_metric
 
 HARDWARE_RECIPE = "labelled-sensor-window-v1"
 HARDWARE_LABEL_CONFIRMATION = "I-confirm-hardware-labels-are-reviewed"
@@ -50,6 +63,22 @@ _SNAPSHOT_KEYS = {
     "truncatedItems",
 }
 _ITEM_KEYS = {"id", "kind", "health", "value", "unit", "label", "observedAtMs"}
+
+
+def _history_policy() -> JsonlPolicy:
+    return JsonlPolicy(
+        MAX_HISTORY_BYTES,
+        MAX_HISTORY_SNAPSHOTS,
+        MAX_HISTORY_LINE_BYTES,
+        "history-invalid",
+        "hardware history is not a safe regular file",
+        "history-too-large",
+        "hardware history byte limit exceeded",
+        "hardware snapshot limit exceeded",
+        "history-invalid",
+        "hardware history line {line_number} is invalid",
+        "hardware history line {line_number}: {detail}",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,12 +144,7 @@ def load_hardware_history(
             f"review the labels and pass exactly {HARDWARE_LABEL_CONFIRMATION}",
         )
     selected = _validated_bindings(bindings)
-    source = Path(path)
-    if source.is_symlink() or not source.is_file():
-        raise TrainingError("history-invalid", "hardware history is not a safe regular file")
-    if source.stat().st_size > MAX_HISTORY_BYTES:
-        raise TrainingError("history-too-large", "hardware history byte limit exceeded")
-    observations, semantics, digest = _read_history(source, selected)
+    observations, semantics, digest = _read_history(Path(path), selected)
     if not observations:
         raise TrainingError("insufficient-history", "hardware history is empty")
     _strict_observation_times(observations)
@@ -141,24 +165,28 @@ def _read_history(
     tuple[tuple[SensorKind, str], ...],
     str,
 ]:
-    digest = hashlib.sha256()
-    observations = []
     semantics = None
-    with source.open("rb") as handle:
-        for line_number, raw in enumerate(handle, start=1):
-            digest.update(raw)
-            if line_number > MAX_HISTORY_SNAPSHOTS:
-                raise TrainingError("history-too-large", "hardware snapshot limit exceeded")
-            observation, current_semantics = _history_line(raw, line_number, bindings)
-            if semantics is None:
-                semantics = current_semantics
-            elif semantics != current_semantics:
-                raise TrainingError("sensor-drift", "hardware sensor kind or unit changed")
-            observations.append(observation)
+
+    def on_item(
+        item: tuple[HardwareObservation, tuple[tuple[SensorKind, str], ...]],
+    ) -> None:
+        nonlocal semantics
+        _observation, current_semantics = item
+        if semantics is None:
+            semantics = current_semantics
+        elif semantics != current_semantics:
+            raise TrainingError("sensor-drift", "hardware sensor kind or unit changed")
+
+    items, digest = load_bounded_jsonl(
+        source,
+        _history_policy(),
+        lambda document: _observation_from_document(document, bindings),
+        on_item=on_item,
+    )
     return (
-        tuple(observations),
+        tuple(item[0] for item in items),
         semantics or (),
-        digest.hexdigest(),
+        digest,
     )
 
 
@@ -181,17 +209,12 @@ def _history_line(
     line_number: int,
     bindings: tuple[SensorBinding, ...],
 ) -> tuple[HardwareObservation, tuple[tuple[SensorKind, str], ...]]:
-    if not raw.strip() or len(raw) > MAX_HISTORY_LINE_BYTES:
-        raise TrainingError(
-            "history-invalid", f"hardware history line {line_number} is invalid"
-        )
-    try:
-        return _observation_from_document(json.loads(raw), bindings)
-    except (UnicodeDecodeError, json.JSONDecodeError, TrainingError) as error:
-        detail = error.detail if isinstance(error, TrainingError) else "invalid JSON"
-        raise TrainingError(
-            "history-invalid", f"hardware history line {line_number}: {detail}"
-        ) from error
+    return parse_jsonl_line(
+        raw,
+        line_number,
+        _history_policy(),
+        lambda document: _observation_from_document(document, bindings),
+    )
 
 
 def _observation_from_document(
@@ -313,9 +336,7 @@ class HardwareHealthTrainer:
             raise ValueError("minimum_class_examples must be a positive integer")
         self._minimum_auc = _unit_metric(minimum_auc, "minimum_auc")
         self._minimum_recall = _unit_metric(minimum_recall, "minimum_recall")
-        self._maximum_fpr = _unit_metric(
-            maximum_false_positive_rate, "maximum_false_positive_rate"
-        )
+        self._maximum_fpr = _unit_metric(maximum_false_positive_rate, "maximum_false_positive_rate")
         self._window = window
         self._minimum_class_examples = minimum_class_examples
         self._exporter = exporter or OnnxHardwareExporter()
@@ -329,9 +350,7 @@ class HardwareHealthTrainer:
         _require_classes(training, self._minimum_class_examples, "training")
         _require_classes(holdout, self._minimum_class_examples, "holdout")
         means, scales = _normalization(training)
-        weights, intercept = _fit_output(
-            training, lambda item: item.build_failed, means, scales
-        )
+        weights, intercept = _fit_output(training, lambda item: item.build_failed, means, scales)
         model = BuildAdvisorModel(
             means,
             scales,
@@ -347,85 +366,38 @@ class HardwareHealthTrainer:
             raise TrainingError(
                 "model-not-stable", "held-out hardware false-positive rate exceeds the gate"
             )
-        destination = Path(output_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        model_path = destination / "model.onnx"
-        self._exporter.export(model, model_path)
-        if not model_path.is_file() or model_path.stat().st_size == 0:
-            raise TrainingError("export-failed", "exporter produced no portable model")
-        report = _report(dataset, training, holdout, self._window, quality, model_path)
-        write_training_report(
-            destination / "hardware-training-report.json",
-            report,
-            prefix=".hardware-training-report-",
-            numeric=True,
+        return publish_numeric_training(
+            output_dir,
+            model,
+            self._exporter,
+            report_name="hardware-training-report.json",
+            report_prefix=".hardware-training-report-",
+            report=lambda model_path: _report(
+                dataset,
+                training,
+                holdout,
+                self._window,
+                quality,
+                model_path,
+            ),
+            writer=write_training_report,
         )
-        return report
 
 
 class OnnxHardwareExporter:
     def export(self, model: BuildAdvisorModel, destination: Path) -> None:
-        try:
-            import onnx  # noqa: PLC0415 - optional producer dependency
-            from onnx import TensorProto, helper  # noqa: PLC0415
-        except ImportError as error:
-            raise TrainingError(
-                "exporter-missing", "onnx is not installed; install the [train] extra"
-            ) from error
-        width = len(model.means)
-        graph = helper.make_graph(
-            [
-                helper.make_node("Sub", ["input", "means"], ["centered"]),
-                helper.make_node("Div", ["centered", "scales"], ["normalized"]),
-                helper.make_node("MatMul", ["normalized", "weights"], ["linear"]),
-                helper.make_node("Add", ["linear", "intercept"], ["logit"]),
-                helper.make_node("Sigmoid", ["logit"], ["risk"]),
-            ],
-            "omnitensor-hardware-health-risk",
-            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
-            [helper.make_tensor_value_info("risk", TensorProto.FLOAT, [1, 1])],
-            [
-                helper.make_tensor("means", TensorProto.FLOAT, [width], model.means),
-                helper.make_tensor("scales", TensorProto.FLOAT, [width], model.scales),
-                helper.make_tensor(
-                    "weights",
-                    TensorProto.FLOAT,
-                    [width, 1],
-                    [row[0] for row in model.weights],
-                ),
-                helper.make_tensor("intercept", TensorProto.FLOAT, [1], model.intercepts),
-            ],
+        onnx, tensor_proto, helper = load_onnx_dependency()
+        portable = normalized_logistic_model(
+            model,
+            graph_name="omnitensor-hardware-health-risk",
+            intercept_name="intercept",
+            logit_name="logit",
+            output_name="risk",
+            onnx=onnx,
+            tensor_proto=tensor_proto,
+            helper=helper,
         )
-        portable = helper.make_model(
-            graph,
-            producer_name="omnitensor",
-            opset_imports=[helper.make_opsetid("", 13)],
-        )
-        portable.ir_version = min(portable.ir_version, 8)
-        try:
-            onnx.checker.check_model(portable)
-        except Exception as error:  # noqa: BLE001
-            raise TrainingError("export-failed", f"ONNX validation failed: {error}") from error
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(prefix=".hardware-model-", dir=destination.parent)
-        os.close(handle)
-        try:
-            onnx.save_model(portable, temporary)
-            os.replace(temporary, destination)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
-
-
-def _unit_metric(value: object, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or not 0 <= value <= 1
-    ):
-        raise ValueError(f"{name} must be in [0, 1]")
-    return float(value)
+        save_onnx_atomic(portable, destination, onnx, prefix=".hardware-model-")
 
 
 def _window_examples(
@@ -452,20 +424,19 @@ def _window_examples(
 def _time_split(
     examples: Sequence[BuildExample],
 ) -> tuple[tuple[BuildExample, ...], tuple[BuildExample, ...]]:
-    if len(examples) < 2:
-        raise TrainingError("insufficient-history", "hardware windows cannot be split")
-    split = min(len(examples) - 1, max(1, int(len(examples) * 0.8)))
-    return tuple(examples[:split]), tuple(examples[split:])
+    return chronological_split(
+        examples,
+        insufficient_detail="hardware windows cannot be split",
+    )
 
 
 def _require_classes(examples: Sequence[BuildExample], minimum: int, label: str) -> None:
-    positives = sum(item.build_failed for item in examples)
-    negatives = len(examples) - positives
-    if positives < minimum or negatives < minimum:
-        raise TrainingError(
-            "class-imbalance",
-            f"{label} split needs at least {minimum} baseline and fault examples",
-        )
+    require_binary_class_floor(
+        examples,
+        lambda item: item.build_failed,
+        minimum,
+        f"{label} split needs at least {minimum} baseline and fault examples",
+    )
 
 
 def _quality(model: BuildAdvisorModel, examples: Sequence[BuildExample]) -> dict:
@@ -499,7 +470,7 @@ def _report(
         for role, kind, unit in zip(dataset.roles, dataset.kinds, dataset.units, strict=True)
     ]
     width = len(dataset.roles) * 4 * window
-    return {
+    family_fields = {
         "version": 1,
         "recipe": HARDWARE_RECIPE,
         "dataset": {
@@ -537,14 +508,10 @@ def _report(
             "allowedActions": [],
         },
         "quality": quality,
-        "model": {
-            "format": "onnx",
-            "filename": "model.onnx",
-            "sha256": file_digest(model_path),
-        },
-        "tensorContract": {
-            "inputs": [{"shape": [1, width], "dtype": "float32", "layout": "NC"}]
-        },
-        "outputContract": {"kind": "raw"},
-        "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
     }
+    return numeric_training_report(
+        family_fields,
+        model_path,
+        width,
+        digest=file_digest,
+    )

@@ -214,14 +214,17 @@ def test_labelled_history_trains_private_portable_hardware_source(tmp_path):
         "inputs": [{"shape": [1, 8], "dtype": "float32", "layout": "NC"}]
     }
     assert report["targets"] == {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"}
-    rendered = (tmp_path / "fit/hardware-training-report.json").read_text()
+    report_path = tmp_path / "fit/hardware-training-report.json"
+    rendered = report_path.read_text()
     assert json.loads(rendered) == report
     assert "cpu-package-0" not in rendered
     assert "dimm-0" not in rendered
     assert "private host label" not in rendered
 
     onnx = pytest.importorskip("onnx")
-    model = onnx.load(tmp_path / "fit/model.onnx")
+    assert onnx.__version__ == "1.22.0", "review serialized goldens with producer upgrades"
+    model_path = tmp_path / "fit/model.onnx"
+    model = onnx.load(model_path)
     onnx.checker.check_model(model)
     assert [node.op_type for node in model.graph.node] == ["Sub", "Div", "MatMul", "Add", "Sigmoid"]
     input_shape = [value.dim_value for value in model.graph.input[0].type.tensor_type.shape.dim]
@@ -230,6 +233,27 @@ def test_labelled_history_trains_private_portable_hardware_source(tmp_path):
     assert output_shape == [1, 1]
     assert model.opset_import[0].version == 13
     assert model.ir_version <= 8
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "f945161bfb89462049683e3ba308601b2b6185ee011921433847936c7aaf379a"
+    )
+    assert hashlib.sha256(model.graph.SerializeToString()).hexdigest() == (
+        "c1d970b7adc9531dd00246e7ad241fe8ffe9dddedc05f37c196c8c471a1c0d23"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "1d2761aa3bd4df7e75cf18bb9a5b0b310864ff802455852913cc8dcd066e39a6"
+    )
+    assert [
+        (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
+        for item in model.graph.initializer
+    ] == [
+        ("means", "446177ad658d1d91ddbdfd9ea22620fee8ca4080f695e3f710a6ab5ae8f9ba4c"),
+        ("scales", "e50fc714e06e46cec9f56d3dd3347f68da1486b927a542684667e5900472d0ad"),
+        ("weights", "df892dda95384b0f2c092e4a622dc47e4d9059ab74d7752cc4449887e0eefb12"),
+        (
+            "intercept",
+            "779cc30f0b310cb795743a4242ff5b2c87e97849e319af624616678b4be93bef",
+        ),
+    ]
 
 
 @pytest.mark.parametrize(

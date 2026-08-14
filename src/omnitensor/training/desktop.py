@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-import os
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,8 +10,23 @@ from typing import Protocol
 
 from ..preparation import file_digest
 from ..storelock import store_lock
-from .build import BuildAdvisorModel, BuildExample, _fit_output, _normalization
+from .build import _fit_output
 from .contracts import TrainingError, write_training_report
+from .tabular import (
+    BuildAdvisorModel,
+    BuildExample,
+    JsonlPolicy,
+    chronological_split,
+    load_bounded_jsonl,
+    load_onnx_dependency,
+    normalized_logistic_model,
+    numeric_training_report,
+    parse_jsonl_line,
+    publish_numeric_training,
+    save_onnx_atomic,
+)
+from .tabular import normalization as _normalization
+from .tabular import unit_interval as _unit_metric
 
 DESKTOP_RECIPE = "confirmed-layout-suggestion-v1"
 DESKTOP_CONFIRMATION = "user-confirmed"
@@ -67,6 +78,22 @@ _RECORD_KEYS = {
 }
 
 
+def _history_policy() -> JsonlPolicy:
+    return JsonlPolicy(
+        MAX_HISTORY_BYTES,
+        MAX_HISTORY_EXAMPLES,
+        MAX_HISTORY_LINE_BYTES,
+        "history-invalid",
+        "desktop history is not a safe regular file",
+        "history-too-large",
+        "desktop history byte limit exceeded",
+        "desktop example limit exceeded",
+        "history-invalid",
+        "desktop history line {line_number} is invalid",
+        "desktop history line {line_number}: {detail}",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DesktopExample:
     observed_at_ms: int
@@ -85,41 +112,27 @@ class DesktopModelExporter(Protocol):
 
 
 def load_desktop_history(path: Path | str) -> DesktopDataset:
-    source = Path(path)
-    if source.is_symlink() or not source.is_file():
-        raise TrainingError("history-invalid", "desktop history is not a safe regular file")
-    if source.stat().st_size > MAX_HISTORY_BYTES:
-        raise TrainingError("history-too-large", "desktop history byte limit exceeded")
-    digest = hashlib.sha256()
-    examples = []
     previous = -1
-    with source.open("rb") as handle:
-        for line_number, raw in enumerate(handle, start=1):
-            digest.update(raw)
-            if line_number > MAX_HISTORY_EXAMPLES:
-                raise TrainingError("history-too-large", "desktop example limit exceeded")
-            example = _history_line(raw, line_number)
-            if example.observed_at_ms <= previous:
-                raise TrainingError(
-                    "observations-unordered", "desktop example times must increase"
-                )
-            previous = example.observed_at_ms
-            examples.append(example)
+
+    def on_item(example: DesktopExample) -> None:
+        nonlocal previous
+        if example.observed_at_ms <= previous:
+            raise TrainingError("observations-unordered", "desktop example times must increase")
+        previous = example.observed_at_ms
+
+    examples, digest = load_bounded_jsonl(
+        path,
+        _history_policy(),
+        _example_from_document,
+        on_item=on_item,
+    )
     if not examples:
         raise TrainingError("insufficient-history", "desktop history is empty")
-    return DesktopDataset(tuple(examples), digest.hexdigest())
+    return DesktopDataset(examples, digest)
 
 
 def _history_line(raw: bytes, line_number: int) -> DesktopExample:
-    if not raw.strip() or len(raw) > MAX_HISTORY_LINE_BYTES:
-        raise TrainingError("history-invalid", f"desktop history line {line_number} is invalid")
-    try:
-        return _example_from_document(json.loads(raw))
-    except (UnicodeDecodeError, json.JSONDecodeError, TrainingError) as error:
-        detail = error.detail if isinstance(error, TrainingError) else "invalid JSON"
-        raise TrainingError(
-            "history-invalid", f"desktop history line {line_number}: {detail}"
-        ) from error
+    return parse_jsonl_line(raw, line_number, _history_policy(), _example_from_document)
 
 
 def _example_from_document(document: object) -> DesktopExample:
@@ -198,15 +211,15 @@ class DesktopSuggestionTrainer:
             raise ValueError("minimum_class_examples must be a positive integer")
         self._minimum_class_examples = minimum_class_examples
         self._minimum_accuracy = _unit_metric(minimum_accuracy, "minimum_accuracy")
-        self._minimum_macro_recall = _unit_metric(
-            minimum_macro_recall, "minimum_macro_recall"
-        )
+        self._minimum_macro_recall = _unit_metric(minimum_macro_recall, "minimum_macro_recall")
         self._exporter = exporter or OnnxDesktopExporter()
 
     def train(self, dataset: DesktopDataset, output_dir: Path | str) -> dict:
-        suggestions = tuple(value for value in SUGGESTIONS if value in {
-            item.suggestion for item in dataset.examples
-        })
+        suggestions = tuple(
+            value
+            for value in SUGGESTIONS
+            if value in {item.suggestion for item in dataset.examples}
+        )
         if len(suggestions) < 2:
             raise TrainingError("class-imbalance", "desktop history needs two suggestions")
         training, holdout = _time_split(dataset.examples)
@@ -236,75 +249,38 @@ class DesktopSuggestionTrainer:
             raise TrainingError(
                 "model-not-useful", "held-out desktop macro recall is below the gate"
             )
-        destination = Path(output_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        model_path = destination / "model.onnx"
-        self._exporter.export(model, model_path)
-        if not model_path.is_file() or model_path.stat().st_size == 0:
-            raise TrainingError("export-failed", "exporter produced no portable model")
-        report = _report(dataset, training, holdout, suggestions, quality, model_path)
-        write_training_report(
-            destination / "desktop-training-report.json",
-            report,
-            prefix=".desktop-training-report-",
-            numeric=True,
+        return publish_numeric_training(
+            output_dir,
+            model,
+            self._exporter,
+            report_name="desktop-training-report.json",
+            report_prefix=".desktop-training-report-",
+            report=lambda model_path: _report(
+                dataset,
+                training,
+                holdout,
+                suggestions,
+                quality,
+                model_path,
+            ),
+            writer=write_training_report,
         )
-        return report
 
 
 class OnnxDesktopExporter:
     def export(self, model: BuildAdvisorModel, destination: Path) -> None:
-        try:
-            import onnx  # noqa: PLC0415 - optional producer dependency
-            from onnx import TensorProto, helper  # noqa: PLC0415
-        except ImportError as error:
-            raise TrainingError(
-                "exporter-missing", "onnx is not installed; install the [train] extra"
-            ) from error
-        width = len(model.means)
-        outputs = len(model.intercepts)
-        graph = helper.make_graph(
-            [
-                helper.make_node("Sub", ["input", "means"], ["centered"]),
-                helper.make_node("Div", ["centered", "scales"], ["normalized"]),
-                helper.make_node("MatMul", ["normalized", "weights"], ["linear"]),
-                helper.make_node("Add", ["linear", "intercepts"], ["logits"]),
-                helper.make_node("Sigmoid", ["logits"], ["scores"]),
-            ],
-            "omnitensor-desktop-layout-suggestions",
-            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
-            [helper.make_tensor_value_info("scores", TensorProto.FLOAT, [1, outputs])],
-            [
-                helper.make_tensor("means", TensorProto.FLOAT, [width], model.means),
-                helper.make_tensor("scales", TensorProto.FLOAT, [width], model.scales),
-                helper.make_tensor(
-                    "weights",
-                    TensorProto.FLOAT,
-                    [width, outputs],
-                    [value for row in model.weights for value in row],
-                ),
-                helper.make_tensor("intercepts", TensorProto.FLOAT, [outputs], model.intercepts),
-            ],
+        onnx, tensor_proto, helper = load_onnx_dependency()
+        portable = normalized_logistic_model(
+            model,
+            graph_name="omnitensor-desktop-layout-suggestions",
+            intercept_name="intercepts",
+            logit_name="logits",
+            output_name="scores",
+            onnx=onnx,
+            tensor_proto=tensor_proto,
+            helper=helper,
         )
-        portable = helper.make_model(
-            graph,
-            producer_name="omnitensor",
-            opset_imports=[helper.make_opsetid("", 13)],
-        )
-        portable.ir_version = min(portable.ir_version, 8)
-        try:
-            onnx.checker.check_model(portable)
-        except Exception as error:  # noqa: BLE001
-            raise TrainingError("export-failed", f"ONNX validation failed: {error}") from error
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(prefix=".desktop-model-", dir=destination.parent)
-        os.close(handle)
-        try:
-            onnx.save_model(portable, temporary)
-            os.replace(temporary, destination)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        save_onnx_atomic(portable, destination, onnx, prefix=".desktop-model-")
 
 
 def revoke_desktop_history(path: Path | str, confirmation: str) -> bool:
@@ -325,24 +301,13 @@ def revoke_desktop_history(path: Path | str, confirmation: str) -> bool:
     return True
 
 
-def _unit_metric(value: object, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or not 0 <= value <= 1
-    ):
-        raise ValueError(f"{name} must be in [0, 1]")
-    return float(value)
-
-
 def _time_split(
     examples: Sequence[DesktopExample],
 ) -> tuple[tuple[DesktopExample, ...], tuple[DesktopExample, ...]]:
-    if len(examples) < 2:
-        raise TrainingError("insufficient-history", "desktop history cannot be split")
-    split = min(len(examples) - 1, max(1, int(len(examples) * 0.8)))
-    return tuple(examples[:split]), tuple(examples[split:])
+    return chronological_split(
+        examples,
+        insufficient_detail="desktop history cannot be split",
+    )
 
 
 def _require_suggestions(
@@ -400,7 +365,7 @@ def _report(
     quality: dict,
     model_path: Path,
 ) -> dict:
-    return {
+    family_fields = {
         "version": 1,
         "recipe": DESKTOP_RECIPE,
         "dataset": {
@@ -430,14 +395,10 @@ def _report(
             "automaticWindowActions": False,
         },
         "quality": quality,
-        "model": {
-            "format": "onnx",
-            "filename": "model.onnx",
-            "sha256": file_digest(model_path),
-        },
-        "tensorContract": {
-            "inputs": [{"shape": [1, len(DESKTOP_FEATURES)], "dtype": "float32", "layout": "NC"}]
-        },
-        "outputContract": {"kind": "raw"},
-        "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
     }
+    return numeric_training_report(
+        family_fields,
+        model_path,
+        len(DESKTOP_FEATURES),
+        digest=file_digest,
+    )

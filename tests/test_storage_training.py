@@ -230,18 +230,38 @@ def test_backblaze_fleet_build_and_portable_train_are_identity_free(tmp_path):
         {"shape": [1, 6], "dtype": "float32", "layout": "NC"}
     ]
     assert report["outputContract"] == {"kind": "raw"}
-    serialized = (tmp_path / "fit/storage-training-report.json").read_text()
+    report_path = tmp_path / "fit/storage-training-report.json"
+    serialized = report_path.read_text()
     assert json.loads(serialized) == report
     assert "failed-early" not in serialized
     assert "not-a-feature" not in serialized
 
     onnx = pytest.importorskip("onnx")
-    graph = onnx.load(tmp_path / "fit/model.onnx").graph
+    assert onnx.__version__ == "1.22.0", "review serialized goldens with producer upgrades"
+    model_path = tmp_path / "fit/model.onnx"
+    portable = onnx.load(model_path)
+    graph = portable.graph
     assert [node.op_type for node in graph.node] == ["MatMul", "Add", "Sigmoid"]
     input_shape = [dimension.dim_value for dimension in graph.input[0].type.tensor_type.shape.dim]
     output_shape = [dimension.dim_value for dimension in graph.output[0].type.tensor_type.shape.dim]
     assert input_shape == [1, 6]
     assert output_shape == [1, 1]
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "741d20c7c35c9546d4dd71966e5bc8c62fcde3f17753131e6b514b5c53e61121"
+    )
+    assert hashlib.sha256(graph.SerializeToString()).hexdigest() == (
+        "23af515fc0b7ed2c2d4346c69d5f13b8dcfb2e625c8fea34f7adf8cc7949230b"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "f15466f7db7124f8820c02ae959c95b808b7ee5d2f50daf6ff840dc159aac232"
+    )
+    assert [
+        (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
+        for item in graph.initializer
+    ] == [
+        ("weights", "67ebc82a620da420cab0e65b8949612357721ef31d60304cc274eabedf1b51ff"),
+        ("bias", "9d467ffe5188f721e063abb31d4e97072e49983de85d93e3dd4b54fb6b86c1c6"),
+    ]
 
 
 def test_future_failure_labels_only_prior_horizon_and_excludes_failure_row(tmp_path):

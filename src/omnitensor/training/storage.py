@@ -13,8 +13,6 @@ import csv
 import hashlib
 import json
 import math
-import os
-import tempfile
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -25,6 +23,19 @@ from typing import Protocol
 
 from ..preparation import file_digest
 from .contracts import TrainingError, write_training_report
+from .tabular import (
+    checked_model,
+    fit_balanced_logistic,
+    load_onnx_dependency,
+    numeric_training_report,
+    population_normalization,
+    publish_numeric_training,
+    ranked_auc,
+    require_binary_class_floor,
+    save_onnx_atomic,
+)
+from .tabular import stable_sigmoid as _sigmoid
+from .tabular.fit import unchecked_normalized_features
 
 BACKBLAZE_TERMS = "Backblaze-Drive-Stats"
 BACKBLAZE_CITATION = "Backblaze Drive Stats"
@@ -141,9 +152,7 @@ class BackblazeDatasetBuilder:
         for path in files:
             file_date = _file_date(path)
             last_date = file_date
-            read, absent, header = self._read_daily(
-                path, file_date, pending, examples, rows_read
-            )
+            read, absent, header = self._read_daily(path, file_date, pending, examples, rows_read)
             rows_read += read
             missing += absent
             schema_digest.update(json.dumps(header, separators=(",", ":")).encode())
@@ -282,77 +291,38 @@ class StorageTrainer:
             raise TrainingError(
                 "model-not-useful", "held-out storage risk AUC does not beat the required gate"
             )
-        destination = Path(output_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        model_path = destination / "model.onnx"
-        self._exporter.export(model, model_path)
-        if not model_path.is_file() or model_path.stat().st_size == 0:
-            raise TrainingError("export-failed", "exporter produced no portable model")
-        report = {
-            "version": 1,
-            "recipe": STORAGE_RECIPE,
-            "dataset": {
-                "source": BACKBLAZE_SOURCE_URI,
-                "citation": BACKBLAZE_CITATION,
-                "terms": BACKBLAZE_TERMS,
-                "termsAccepted": True,
-                "rowsRead": dataset.rows_read,
-                "rowsMissingFeatures": dataset.rows_missing_features,
-                "schemaSha256": dataset.schema_sha256,
-                "corpusSha256": dataset.corpus_sha256,
-                "firstDate": dataset.first_date.isoformat(),
-                "lastDate": dataset.last_date.isoformat(),
-            },
-            "split": {
-                "kind": "time-purged",
-                "holdoutFrom": split_date.isoformat(),
-                "purgeDays": dataset.horizon_days,
-            },
-            "features": list(FEATURE_COLUMNS),
-            "label": {"kind": "future-failure", "horizonDays": dataset.horizon_days},
-            "samples": {"training": len(train), "holdout": len(holdout)},
-            "quality": quality,
-            "model": {
-                "format": "onnx",
-                "filename": "model.onnx",
-                "sha256": file_digest(model_path),
-            },
-            "tensorContract": {
-                "inputs": [{"shape": [1, len(FEATURE_COLUMNS)], "dtype": "float32", "layout": "NC"}]
-            },
-            "outputContract": {"kind": "raw"},
-            "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
-        }
-        write_training_report(
-            destination / "storage-training-report.json",
-            report,
-            prefix=".storage-training-report-",
-            numeric=True,
+        return publish_numeric_training(
+            output_dir,
+            model,
+            self._exporter,
+            report_name="storage-training-report.json",
+            report_prefix=".storage-training-report-",
+            report=lambda model_path: _training_report(
+                dataset,
+                train,
+                holdout,
+                split_date,
+                quality,
+                model_path,
+            ),
+            writer=write_training_report,
         )
-        return report
 
 
 class OnnxStorageExporter:
     """Export normalization-folded MatMul/Add/Sigmoid portable inference."""
 
     def export(self, model: StorageRiskModel, destination: Path) -> None:
-        try:
-            import onnx  # noqa: PLC0415 - optional producer dependency
-            from onnx import TensorProto, helper  # noqa: PLC0415
-        except ImportError as error:
-            raise TrainingError(
-                "exporter-missing", "onnx is not installed; install the [train] extra"
-            ) from error
+        onnx, tensor_proto, helper = load_onnx_dependency()
         raw_weights = [
             weight / scale for weight, scale in zip(model.weights, model.scales, strict=True)
         ]
         raw_bias = model.intercept - sum(
-            weight * mean
-            for weight, mean in zip(raw_weights, model.means, strict=True)
+            weight * mean for weight, mean in zip(raw_weights, model.means, strict=True)
         )
         width = len(raw_weights)
-        weights = helper.make_tensor("weights", TensorProto.FLOAT, [width, 1], raw_weights)
-        bias = helper.make_tensor("bias", TensorProto.FLOAT, [1], [raw_bias])
+        weights = helper.make_tensor("weights", tensor_proto.FLOAT, [width, 1], raw_weights)
+        bias = helper.make_tensor("bias", tensor_proto.FLOAT, [1], [raw_bias])
         graph = helper.make_graph(
             [
                 helper.make_node("MatMul", ["input", "weights"], ["linear"]),
@@ -360,29 +330,53 @@ class OnnxStorageExporter:
                 helper.make_node("Sigmoid", ["logit"], ["risk"]),
             ],
             "omnitensor-storage-risk",
-            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
-            [helper.make_tensor_value_info("risk", TensorProto.FLOAT, [1, 1])],
+            [helper.make_tensor_value_info("input", tensor_proto.FLOAT, [1, width])],
+            [helper.make_tensor_value_info("risk", tensor_proto.FLOAT, [1, 1])],
             [weights, bias],
         )
-        portable = helper.make_model(
-            graph,
-            producer_name="omnitensor",
-            opset_imports=[helper.make_opsetid("", 13)],
-        )
-        portable.ir_version = min(portable.ir_version, 8)
-        try:
-            onnx.checker.check_model(portable)
-        except Exception as error:  # noqa: BLE001 - exporter diagnostics vary
-            raise TrainingError("export-failed", f"ONNX validation failed: {error}") from error
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(prefix=".storage-model-", dir=destination.parent)
-        os.close(handle)
-        try:
-            onnx.save_model(portable, temporary)
-            os.replace(temporary, destination)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        portable = checked_model(graph, onnx, helper)
+        save_onnx_atomic(portable, destination, onnx, prefix=".storage-model-")
+
+
+def _training_report(
+    dataset: StorageDataset,
+    training: Sequence[StorageExample],
+    holdout: Sequence[StorageExample],
+    split_date: date,
+    quality: dict,
+    model_path: Path,
+) -> dict:
+    family_fields = {
+        "version": 1,
+        "recipe": STORAGE_RECIPE,
+        "dataset": {
+            "source": BACKBLAZE_SOURCE_URI,
+            "citation": BACKBLAZE_CITATION,
+            "terms": BACKBLAZE_TERMS,
+            "termsAccepted": True,
+            "rowsRead": dataset.rows_read,
+            "rowsMissingFeatures": dataset.rows_missing_features,
+            "schemaSha256": dataset.schema_sha256,
+            "corpusSha256": dataset.corpus_sha256,
+            "firstDate": dataset.first_date.isoformat(),
+            "lastDate": dataset.last_date.isoformat(),
+        },
+        "split": {
+            "kind": "time-purged",
+            "holdoutFrom": split_date.isoformat(),
+            "purgeDays": dataset.horizon_days,
+        },
+        "features": list(FEATURE_COLUMNS),
+        "label": {"kind": "future-failure", "horizonDays": dataset.horizon_days},
+        "samples": {"training": len(training), "holdout": len(holdout)},
+        "quality": quality,
+    }
+    return numeric_training_report(
+        family_fields,
+        model_path,
+        len(FEATURE_COLUMNS),
+        digest=file_digest,
+    )
 
 
 def _csv_files(root: Path) -> tuple[Path, ...]:
@@ -450,9 +444,7 @@ def _keep_negative(serial: str, observed_on: date, modulus: int) -> bool:
     return int.from_bytes(digest[:8], "big") % modulus == 0
 
 
-def _append_example(
-    examples: list[StorageExample], example: StorageExample, maximum: int
-) -> None:
+def _append_example(examples: list[StorageExample], example: StorageExample, maximum: int) -> None:
     if len(examples) >= maximum:
         raise TrainingError("dataset-too-large", "labelled sample limit exceeded")
     examples.append(example)
@@ -474,80 +466,38 @@ def _time_split(
     return train, holdout, split_date
 
 
-def _require_classes(
-    examples: Sequence[StorageExample], minimum_positive: int, label: str
-) -> None:
-    positives = sum(example.failed_within_horizon for example in examples)
-    negatives = len(examples) - positives
-    if positives < minimum_positive or negatives < minimum_positive:
-        raise TrainingError(
-            "class-imbalance",
-            f"{label} split needs at least {minimum_positive} positive and negative examples",
-        )
+def _require_classes(examples: Sequence[StorageExample], minimum_positive: int, label: str) -> None:
+    require_binary_class_floor(
+        examples,
+        lambda example: example.failed_within_horizon,
+        minimum_positive,
+        f"{label} split needs at least {minimum_positive} positive and negative examples",
+    )
 
 
 def _fit_logistic(examples: Sequence[StorageExample]) -> StorageRiskModel:
-    width = len(FEATURE_COLUMNS)
-    means = tuple(
-        sum(example.features[index] for example in examples) / len(examples)
-        for index in range(width)
+    means, scales = population_normalization(
+        examples,
+        lambda example: example.features,
+        scale_floor=1.0,
+        width=len(FEATURE_COLUMNS),
     )
-    scales = tuple(
-        max(
-            1.0,
-            math.sqrt(
-                sum((example.features[index] - means[index]) ** 2 for example in examples)
-                / len(examples)
-            ),
-        )
-        for index in range(width)
+    weights, intercept = fit_balanced_logistic(
+        examples,
+        lambda example: example.failed_within_horizon,
+        lambda example: example.features,
+        means,
+        scales,
+        iterations=200,
+        normalize=unchecked_normalized_features,
+        sigmoid=_sigmoid,
     )
-    weights = [0.0] * width
-    intercept = 0.0
-    positives = sum(example.failed_within_horizon for example in examples)
-    positive_weight = (len(examples) - positives) / positives
-    total_weight = 2 * (len(examples) - positives)
-    for step in range(200):
-        gradients = [0.0] * width
-        intercept_gradient = 0.0
-        for example in examples:
-            standardized = [
-                (value - mean) / scale
-                for value, mean, scale in zip(
-                    example.features, means, scales, strict=True
-                )
-            ]
-            probability = _sigmoid(
-                intercept
-                + sum(
-                    weight * value
-                    for weight, value in zip(weights, standardized, strict=True)
-                )
-            )
-            sample_weight = positive_weight if example.failed_within_horizon else 1.0
-            error = sample_weight * (probability - example.failed_within_horizon)
-            intercept_gradient += error
-            for index, value in enumerate(standardized):
-                gradients[index] += error * value
-        rate = 0.2 / math.sqrt(step + 1)
-        intercept -= rate * intercept_gradient / total_weight
-        for index in range(width):
-            weights[index] -= rate * (gradients[index] / total_weight + 1e-4 * weights[index])
-    return StorageRiskModel(tuple(weights), intercept, means, scales)
-
-
-def _sigmoid(value: float) -> float:
-    if value >= 0:
-        inverse = math.exp(-min(value, 700.0))
-        return 1.0 / (1.0 + inverse)
-    exponential = math.exp(max(value, -700.0))
-    return exponential / (1.0 + exponential)
+    return StorageRiskModel(weights, intercept, means, scales)
 
 
 def _quality(model: StorageRiskModel, examples: Sequence[StorageExample]) -> dict:
     scored = [
-        (model.predict(example.features), example.failed_within_horizon)
-        for example in examples
+        (model.predict(example.features), example.failed_within_horizon) for example in examples
     ]
     positives = sum(label for _score, label in scored)
     negatives = len(scored) - positives
@@ -568,16 +518,4 @@ def _quality(model: StorageRiskModel, examples: Sequence[StorageExample]) -> dic
 
 
 def _auc(scored: Iterable[tuple[float, int]]) -> float:
-    ordered = sorted(scored)
-    positives = sum(label for _score, label in ordered)
-    negatives = len(ordered) - positives
-    rank_sum = 0.0
-    index = 0
-    while index < len(ordered):
-        end = index + 1
-        while end < len(ordered) and ordered[end][0] == ordered[index][0]:
-            end += 1
-        average_rank = ((index + 1) + end) / 2
-        rank_sum += average_rank * sum(label for _score, label in ordered[index:end])
-        index = end
-    return (rank_sum - positives * (positives + 1) / 2) / (positives * negatives)
+    return ranked_auc(scored, empty_class_detail=None)

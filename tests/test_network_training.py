@@ -243,13 +243,16 @@ def test_train_emits_identity_free_portable_report_and_valid_onnx(tmp_path):
     }
     assert report["outputContract"] == {"kind": "raw"}
     assert report["targets"] == {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"}
-    rendered = (tmp_path / "fit/network-training-report.json").read_text()
+    report_path = tmp_path / "fit/network-training-report.json"
+    rendered = report_path.read_text()
     assert json.loads(rendered) == report
     assert "wifi-main" not in rendered
     assert "packetPayload" not in rendered
 
     onnx = pytest.importorskip("onnx")
-    model = onnx.load(tmp_path / "fit/model.onnx")
+    assert onnx.__version__ == "1.22.0", "review serialized goldens with producer upgrades"
+    model_path = tmp_path / "fit/model.onnx"
+    model = onnx.load(model_path)
     onnx.checker.check_model(model)
     assert [node.op_type for node in model.graph.node] == [
         "Sub",
@@ -265,6 +268,26 @@ def test_train_emits_identity_free_portable_report_and_valid_onnx(tmp_path):
     assert output_shape == [1, 1]
     assert model.opset_import[0].version == 13
     assert model.ir_version <= 8
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "51c003206857db8b16f7174b26565d748fe586523a166fb9d85a163824bb9c91"
+    )
+    assert hashlib.sha256(model.graph.SerializeToString()).hexdigest() == (
+        "b9a0ab63326e01a595c55379b55abbe73a2f08139bb0428b1d8c5feb4afc6ac2"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "ee76da9eb83e42aafb0fe094cce4eb16e65599e47160ceb910a6b3a5e1569f98"
+    )
+    assert [
+        (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
+        for item in model.graph.initializer
+    ] == [
+        ("means", "be132fa73992a18fba0df54ca4ecc2517b2a37f646a289e0b299de9473918557"),
+        ("scales", "53af452260213e4f7ff677fbc90aa6f392a0824d3910ac836cfd46d2a40a7cda"),
+        (
+            "projection",
+            "d959db628ff667f20264552ad6397ec2925caaa07a2aad09ee0c541aed72d7cd",
+        ),
+    ]
 
 
 def test_aggregate_features_cover_state_connectivity_and_hotplug():

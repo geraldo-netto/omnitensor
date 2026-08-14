@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-import os
 import re
-import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
@@ -21,6 +17,38 @@ from ..plugins.build_ingestion import (
 )
 from ..preparation import file_digest
 from .contracts import TrainingError, write_training_report
+from .tabular import (
+    BuildAdvisorModel,
+    BuildExample,
+    JsonlPolicy,
+    chronological_split,
+    fit_balanced_logistic,
+    load_bounded_jsonl,
+    load_onnx_dependency,
+    normalized_logistic_model,
+    numeric_training_report,
+    parse_jsonl_line,
+    publish_numeric_training,
+    require_binary_class_floor,
+    save_onnx_atomic,
+)
+from .tabular import binary_auc as _auc
+from .tabular import normalization as _normalization
+from .tabular import normalized_features as _normalized_features  # noqa: F401
+from .tabular import stable_sigmoid as _sigmoid  # noqa: F401
+from .tabular import unit_interval as _unit_interval
+
+
+def _model_normalized_features(features, means, scales):
+    return _normalized_features(features, means, scales)
+
+
+def _model_probability(value):
+    return _sigmoid(value)
+
+
+BuildAdvisorModel._normalize = staticmethod(_model_normalized_features)
+BuildAdvisorModel._probability = staticmethod(_model_probability)
 
 BUILD_RECIPE = "metadata-risk-ranking-v1"
 BUILD_PROVENANCE_CONFIRMATION = "I-confirm-build-metadata-is-approved"
@@ -70,6 +98,22 @@ _DEPENDENCY_FILES = frozenset(
 )
 
 
+def _history_policy() -> JsonlPolicy:
+    return JsonlPolicy(
+        MAX_HISTORY_BYTES,
+        DEFAULT_MAX_BUILD_RECORDS,
+        MAX_HISTORY_LINE_BYTES,
+        "history-invalid",
+        "build history is not a safe regular file",
+        "history-too-large",
+        "build history byte limit exceeded",
+        "build record limit exceeded",
+        "history-invalid",
+        "build history line {line_number} is invalid",
+        "build history line {line_number}: {detail}",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class BuildTrainingRecord:
     record: BuildRecord
@@ -80,36 +124,6 @@ class BuildTrainingRecord:
 class BuildDataset:
     records: tuple[BuildTrainingRecord, ...]
     history_sha256: str
-
-
-@dataclass(frozen=True, slots=True)
-class BuildExample:
-    started_at_ms: int
-    features: tuple[float, ...]
-    build_failed: int
-    executed_optional: tuple[str, ...]
-    failed_optional: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class BuildAdvisorModel:
-    means: tuple[float, ...]
-    scales: tuple[float, ...]
-    weights: tuple[tuple[float, ...], ...]
-    intercepts: tuple[float, ...]
-
-    def predict(self, features: Sequence[float]) -> tuple[float, ...]:
-        normalized = _normalized_features(features, self.means, self.scales)
-        return tuple(
-            _sigmoid(
-                intercept
-                + sum(
-                    normalized[row] * self.weights[row][column]
-                    for row in range(len(normalized))
-                )
-            )
-            for column, intercept in enumerate(self.intercepts)
-        )
 
 
 class BuildModelExporter(Protocol):
@@ -127,36 +141,14 @@ def load_build_history(
             "provenance-not-confirmed",
             f"review the export and pass exactly {BUILD_PROVENANCE_CONFIRMATION}",
         )
-    source = Path(path)
-    if source.is_symlink() or not source.is_file():
-        raise TrainingError("history-invalid", "build history is not a safe regular file")
-    if source.stat().st_size > MAX_HISTORY_BYTES:
-        raise TrainingError("history-too-large", "build history byte limit exceeded")
-    digest = hashlib.sha256()
-    records = []
-    with source.open("rb") as handle:
-        for line_number, raw in enumerate(handle, start=1):
-            digest.update(raw)
-            if line_number > DEFAULT_MAX_BUILD_RECORDS:
-                raise TrainingError("history-too-large", "build record limit exceeded")
-            records.append(_history_line(raw, line_number))
+    records, digest = load_bounded_jsonl(path, _history_policy(), _record_from_document)
     if not records:
         raise TrainingError("insufficient-history", "build history is empty")
-    return BuildDataset(tuple(records), digest.hexdigest())
+    return BuildDataset(records, digest)
 
 
 def _history_line(raw: bytes, line_number: int) -> BuildTrainingRecord:
-    if not raw.strip() or len(raw) > MAX_HISTORY_LINE_BYTES:
-        raise TrainingError(
-            "history-invalid", f"build history line {line_number} is invalid"
-        )
-    try:
-        return _record_from_document(json.loads(raw))
-    except (UnicodeDecodeError, json.JSONDecodeError, TrainingError) as error:
-        detail = error.detail if isinstance(error, TrainingError) else "invalid JSON"
-        raise TrainingError(
-            "history-invalid", f"build history line {line_number}: {detail}"
-        ) from error
+    return parse_jsonl_line(raw, line_number, _history_policy(), _record_from_document)
 
 
 class BuildAdvisorTrainer:
@@ -201,9 +193,7 @@ class BuildAdvisorTrainer:
         means, scales = _normalization(training)
         outputs = [_fit_output(training, lambda item: item.build_failed, means, scales)]
         for check in self._optional:
-            check_training = tuple(
-                item for item in training if check in item.executed_optional
-            )
+            check_training = tuple(item for item in training if check in item.executed_optional)
             _require_check_classes(
                 check_training,
                 check,
@@ -233,90 +223,45 @@ class BuildAdvisorTrainer:
             )
         if ranking_mrr < self._minimum_ranking_mrr:
             raise TrainingError("model-not-useful", "held-out optional-check MRR is below the gate")
-        destination = Path(output_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        model_path = destination / "model.onnx"
-        self._exporter.export(model, model_path)
-        if not model_path.is_file() or model_path.stat().st_size == 0:
-            raise TrainingError("export-failed", "exporter produced no portable model")
-        report = _training_report(
-            dataset,
-            training,
-            holdout,
-            ignored,
-            self._mandatory,
-            self._optional,
-            risk_auc,
-            ranking_mrr,
-            ranked_records,
-            model_path,
+        return publish_numeric_training(
+            output_dir,
+            model,
+            self._exporter,
+            report_name="build-training-report.json",
+            report_prefix=".build-training-report-",
+            report=lambda model_path: _training_report(
+                dataset,
+                training,
+                holdout,
+                ignored,
+                self._mandatory,
+                self._optional,
+                risk_auc,
+                ranking_mrr,
+                ranked_records,
+                model_path,
+            ),
+            writer=write_training_report,
         )
-        write_training_report(
-            destination / "build-training-report.json",
-            report,
-            prefix=".build-training-report-",
-            numeric=True,
-        )
-        return report
 
 
 class OnnxBuildExporter:
     """Export shared normalization and bounded multi-label logistic outputs."""
 
     def export(self, model: BuildAdvisorModel, destination: Path) -> None:
-        try:
-            import onnx  # noqa: PLC0415 - optional producer dependency
-            from onnx import TensorProto, helper  # noqa: PLC0415
-        except ImportError as error:
-            raise TrainingError(
-                "exporter-missing", "onnx is not installed; install the [train] extra"
-            ) from error
-        width = len(BUILD_FEATURES)
-        outputs = len(model.intercepts)
-        graph = helper.make_graph(
-            [
-                helper.make_node("Sub", ["input", "means"], ["centered"]),
-                helper.make_node("Div", ["centered", "scales"], ["normalized"]),
-                helper.make_node("MatMul", ["normalized", "weights"], ["linear"]),
-                helper.make_node("Add", ["linear", "intercepts"], ["logits"]),
-                helper.make_node("Sigmoid", ["logits"], ["scores"]),
-            ],
-            "omnitensor-build-risk-ranking",
-            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
-            [helper.make_tensor_value_info("scores", TensorProto.FLOAT, [1, outputs])],
-            [
-                helper.make_tensor("means", TensorProto.FLOAT, [width], model.means),
-                helper.make_tensor("scales", TensorProto.FLOAT, [width], model.scales),
-                helper.make_tensor(
-                    "weights",
-                    TensorProto.FLOAT,
-                    [width, outputs],
-                    [value for row in model.weights for value in row],
-                ),
-                helper.make_tensor(
-                    "intercepts", TensorProto.FLOAT, [outputs], model.intercepts
-                ),
-            ],
+        onnx, tensor_proto, helper = load_onnx_dependency()
+        portable = normalized_logistic_model(
+            model,
+            graph_name="omnitensor-build-risk-ranking",
+            intercept_name="intercepts",
+            logit_name="logits",
+            output_name="scores",
+            onnx=onnx,
+            tensor_proto=tensor_proto,
+            helper=helper,
+            input_width=len(BUILD_FEATURES),
         )
-        portable = helper.make_model(
-            graph,
-            producer_name="omnitensor",
-            opset_imports=[helper.make_opsetid("", 13)],
-        )
-        portable.ir_version = min(portable.ir_version, 8)
-        try:
-            onnx.checker.check_model(portable)
-        except Exception as error:  # noqa: BLE001 - exporter diagnostics vary
-            raise TrainingError("export-failed", f"ONNX validation failed: {error}") from error
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(prefix=".build-model-", dir=destination.parent)
-        os.close(handle)
-        try:
-            onnx.save_model(portable, temporary)
-            os.replace(temporary, destination)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        save_onnx_atomic(portable, destination, onnx, prefix=".build-model-")
 
 
 def _record_from_document(document: object) -> BuildTrainingRecord:
@@ -398,17 +343,6 @@ def _positive_integer(value: object, name: str) -> None:
         raise ValueError(f"{name} must be a positive integer")
 
 
-def _unit_interval(value: object, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or not 0 <= value <= 1
-    ):
-        raise ValueError(f"{name} must be in [0, 1]")
-    return float(value)
-
-
 def _build_examples(
     records: Sequence[BuildTrainingRecord],
     mandatory: tuple[str, ...],
@@ -455,8 +389,7 @@ def _path_features(paths: Sequence[str]) -> tuple[float, ...]:
         for path in parsed
     )
     docs = sum(
-        path.suffix.lower() in _DOC_SUFFIXES
-        or "docs" in {part.lower() for part in path.parts}
+        path.suffix.lower() in _DOC_SUFFIXES or "docs" in {part.lower() for part in path.parts}
         for path in parsed
     )
     config = sum(path.suffix.lower() in _CONFIG_SUFFIXES for path in parsed)
@@ -483,27 +416,22 @@ def _path_features(paths: Sequence[str]) -> tuple[float, ...]:
 def _time_split(
     examples: Sequence[BuildExample],
 ) -> tuple[tuple[BuildExample, ...], tuple[BuildExample, ...]]:
-    if len(examples) < 2:
-        raise TrainingError("insufficient-history", "build history needs at least two outcomes")
-    split = min(len(examples) - 1, max(1, int(len(examples) * 0.8)))
-    return tuple(examples[:split]), tuple(examples[split:])
+    return chronological_split(
+        examples,
+        insufficient_detail="build history needs at least two outcomes",
+    )
 
 
-def _require_binary_classes(
-    examples: Sequence[BuildExample], minimum: int, label: str
-) -> None:
-    positives = sum(item.build_failed for item in examples)
-    negatives = len(examples) - positives
-    if positives < minimum or negatives < minimum:
-        raise TrainingError(
-            "class-imbalance",
-            f"{label} needs at least {minimum} positive and negative examples",
-        )
+def _require_binary_classes(examples: Sequence[BuildExample], minimum: int, label: str) -> None:
+    require_binary_class_floor(
+        examples,
+        lambda item: item.build_failed,
+        minimum,
+        f"{label} needs at least {minimum} positive and negative examples",
+    )
 
 
-def _require_check_classes(
-    examples: Sequence[BuildExample], check: str, minimum: int
-) -> None:
+def _require_check_classes(examples: Sequence[BuildExample], check: str, minimum: int) -> None:
     positives = sum(check in item.failed_optional for item in examples)
     negatives = len(examples) - positives
     if positives < minimum or negatives < minimum:
@@ -513,84 +441,22 @@ def _require_check_classes(
         )
 
 
-def _normalization(
-    examples: Sequence[BuildExample],
-) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    width = len(examples[0].features)
-    means = tuple(
-        sum(item.features[index] for item in examples) / len(examples)
-        for index in range(width)
-    )
-    scales = tuple(
-        max(
-            1e-9,
-            math.sqrt(
-                sum((item.features[index] - means[index]) ** 2 for item in examples)
-                / len(examples)
-            ),
-        )
-        for index in range(width)
-    )
-    return means, scales
-
-
 def _fit_output(
     examples: Sequence[BuildExample],
     label_of,
     means: tuple[float, ...],
     scales: tuple[float, ...],
 ) -> tuple[tuple[float, ...], float]:
-    labels = tuple(label_of(item) for item in examples)
-    positives = sum(labels)
-    positive_weight = (len(labels) - positives) / positives
-    total_weight = 2 * (len(labels) - positives)
-    weights = [0.0] * len(means)
-    intercept = 0.0
-    for step in range(240):
-        gradients = [0.0] * len(weights)
-        intercept_gradient = 0.0
-        for item, label in zip(examples, labels, strict=True):
-            features = _normalized_features(item.features, means, scales)
-            probability = _sigmoid(
-                intercept
-                + sum(
-                    weight * value
-                    for weight, value in zip(weights, features, strict=True)
-                )
-            )
-            sample_weight = positive_weight if label else 1.0
-            error = sample_weight * (probability - label)
-            intercept_gradient += error
-            for index, value in enumerate(features):
-                gradients[index] += error * value
-        rate = 0.2 / math.sqrt(step + 1)
-        intercept -= rate * intercept_gradient / total_weight
-        for index in range(len(weights)):
-            weights[index] -= rate * (gradients[index] / total_weight + 1e-4 * weights[index])
-    return tuple(weights), intercept
-
-
-def _normalized_features(
-    features: Sequence[float], means: Sequence[float], scales: Sequence[float]
-) -> tuple[float, ...]:
-    if len(features) != len(means) or len(scales) != len(means):
-        raise TrainingError("features-invalid", "build feature width disagrees")
-    values = []
-    for value, mean, scale in zip(features, means, scales, strict=True):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TrainingError("features-invalid", "build features must be numbers")
-        if not math.isfinite(value):
-            raise TrainingError("features-invalid", "build features must be finite")
-        values.append((float(value) - mean) / scale)
-    return tuple(values)
-
-
-def _sigmoid(value: float) -> float:
-    if value >= 0:
-        inverse = math.exp(-min(value, 700.0))
-        return 1 / (1 + inverse)
-    exponential = math.exp(max(value, -700.0))
-    return exponential / (1 + exponential)
+    return fit_balanced_logistic(
+        examples,
+        label_of,
+        lambda item: item.features,
+        means,
+        scales,
+        iterations=240,
+        normalize=_normalized_features,
+        sigmoid=_sigmoid,
+    )
 
 
 def _risk_auc(model: BuildAdvisorModel, examples: Sequence[BuildExample]) -> float:
@@ -626,24 +492,6 @@ def _ranking_mrr(
     return sum(reciprocal_ranks) / len(reciprocal_ranks), len(reciprocal_ranks)
 
 
-def _auc(scored: Iterable[tuple[float, int]]) -> float:
-    ordered = sorted(scored)
-    positives = sum(label for _score, label in ordered)
-    negatives = len(ordered) - positives
-    if positives == 0 or negatives == 0:
-        raise TrainingError("class-imbalance", "AUC requires both build outcomes")
-    rank_sum = 0.0
-    index = 0
-    while index < len(ordered):
-        end = index + 1
-        while end < len(ordered) and ordered[end][0] == ordered[index][0]:
-            end += 1
-        average_rank = ((index + 1) + end) / 2
-        rank_sum += average_rank * sum(label for _score, label in ordered[index:end])
-        index = end
-    return (rank_sum - positives * (positives + 1) / 2) / (positives * negatives)
-
-
 def _training_report(
     dataset: BuildDataset,
     training: Sequence[BuildExample],
@@ -656,7 +504,7 @@ def _training_report(
     ranked_records: int,
     model_path: Path,
 ) -> dict:
-    return {
+    family_fields = {
         "version": 1,
         "recipe": BUILD_RECIPE,
         "dataset": {
@@ -678,8 +526,7 @@ def _training_report(
         "outputs": {
             "buildFailureRiskIndex": 0,
             "optionalCheckRisk": [
-                {"check": check, "index": index}
-                for index, check in enumerate(optional, start=1)
+                {"check": check, "index": index} for index, check in enumerate(optional, start=1)
             ],
             "mandatoryChecks": list(mandatory),
             "mandatoryChecksAlwaysIncluded": True,
@@ -703,14 +550,10 @@ def _training_report(
             "holdoutOptionalCheckMrr": ranking_mrr,
             "rankedHoldoutRecords": ranked_records,
         },
-        "model": {
-            "format": "onnx",
-            "filename": "model.onnx",
-            "sha256": file_digest(model_path),
-        },
-        "tensorContract": {
-            "inputs": [{"shape": [1, len(BUILD_FEATURES)], "dtype": "float32", "layout": "NC"}]
-        },
-        "outputContract": {"kind": "raw"},
-        "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
     }
+    return numeric_training_report(
+        family_fields,
+        model_path,
+        len(BUILD_FEATURES),
+        digest=file_digest,
+    )

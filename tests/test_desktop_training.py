@@ -149,14 +149,17 @@ def test_content_free_personal_history_trains_portable_scores(tmp_path):
     }
     assert report["outputContract"] == {"kind": "raw"}
     assert report["targets"] == {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"}
-    rendered = (tmp_path / "fit/desktop-training-report.json").read_text()
+    report_path = tmp_path / "fit/desktop-training-report.json"
+    rendered = report_path.read_text()
     assert json.loads(rendered) == report
     assert "private document" not in rendered
     assert "org.gnome" not in rendered
     assert "win-" not in rendered
 
     onnx = pytest.importorskip("onnx")
-    model = onnx.load(tmp_path / "fit/model.onnx")
+    assert onnx.__version__ == "1.22.0", "review serialized goldens with producer upgrades"
+    model_path = tmp_path / "fit/model.onnx"
+    model = onnx.load(model_path)
     onnx.checker.check_model(model)
     assert [node.op_type for node in model.graph.node] == ["Sub", "Div", "MatMul", "Add", "Sigmoid"]
     input_shape = [value.dim_value for value in model.graph.input[0].type.tensor_type.shape.dim]
@@ -165,6 +168,27 @@ def test_content_free_personal_history_trains_portable_scores(tmp_path):
     assert output_shape == [1, 2]
     assert model.opset_import[0].version == 13
     assert model.ir_version <= 8
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "9a8f198bc12d4052bef9840729765fd598950e45f3157d7089df543e79bbf936"
+    )
+    assert hashlib.sha256(model.graph.SerializeToString()).hexdigest() == (
+        "c21c2a71ed28f92bf2d83d51a67ac2b537b5c18527ac8ae1fe9656a4efee66fc"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "0104ecf87500cf43d6c87baa5bf7050f15bf651db5d41a5da34655b89ee24aa0"
+    )
+    assert [
+        (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
+        for item in model.graph.initializer
+    ] == [
+        ("means", "2c6c0b073ff6814a030ab9d30ccdcb43d7ac8444aa49b33742c17a021cc230fd"),
+        ("scales", "425f4b1d3cbf87078e83677c5cf5d061ecc1c780eae6bffe7f83f2812bda1154"),
+        ("weights", "92a59f2d69da18ae3ace32b6128eb06e00b88c547c458ac651104424bb79d6d2"),
+        (
+            "intercepts",
+            "ec72f8a19588720d9dd11e8736314576522a0f9eb9af600cdcf0e2c56e0007bb",
+        ),
+    ]
 
 
 def test_record_contract_is_closed_versioned_and_confirmation_only():

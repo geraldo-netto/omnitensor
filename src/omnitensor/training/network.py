@@ -8,11 +8,7 @@ only operator-confirmed normal history, and exports one portable ONNX graph.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-import os
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,14 +27,22 @@ from ..plugins.network_collection import (
 from ..plugins.triggers import SourceStatus
 from ..preparation import file_digest
 from .contracts import TrainingError, write_training_report
+from .tabular import (
+    JsonlPolicy,
+    checked_model,
+    floor_chronological_split,
+    load_bounded_jsonl,
+    load_onnx_dependency,
+    numeric_training_report,
+    publish_numeric_training,
+    save_onnx_atomic,
+)
 
 NETWORK_RECIPE = "aggregate-reconstruction-v1"
 NORMAL_ONLY_CONFIRMATION = "I-confirm-this-replay-is-normal"
 KITSUNE_PAPER_URI = "https://arxiv.org/abs/1802.09089"
 KITSUNE_CODE_URI = "https://github.com/ymirsky/Kitsune-py"
-KITSUNE_CITATION = (
-    "Mirsky, Doitshman, Elovici, and Shabtai, Kitsune, NDSS 2018"
-)
+KITSUNE_CITATION = "Mirsky, Doitshman, Elovici, and Shabtai, Kitsune, NDSS 2018"
 KITSUNE_CODE_LICENSE = "MIT"
 NETWORK_FEATURES = (
     "receivedBytesPerSecond",
@@ -93,6 +97,22 @@ _COUNTER_KEYS = {
 }
 
 
+def _replay_policy() -> JsonlPolicy:
+    return JsonlPolicy(
+        MAX_REPLAY_BYTES,
+        MAX_REPLAY_SNAPSHOTS,
+        MAX_REPLAY_LINE_BYTES,
+        "replay-invalid",
+        "network replay is not a safe regular file",
+        "replay-too-large",
+        "network replay byte limit exceeded",
+        "network replay snapshot limit exceeded",
+        "replay-invalid",
+        "network replay line {line_number} is invalid",
+        "network replay line {line_number}: {detail}",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class NetworkFeatureRow:
     observed_at_ms: int
@@ -141,32 +161,13 @@ class NetworkModelExporter(Protocol):
 
 def load_network_replay(path: Path | str) -> NetworkDataset:
     """Load closed collector documents without retaining link identities."""
-    source = Path(path)
-    if source.is_symlink() or not source.is_file():
-        raise TrainingError("replay-invalid", "network replay is not a safe regular file")
-    if source.stat().st_size > MAX_REPLAY_BYTES:
-        raise TrainingError("replay-too-large", "network replay byte limit exceeded")
-    snapshots = []
-    digest = hashlib.sha256()
-    with source.open("rb") as handle:
-        for line_number, raw in enumerate(handle, start=1):
-            digest.update(raw)
-            if line_number > MAX_REPLAY_SNAPSHOTS:
-                raise TrainingError("replay-too-large", "network replay snapshot limit exceeded")
-            if not raw.strip() or len(raw) > MAX_REPLAY_LINE_BYTES:
-                raise TrainingError(
-                    "replay-invalid", f"network replay line {line_number} is invalid"
-                )
-            try:
-                document = json.loads(raw)
-                snapshots.append(_snapshot_from_document(document))
-            except (UnicodeDecodeError, json.JSONDecodeError, TrainingError) as error:
-                detail = error.detail if isinstance(error, TrainingError) else "invalid JSON"
-                raise TrainingError(
-                    "replay-invalid", f"network replay line {line_number}: {detail}"
-                ) from error
-    rows = network_feature_rows(tuple(snapshots))
-    return NetworkDataset(rows, digest.hexdigest(), len(snapshots))
+    snapshots, digest = load_bounded_jsonl(
+        path,
+        _replay_policy(),
+        _snapshot_from_document,
+    )
+    rows = network_feature_rows(snapshots)
+    return NetworkDataset(rows, digest, len(snapshots))
 
 
 def network_feature_rows(snapshots: Sequence[NetworkSnapshot]) -> tuple[NetworkFeatureRow, ...]:
@@ -212,8 +213,7 @@ class NetworkAnomalyTrainer:
                 f"review the replay and pass exactly {NORMAL_ONLY_CONFIRMATION}",
             )
         if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 1
-            for value in bounds
+            isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in bounds
         ):
             raise ValueError("network split row bounds must be positive integers")
         if (
@@ -245,81 +245,32 @@ class NetworkAnomalyTrainer:
                 "model-not-stable",
                 "held-out normal replay exceeds the false-positive gate",
             )
-        destination = Path(output_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        model_path = destination / "model.onnx"
-        self._exporter.export(model, model_path)
-        if not model_path.is_file() or model_path.stat().st_size == 0:
-            raise TrainingError("export-failed", "exporter produced no portable model")
-        report = {
-            "version": 1,
-            "recipe": NETWORK_RECIPE,
-            "inspiration": {
-                "paper": KITSUNE_PAPER_URI,
-                "code": KITSUNE_CODE_URI,
-                "citation": KITSUNE_CITATION,
-                "codeLicense": KITSUNE_CODE_LICENSE,
-                "codeVendored": False,
-            },
-            "dataset": {
-                "replaySha256": dataset.replay_sha256,
-                "snapshots": dataset.snapshots,
-                "identityPersisted": False,
-                "packetContentIngested": False,
-                "operatorConfirmedNormal": True,
-            },
-            "split": {
-                "kind": "chronological",
-                "training": len(training),
-                "holdout": len(holdout),
-                "holdoutFromMs": holdout[0].observed_at_ms,
-            },
-            "features": list(NETWORK_FEATURES),
-            "quality": {
-                "threshold": threshold,
-                "trainingP95Score": _percentile(training_scores, 0.95),
-                "holdoutP95Score": _percentile(holdout_scores, 0.95),
-                "holdoutFalsePositiveRate": false_positive_rate,
-                "maximumFalsePositiveRate": self._maximum_false_positive_rate,
-                "anomalyRecall": None,
-            },
-            "model": {
-                "format": "onnx",
-                "filename": "model.onnx",
-                "sha256": file_digest(model_path),
-            },
-            "tensorContract": {
-                "inputs": [
-                    {
-                        "shape": [1, len(NETWORK_FEATURES)],
-                        "dtype": "float32",
-                        "layout": "NC",
-                    }
-                ]
-            },
-            "outputContract": {"kind": "raw"},
-            "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
-        }
-        write_training_report(
-            destination / "network-training-report.json",
-            report,
-            prefix=".network-training-report-",
-            numeric=True,
+        return publish_numeric_training(
+            output_dir,
+            model,
+            self._exporter,
+            report_name="network-training-report.json",
+            report_prefix=".network-training-report-",
+            report=lambda model_path: _training_report(
+                dataset,
+                training,
+                holdout,
+                training_scores,
+                holdout_scores,
+                threshold,
+                false_positive_rate,
+                self._maximum_false_positive_rate,
+                model_path,
+            ),
+            writer=write_training_report,
         )
-        return report
 
 
 class OnnxNetworkExporter:
     """Export normalization plus block reconstruction error using common ops."""
 
     def export(self, model: NetworkReconstructionModel, destination: Path) -> None:
-        try:
-            import onnx  # noqa: PLC0415 - optional producer dependency
-            from onnx import TensorProto, helper  # noqa: PLC0415
-        except ImportError as error:
-            raise TrainingError(
-                "exporter-missing", "onnx is not installed; install the [train] extra"
-            ) from error
+        onnx, tensor_proto, helper = load_onnx_dependency()
         width = len(NETWORK_FEATURES)
         flat_projection = [value for row in model.projection for value in row]
         graph = helper.make_graph(
@@ -332,35 +283,70 @@ class OnnxNetworkExporter:
                 helper.make_node("ReduceMean", ["squared"], ["score"], axes=[1], keepdims=1),
             ],
             "omnitensor-network-aggregate-reconstruction",
-            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, width])],
-            [helper.make_tensor_value_info("score", TensorProto.FLOAT, [1, 1])],
+            [helper.make_tensor_value_info("input", tensor_proto.FLOAT, [1, width])],
+            [helper.make_tensor_value_info("score", tensor_proto.FLOAT, [1, 1])],
             [
-                helper.make_tensor("means", TensorProto.FLOAT, [width], model.means),
-                helper.make_tensor("scales", TensorProto.FLOAT, [width], model.scales),
+                helper.make_tensor("means", tensor_proto.FLOAT, [width], model.means),
+                helper.make_tensor("scales", tensor_proto.FLOAT, [width], model.scales),
                 helper.make_tensor(
-                    "projection", TensorProto.FLOAT, [width, width], flat_projection
+                    "projection", tensor_proto.FLOAT, [width, width], flat_projection
                 ),
             ],
         )
-        portable = helper.make_model(
-            graph,
-            producer_name="omnitensor",
-            opset_imports=[helper.make_opsetid("", 13)],
-        )
-        portable.ir_version = min(portable.ir_version, 8)
-        try:
-            onnx.checker.check_model(portable)
-        except Exception as error:  # noqa: BLE001 - exporter diagnostics vary
-            raise TrainingError("export-failed", f"ONNX validation failed: {error}") from error
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(prefix=".network-model-", dir=destination.parent)
-        os.close(handle)
-        try:
-            onnx.save_model(portable, temporary)
-            os.replace(temporary, destination)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        portable = checked_model(graph, onnx, helper)
+        save_onnx_atomic(portable, destination, onnx, prefix=".network-model-")
+
+
+def _training_report(
+    dataset: NetworkDataset,
+    training: Sequence[NetworkFeatureRow],
+    holdout: Sequence[NetworkFeatureRow],
+    training_scores: Sequence[float],
+    holdout_scores: Sequence[float],
+    threshold: float,
+    false_positive_rate: float,
+    maximum_false_positive_rate: float,
+    model_path: Path,
+) -> dict:
+    family_fields = {
+        "version": 1,
+        "recipe": NETWORK_RECIPE,
+        "inspiration": {
+            "paper": KITSUNE_PAPER_URI,
+            "code": KITSUNE_CODE_URI,
+            "citation": KITSUNE_CITATION,
+            "codeLicense": KITSUNE_CODE_LICENSE,
+            "codeVendored": False,
+        },
+        "dataset": {
+            "replaySha256": dataset.replay_sha256,
+            "snapshots": dataset.snapshots,
+            "identityPersisted": False,
+            "packetContentIngested": False,
+            "operatorConfirmedNormal": True,
+        },
+        "split": {
+            "kind": "chronological",
+            "training": len(training),
+            "holdout": len(holdout),
+            "holdoutFromMs": holdout[0].observed_at_ms,
+        },
+        "features": list(NETWORK_FEATURES),
+        "quality": {
+            "threshold": threshold,
+            "trainingP95Score": _percentile(training_scores, 0.95),
+            "holdoutP95Score": _percentile(holdout_scores, 0.95),
+            "holdoutFalsePositiveRate": false_positive_rate,
+            "maximumFalsePositiveRate": maximum_false_positive_rate,
+            "anomalyRecall": None,
+        },
+    }
+    return numeric_training_report(
+        family_fields,
+        model_path,
+        len(NETWORK_FEATURES),
+        digest=file_digest,
+    )
 
 
 def _snapshot_from_document(document: object) -> NetworkSnapshot:
@@ -451,9 +437,7 @@ def _aggregate_features(previous: NetworkSnapshot, current: NetworkSnapshot) -> 
     states = [link.state for link in current.links]
     connectivity = [link.connectivity for link in current.links]
     signals = [
-        link.signal_percent / 100
-        for link in current.links
-        if link.signal_percent is not None
+        link.signal_percent / 100 for link in current.links if link.signal_percent is not None
     ]
     constrained = {
         NetworkConnectivity.LIMITED,
@@ -499,11 +483,12 @@ def _fraction(values: Sequence[object], expected: object) -> float:
 def _chronological_split(
     rows: Sequence[NetworkFeatureRow], minimum_training: int, minimum_holdout: int
 ) -> tuple[tuple[NetworkFeatureRow, ...], tuple[NetworkFeatureRow, ...]]:
-    if len(rows) < minimum_training + minimum_holdout:
-        raise TrainingError("insufficient-history", "network replay does not meet split row floors")
-    split = max(minimum_training, int(len(rows) * 0.8))
-    split = min(split, len(rows) - minimum_holdout)
-    return tuple(rows[:split]), tuple(rows[split:])
+    return floor_chronological_split(
+        rows,
+        minimum_training,
+        minimum_holdout,
+        insufficient_detail="network replay does not meet split row floors",
+    )
 
 
 def _fit_reconstruction(rows: Sequence[NetworkFeatureRow]) -> NetworkReconstructionModel:
@@ -512,18 +497,14 @@ def _fit_reconstruction(rows: Sequence[NetworkFeatureRow]) -> NetworkReconstruct
     scales = tuple(
         max(
             1e-9,
-            math.sqrt(
-                sum((row.features[index] - means[index]) ** 2 for row in rows) / len(rows)
-            ),
+            math.sqrt(sum((row.features[index] - means[index]) ** 2 for row in rows) / len(rows)),
         )
         for index in range(width)
     )
     normalized = tuple(
         tuple(
             (value - mean) / scale
-            for value, mean, scale in zip(
-                row.features, means, scales, strict=True
-            )
+            for value, mean, scale in zip(row.features, means, scales, strict=True)
         )
         for row in rows
     )
@@ -540,10 +521,7 @@ def _principal_direction(
     rows: Sequence[Sequence[float]], group: Sequence[int]
 ) -> tuple[float, ...]:
     covariance = tuple(
-        tuple(
-            sum(row[left] * row[right] for row in rows) / len(rows)
-            for right in group
-        )
+        tuple(sum(row[left] * row[right] for row in rows) / len(rows) for right in group)
         for left in group
     )
     direction = tuple(1 / math.sqrt(len(group)) for _index in group)

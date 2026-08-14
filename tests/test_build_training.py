@@ -195,14 +195,17 @@ def test_history_load_and_portable_training_are_provenance_safe(tmp_path):
     }
     assert report["outputContract"] == {"kind": "raw"}
     assert report["targets"] == {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"}
-    rendered = (tmp_path / "fit/build-training-report.json").read_text()
+    report_path = tmp_path / "fit/build-training-report.json"
+    rendered = report_path.read_text()
     assert json.loads(rendered) == report
     assert "private-build" not in rendered
     assert "guide-" not in rendered
     assert "module-" not in rendered
 
     onnx = pytest.importorskip("onnx")
-    model = onnx.load(tmp_path / "fit/model.onnx")
+    assert onnx.__version__ == "1.22.0", "review serialized goldens with producer upgrades"
+    model_path = tmp_path / "fit/model.onnx"
+    model = onnx.load(model_path)
     onnx.checker.check_model(model)
     assert [node.op_type for node in model.graph.node] == [
         "Sub",
@@ -217,6 +220,27 @@ def test_history_load_and_portable_training_are_provenance_safe(tmp_path):
     assert output_shape == [1, 3]
     assert model.opset_import[0].version == 13
     assert model.ir_version <= 8
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "ddd161eef9f993053e2707babbcac19a49a452be6a7e9d42fcb616de6c271fa1"
+    )
+    assert hashlib.sha256(model.graph.SerializeToString()).hexdigest() == (
+        "ba3849d0d93a23f9675a8b8e104620ff28cf0245ffd9a9d4f2c41e95b4cd36a5"
+    )
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
+        "bbaed2ee17daa2c83b5f7a12105b6442fc860b1ba7781d07a9f0dc60191c2560"
+    )
+    assert [
+        (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
+        for item in model.graph.initializer
+    ] == [
+        ("means", "fd06a72b1a69d98334e31ccbb20d44e3a0048ae0bcf977885018675c07d2295e"),
+        ("scales", "c6a8961b3f2b1abdfbec9c257a724506bc9c0aeab5840dd3072feceac9383a30"),
+        ("weights", "a10490e212d3339c1dbe8e07f46f645020fda2504d622df3f6eb36398448d90e"),
+        (
+            "intercepts",
+            "6400b51d17abe5259318584fe4273ab773cbaf3d33ac14907dca0f823fc48f6a",
+        ),
+    ]
 
 
 def test_record_parser_preserves_only_declared_metadata():
