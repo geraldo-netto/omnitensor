@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-14T20:11:23+02:00",
+  "sourceCommit": "88d92945b20f11f178f0f57c131005159d5696b3",
+  "manifest": "mutation-selectors.json",
+  "manifestVersion": 2,
+  "scope": {
+    "status": "partial",
+    "blockedBy": "OMNI-0297",
+    "callables": 164
+  },
+  "operatorPolicy": {
+    "engine": "mutmut",
+    "version": "3.7.0",
+    "stringLiteralMutations": false
+  },
+  "threshold": 80.0,
+  "summary": {
+    "mutants": 3584,
+    "killed": 3291,
+    "survived": 285,
+    "timedOut": 8,
+    "detected": 3299,
+    "score": 92.0,
+    "callablesBelowThreshold": 8
+  },
+  "shards": [
+    {
+      "name": "acceptance",
+      "callables": 42,
+      "mutants": 1434,
+      "detected": 1275,
+      "survived": 159,
+      "timedOut": 0,
+      "score": 88.9,
+      "callablesBelowThreshold": 3
+    },
+    {
+      "name": "document-binding",
+      "callables": 3,
+      "mutants": 69,
+      "detected": 61,
+      "survived": 8,
+      "timedOut": 0,
+      "score": 88.4,
+      "callablesBelowThreshold": 1
+    },
+    {
+      "name": "event-workload",
+      "callables": 30,
+      "mutants": 626,
+      "detected": 585,
+      "survived": 41,
+      "timedOut": 0,
+      "score": 93.5,
+      "callablesBelowThreshold": 0
+    },
+    {
+      "name": "executors",
+      "callables": 21,
+      "mutants": 186,
+      "detected": 182,
+      "survived": 4,
+      "timedOut": 0,
+      "score": 97.8,
+      "callablesBelowThreshold": 1
+    },
+    {
+      "name": "grounded-answer",
+      "callables": 15,
+      "mutants": 592,
+      "detected": 558,
+      "survived": 34,
+      "timedOut": 0,
+      "score": 94.3,
+      "callablesBelowThreshold": 0
+    },
+    {
+      "name": "mutation-launcher",
+      "callables": 2,
+      "mutants": 12,
+      "detected": 11,
+      "survived": 1,
+      "timedOut": 0,
+      "score": 91.7,
+      "callablesBelowThreshold": 0
+    },
+    {
+      "name": "runtime-contract",
+      "callables": 5,
+      "mutants": 42,
+      "detected": 35,
+      "survived": 7,
+      "timedOut": 0,
+      "score": 83.3,
+      "callablesBelowThreshold": 1
+    },
+    {
+      "name": "scheduler",
+      "callables": 24,
+      "mutants": 328,
+      "detected": 306,
+      "survived": 22,
+      "timedOut": 8,
+      "score": 93.3,
+      "callablesBelowThreshold": 2
+    },
+    {
+      "name": "snapshot-forecast",
+      "callables": 10,
+      "mutants": 132,
+      "detected": 129,
+      "survived": 3,
+      "timedOut": 0,
+      "score": 97.7,
+      "callablesBelowThreshold": 0
+    },
+    {
+      "name": "tensor-output",
+      "callables": 12,
+      "mutants": 163,
+      "detected": 157,
+      "survived": 6,
+      "timedOut": 0,
+      "score": 96.3,
+      "callablesBelowThreshold": 0
+    }
+  ],
+  "belowThreshold": [
+    {
+      "shard": "acceptance",
+      "selector": "omnitensor.plugins.acceptance_kit.x_parse_native_load_report",
+      "detected": 60,
+      "mutants": 89,
+      "score": 67.4
+    },
+    {
+      "shard": "acceptance",
+      "selector": "omnitensor.plugins.document_acceptance.x__parse_safety",
+      "detected": 35,
+      "mutants": 45,
+      "score": 77.8
+    },
+    {
+      "shard": "acceptance",
+      "selector": "omnitensor.plugins.document_acceptance.x__validate_bge_evidence",
+      "detected": 47,
+      "mutants": 61,
+      "score": 77.0
+    },
+    {
+      "shard": "document-binding",
+      "selector": "omnitensor.training.binding.x_model_fragment",
+      "detected": 14,
+      "mutants": 20,
+      "score": 70.0
+    },
+    {
+      "shard": "executors",
+      "selector": "omnitensor.executors.base.xǁModelCacheǁ__init__",
+      "detected": 6,
+      "mutants": 8,
+      "score": 75.0
+    },
+    {
+      "shard": "runtime-contract",
+      "selector": "omnitensor.contract.x__declared_version",
+      "detected": 8,
+      "mutants": 12,
+      "score": 66.7
+    },
+    {
+      "shard": "scheduler",
+      "selector": "omnitensor.scheduler.xǁSchedulerǁ_degrade",
+      "detected": 10,
+      "mutants": 16,
+      "score": 62.5
+    },
+    {
+      "shard": "scheduler",
+      "selector": "omnitensor.scheduler.xǁSchedulerǁtick",
+      "detected": 23,
+      "mutants": 29,
+      "score": 79.3
+    }
+  ],
+  "classification": {
+    "selectorsDropped": [],
+    "note": "No below-threshold callable is implementation-only: survivors cover validation bounds and types, digest and device fail-closed checks, deep-copy isolation, cache capacity, queue cleanup, and load math. Equivalent or prose-only survivors are not regression requirements; string-literal mutations remain disabled."
+  }
+}
