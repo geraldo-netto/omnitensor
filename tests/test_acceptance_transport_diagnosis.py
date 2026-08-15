@@ -1,0 +1,94 @@
+"""A probe that retries must not report the deadline as the diagnosis.
+
+`omnitensor-verify-install` reported `ApplyCommand raised TimeoutError` for a
+service that was still starting and had not claimed the bus name. That is true
+about the probe and useless about the cause: it reads like a wedged service.
+"""
+
+import asyncio
+
+import pytest
+
+from omnitensor.acceptance_checks import check_bus
+from omnitensor.acceptance_probes import DbusApplyCommandProbe
+
+
+def probe(caller, *, timeout_s: float = 0.3):
+    return DbusApplyCommandProbe(timeout_s=timeout_s, retry_interval_s=0.01, caller=caller)
+
+
+def failing(error: Exception):
+    async def call(_text: str) -> str:
+        raise error
+
+    return call
+
+
+def slow(delay: float = 5.0):
+    async def call(_text: str) -> str:
+        await asyncio.sleep(delay)
+        return "{}"
+
+    return call
+
+
+def first_then(error: Exception, follow):
+    state = {"first": True}
+
+    async def call(text: str) -> str:
+        if state["first"]:
+            state["first"] = False
+            raise error
+        return await follow(text)
+
+    return call
+
+
+def test_a_transport_that_never_answers_names_the_first_real_failure():
+    detail = check_bus(probe(first_then(ConnectionError("name has no owner"), slow()))).detail
+    assert "name has no owner" in detail, detail
+    assert "TimeoutError after ConnectionError" in detail, detail
+
+
+def test_a_repeated_failure_is_reported_once_rather_than_chained_to_itself():
+    detail = check_bus(probe(failing(ConnectionError("name has no owner")))).detail
+    assert detail == "ApplyCommand raised ConnectionError: name has no owner"
+
+
+def test_a_genuinely_unresponsive_service_still_reports_the_deadline():
+    # No earlier failure exists to name, and `wait_for` chains its own
+    # cancellation, which describes nothing.
+    detail = check_bus(probe(slow(), timeout_s=0.2)).detail
+    assert detail == "ApplyCommand raised TimeoutError"
+
+
+def test_an_answering_transport_is_reported_with_its_revision():
+    async def call(_text: str) -> str:
+        return (
+            '{"version":2,"commandId":"invalid","status":"rejected","revision":7,'
+            '"appliedAt":1,"message":"Command does not match the version 2 contract",'
+            '"portfolio":{"paused":false,"profiles":{},"deviceChoices":{}}}'
+        )
+
+    check = check_bus(probe(call))
+    assert check.ok is True
+    assert "revision 7" in check.detail
+
+
+def test_a_reply_that_is_not_the_contract_is_refused():
+    async def not_json(_text: str) -> str:
+        return "<html>"
+
+    assert check_bus(probe(not_json)).detail == "ApplyCommand did not return JSON"
+
+    async def wrong_shape(_text: str) -> str:
+        return '{"version":2}'
+
+    assert "violates contract" in check_bus(probe(wrong_shape)).detail
+
+
+def test_probe_timing_must_be_positive():
+    with pytest.raises(ValueError, match="timing"):
+        DbusApplyCommandProbe(timeout_s=0)
+    with pytest.raises(ValueError, match="timing"):
+        DbusApplyCommandProbe(retry_interval_s=-1)

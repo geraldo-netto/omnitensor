@@ -110,9 +110,7 @@ def check_schemas(names: Sequence[str] = REQUIRED_SCHEMAS) -> Check:
 
 def check_workload_catalog(root: Path | None = None) -> Check:
     try:
-        workload_root = legacy_acceptance_value(
-            "bundled_workloads_path", bundled_workloads_path
-        )
+        workload_root = legacy_acceptance_value("bundled_workloads_path", bundled_workloads_path)
         resolved = root or workload_root()
     except FileNotFoundError as error:
         return Check("workloads", False, str(error))
@@ -136,9 +134,7 @@ def check_plugin_discovery(discover: Callable[[], Iterable]) -> Check:
 
 def check_isolation(specs: Iterable) -> Check:
     external = tuple(specs)
-    unsandboxed = [
-        spec.plugin_id for spec in external if getattr(spec, "sandbox", None) is None
-    ]
+    unsandboxed = [spec.plugin_id for spec in external if getattr(spec, "sandbox", None) is None]
     if unsandboxed:
         return Check(
             "isolation",
@@ -148,11 +144,32 @@ def check_isolation(specs: Iterable) -> Check:
     return Check("isolation", True, f"{len(external)} external workers are sandboxed")
 
 
+def _transport_failure(error: BaseException) -> str:
+    """Name the failure the operator can act on, not the deadline that hid it.
+
+    The probe retries for its whole budget, so a service that never claimed the
+    bus name surfaces as ``TimeoutError`` — true about the probe and useless
+    about the cause. ``asyncio.wait_for`` also chains its own cancellation,
+    which describes nothing.
+    """
+    import asyncio  # noqa: PLC0415
+
+    cause = error.__cause__
+    repeated = cause is not None and type(cause) is type(error) and str(cause) == str(error)
+    if cause is None or repeated or isinstance(cause, asyncio.CancelledError):
+        reported = cause if repeated else error
+        detail = str(reported).strip()
+        return f"{type(reported).__name__}: {detail}" if detail else type(reported).__name__
+    detail = str(cause).strip()
+    named = f"{type(error).__name__} after {type(cause).__name__}"
+    return f"{named}: {detail}" if detail else named
+
+
 def check_bus(probe: BusProbe) -> Check:
     try:
         reply = probe.apply_command("not-json")
     except Exception as error:  # noqa: BLE001 - transport failures are arbitrary
-        return Check("dbus", False, f"ApplyCommand raised {type(error).__name__}")
+        return Check("dbus", False, f"ApplyCommand raised {_transport_failure(error)}")
     try:
         acknowledgement = json.loads(reply)
     except ValueError:

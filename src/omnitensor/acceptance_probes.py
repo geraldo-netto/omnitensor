@@ -54,6 +54,22 @@ class SystemdUserServiceProbe:
         return code == 0 and state == "active", f"{self._unit} is {state}"
 
 
+def _diagnosed(last: BaseException, first: BaseException) -> BaseException:
+    """The exception to raise once the retry budget is spent.
+
+    Attaching the first failure as the cause keeps the diagnosis a caller can
+    act on ("the name has no owner") attached to the outcome the probe observed
+    ("it never answered"), instead of replacing one with the other.
+    """
+    if last is first or (type(last) is type(first) and str(last) == str(first)):
+        return last
+    # Set rather than `raise ... from`, because the caller re-raises the value
+    # this returns and an explicit `from` there would overwrite it.
+    last.__cause__ = first
+    last.__suppress_context__ = True
+    return last
+
+
 class DbusApplyCommandProbe:
     """:class:`BusProbe` over the session bus."""
 
@@ -95,14 +111,20 @@ class DbusApplyCommandProbe:
         async def call() -> str:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._timeout_s
+            # A probe that retries for its whole budget and then reports the
+            # deadline says "TimeoutError" for a service that never claimed the
+            # bus name — accurate about the probe and useless about the cause.
+            # The first real failure is the one worth carrying out.
+            first_error: BaseException | None = None
             while True:
                 remaining = deadline - loop.time()
                 try:
                     return await asyncio.wait_for(call_once(), timeout=max(remaining, 0.001))
-                except Exception:
+                except Exception as error:
+                    first_error = first_error or error
                     remaining = deadline - loop.time()
                     if remaining <= 0:
-                        raise
+                        raise _diagnosed(error, first_error)  # noqa: B904 - cause is set above
                     await asyncio.sleep(min(self._retry_interval_s, remaining))
 
         return asyncio.run(call())
