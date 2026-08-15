@@ -698,3 +698,57 @@ def test_every_bpftool_call_in_the_helper_is_bounded():
 
     # And an expiry has to be answered rather than escaping the accept loop.
     assert "TimeoutExpired" in source
+
+
+def test_a_worker_failure_reason_reaches_the_inventory_only_when_there_is_one():
+    """Dropping it made every failed launch read as an unqualified provider.
+
+    The applet's record is closed, so an entry that always carried the field —
+    even as null — is a field an older applet rejects, taking the whole catalog
+    down with it. It is present only when the runtime has something to say.
+    """
+    from omnitensor.inspection import plugin_inventory_entry
+    from omnitensor.registry import validate_document
+
+    from tests.conftest import sample_plugin_manifest  # noqa: PLC0415
+
+    class Resolution:
+        ready = True
+        reason = ""
+
+    plugin = type(
+        "Plugin",
+        (),
+        {
+            "plugin_id": "events",
+            "version": "1.0.0",
+            "source": "external",
+            "distribution_name": "omnitensor-events",
+            "manifest": sample_plugin_manifest("events"),
+        },
+    )()
+
+    def entry(**kwargs):
+        return plugin_inventory_entry(
+            plugin,
+            resolve_artifact=lambda _artifact_id: Resolution(),
+            granted_permissions=(),
+            **kwargs,
+        )
+
+    silent = entry(worker_state="ready")
+    assert "workerDetail" not in silent
+
+    failed = entry(worker_state="failed", worker_detail="ModuleNotFoundError: qwen")
+    assert failed["workerDetail"] == "ModuleNotFoundError: qwen"
+
+    # Bounded, because it is rendered in a panel menu.
+    long = entry(worker_state="failed", worker_detail="x" * 500)
+    assert len(long["workerDetail"]) == 300
+
+    for document in (silent, failed, long):
+        assert validate_document("plugin-inventory.schema.json", {
+            "version": 1,
+            "generatedAt": 1,
+            "plugins": [document],
+        }) == []

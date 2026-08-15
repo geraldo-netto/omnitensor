@@ -5,14 +5,25 @@
   "description": "Read-only description of installed plugins: what each declares, what it still needs, and whether it can run. Contains no configuration values, because a value can be a resolved secret.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "generatedAt", "plugins"],
+  "required": [
+    "version",
+    "generatedAt",
+    "plugins"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "generatedAt": {"type": "integer", "minimum": 1},
+    "version": {
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "integer",
+      "minimum": 1
+    },
     "plugins": {
       "type": "array",
       "maxItems": 128,
-      "items": {"$ref": "#/$defs/plugin"}
+      "items": {
+        "$ref": "#/$defs/plugin"
+      }
     }
   },
   "$defs": {
@@ -39,11 +50,27 @@
           "minLength": 1,
           "maxLength": 120
         },
-        "version": {"type": "string", "minLength": 1, "maxLength": 40},
-        "source": {"enum": ["bundled", "external"]},
-        "distribution": {"type": "string", "minLength": 1, "maxLength": 160},
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "source": {
+          "enum": [
+            "bundled",
+            "external"
+          ]
+        },
+        "distribution": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
         "workerState": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "enum": [
             "starting",
             "ready",
@@ -55,18 +82,40 @@
             null
           ]
         },
+        "workerDetail": {
+          "description": "Why a worker is not running, when the runtime has something to say. Optional: an entry that always carried it would be a field an older applet rejects, and its record is closed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
         "protocol": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minimum", "maximum", "capabilities"],
+          "required": [
+            "minimum",
+            "maximum",
+            "capabilities"
+          ],
           "properties": {
-            "minimum": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "maximum": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "minimum": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "maximum": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
             "capabilities": {
               "type": "array",
               "maxItems": 32,
               "uniqueItems": true,
-              "items": {"type": "string", "minLength": 1, "maxLength": 64}
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
             }
           }
         },
@@ -75,7 +124,13 @@
           "minItems": 1,
           "maxItems": 8,
           "uniqueItems": true,
-          "items": {"enum": ["manual", "periodic", "event"]}
+          "items": {
+            "enum": [
+              "manual",
+              "periodic",
+              "event"
+            ]
+          }
         },
         "artifacts": {
           "type": "array",
@@ -83,7 +138,13 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "version", "format", "ready", "reason"],
+            "required": [
+              "id",
+              "version",
+              "format",
+              "ready",
+              "reason"
+            ],
             "properties": {
               "id": {
                 "type": "string",
@@ -91,10 +152,23 @@
                 "minLength": 1,
                 "maxLength": 120
               },
-              "version": {"type": "string", "minLength": 1, "maxLength": 40},
-              "format": {"type": "string", "minLength": 1, "maxLength": 40},
-              "ready": {"type": "boolean"},
-              "reason": {"type": "string", "maxLength": 240}
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "format": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 240
+              }
             }
           }
         },
@@ -104,7 +178,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "granted"],
+            "required": [
+              "name",
+              "granted"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -112,16 +189,25 @@
                 "minLength": 3,
                 "maxLength": 160
               },
-              "granted": {"type": "boolean"}
+              "granted": {
+                "type": "boolean"
+              }
             }
           }
         },
-        "configurationSchema": {"type": "object", "maxProperties": 64},
+        "configurationSchema": {
+          "type": "object",
+          "maxProperties": 64
+        },
         "secretConfigurationKeys": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 120}
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
         }
       }
     }

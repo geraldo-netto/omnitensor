@@ -96,6 +96,7 @@ def plugin_inventory_entry(
     resolve_artifact: Callable[[str], ArtifactResolution],
     granted_permissions: Collection[str] = (),
     worker_state: str | None = None,
+    worker_detail: str | None = None,
 ) -> dict:
     """One plugin's capabilities, readiness, schema, and permission state."""
     declaration = plugin.manifest["plugin"]
@@ -108,6 +109,10 @@ def plugin_inventory_entry(
         "source": str(plugin.source),
         "distribution": plugin.distribution_name,
         "workerState": worker_state,
+        # Present only when the runtime has something to say: the applet's
+        # record is closed, so an always-present null would be a field an
+        # older applet rejects, taking the whole catalog down with it.
+        **({"workerDetail": worker_detail[:300]} if worker_detail else {}),
         "protocol": {
             "minimum": declaration["protocol"]["minimum"],
             "maximum": declaration["protocol"]["maximum"],
@@ -141,6 +146,7 @@ def build_plugin_inventory(
     resolve_artifact: Callable[[str], ArtifactResolution],
     granted_permissions: Callable[[str], Collection[str]] = lambda _plugin_id: (),
     worker_states: Callable[[str], str | None] = lambda _plugin_id: None,
+    worker_details: Callable[[str], str | None] = lambda _plugin_id: None,
     generated_at_ms: int,
 ) -> dict:
     """Build the contract-valid inventory document, in stable plugin order."""
@@ -153,6 +159,7 @@ def build_plugin_inventory(
                 resolve_artifact=resolve_artifact,
                 granted_permissions=granted_permissions(plugin.plugin_id),
                 worker_state=worker_states(plugin.plugin_id),
+                worker_detail=worker_details(plugin.plugin_id),
             )
             for plugin in sorted(plugins, key=lambda item: item.plugin_id)
         ],

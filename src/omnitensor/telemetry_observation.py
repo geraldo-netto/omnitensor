@@ -145,6 +145,14 @@ def describe_plugins(
     ):
         return no_inventory()
     states = {status.plugin_id: str(status.state) for status in retained.workers}
+    # Why a worker is not running. Dropping it made every failed launch read
+    # on the desktop as an unqualified provider, which sent people to install
+    # artifacts that were already installed and correct.
+    details = {
+        status.plugin_id: getattr(status, "detail", "")
+        for status in retained.workers
+        if getattr(status, "detail", "")
+    }
     granted_permissions = (
         plugin_runtime.granted_permissions
         if isinstance(plugin_runtime, PluginPermissionSource)
@@ -155,6 +163,7 @@ def describe_plugins(
         resolve_artifact=resolve_artifact,
         granted_permissions=granted_permissions,
         worker_states=states.get,
+        worker_details=details.get,
         generated_at_ms=clock_ms(),
     )
     return json.dumps(document, separators=(",", ":"))
