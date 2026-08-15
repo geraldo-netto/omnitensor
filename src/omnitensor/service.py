@@ -125,6 +125,12 @@ LOGGER = logging.getLogger(__name__)
 PUBLISH_INTERVAL_S = 2.0
 DISCOVERY_INTERVAL_S = 10.0
 GRANT_REFRESH_INTERVAL_S = 0.25
+# Artifact readiness re-reads and re-digests every declared artifact, which is
+# 0.25 ms for a small model and 25 ms at the 64 MiB ceiling — affordable
+# occasionally, not twice a second beside the snapshot. Thirty seconds is short
+# enough that installing an artifact shows up while someone is still looking
+# for it.
+PLUGIN_READINESS_INTERVAL_S = 30.0
 
 
 class OmniTensorService:
@@ -266,6 +272,7 @@ class OmniTensorService:
         )
         self._snapshot_retracted = False
         self._next_grant_refresh = 0.0
+        self._next_readiness_refresh = 0.0
         self._stopping = asyncio.Event()
 
     def _device_load(self, device, stats) -> float | None:
@@ -578,6 +585,7 @@ class OmniTensorService:
                     if self._snapshot_retracted:
                         LOGGER.info("Accelerator devices returned; publishing snapshots again")
                         self._snapshot_retracted = False
+                    await self._refresh_plugin_readiness()
                     snapshot = await run_off_loop(self._build_runtime_snapshot)
                     await run_off_loop(self._publisher_port.publish, snapshot)
                 elif not self._snapshot_retracted:
@@ -667,6 +675,46 @@ class OmniTensorService:
             plugin_snapshot,
             self.plugin_telemetry,
         )
+        await self._record_plugin_readiness()
+
+    async def _record_plugin_readiness(self) -> None:
+        """Record artifact readiness and worker health for every plugin.
+
+        Resolving an artifact re-reads and re-digests the file, so this is not
+        something the publish loop can do twice a second; it runs when the
+        plugin runtime changes and then on its own slow interval, which is what
+        `_refresh_plugin_readiness` is for.
+        """
+        snapshot = getattr(self._plugin_runtime, "snapshot", None)
+        if snapshot is None:
+            return
+        await run_off_loop(
+            observation.record_artifact_readiness,
+            snapshot,
+            self._resolve_plugin_artifact_id,
+            self.plugin_telemetry,
+        )
+        observation.record_worker_health(snapshot, self.plugin_telemetry)
+        self._next_readiness_refresh = time.monotonic() + PLUGIN_READINESS_INTERVAL_S
+
+    async def _refresh_plugin_readiness(self) -> None:
+        """Re-record readiness once the interval has passed.
+
+        Worker health is refreshed every time, because reading a state a
+        supervisor already holds costs nothing; artifacts are the expensive
+        half and wait for the interval.
+        """
+        snapshot = getattr(self._plugin_runtime, "snapshot", None)
+        if snapshot is None:
+            return
+        observation.record_worker_health(snapshot, self.plugin_telemetry)
+        if time.monotonic() < self._next_readiness_refresh:
+            return
+        await self._record_plugin_readiness()
+
+    def _resolve_plugin_artifact_id(self, artifact_id: str):
+        """Resolve a plugin's declared artifact by id, as the inventory does."""
+        return self._resolve_artifact(artifact_id)
 
     async def _stop_plugin_runtime(self) -> None:
         async with self._plugin_lifecycle_lock:
@@ -687,6 +735,7 @@ class OmniTensorService:
                 plugin_snapshot,
                 self.plugin_telemetry,
             )
+            await self._record_plugin_readiness()
         self._pending_device_profiles.clear()
 
 

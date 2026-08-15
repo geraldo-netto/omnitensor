@@ -9,10 +9,15 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 
 from .forecastresult import parse_forecast_reading
-from .inspection import build_plugin_inventory
+from .inspection import artifact_readiness, build_plugin_inventory
 from .plugins.secrets import SecretRedactor
 from .plugins.summaries import ResultSummaryRegistry, SummaryError
-from .plugins.telemetry import PluginTelemetryRegistry
+from .plugins.supervisor_diagnostics import WorkerState
+from .plugins.telemetry import (
+    ArtifactReadiness,
+    PluginTelemetryHealth,
+    PluginTelemetryRegistry,
+)
 from .ports import (
     PluginCatalogSnapshot,
     PluginPermissionSource,
@@ -217,20 +222,95 @@ def runtime_snapshot(
     )
 
 
+# A worker that cannot run is a fact about the plugin, and until it was
+# reported the only thing that ever moved a plugin off "initializing" was a job
+# finishing — so a provider whose worker never started looked identical to one
+# nobody had asked for anything yet.  Only the states that mean "this will not
+# serve a job" are mapped: starting and restarting are transient, and ready is
+# left to the job outcomes, which are the ones that can say healthy.
+WORKER_HEALTH = {
+    WorkerState.FAILED: PluginTelemetryHealth.UNAVAILABLE,
+    WorkerState.EXHAUSTED: PluginTelemetryHealth.UNAVAILABLE,
+    WorkerState.EXITED: PluginTelemetryHealth.STOPPED,
+    WorkerState.STOPPED: PluginTelemetryHealth.STOPPED,
+}
+# Why an artifact is not ready, in the vocabulary the telemetry contract has.
+# The store's own reasons are prose, so they are matched on the phrase it
+# writes rather than parsed.
+_REJECTED_REASONS = ("sha256 mismatch", "digest")
+_INCOMPATIBLE_REASONS = ("incompatible", "unsupported format", "format")
+
+
 def register_plugin_telemetry(snapshot, telemetry: PluginTelemetryRegistry) -> None:
+    """Register every plugin and record what its worker is doing."""
     if not isinstance(snapshot, PluginRuntimeSnapshot) or not isinstance(
         snapshot.catalog, PluginCatalogSnapshot
     ):
         return
     for plugin in snapshot.catalog.plugins:
         telemetry.register(plugin.plugin_id)
+    record_worker_health(snapshot, telemetry)
+
+
+def record_worker_health(snapshot, telemetry: PluginTelemetryRegistry) -> None:
+    """Set health from worker state for the workers that cannot serve."""
+    if not isinstance(snapshot, PluginRuntimeSnapshot):
+        return
+    for status in getattr(snapshot, "workers", ()):
+        health = WORKER_HEALTH.get(getattr(status, "state", None))
+        if health is None:
+            continue
+        try:
+            telemetry.set_health(status.plugin_id, health)
+        except (KeyError, ValueError):
+            # A worker for a plugin the registry does not know is not a reason
+            # to stop publishing telemetry for the ones it does.
+            continue
+
+
+def artifact_readiness_state(readiness) -> ArtifactReadiness:
+    """One plugin's artifact readiness, from every artifact it declares."""
+    unready = [item for item in readiness if not item.ready]
+    if not unready:
+        # A plugin that declares no artifacts has nothing missing, which is a
+        # different answer from "not checked".
+        return ArtifactReadiness.READY
+    reasons = " ".join(item.reason.lower() for item in unready)
+    if any(phrase in reasons for phrase in _REJECTED_REASONS):
+        return ArtifactReadiness.REJECTED
+    if any(phrase in reasons for phrase in _INCOMPATIBLE_REASONS):
+        return ArtifactReadiness.INCOMPATIBLE
+    return ArtifactReadiness.MISSING
+
+
+def record_artifact_readiness(snapshot, resolve_artifact, telemetry) -> None:
+    """Report whether each plugin's artifacts resolve.
+
+    The inventory has always computed this for the desktop; the telemetry field
+    beside it was published and never filled in, so every plugin reported
+    "unknown" forever.  This is the same computation, recorded where a snapshot
+    reader can see it.
+    """
+    if not isinstance(snapshot, PluginRuntimeSnapshot) or not isinstance(
+        snapshot.catalog, PluginCatalogSnapshot
+    ):
+        return
+    for plugin in snapshot.catalog.plugins:
+        try:
+            state = artifact_readiness_state(artifact_readiness(plugin, resolve_artifact))
+            telemetry.set_artifact_readiness(plugin.plugin_id, state)
+        except (KeyError, ValueError):
+            continue
 
 
 __all__ = [
     "ResultSummaryObserver",
     "TelemetryJobObserver",
+    "artifact_readiness_state",
     "describe_plugins",
     "device_load",
+    "record_artifact_readiness",
+    "record_worker_health",
     "register_plugin_telemetry",
     "runtime_snapshot",
 ]
