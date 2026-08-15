@@ -13,48 +13,7 @@
       "gpu"
     ],
     "minimumDevices": 1,
-    "model": {
-      "id": "retinexformer-lol-v1",
-      "version": "1.0.0",
-      "format": "ncnn",
-      "fullyQuantized": false,
-      "minimumCompilerVersion": "validated-release",
-      "minimumRuntimeVersion": "validated-release",
-      "tensorContract": {
-        "inputs": [
-          {
-            "shape": [
-              1,
-              3,
-              256,
-              256
-            ],
-            "dtype": "float32",
-            "layout": "NCHW",
-            "preprocess": {
-              "channelOrder": "RGB",
-              "mean": [
-                0,
-                0,
-                0
-              ],
-              "scale": [
-                0.00392156862745098,
-                0.00392156862745098,
-                0.00392156862745098
-              ],
-              "resize": {
-                "filter": "bicubic",
-                "fit": "exact"
-              }
-            }
-          }
-        ]
-      },
-      "outputContract": {
-        "kind": "raw"
-      }
-    }
+    "model": null
   },
   "ui": {
     "title": "Low-light enhancement",

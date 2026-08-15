@@ -65,6 +65,7 @@ def forecast_manifest(plugin_id: str) -> dict:
         "id": "local-forecast-gpu",
         "version": "1.0.0",
         "format": "ncnn",
+        "sha256": "b" * 64,
         "fullyQuantized": False,
         "minimumCompilerVersion": "0.0.0",
         "minimumRuntimeVersion": "0.0.0",

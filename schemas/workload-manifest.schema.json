@@ -533,6 +533,7 @@
         "id",
         "version",
         "format",
+        "sha256",
         "fullyQuantized",
         "minimumCompilerVersion",
         "minimumRuntimeVersion"
@@ -572,7 +573,7 @@
           "maxLength": 80
         },
         "sha256": {
-          "description": "Digest of the exact artifact this profile may run. Optional for compatibility with manifests written before dispatch verified it; when absent the runtime can only trust the digest recorded when the artifact was installed.",
+          "description": "Which file this model is. The runtime refuses a model without one, because it cannot tell which file the manifest means, so a manifest that omits it declares a profile that can never run.",
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
         },
@@ -762,29 +763,86 @@
           "description": "Immutable source report and task-semantics identity shared by every native variant of a locally produced numeric model.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["version", "profileId", "recipe", "reportSha256", "taskSemanticsSha256"],
+          "required": [
+            "version",
+            "profileId",
+            "recipe",
+            "reportSha256",
+            "taskSemanticsSha256"
+          ],
           "properties": {
-            "version": {"const": 1},
-            "profileId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 80},
-            "recipe": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 80},
-            "reportSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-            "taskSemanticsSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+            "version": {
+              "const": 1
+            },
+            "profileId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "maxLength": 80
+            },
+            "recipe": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "maxLength": 80
+            },
+            "reportSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "taskSemanticsSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
           }
         },
         "nativeEvidence": {
           "description": "Target-specific compiler and portable/native parity evidence. Named-device acceptance is deliberately false until a profile consumer supplies separate hardware evidence.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["portableSha256", "nativeSha256", "reportSha256", "samples", "maximumAbsoluteError", "tolerance", "compilerReportSha256", "namedDeviceAccepted"],
+          "required": [
+            "portableSha256",
+            "nativeSha256",
+            "reportSha256",
+            "samples",
+            "maximumAbsoluteError",
+            "tolerance",
+            "compilerReportSha256",
+            "namedDeviceAccepted"
+          ],
           "properties": {
-            "portableSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-            "nativeSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-            "reportSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-            "samples": {"type": "integer", "minimum": 1},
-            "maximumAbsoluteError": {"type": "number", "minimum": 0},
-            "tolerance": {"type": "number", "exclusiveMinimum": 0},
-            "compilerReportSha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
-            "namedDeviceAccepted": {"const": false}
+            "portableSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "nativeSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "reportSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "samples": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maximumAbsoluteError": {
+              "type": "number",
+              "minimum": 0
+            },
+            "tolerance": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "compilerReportSha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "namedDeviceAccepted": {
+              "const": false
+            }
           }
         },
         "outputContract": {

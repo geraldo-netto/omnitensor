@@ -1835,6 +1835,7 @@ def test_inventory_readiness_uses_the_declared_digest_like_dispatch_does(tmp_pat
         "id": "sample-model",
         "version": "1.2.3",
         "format": "ncnn",
+        "sha256": "a" * 64,
         "fullyQuantized": True,
         "minimumCompilerVersion": "1.0.0",
         "minimumRuntimeVersion": "1.0.0",
