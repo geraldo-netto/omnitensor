@@ -10,11 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .callers import CallerIdentityResolver
-from .dbus_transport import DbusControlTransport
 from .discovery import Device, DiscoveryPaths, detect_devices, device_utilization
 from .ports import ControlTransport, DeviceDiscovery, SnapshotPublisher
 from .snapshot import remove_snapshot, write_snapshot
+from .socket_transport import SocketControlTransport
 
 
 class SysfsDeviceDiscovery:
@@ -60,7 +59,6 @@ class HostPorts:
 def build_host_ports(
     *,
     snapshot_path: Path,
-    callers: CallerIdentityResolver,
     discovery_paths: DiscoveryPaths | None = None,
     accelerator_device_ids: dict[str, str] | None = None,
     discovery: DeviceDiscovery | None = None,
@@ -72,5 +70,5 @@ def build_host_ports(
         discovery=discovery
         or SysfsDeviceDiscovery(discovery_paths, accelerator_device_ids),
         publisher=publisher or FileSnapshotPublisher(snapshot_path),
-        transport=transport or DbusControlTransport(callers=callers),
+        transport=transport or SocketControlTransport(),
     )

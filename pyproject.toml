@@ -23,7 +23,7 @@ dependencies = [
     "chardet>=5.2,<6",
     "cryptography>=42.0",
     "jsonschema>=4.21",
-    "dbus-fast>=2.21",
+    "msgpack>=1.0",
 ]
 
 [project.optional-dependencies]

@@ -12,12 +12,12 @@
       "const": 1
     },
     "methods": {
-      "description": "Every method the bus interface exports, including this one.",
+      "description": "Every method the control socket dispatches, including this one.",
       "type": "array",
       "minItems": 1,
       "maxItems": 32,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]{0,63}$"}
+      "items": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"}
     },
     "schemas": {
       "description": "Version of each named wire contract this service accepts and emits. A name absent here is a document this service does not speak.",

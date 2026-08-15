@@ -36,7 +36,7 @@ ROOT = Path(__file__).parents[1]
 CORPUS = ROOT / "evaluation-corpora/selected-text-v1.json"
 
 
-def test_acceptance_collector_imports_canonical_dbus_coordinates():
+def test_acceptance_collector_imports_the_canonical_control_client():
     source = (ROOT / "scripts/collect-selected-text-acceptance.py").read_text(
         encoding="utf-8"
     )
@@ -44,7 +44,7 @@ def test_acceptance_collector_imports_canonical_dbus_coordinates():
     imports = {
         alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "omnitensor.dbus_transport"
+        if isinstance(node, ast.ImportFrom) and node.module == "omnitensor.socket_transport"
         for alias in node.names
     }
     rebound = {
@@ -60,8 +60,8 @@ def test_acceptance_collector_imports_canonical_dbus_coordinates():
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant)
-        and node.value
-        in {"org.cinnamon.OmniTensor1", "/org/cinnamon/OmniTensor1"}
+        and isinstance(node.value, str)
+        and ("control.sock" in node.value or "OMNITENSOR_CONTROL_SOCKET" in node.value)
     }
     acceptance_imports = {
         alias.name
@@ -79,8 +79,9 @@ def test_acceptance_collector_imports_canonical_dbus_coordinates():
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
 
-    assert imports >= {"BUS_NAME", "OBJECT_PATH"}
-    assert rebound.isdisjoint({"BUS_NAME", "OBJECT_PATH"})
+    assert imports >= {"call_control"}
+    assert rebound.isdisjoint({"call_control"})
+    # The socket path is owned by socket_transport; a copy here could drift.
     assert copied_coordinates == set()
     assert "load_selected_text_worker_load_receipt" in acceptance_imports
     assert "_model" not in functions

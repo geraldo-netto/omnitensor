@@ -27,14 +27,12 @@ LEGACY_RUNNER_MODULE = "omnitensor.training.runner"
 def test_runner_facade_preserves_extracted_contract_and_client_identity():
     assert runner.ForecastRunError is forecast_contracts.ForecastRunError
     assert runner.ForecastClient is forecast_contracts.ForecastClient
-    assert runner.DbusForecastClient is forecast_client.DbusForecastClient
-    assert runner.BUS_NAME == forecast_client.BUS_NAME
-    assert runner.OBJECT_PATH == forecast_client.OBJECT_PATH
+    assert runner.SocketForecastClient is forecast_client.SocketForecastClient
 
     for owner in (
         forecast_contracts.ForecastRunError,
         forecast_contracts.ForecastClient,
-        forecast_client.DbusForecastClient,
+        forecast_client.SocketForecastClient,
     ):
         assert owner.__module__ == LEGACY_RUNNER_MODULE
         assert pickle.loads(pickle.dumps(owner)) is owner

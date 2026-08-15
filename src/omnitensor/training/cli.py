@@ -38,8 +38,8 @@ from .hardware import (
 from .installation import available_targets, install_training
 from .network import NORMAL_ONLY_CONFIRMATION, NetworkAnomalyTrainer, load_network_replay
 from .runner import (
-    DbusForecastClient,
     ForecastRunError,
+    SocketForecastClient,
     TrustedForecastRunner,
     load_forecast_binding,
 )
@@ -174,7 +174,7 @@ def forecast_main(argv: list[str] | None = None) -> int:
         argv,
         dependencies=ForecastCliDependencies(
             binding_loader=load_forecast_binding,
-            client_type=DbusForecastClient,
+            client_type=SocketForecastClient,
             runner_type=TrustedForecastRunner,
             recorder_type=TelemetryRecorder,
             reading_parser=parse_forecast_reading,

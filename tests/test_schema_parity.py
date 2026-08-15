@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 
 SHARED_SCHEMAS = (
+    "control-reply",
+    "control-request",
     "runtime-acknowledgement",
     "runtime-command",
     "runtime-contract",

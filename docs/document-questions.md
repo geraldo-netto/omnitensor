@@ -74,7 +74,7 @@ unretrieved, duplicated, or changed citations fail the whole job.
 Cancellation is checked before extraction, retrieval, and generation. Progress
 contains only `extract`, `retrieve`, `answer`, and `terminal`. Private fragments
 are discarded after success, refusal, cancellation, or exception. No result is
-written into the public runtime snapshot; the submitting D-Bus owner retrieves
+written into the public runtime snapshot; the submitting owner retrieves
 it through the owner-scoped job-result API.
 
 ## Application behavior
@@ -107,7 +107,8 @@ The 13 August 2026 archived run used BGE-small/ncnn plus
 Qwen3-8B-Q4_K_M/llama.cpp on the named
 `AMD Radeon RX 6600 XT (RADV NAVI23)`. llama.cpp reported all 37 model layers on
 Vulkan with CPU fallback forbidden and Q8_0 key/value caches. The six cases ran
-through the installed session D-Bus service and recorded 1.0 retrieval recall,
+through the installed service's control API of the day (then session D-Bus,
+since replaced by the control socket) and recorded 1.0 retrieval recall,
 1.0 grounded-term recall, 1.0 citation integrity, 21,907 ms p95 end-to-end
 latency, and 7,637,553,152 peak observed GPU bytes. Regression and integration
 probes require malicious and mutated documents to fail closed, revoked grants

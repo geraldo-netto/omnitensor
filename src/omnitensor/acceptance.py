@@ -36,9 +36,9 @@ from .acceptance_cli import (
     load_applet_checksums,
     main,
 )
-from .acceptance_contracts import BusProbe, Check, InstallationReport, ServiceProbe
+from .acceptance_contracts import Check, ControlProbe, InstallationReport, ServiceProbe
 from .acceptance_probes import (
-    DbusApplyCommandProbe,
+    SocketApplyCommandProbe,
     SystemdUserServiceProbe,
     _executor_for,
     _run_command,
@@ -80,7 +80,7 @@ __all__ = [
     "Check",
     "InstallationReport",
     "ServiceProbe",
-    "BusProbe",
+    "ControlProbe",
     "check_executable",
     "check_service",
     "check_schemas",
@@ -97,7 +97,7 @@ __all__ = [
     "check_backends",
     "verify_installation",
     "SystemdUserServiceProbe",
-    "DbusApplyCommandProbe",
+    "SocketApplyCommandProbe",
     "load_applet_checksums",
     "build_default_report",
     "main",

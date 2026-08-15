@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect real D-Bus selected-text observations from one installed GPU worker."""
+"""Collect real control-socket selected-text observations from one installed GPU worker."""
 
 from __future__ import annotations
 
@@ -9,21 +9,18 @@ import json
 import time
 from pathlib import Path
 
-from dbus_fast import BusType
-from dbus_fast.aio import MessageBus
-
 from omnitensor.atomicio import write_json_atomic
-from omnitensor.dbus_transport import BUS_NAME, OBJECT_PATH
 from omnitensor.plugins.selected_text_acceptance import (
     load_selected_text_corpus,
     load_selected_text_worker_load_receipt,
 )
 from omnitensor.preparation import file_digest
+from omnitensor.socket_transport import call_control
 
 
 def _arguments(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
-        description="Run the frozen selected-text corpus through the installed D-Bus service"
+        description="Run the frozen selected-text corpus through the installed service"
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--corpus", type=Path)
@@ -34,16 +31,15 @@ def _arguments(argv: list[str] | None = None):
     return parser.parse_args(argv)
 
 
-async def _terminal(interface, job_id: str, timeout: float, prefix: str):
+async def _terminal(call, job_id: str, timeout: float, prefix: str):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     poll = 0
     while loop.time() < deadline:
-        request = json.dumps(
+        result = await call(
+            "get-job-result",
             {"version": 1, "requestId": f"{prefix}-result-{poll}", "jobId": job_id},
-            separators=(",", ":"),
         )
-        result = json.loads(await interface.call_get_job_result(request))
         if result["state"] in {"succeeded", "failed", "cancelled", "unknown"}:
             return result
         poll += 1
@@ -51,68 +47,55 @@ async def _terminal(interface, job_id: str, timeout: float, prefix: str):
     raise RuntimeError(f"job {job_id} did not terminate within {timeout} seconds")
 
 
-async def _run_case(interface, case, index: int, timeout: float):
+async def _run_case(call, case, index: int, timeout: float):
     payload = {"selection": case.selection, "operation": case.operation}
     if case.language is not None:
         payload["language"] = case.language
     request_id = f"selected-acceptance-{index}"
     started = time.monotonic_ns()
-    acknowledgement = json.loads(
-        await interface.call_submit_job(
-            json.dumps(
-                {
-                    "version": 1,
-                    "requestId": request_id,
-                    "workloadId": "selected-text-tools",
-                    "payload": payload,
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-        )
+    acknowledgement = await call(
+        "submit-job",
+        {
+            "version": 1,
+            "requestId": request_id,
+            "workloadId": "selected-text-tools",
+            "payload": payload,
+        },
     )
     if acknowledgement["status"] != "accepted" or not acknowledgement["jobId"]:
         raise RuntimeError(f"{case.case_id} was not accepted: {acknowledgement}")
-    terminal = await _terminal(interface, acknowledgement["jobId"], timeout, request_id)
+    terminal = await _terminal(call, acknowledgement["jobId"], timeout, request_id)
     latency_ms = (time.monotonic_ns() - started) // 1_000_000
     if terminal["state"] != "succeeded" or not isinstance(terminal.get("output"), dict):
         raise RuntimeError(f"{case.case_id} failed: {terminal}")
     return {"caseId": case.case_id, "result": terminal["output"], "latencyMs": latency_ms}
 
 
-async def _cancellation_latency(interface, timeout: float) -> int:
+async def _cancellation_latency(call, timeout: float) -> int:
     request_id = "selected-acceptance-cancel"
-    acknowledgement = json.loads(
-        await interface.call_submit_job(
-            json.dumps(
-                {
-                    "version": 1,
-                    "requestId": request_id,
-                    "workloadId": "selected-text-tools",
-                    "payload": {
-                        "selection": "Explain this checksum behavior. " * 900,
-                        "operation": "explain",
-                    },
-                },
-                separators=(",", ":"),
-            )
-        )
+    acknowledgement = await call(
+        "submit-job",
+        {
+            "version": 1,
+            "requestId": request_id,
+            "workloadId": "selected-text-tools",
+            "payload": {
+                "selection": "Explain this checksum behavior. " * 900,
+                "operation": "explain",
+            },
+        },
     )
     job_id = acknowledgement.get("jobId")
     if acknowledgement.get("status") != "accepted" or not job_id:
         raise RuntimeError(f"cancellation probe was not accepted: {acknowledgement}")
     started = time.monotonic_ns()
-    cancelled = json.loads(
-        await interface.call_cancel_job(
-            json.dumps(
-                {"version": 1, "requestId": f"{request_id}-request", "jobId": job_id},
-                separators=(",", ":"),
-            )
-        )
+    cancelled = await call(
+        "cancel-job",
+        {"version": 1, "requestId": f"{request_id}-request", "jobId": job_id},
     )
     if cancelled["status"] not in {"cancelled", "accepted"}:
         raise RuntimeError(f"cancellation was refused: {cancelled}")
-    terminal = await _terminal(interface, job_id, timeout, request_id)
+    terminal = await _terminal(call, job_id, timeout, request_id)
     if terminal["state"] != "cancelled":
         raise RuntimeError(f"cancellation did not reach a cancelled terminal: {terminal}")
     return (time.monotonic_ns() - started) // 1_000_000
@@ -136,26 +119,19 @@ def _require_ready(inventory):
 
 
 async def _collect(arguments):
-    bus = await MessageBus(bus_type=BusType.SESSION).connect()
-    try:
-        introspection = await bus.introspect(BUS_NAME, OBJECT_PATH)
-        proxy = bus.get_proxy_object(BUS_NAME, OBJECT_PATH, introspection)
-        interface = proxy.get_interface(BUS_NAME)
-        _require_ready(json.loads(await interface.call_describe_plugins()))
-        receipt = load_selected_text_worker_load_receipt(arguments.worker_load_receipt)
-        if file_digest(arguments.qwen_model) != receipt.primary.model_sha256:
-            raise RuntimeError("Qwen model path differs from the worker load receipt")
-        if file_digest(arguments.hebrew_model) != receipt.hebrew.model_sha256:
-            raise RuntimeError("Hebrew model path differs from the worker load receipt")
-        corpus = load_selected_text_corpus(arguments.corpus)
-        observations = []
-        for index, case in enumerate(corpus.cases):
-            observations.append(
-                await _run_case(interface, case, index, arguments.timeout_seconds)
-            )
-        cancellation = await _cancellation_latency(interface, arguments.timeout_seconds)
-    finally:
-        bus.disconnect()
+    _require_ready(await call_control("describe-plugins", {}))
+    receipt = load_selected_text_worker_load_receipt(arguments.worker_load_receipt)
+    if file_digest(arguments.qwen_model) != receipt.primary.model_sha256:
+        raise RuntimeError("Qwen model path differs from the worker load receipt")
+    if file_digest(arguments.hebrew_model) != receipt.hebrew.model_sha256:
+        raise RuntimeError("Hebrew model path differs from the worker load receipt")
+    corpus = load_selected_text_corpus(arguments.corpus)
+    observations = []
+    for index, case in enumerate(corpus.cases):
+        observations.append(
+            await _run_case(call_control, case, index, arguments.timeout_seconds)
+        )
+    cancellation = await _cancellation_latency(call_control, arguments.timeout_seconds)
     public = json.dumps(observations, ensure_ascii=False)
     route_preserved = all(
         observation["result"]["providerId"] == case.expected_provider_id

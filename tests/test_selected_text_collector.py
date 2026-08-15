@@ -73,40 +73,28 @@ def _inventory() -> str:
     )
 
 
-class _Interface:
-    async def call_describe_plugins(self) -> str:
-        return _inventory()
+class _Control:
+    """A fake ``call_control`` that answers the inventory handshake."""
 
-
-class _Bus:
     def __init__(self) -> None:
-        self.disconnected = False
+        self.calls = []
 
-    async def introspect(self, _name, _path):
-        return object()
-
-    def get_proxy_object(self, _name, _path, _introspection):
-        return SimpleNamespace(get_interface=lambda _interface: _Interface())
-
-    def disconnect(self) -> None:
-        self.disconnected = True
+    async def __call__(self, method, params):
+        self.calls.append((method, params))
+        assert method == "describe-plugins"
+        return json.loads(_inventory())
 
 
-def _install_bus(monkeypatch, collector):
-    bus = _Bus()
-
-    class Connector:
-        async def connect(self):
-            return bus
-
-    monkeypatch.setattr(collector, "MessageBus", lambda **_kwargs: Connector())
-    return bus
+def _install_control(monkeypatch, collector):
+    control = _Control()
+    monkeypatch.setattr(collector, "call_control", control)
+    return control
 
 
 def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch):
     collector = _collector_module()
     receipt = _receipt()
-    bus = _install_bus(monkeypatch, collector)
+    control = _install_control(monkeypatch, collector)
     case = SimpleNamespace(case_id="case-1", expected_provider_id="qwen3-8b-q4-k-m")
     corpus = SimpleNamespace(sha256="c" * 64, cases=(case,))
 
@@ -148,14 +136,14 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
         "privateFragmentsDiscarded": True,
         "defaultRoutePreserved": True,
     }
-    assert bus.disconnected is True
+    assert [method for method, _params in control.calls] == ["describe-plugins"]
 
 
 def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(
     tmp_path, monkeypatch
 ):
     collector = _collector_module()
-    bus = _install_bus(monkeypatch, collector)
+    control = _install_control(monkeypatch, collector)
     writes = []
 
     def refuse_receipt(_path):
@@ -194,7 +182,7 @@ def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(
 
     assert writes == []
     assert not (tmp_path / "evidence.json").exists()
-    assert bus.disconnected is True
+    assert [method for method, _params in control.calls] == ["describe-plugins"]
 
 
 @pytest.mark.parametrize(
@@ -209,7 +197,7 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
 ):
     collector = _collector_module()
     receipt = _receipt()
-    bus = _install_bus(monkeypatch, collector)
+    control = _install_control(monkeypatch, collector)
     monkeypatch.setattr(
         collector, "load_selected_text_worker_load_receipt", lambda _path: receipt
     )
@@ -238,7 +226,7 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
     with pytest.raises(RuntimeError, match=detail):
         asyncio.run(collector._collect(arguments))
 
-    assert bus.disconnected is True
+    assert [method for method, _params in control.calls] == ["describe-plugins"]
 
 
 def test_collector_main_publishes_only_the_completed_document(tmp_path, monkeypatch, capsys):

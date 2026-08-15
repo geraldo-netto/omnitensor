@@ -100,7 +100,7 @@ def test_generation_guide_keeps_models_and_transports_replaceable():
     for boundary in (
         "task- and provider-neutral",
         "only opaque, bounded content references",
-        "must not enter the public runtime snapshot, D-Bus payloads, logs",
+        "must not enter the public runtime snapshot, control payloads, logs",
         "outside the core service process",
         "default preference is exactly `gpu`",
         "only when NPU admission or model loading fails before generation",
@@ -117,7 +117,7 @@ def test_event_result_guide_keeps_evidence_private_and_writes_confirmed():
     assert "[grounded event result\ncontract](event-results.md)" in generation
     for boundary in (
         "opaque `private:` source",
-        "Public snapshots, logs, and general D-Bus",
+        "Public snapshots, logs, and general control",
         "explicitly `succeeded`, `partial`, or `refused`",
         "offset that does not describe that local wall time",
         "cannot mark its own output confirmed or rejected",
@@ -373,7 +373,7 @@ def test_installation_guide_documents_every_verifier_check():
         "workloads",
         "discovery",
         "isolation",
-        "dbus",
+        "control",
         "snapshot",
         "applet",
     ):

@@ -47,7 +47,8 @@ backward ranges, partial matches, and multiple matches. Ambiguous or incomplete
 text gets neither fallback and retains the existing refusal path.
 
 The 13 August 2026 installed-provider recheck used runtime 0.2.0 through the
-session D-Bus API on the qualified RX 6600 XT. The frozen English event fixture
+control API of the day (then session D-Bus, since replaced by the control
+socket) on the qualified RX 6600 XT. The frozen English event fixture
 completed in 16.7 seconds with one pending candidate, exact title, start, end,
 timezone, location, and canonical full-fragment evidence hashes. Its public job
 result contained no raw fragment field or absolute source path.
@@ -122,7 +123,7 @@ ncnn export is not interchangeable with this graph.
 | The pinned Qwen3-8B Q4_K_M GGUF | One digest-locked primary generation artifact shared by all four workload providers |
 | The pinned DictaLM2.0 7B Instruct Q4_K_M GGUF | Explicit Hebrew translation for selected-text tools only |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
-| A user D-Bus session | The OmniTensor control and job-result surface |
+| A user runtime directory (`$XDG_RUNTIME_DIR`) | The OmniTensor control socket and job-result surface |
 
 The worker supports the repository's x86_64 and aarch64 seccomp tables, but the
 receipt shipped in this provider release records one x86_64 native runtime.
@@ -136,7 +137,7 @@ tested; do not turn off seccomp merely to make a model load.
 | --- | --- |
 | `pymupdf>=1.24` (`omnitensor[events]`) | PDF and image extraction for event extraction, Ask selected files, and file organizer |
 | Tesseract plus the required language packs | OCR through the optional PyMuPDF adapter |
-| Cinnamon XPU WLM | Desktop discovery and actions; D-Bus clients can use the workloads without the applet |
+| Cinnamon XPU WLM | Desktop discovery and actions; control-socket clients can use the workloads without the applet |
 | A separately qualified NPU provider | An explicit NPU route; the Vulkan wheels in this guide do not provide one |
 
 Plain UTF-8 text and Markdown do not require PyMuPDF. Event extraction also
@@ -375,23 +376,21 @@ systemctl --user restart omnitensor.service
 systemctl --user is-active omnitensor.service
 "$OMNI_SERVICE/omnitensor-verify-install"
 
-gdbus call --session \
-  --dest org.cinnamon.OmniTensor1 \
-  --object-path /org/cinnamon/OmniTensor1 \
-  --method org.cinnamon.OmniTensor1.DescribePlugins
+python3 -c 'import asyncio, json; from omnitensor.socket_transport import call_control; \
+  print(json.dumps(asyncio.run(call_control("describe-plugins", {})), indent=2))'
 
 journalctl --user --unit omnitensor.service --since '-5 minutes' \
   --no-pager
 ```
 
 `systemctl is-active` becomes true before model-backed workers finish their
-bounded startup. `omnitensor-verify-install` therefore retries transient D-Bus
+bounded startup. `omnitensor-verify-install` therefore retries transient control-socket
 startup errors for up to 30 seconds; a persistent transport or contract error
 still fails the installation.
 The 12 August 2026 live recheck started the verifier immediately after service
 restart and passed every check after 12 seconds.
 
-For each of the four IDs, `DescribePlugins` must report:
+For each of the four IDs, `describe-plugins` must report:
 
 - `source: "external"`, the expected distribution, and `workerState: "ready"`;
 - negotiated `execute`, `cancel`, `health`, and `progress` capabilities;
@@ -444,8 +443,8 @@ OMNI_SELECTED_LOAD="$OMNI_STATE/plugin-state/selected-text-tools/selected-text-w
   --output /absolute/path/to/selected-text-evidence.json
 ```
 
-The private receipt is usable only while D-Bus reports the current
-selected-text worker ready. The worker writes it after both actual model loads
+The private receipt is usable only while `describe-plugins` reports the
+current selected-text worker ready. The worker writes it after both actual model loads
 prove the exact runtime, named GPU, full 37/37 and 33/33 Vulkan layer counts,
 and no CPU fallback. Startup clears stale bytes; startup failure and normal
 worker stop remove them. If `OMNITENSOR_STATE_PATH` is customized, locate
@@ -483,7 +482,7 @@ undeclared quality metrics for the other tasks.
 
 - Source text, selections, prompts, citations, model replies, and absolute
   paths never enter the public runtime snapshot. Job results remain private to
-  the submitting D-Bus owner.
+  the submitting owner (the connection's peer uid).
 - Files and clipboard contents are admitted only after an explicit action and
   the matching live grant. No workflow watches a directory or clipboard.
 - The worker sees only verified artifact directories, brokered selected-input

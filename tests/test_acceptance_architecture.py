@@ -17,52 +17,8 @@ import omnitensor.acceptance_contracts as contracts
 import omnitensor.acceptance_probes as probes
 
 
-class _DbusInterface:
-    def __init__(self, trace):
-        self.trace = trace
-
-    async def call_apply_command(self, text):
-        self.trace.append(("call", text))
-        return "reply"
-
-
-class _DbusProxy:
-    def __init__(self, trace):
-        self.trace = trace
-
-    def get_interface(self, name):
-        self.trace.append(("interface", name))
-        return _DbusInterface(self.trace)
-
-
-class _Dbus:
-    def __init__(self, trace, fail, disconnect_error=None):
-        self.trace = trace
-        self.fail = fail
-        self.disconnect_error = disconnect_error
-
-    async def connect(self):
-        self.trace.append("connect")
-        return self
-
-    async def introspect(self, name, path):
-        self.trace.append(("introspect", name, path))
-        if self.fail:
-            raise ConnectionRefusedError("starting")
-        return object()
-
-    def get_proxy_object(self, name, path, introspection):
-        self.trace.append(("proxy", name, path, introspection is not None))
-        return _DbusProxy(self.trace)
-
-    def disconnect(self):
-        self.trace.append("disconnect")
-        if self.disconnect_error is not None:
-            raise self.disconnect_error
-
-
 def test_facade_exports_the_exact_owner_objects():
-    contract_names = ("Check", "InstallationReport", "ServiceProbe", "BusProbe")
+    contract_names = ("Check", "InstallationReport", "ServiceProbe", "ControlProbe")
     check_names = (
         "REQUIRED_SCHEMAS",
         "DEFAULT_SNAPSHOT_MAX_AGE_MS",
@@ -84,7 +40,7 @@ def test_facade_exports_the_exact_owner_objects():
     )
     probe_names = (
         "SystemdUserServiceProbe",
-        "DbusApplyCommandProbe",
+        "SocketApplyCommandProbe",
         "_executor_for",
         "_runtime_verdict",
         "_run_command",
@@ -113,7 +69,7 @@ def test_moved_values_keep_legacy_repr_and_pickle_globals():
     assert type(outcome).__module__ == "omnitensor.acceptance"
     assert type(report).__module__ == "omnitensor.acceptance"
     assert facade.SystemdUserServiceProbe.__module__ == "omnitensor.acceptance"
-    assert facade.DbusApplyCommandProbe.__module__ == "omnitensor.acceptance"
+    assert facade.SocketApplyCommandProbe.__module__ == "omnitensor.acceptance"
     assert pickle.loads(pickle.dumps(outcome)) == outcome
     assert pickle.loads(pickle.dumps(report)) == report
 
@@ -218,28 +174,7 @@ def test_systemd_default_runner_resolves_the_facade_at_construction(monkeypatch)
     assert calls == [["systemctl", "--user", "is-active", "omnitensor.service"]]
 
 
-def test_dbus_probe_disconnects_failed_and_successful_attempts(monkeypatch):
-    trace = []
-    buses = iter((_Dbus(trace, True), _Dbus(trace, False)))
-    monkeypatch.setitem(
-        sys.modules,
-        "dbus_fast",
-        SimpleNamespace(BusType=SimpleNamespace(SESSION="session")),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "dbus_fast.aio",
-        SimpleNamespace(MessageBus=lambda **_kwargs: next(buses)),
-    )
-
-    probe = probes.DbusApplyCommandProbe(timeout_s=1, retry_interval_s=0)
-    assert probe.apply_command("not-json") == "reply"
-    assert trace.count("connect") == 2
-    assert trace.count("disconnect") == 2
-    assert ("call", "not-json") in trace
-
-
-def test_dbus_probe_exhaustion_preserves_last_error_and_cancellation_is_not_retried():
+def test_socket_probe_exhaustion_preserves_last_error_and_cancellation_is_not_retried():
     failure = ConnectionRefusedError("still starting")
     attempts = []
 
@@ -248,7 +183,7 @@ def test_dbus_probe_exhaustion_preserves_last_error_and_cancellation_is_not_retr
         raise failure
 
     with pytest.raises(ConnectionRefusedError) as raised:
-        probes.DbusApplyCommandProbe(
+        probes.SocketApplyCommandProbe(
             timeout_s=0.01,
             retry_interval_s=0,
             caller=failing,
@@ -263,34 +198,8 @@ def test_dbus_probe_exhaustion_preserves_last_error_and_cancellation_is_not_retr
         raise asyncio.CancelledError
 
     with pytest.raises(asyncio.CancelledError):
-        probes.DbusApplyCommandProbe(caller=cancelled).apply_command("not-json")
+        probes.SocketApplyCommandProbe(caller=cancelled).apply_command("not-json")
     assert cancelled_attempts == ["not-json"]
-
-
-def test_dbus_disconnect_failure_overrides_a_reply_and_is_retried(monkeypatch):
-    trace = []
-    failure = RuntimeError("disconnect failed")
-    monkeypatch.setitem(
-        sys.modules,
-        "dbus_fast",
-        SimpleNamespace(BusType=SimpleNamespace(SESSION="session")),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "dbus_fast.aio",
-        SimpleNamespace(
-            MessageBus=lambda **_kwargs: _Dbus(
-                trace, False, disconnect_error=failure
-            )
-        ),
-    )
-
-    with pytest.raises(RuntimeError) as raised:
-        probes.DbusApplyCommandProbe(
-            timeout_s=0.01, retry_interval_s=0
-        ).apply_command("not-json")
-    assert raised.value is failure
-    assert trace.count("disconnect") > 1
 
 
 def test_cli_facade_builder_seam_preserves_arguments_and_exact_output(

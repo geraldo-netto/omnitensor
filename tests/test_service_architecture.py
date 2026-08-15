@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from dbus_fast import BusType, RequestNameReply
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -22,9 +21,7 @@ from omnitensor import (
     service,
     telemetry_observation,
 )
-from omnitensor import dbus_transport as dbus_transport_module
 from omnitensor import host as host_module
-from omnitensor.callers import CallerIdentityResolver
 from omnitensor.composition import (
     ServiceEnvironment,
     _env_accelerator_device_ids,
@@ -33,7 +30,6 @@ from omnitensor.composition import (
     _env_paths,
     build_service_from_env,
 )
-from omnitensor.dbus_transport import DbusControlTransport, OmniTensorInterface
 from omnitensor.discovery import Device, DiscoveryPaths
 from omnitensor.dispatch import InferenceJobDispatcher
 from omnitensor.execution import _build_executor, build_executors
@@ -57,6 +53,7 @@ from omnitensor.ports import (
     PluginSnapshotSource,
     RuntimeHandler,
 )
+from omnitensor.socket_transport import SocketControlTransport, default_socket_path
 
 MUTMUT_TRAMPOLINE_MODULE = "mutmut.mutation.trampoline"
 MUTMUT_MAIN_WRAPPER_PREFIX = "x_main__mutmut_"
@@ -377,17 +374,17 @@ def test_bundled_artifact_lookup_does_not_require_a_plugin_snapshot(monkeypatch)
 
 
 def test_public_service_dispatch_seams_remain_live(monkeypatch):
-    monkeypatch.setattr(service, "BUS_METHODS", ("CustomMethod",))
+    monkeypatch.setattr(service, "RUNTIME_METHODS", ("custom-method",))
     contract_calls = []
     monkeypatch.setattr(
         runtime_api,
         "contract_document_text",
         lambda methods: contract_calls.append(methods) or "contract",
     )
-    callers = SimpleNamespace(cached_owner_token=lambda: None)
+    callers = SimpleNamespace(owner_token=lambda: "uid:1000")
     api = runtime_api.RuntimeAPI(None, None, callers=callers)
     assert api.describe_contract_text() == "contract"
-    assert contract_calls == [("CustomMethod",)]
+    assert contract_calls == [("custom-method",)]
 
     monkeypatch.setattr(service, "NO_MODEL", "custom-no-model")
     monkeypatch.setattr(
@@ -574,7 +571,6 @@ def test_host_port_composition_preserves_every_injected_boundary(tmp_path):
 
     ports = build_host_ports(
         snapshot_path=tmp_path / "snapshot.json",
-        callers=CallerIdentityResolver(),
         discovery=discovery,
         publisher=publisher,
         transport=transport,
@@ -586,12 +582,10 @@ def test_host_port_composition_preserves_every_injected_boundary(tmp_path):
 
 
 def test_host_port_composition_owns_the_production_adapter_choices(tmp_path):
-    callers = CallerIdentityResolver()
     discovery_paths = DiscoveryPaths(tmp_path / "dev", tmp_path / "sys")
 
     ports = build_host_ports(
         snapshot_path=tmp_path / "snapshot.json",
-        callers=callers,
         discovery_paths=discovery_paths,
         accelerator_device_ids={"gpu": "gpu-renderD129"},
     )
@@ -601,8 +595,8 @@ def test_host_port_composition_owns_the_production_adapter_choices(tmp_path):
     assert ports.discovery._selected_ids == {"gpu": "gpu-renderD129"}
     assert isinstance(ports.publisher, FileSnapshotPublisher)
     assert ports.publisher._path == tmp_path / "snapshot.json"
-    assert isinstance(ports.transport, DbusControlTransport)
-    assert ports.transport._callers is callers
+    assert isinstance(ports.transport, SocketControlTransport)
+    assert ports.transport.socket_path == default_socket_path()
 
 
 def test_sysfs_adapter_delegates_exact_host_state(monkeypatch, tmp_path):
@@ -645,116 +639,6 @@ def test_file_snapshot_adapter_publishes_and_retracts_atomically(tmp_path):
 
     adapter.retract()
     assert not target.exists()
-
-
-class FakeBus:
-    def __init__(self, reply=RequestNameReply.PRIMARY_OWNER):
-        self.reply = reply
-        self.handlers = []
-        self.exports = []
-        self.names = []
-        self.disconnections = 0
-
-    def add_message_handler(self, handler):
-        self.handlers.append(handler)
-
-    def export(self, path, interface):
-        self.exports.append((path, interface))
-
-    async def request_name(self, name):
-        self.names.append(name)
-        return self.reply
-
-    def disconnect(self):
-        self.disconnections += 1
-
-
-def test_dbus_transport_retains_options_and_owns_connection_lifecycle(monkeypatch):
-    import asyncio
-
-    bus = FakeBus()
-    callers = CallerIdentityResolver()
-    lookups = []
-
-    async def lookup(_name):
-        return None
-
-    def lookup_factory(actual_bus):
-        lookups.append(actual_bus)
-        return lookup
-
-    monkeypatch.setattr(dbus_transport_module, "unix_user_lookup", lookup_factory)
-
-    async def factory():
-        return bus
-
-    transport = DbusControlTransport(
-        BusType.SYSTEM,
-        bus_factory=factory,
-        bus_name="org.cinnamon.Test",
-        callers=callers,
-    )
-    assert transport._bus_type == BusType.SYSTEM
-    assert transport._bus_factory is factory
-    assert transport._bus_name == "org.cinnamon.Test"
-    assert transport._callers is callers
-    assert transport._bus is None
-
-    handler = object()
-    asyncio.run(transport.start(handler))
-    assert transport._bus is bus
-    assert len(bus.handlers) == 1
-    assert callable(bus.handlers[0])
-    assert bus.names == ["org.cinnamon.Test"]
-    assert lookups == [bus]
-    assert callers._unix_user is lookup
-    [(path, interface)] = bus.exports
-    assert path == "/org/cinnamon/OmniTensor1"
-    assert isinstance(interface, OmniTensorInterface)
-    assert interface._runtime is handler
-    asyncio.run(transport.stop())
-    assert bus.disconnections == 1
-    assert transport._bus is None
-
-
-def test_dbus_transport_disconnects_a_bus_that_cannot_own_the_name():
-    import asyncio
-
-    bus = FakeBus(RequestNameReply.EXISTS)
-
-    async def factory():
-        return bus
-
-    transport = DbusControlTransport(bus_factory=factory)
-    with pytest.raises(RuntimeError) as excinfo:
-        asyncio.run(transport.start(object()))
-    assert str(excinfo.value) == (
-        "org.cinnamon.OmniTensor1 is already owned"
-        " (request_name reply: EXISTS);"
-        " another omnitensor instance is running"
-    )
-    assert bus.disconnections == 1
-    assert transport._bus is None
-
-
-def test_dbus_transport_connects_the_requested_bus_type(monkeypatch):
-    import asyncio
-
-    connected = object()
-    seen = []
-
-    class FakeMessageBus:
-        def __init__(self, *, bus_type):
-            seen.append(bus_type)
-
-        async def connect(self):
-            return connected
-
-    monkeypatch.setattr(dbus_transport_module, "MessageBus", FakeMessageBus)
-
-    transport = DbusControlTransport(BusType.SYSTEM)
-    assert asyncio.run(transport._connect()) is connected
-    assert seen == [BusType.SYSTEM]
 
 
 def test_environment_composition_passes_exact_options_to_the_service_factory(tmp_path):
@@ -985,9 +869,9 @@ def test_input_root_environment_round_trips_each_non_empty_segment(roots):
 def test_service_module_is_only_the_compatibility_surface_for_host_implementations():
     source = inspect.getsource(service)
 
-    assert "from dbus_fast" not in source
+    assert "import msgpack" not in source
     assert "detect_devices" not in source
     assert "write_snapshot" not in source
-    assert "class DbusControlTransport" not in source
+    assert "class SocketControlTransport" not in source
     assert "class SysfsDeviceDiscovery" not in source
     assert "def build_service_from_env" not in source

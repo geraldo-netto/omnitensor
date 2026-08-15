@@ -12,7 +12,7 @@ from pathlib import Path
 from omnitensor.telemetry_recorder import TelemetryRecorder
 
 from ..forecastresult import parse_forecast_reading
-from .forecast_client import DbusForecastClient
+from .forecast_client import SocketForecastClient
 from .forecast_contracts import ForecastRunError
 from .runner import TrustedForecastRunner, load_forecast_binding
 
@@ -23,7 +23,7 @@ DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 @dataclass(frozen=True, slots=True)
 class ForecastCliDependencies:
     binding_loader: object = load_forecast_binding
-    client_type: object = DbusForecastClient
+    client_type: object = SocketForecastClient
     runner_type: object = TrustedForecastRunner
     recorder_type: object = TelemetryRecorder
     reading_parser: object = parse_forecast_reading

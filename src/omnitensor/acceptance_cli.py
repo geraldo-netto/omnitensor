@@ -21,12 +21,12 @@ from .acceptance_checks import (
     verify_installation,
 )
 from .acceptance_contracts import (
-    BusProbe,
+    ControlProbe,
     InstallationReport,
     ServiceProbe,
     legacy_acceptance_value,
 )
-from .acceptance_probes import DbusApplyCommandProbe, SystemdUserServiceProbe
+from .acceptance_probes import SocketApplyCommandProbe, SystemdUserServiceProbe
 from .registry import bundled_workloads_path
 
 DEFAULT_APPLET_ROOT = "~/.local/share/cinnamon/applets/cinnamon-xpuwlm@geraldo-netto"
@@ -54,7 +54,7 @@ def build_default_report(
     applet_root: Path | None = None,
     applet_checksums: Path | None = None,
     service: ServiceProbe | None = None,
-    bus: BusProbe | None = None,
+    bus: ControlProbe | None = None,
 ) -> InstallationReport:
     """The checks a real host runs after installing the service and applet."""
     from .plugins.discovery import discover_plugin_metadata  # noqa: PLC0415
@@ -81,7 +81,7 @@ def build_default_report(
     systemd_probe = legacy_acceptance_value(
         "SystemdUserServiceProbe", SystemdUserServiceProbe
     )
-    dbus_probe = legacy_acceptance_value("DbusApplyCommandProbe", DbusApplyCommandProbe)
+    socket_probe = legacy_acceptance_value("SocketApplyCommandProbe", SocketApplyCommandProbe)
 
     bundled = bundled_root()
     checks = [
@@ -97,7 +97,7 @@ def build_default_report(
                 ).plugins
             )
         ),
-        bus_check(bus or dbus_probe()),
+        bus_check(bus or socket_probe()),
         snapshot_check(snapshot_path, now_ms=now_ms),
         backends_check(),
         confinement_check(),

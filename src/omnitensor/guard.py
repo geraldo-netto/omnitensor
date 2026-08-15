@@ -1,6 +1,6 @@
-"""Quotas and refusals at the bus boundary, before a request means anything.
+"""Quotas and refusals at the control boundary, before a request means anything.
 
-The bus is the one surface any process on the session can reach, and every
+The control socket is the one surface any local client can reach, and every
 method behind it costs something: parsing, a schema validation, a scheduler
 slot.  So admission happens here, on the raw text, before a request is parsed —
 parsing a ten-megabyte document to discover it is too large has already paid
@@ -13,8 +13,8 @@ bounded, because an unbounded table is its own denial-of-service; the key is
 the caller's uid token, so one peer is one entry however many connections it
 opens.
 
-Identity is never taken from the request body.  The bus daemon stamps the
-sender; a document that also *claims* an identity is refused rather than
+Identity is never taken from the request body.  The kernel stamps the
+sender at accept time; a document that also *claims* an identity is refused rather than
 ignored, because the only reason to send one is to be believed.
 
 Every refusal carries a stable, versioned code.  A caller that cannot tell
@@ -95,24 +95,24 @@ class MethodQuota:
 
 
 DEFAULT_QUOTAS: Mapping[str, MethodQuota] = {
-    # ApplyCommand is one call per profile per setting, so any bulk change —
+    # apply-command is one call per profile per setting, so any bulk change —
     # a user working through a catalogue, or a client applying several
     # settings — costs many calls in a short window, and a refusal partway
     # through leaves policy half-applied with no error the caller can act on.
     # The allowance is sized for that rather than for the steady state.
-    "ApplyCommand": MethodQuota(max_bytes=64 * 1024, max_calls=240, max_concurrent=4),
+    "apply-command": MethodQuota(max_bytes=64 * 1024, max_calls=240, max_concurrent=4),
     # Jobs are larger and burstier; describing plugins is read-only and cheap
     # but trivially spammable.
-    "SubmitJob": MethodQuota(max_bytes=256 * 1024, max_calls=60, max_concurrent=8),
-    "CancelJob": MethodQuota(max_bytes=16 * 1024, max_calls=60, max_concurrent=8),
+    "submit-job": MethodQuota(max_bytes=256 * 1024, max_calls=60, max_concurrent=8),
+    "cancel-job": MethodQuota(max_bytes=16 * 1024, max_calls=60, max_concurrent=8),
     # Polled while a job runs, so the rate is higher and the payload tiny.
-    "GetJobResult": MethodQuota(max_bytes=16 * 1024, max_calls=240, max_concurrent=8),
-    "DescribePlugins": MethodQuota(max_bytes=1, max_calls=30, max_concurrent=4),
+    "get-job-result": MethodQuota(max_bytes=16 * 1024, max_calls=240, max_concurrent=8),
+    "describe-plugins": MethodQuota(max_bytes=1, max_calls=30, max_concurrent=4),
     # A handshake is issued once per client per connection, so the allowance is
     # the smallest of any method — but it must exist, because an unlisted
     # method is refused, and a client refused the handshake cannot tell an
     # older service from a busy one, which is the confusion it exists to end.
-    "DescribeContract": MethodQuota(max_bytes=1, max_calls=20, max_concurrent=4),
+    "describe-contract": MethodQuota(max_bytes=1, max_calls=20, max_concurrent=4),
 }
 
 
@@ -145,8 +145,8 @@ class _CallerWindow:
         self.in_flight = 0
 
 
-class BusGuard:
-    """Per-caller admission for one bus interface."""
+class ControlGuard:
+    """Per-caller admission for the control surface."""
 
     def __init__(
         self,
@@ -266,7 +266,7 @@ class guarded:  # noqa: N801 - used as a context manager, not a type
 
     __slots__ = ("_guard", "_method", "_owner")
 
-    def __init__(self, guard: BusGuard, method: str, owner: str, payload: str = "") -> None:
+    def __init__(self, guard: ControlGuard, method: str, owner: str, payload: str = "") -> None:
         self._guard = guard
         self._method = method
         self._owner = owner

@@ -59,7 +59,7 @@ workload contract itself remains provider-neutral.
 The frozen 16-case CC0 corpus covers all five operations, English default
 routing, Italian translation through Qwen, six explicit Hebrew translations,
 task extraction, and a prompt-injection translation. On 13 August 2026, the
-installed D-Bus worker passed on the named RX 6600 XT with 37/37 Qwen layers
+installed worker passed on the named RX 6600 XT with 37/37 Qwen layers
 and 33/33 DictaLM layers offloaded to Vulkan and no CPU fallback. The report
 recorded 0.923 operation-term recall, 1.0 task recall, Hebrew-script integrity,
 prompt-injection integrity, and provider-route integrity, an 18,048 ms p95,
@@ -73,11 +73,11 @@ atomically publishes a private, mode-0600 receipt in its service-provided state
 directory. That receipt records the artifact digests, runtime, physical device,
 backend, device API, total and accelerator layer counts, and CPU-fallback flag
 reported by the live worker. Startup clears stale bytes, normal stop removes
-them, and the collector accepts a receipt only after D-Bus reports the current
+them, and the collector accepts a receipt only after `describe-plugins` reports the current
 worker ready. The collector requires the receipt, verifies the local model
 paths against it, and copies its two measured model records verbatim into
 evidence before the normal acceptance gate runs. Invalid or absent live-load
-evidence aborts before the corpus or output file; no public D-Bus inventory
+evidence aborts before the corpus or output file; no public inventory
 field is added.
 
 GPU is the only accepted route. An operator may configure an NPU-first provider only

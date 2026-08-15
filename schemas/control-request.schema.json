@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/control-request.schema.json",
+  "title": "OmniTensor control request version 1",
+  "description": "One request frame on the control socket. The transport is length-prefixed msgpack over a per-user unix-domain socket; this schema describes the decoded map. The envelope carries routing only — an id to correlate the reply and a method name — while the document a method actually accepts travels in params and is validated by that method's own wire schema, so the envelope never has to change when a method's body does.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "method", "params"],
+  "properties": {
+    "version": {
+      "description": "Version of the envelope, not of any method's body.",
+      "const": 1
+    },
+    "id": {
+      "description": "Caller-chosen correlation value, echoed verbatim in the reply. Scoped to one connection, so reuse across connections is harmless.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "method": {
+      "description": "Which runtime method to dispatch. The set a live service exports is announced by describe-contract, not pinned here, so an envelope validator does not have to change when a method is added.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "params": {
+      "description": "The method's request document, exactly as its own wire schema defines it; empty for methods that take no request.",
+      "type": "object",
+      "maxProperties": 64
+    }
+  }
+}

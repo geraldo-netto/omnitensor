@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 
 import pytest
@@ -15,46 +13,45 @@ from omnitensor.contract import (
     wire_schema_names,
 )
 from omnitensor.registry import load_schema, schema_names, validate_document
-from omnitensor.service import BUS_METHODS
+from omnitensor.service import RUNTIME_METHODS
 
 
-def decorated_bus_methods() -> set[str]:
-    """The names actually exported on the bus, read from the interface."""
-    from omnitensor import dbus_transport
+def dispatched_control_methods() -> set[str]:
+    """The names the control socket actually dispatches, read from its table."""
+    from omnitensor.ports import RuntimeHandler
+    from omnitensor.socket_transport import _dispatch_table
 
-    tree = ast.parse(inspect.getsource(dbus_transport))
-    interface = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef) and node.name == "OmniTensorInterface"
-    )
-    return {
-        node.name
-        for node in interface.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and any(
-            isinstance(decorator, ast.Call) and getattr(decorator.func, "id", "") == "method"
-            for decorator in node.decorator_list
-        )
-    }
+    class Handler:
+        async def apply_command_text(self, text):
+            raise NotImplementedError
+
+        submit_job_text = cancel_job_text = job_result_text = apply_command_text
+
+        def describe_plugins_text(self):
+            raise NotImplementedError
+
+        describe_contract_text = describe_plugins_text
+
+    handler: RuntimeHandler = Handler()
+    return set(_dispatch_table(handler))
 
 
-def test_the_handshake_announces_every_method_the_bus_exports():
+def test_the_handshake_announces_every_method_the_socket_dispatches():
     """An unannounced method is one a client can only find by calling it."""
-    assert set(BUS_METHODS) == decorated_bus_methods()
+    assert set(RUNTIME_METHODS) == dispatched_control_methods()
 
 
 def test_the_handshake_announces_itself():
     """A client that must already know one method to ask has no handshake."""
-    assert "DescribeContract" in BUS_METHODS
+    assert "describe-contract" in RUNTIME_METHODS
 
 
 def test_the_document_validates_against_its_own_schema():
-    document = json.loads(contract_document_text(BUS_METHODS))
+    document = json.loads(contract_document_text(RUNTIME_METHODS))
 
     assert validate_document(CONTRACT_SCHEMA, document) == []
     assert document["version"] == RUNTIME_CONTRACT_VERSION
-    assert document["methods"] == sorted(BUS_METHODS)
+    assert document["methods"] == sorted(RUNTIME_METHODS)
 
 
 def test_every_wire_contract_is_announced_with_the_version_it_pins():
@@ -77,6 +74,8 @@ def test_contracts_the_service_never_puts_on_the_bus_are_not_announced():
 
 def test_the_runtime_schema_prefix_surface_is_exact_and_sorted():
     expected = (
+        "control-reply.schema.json",
+        "control-request.schema.json",
         "plugin-inventory.schema.json",
         "runtime-acknowledgement.schema.json",
         "runtime-command.schema.json",
@@ -127,10 +126,10 @@ def test_a_boolean_is_not_mistaken_for_a_version():
 
 def test_a_document_that_does_not_validate_is_refused_rather_than_sent():
     with pytest.raises(ValueError, match="contract description is invalid"):
-        contract_document_text(["not a D-Bus method name"])
+        contract_document_text(["not a control method name"])
 
 
 def test_the_methods_are_sorted_so_two_hosts_answer_identically():
-    document = build_contract_document(["SubmitJob", "ApplyCommand"], load_schema)
+    document = build_contract_document(["submit-job", "apply-command"], load_schema)
 
-    assert document["methods"] == ["ApplyCommand", "SubmitJob"]
+    assert document["methods"] == ["apply-command", "submit-job"]

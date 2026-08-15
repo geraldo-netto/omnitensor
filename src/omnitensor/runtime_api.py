@@ -9,7 +9,7 @@ from collections.abc import Callable
 from .callers import CallerIdentityResolver
 from .contract import RUNTIME_METHODS, contract_document_text
 from .control import ControlService
-from .guard import BusGuard, GuardRefusedError, guarded
+from .guard import ControlGuard, GuardRefusedError, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION
 from .jobs import JobSubmissionService
 
@@ -17,7 +17,7 @@ from .jobs import JobSubmissionService
 def _runtime_methods() -> tuple[str, ...]:
     facade = sys.modules.get("omnitensor.service")
     return (
-        getattr(facade, "BUS_METHODS", RUNTIME_METHODS)
+        getattr(facade, "RUNTIME_METHODS", RUNTIME_METHODS)
         if facade is not None
         else RUNTIME_METHODS
     )
@@ -40,56 +40,56 @@ class RuntimeAPI:
         jobs: JobSubmissionService,
         inspector: Callable[[], str] | None = None,
         callers: CallerIdentityResolver | None = None,
-        guard: BusGuard | None = None,
+        guard: ControlGuard | None = None,
     ) -> None:
         self._control = control
         self._jobs = jobs
         self._inspector = inspector or no_inventory
         self._callers = callers or CallerIdentityResolver()
-        self._guard = guard or BusGuard()
+        self._guard = guard or ControlGuard()
 
     async def apply_command_text(self, text: str) -> str:
-        return await self._guarded("ApplyCommand", text, self._control.apply_command_text)
+        return await self._guarded("apply-command", text, self._control.apply_command_text)
 
     async def submit_job_text(self, text: str) -> str:
-        owner = await self._callers.owner_token()
+        owner = self._callers.owner_token()
         return await self._guarded(
-            "SubmitJob",
+            "submit-job",
             text,
             lambda request: self._jobs.submit_job_text(request, owner=owner),
             owner=owner,
         )
 
     async def cancel_job_text(self, text: str) -> str:
-        owner = await self._callers.owner_token()
+        owner = self._callers.owner_token()
         return await self._guarded(
-            "CancelJob",
+            "cancel-job",
             text,
             lambda request: self._jobs.cancel_job_text(request, owner=owner),
             owner=owner,
         )
 
     async def job_result_text(self, text: str) -> str:
-        owner = await self._callers.owner_token()
+        owner = self._callers.owner_token()
         return await self._guarded(
-            "GetJobResult",
+            "get-job-result",
             text,
             lambda request: self._jobs.job_result_text(request, owner=owner),
             owner=owner,
         )
 
     def describe_plugins_text(self) -> str:
-        owner = self._callers.cached_owner_token()
+        owner = self._callers.owner_token()
         try:
-            with guarded(self._guard, "DescribePlugins", owner):
+            with guarded(self._guard, "describe-plugins", owner):
                 return self._inspector()
         except GuardRefusedError as refusal:
             return refusal.text()
 
     def describe_contract_text(self) -> str:
-        owner = self._callers.cached_owner_token()
+        owner = self._callers.owner_token()
         try:
-            with guarded(self._guard, "DescribeContract", owner):
+            with guarded(self._guard, "describe-contract", owner):
                 return contract_document_text(_runtime_methods())
         except GuardRefusedError as refusal:
             return refusal.text()
@@ -102,7 +102,7 @@ class RuntimeAPI:
         *,
         owner: str | None = None,
     ) -> str:
-        resolved = owner if owner is not None else await self._callers.owner_token()
+        resolved = owner if owner is not None else self._callers.owner_token()
         try:
             with guarded(self._guard, method, resolved, text):
                 return await call(text)

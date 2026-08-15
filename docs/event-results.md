@@ -21,7 +21,7 @@ events.
 
 `source_fragments` consumes the existing bounded `ExtractionResult` returned by
 parser, renderer, or OCR workers. The fragment text remains private prompt data
-inside the isolated workload worker. Public snapshots, logs, and general D-Bus
+inside the isolated workload worker. Public snapshots, logs, and general control
 documents receive neither fragments nor event results.
 
 ## Dates and timezones

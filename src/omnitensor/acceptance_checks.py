@@ -10,8 +10,8 @@ from pathlib import Path
 import jsonschema
 
 from .acceptance_contracts import (
-    BusProbe,
     Check,
+    ControlProbe,
     InstallationReport,
     ServiceProbe,
     legacy_acceptance_value,
@@ -27,6 +27,8 @@ from .registry import (
 )
 
 REQUIRED_SCHEMAS = (
+    "control-request.schema.json",
+    "control-reply.schema.json",
     "runtime-contract.schema.json",
     "runtime-snapshot.schema.json",
     "runtime-command.schema.json",
@@ -165,22 +167,24 @@ def _transport_failure(error: BaseException) -> str:
     return f"{named}: {detail}" if detail else named
 
 
-def check_bus(probe: BusProbe) -> Check:
+def check_bus(probe: ControlProbe) -> Check:
     try:
         reply = probe.apply_command("not-json")
     except Exception as error:  # noqa: BLE001 - transport failures are arbitrary
-        return Check("dbus", False, f"ApplyCommand raised {_transport_failure(error)}")
+        return Check("control", False, f"apply-command raised {_transport_failure(error)}")
     try:
         acknowledgement = json.loads(reply)
     except ValueError:
-        return Check("dbus", False, "ApplyCommand did not return JSON")
+        return Check("control", False, "apply-command did not return JSON")
     validator = legacy_acceptance_value("validate_document", validate_document)
     violations = validator("runtime-acknowledgement.schema.json", acknowledgement)
     if violations:
-        return Check("dbus", False, f"acknowledgement violates contract: {violations[0]}")
+        return Check("control", False, f"acknowledgement violates contract: {violations[0]}")
     if acknowledgement.get("status") != "rejected":
-        return Check("dbus", False, "invalid command was not rejected")
-    return Check("dbus", True, f"ApplyCommand answered at revision {acknowledgement['revision']}")
+        return Check("control", False, "invalid command was not rejected")
+    return Check(
+        "control", True, f"apply-command answered at revision {acknowledgement['revision']}"
+    )
 
 
 def check_snapshot(

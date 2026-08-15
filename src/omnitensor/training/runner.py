@@ -27,11 +27,11 @@ from ..registry import (
     load_workloads,
     validate_document,
 )
-from .forecast_client import BUS_NAME, OBJECT_PATH, DbusForecastClient  # noqa: F401
+from .forecast_client import SocketForecastClient  # noqa: F401
 from .forecast_contracts import ForecastClient, ForecastRunError
 
 MAX_WIRE_BYTES = 1024 * 1024
-REQUIRED_METHODS = frozenset({"DescribeContract", "SubmitJob", "GetJobResult"})
+REQUIRED_METHODS = frozenset({"describe-contract", "submit-job", "get-job-result"})
 REQUIRED_SCHEMAS = (
     "runtime-job-submit",
     "runtime-job-acknowledgement",

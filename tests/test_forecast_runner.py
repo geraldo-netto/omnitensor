@@ -15,8 +15,8 @@ from omnitensor.training.cli import forecast_main
 from omnitensor.training.runner import (
     MAX_WIRE_BYTES,
     REQUIRED_METHODS,
-    DbusForecastClient,
     ForecastRunError,
+    SocketForecastClient,
     TrustedForecastRunner,
     _load_catalog,
     _runtime_job_schema_versions,
@@ -582,7 +582,7 @@ def test_runner_poll_bound_failures_have_exact_details(tmp_path, attempts, inter
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "contract", [_contract(methods=["DescribeContract"]), _contract(schemas={})]
+    "contract", [_contract(methods=["describe-contract"]), _contract(schemas={})]
 )
 async def test_runner_refuses_runtime_contract_drift(tmp_path, contract):
     with pytest.raises(ForecastRunError) as captured:
@@ -676,142 +676,67 @@ async def test_runner_refuses_changed_submission_identity(tmp_path):
     assert captured.value.code == "runtime-response-invalid"
 
 
-class FakeInterface:
-    async def call_describe_contract(self):
-        return "contract"
+class FakeCaller:
+    """Records (method, params) calls and answers from a plan."""
 
-    async def call_submit_job(self, request):
-        return f"submit:{request}"
+    def __init__(self, replies=None, error=None):
+        self.calls = []
+        self.replies = dict(replies or {})
+        self.error = error
 
-    async def call_get_job_result(self, request):
-        return f"result:{request}"
-
-
-class FakeBus:
-    def __init__(self):
-        self.disconnected = False
-
-    def disconnect(self):
-        self.disconnected = True
+    async def __call__(self, method, params):
+        self.calls.append((method, params))
+        if self.error is not None:
+            raise self.error
+        return self.replies.get(method, {"answered": method})
 
 
 @pytest.mark.asyncio
-async def test_dbus_adapter_delegates_and_disconnects():
-    bus = FakeBus()
-    client = DbusForecastClient(bus, FakeInterface())
+async def test_socket_adapter_speaks_the_control_methods_as_json_text():
+    caller = FakeCaller(
+        replies={
+            "describe-contract": {"version": 1},
+            "submit-job": {"status": "accepted"},
+            "get-job-result": {"status": "running"},
+        }
+    )
+    client = SocketForecastClient(caller)
 
-    assert await client.describe_contract() == "contract"
-    assert await client.submit_job("one") == "submit:one"
-    assert await client.get_job_result("two") == "result:two"
+    assert json.loads(await client.describe_contract()) == {"version": 1}
+    assert json.loads(await client.submit_job('{"requestId":"r-1"}')) == {"status": "accepted"}
+    assert json.loads(await client.get_job_result('{"jobId":"j-1"}')) == {"status": "running"}
     client.close()
 
-    assert bus.disconnected is True
-
-
-@pytest.mark.asyncio
-async def test_dbus_adapter_connects_to_exact_local_interface(monkeypatch):
-    from dbus_fast import BusType
-
-    interface = FakeInterface()
-    calls = []
-
-    class Proxy:
-        def get_interface(self, name):
-            calls.append(("interface", name))
-            return interface
-
-    class MessageBus:
-        def __init__(self, *, bus_type):
-            calls.append(("type", bus_type))
-
-        async def connect(self):
-            calls.append(("connect",))
-            return self
-
-        async def introspect(self, name, path):
-            calls.append(("introspect", name, path))
-            return "introspection"
-
-        def get_proxy_object(self, name, path, introspection):
-            calls.append(("proxy", name, path, introspection))
-            return Proxy()
-
-        def disconnect(self):
-            calls.append(("disconnect",))
-
-    monkeypatch.setattr("dbus_fast.aio.MessageBus", MessageBus)
-
-    client = await DbusForecastClient.connect()
-
-    assert client._interface is interface
-    assert calls == [
-        ("type", BusType.SESSION),
-        ("connect",),
-        ("introspect", "org.cinnamon.OmniTensor1", "/org/cinnamon/OmniTensor1"),
-        (
-            "proxy",
-            "org.cinnamon.OmniTensor1",
-            "/org/cinnamon/OmniTensor1",
-            "introspection",
-        ),
-        ("interface", "org.cinnamon.OmniTensor1"),
+    assert caller.calls == [
+        ("describe-contract", {}),
+        ("submit-job", {"requestId": "r-1"}),
+        ("get-job-result", {"jobId": "j-1"}),
     ]
 
 
 @pytest.mark.asyncio
-async def test_dbus_adapter_disconnects_failed_connection(monkeypatch):
-    calls = []
-
-    class MessageBus:
-        def __init__(self, *, bus_type):
-            self.bus_type = bus_type
-
-        async def connect(self):
-            return self
-
-        async def introspect(self, _name, _path):
-            raise RuntimeError("introspection lost")
-
-        def disconnect(self):
-            calls.append("disconnect")
-
-    monkeypatch.setattr("dbus_fast.aio.MessageBus", MessageBus)
-
-    with pytest.raises(ForecastRunError) as captured:
-        await DbusForecastClient.connect()
-
-    assert captured.value.code == "runtime-unavailable"
-    assert captured.value.detail == "introspection lost"
-    assert calls == ["disconnect"]
+async def test_socket_adapter_connect_yields_a_usable_client():
+    """The connect/close seam stays whatever the transport is."""
+    client = await SocketForecastClient.connect()
+    assert isinstance(client, SocketForecastClient)
+    client.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "method", ["call_describe_contract", "call_submit_job", "call_get_job_result"]
-)
-async def test_dbus_adapter_translates_transport_failures(method):
-    class BrokenInterface(FakeInterface):
-        def __getattribute__(self, name):
-            if name == method:
-
-                async def broken(*_args):
-                    raise RuntimeError("bus lost")
-
-                return broken
-            return super().__getattribute__(name)
-
-    client = DbusForecastClient(FakeBus(), BrokenInterface())
-    call = {
-        "call_describe_contract": lambda: client.describe_contract(),
-        "call_submit_job": lambda: client.submit_job("x"),
-        "call_get_job_result": lambda: client.get_job_result("x"),
-    }[method]
+@pytest.mark.parametrize("call", ["describe_contract", "submit_job", "get_job_result"])
+async def test_socket_adapter_translates_transport_failures(call):
+    client = SocketForecastClient(FakeCaller(error=RuntimeError("socket lost")))
+    attempt = {
+        "describe_contract": lambda: client.describe_contract(),
+        "submit_job": lambda: client.submit_job("{}"),
+        "get_job_result": lambda: client.get_job_result("{}"),
+    }[call]
 
     with pytest.raises(ForecastRunError) as captured:
-        await call()
+        await attempt()
 
     assert captured.value.code == "runtime-unavailable"
-    assert captured.value.detail == "bus lost"
+    assert captured.value.detail == "socket lost"
 
 
 def test_forecast_cli_runs_without_accepting_inline_features(tmp_path, monkeypatch, capsys):
@@ -828,7 +753,7 @@ def test_forecast_cli_runs_without_accepting_inline_features(tmp_path, monkeypat
     monkeypatch.setattr(
         "omnitensor.training.cli.load_forecast_binding", lambda *a, **k: _workload()
     )
-    monkeypatch.setattr("omnitensor.training.cli.DbusForecastClient", ClientFactory)
+    monkeypatch.setattr("omnitensor.training.cli.SocketForecastClient", ClientFactory)
 
     code = forecast_main(
         [
@@ -885,7 +810,7 @@ def test_forecast_cli_refuses_runtime_output_without_canonical_reading(monkeypat
     monkeypatch.setattr(
         "omnitensor.training.cli.load_forecast_binding", lambda *a, **k: _workload()
     )
-    monkeypatch.setattr("omnitensor.training.cli.DbusForecastClient", ClientFactory)
+    monkeypatch.setattr("omnitensor.training.cli.SocketForecastClient", ClientFactory)
     monkeypatch.setattr("omnitensor.training.cli.TrustedForecastRunner", Runner)
 
     assert forecast_main(["--profile", PROFILE]) == 1
@@ -923,7 +848,7 @@ def test_forecast_cli_default_contract_and_exact_help(monkeypatch, capsys):
             }
 
     monkeypatch.setattr("omnitensor.training.cli.load_forecast_binding", load)
-    monkeypatch.setattr("omnitensor.training.cli.DbusForecastClient", ClientFactory)
+    monkeypatch.setattr("omnitensor.training.cli.SocketForecastClient", ClientFactory)
     monkeypatch.setattr("omnitensor.training.cli.TrustedForecastRunner", Runner)
 
     assert forecast_main(["--profile", PROFILE]) == 0

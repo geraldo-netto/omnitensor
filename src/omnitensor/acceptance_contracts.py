@@ -51,11 +51,11 @@ class ServiceProbe(Protocol):
 
 
 @runtime_checkable
-class BusProbe(Protocol):
+class ControlProbe(Protocol):
     """Whether the D-Bus surface answers with a contract-valid reply."""
 
     def apply_command(self, text: str) -> str: ...
 
 
-for _legacy_type in (Check, InstallationReport, ServiceProbe, BusProbe):
+for _legacy_type in (Check, InstallationReport, ServiceProbe, ControlProbe):
     _legacy_type.__module__ = _LEGACY_MODULE

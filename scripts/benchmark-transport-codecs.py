@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Codec microbenchmark behind the control-plane transport decision (OMNI-0350).
+"""Codec microbenchmark behind the control-plane transport decision.
 
-Compares framed JSON against framed msgpack on this system's real payloads, to
-test the two claims the decision rests on:
+Compares framed JSON against framed msgpack on this system's real payloads.
+The measured claims:
 
   (a) at control-plane sizes (~0.5-6 KB) and rates (~1 message/second) the
-      codec difference is irrelevant, so JSON's zero dependencies and
-      socat-readable debugging win there;
-  (b) msgpack pays only for inline tensors, through its ``bin`` type, which
-      steps outside JSON's data model and therefore stays a per-connection
-      opt-in via the hello frame's codec byte.
+      codec difference is microseconds and invisible;
+  (b) msgpack pays enormously for inline tensors, through its ``bin`` type,
+      which steps outside JSON's data model.
 
 Recorded run (2026-08-15, this host, msgpack 1.0.3 C extension, live snapshot
-and live DescribePlugins payloads):
+and live describe-plugins payloads):
 
-  ApplyCommand ack   653 B    json 4.2/3.3 us     msgpack 1.6/2.0 us
+  apply-command ack  653 B    json 4.2/3.3 us     msgpack 1.6/2.0 us
   snapshot           5.5 KB   json 21.4/20.9 us   msgpack 9.8/16.1 us
-  DescribePlugins    6.2 KB   json 25.1/22.2 us   msgpack 11.8/17.5 us
+  describe-plugins   6.2 KB   json 25.1/22.2 us   msgpack 11.8/17.5 us
   256x256x3 f32      json 52.7 ms enc / 3.7 MB
                      msgpack 2.2 ms / 1.8 MB
                      msgpack+bin 44.9 us / 786 KB   (~1,200x faster, 4.7x smaller)
 
-Conclusion: framed JSON for the control plane; msgpack+bin reserved for inline
-tensors if XTPU-0190 lands them and file staging does not cover them. msgpack
-wins every codec race — the control-plane wins are microseconds per second and
-buy nothing, while the tensor win is real and isolated.
+Decision (operator's, 2026-08-15, superseding this script's earlier framed-JSON
+default): msgpack everywhere, one codec, no negotiation. msgpack won every
+codec race outright; the readable-wire and zero-dependency arguments for JSON
+were judged not worth a second wire format, so ``msgpack`` is a project
+dependency and the control socket (``socket_transport.py``) speaks framed
+msgpack only, with the ``bin`` tensor headroom already in place.
 """
 
 from __future__ import annotations
@@ -32,17 +32,9 @@ from __future__ import annotations
 import json
 import os
 import struct
-import subprocess
 import timeit
 
-try:
-    import msgpack
-except ImportError as error:  # pragma: no cover - operator guidance
-    raise SystemExit(
-        "msgpack is required for the comparison and is deliberately not a "
-        "project dependency; install python3-msgpack (or pip install msgpack "
-        "in a scratch environment) and re-run."
-    ) from error
+import msgpack
 
 REPS_SMALL = 2000
 REPS_TENSOR = 20
@@ -60,29 +52,17 @@ def live_snapshot() -> dict | None:
 
 def live_inventory() -> dict | None:
     try:
-        reply = subprocess.run(
-            [
-                "dbus-send",
-                "--session",
-                "--dest=org.cinnamon.OmniTensor1",
-                "--type=method_call",
-                "--print-reply=literal",
-                "/org/cinnamon/OmniTensor1",
-                "org.cinnamon.OmniTensor1.DescribePlugins",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=True,
-        )
-        raw = reply.stdout.strip()
-        return json.loads(raw[raw.index("{") :])
+        import asyncio  # noqa: PLC0415
+
+        from omnitensor.socket_transport import call_control  # noqa: PLC0415
+
+        return asyncio.run(call_control("describe-plugins", {}))
     except Exception:  # noqa: BLE001 - live probe; the benchmark continues without it
         return None
 
 
 def command_acknowledgement() -> dict:
-    """The ApplyCommand acknowledgement shape observed live on 2026-08-15."""
+    """The apply-command acknowledgement shape observed live on 2026-08-15."""
     profiles = [
         ("build-advisor", 2),
         ("desktop-context", 1),
@@ -162,7 +142,7 @@ def bench(label: str, document: dict, reps: int, tensor_key: str | None = None) 
 
 def main() -> None:
     bench(
-        "1. ApplyCommand acknowledgement (real shape, control plane)",
+        "1. apply-command acknowledgement (real shape, control plane)",
         command_acknowledgement(),
         REPS_SMALL,
     )
@@ -175,9 +155,13 @@ def main() -> None:
 
     inventory = live_inventory()
     if inventory is None:
-        print("\n3. DescribePlugins skipped: service not reachable on the session bus")
+        print("\n3. describe-plugins skipped: service not reachable on the control socket")
     else:
-        bench("3. Live DescribePlugins reply (real, via D-Bus)", inventory, REPS_SMALL)
+        bench(
+            "3. Live describe-plugins reply (real, via the control socket)",
+            inventory,
+            REPS_SMALL,
+        )
 
     bench(
         "4. Small inline tensor job (1x3x8x8 = 192 floats)",

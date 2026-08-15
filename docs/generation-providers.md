@@ -12,7 +12,7 @@ Source text and images are private worker data. A `GenerationRequest` carries
 only opaque, bounded content references; it has no field for inline file
 content. The workload worker resolves those references after consent and
 ingestion. Raw content, rendered prompts, native token streams, and structured
-results must not enter the public runtime snapshot, D-Bus payloads, logs, or a
+results must not enter the public runtime snapshot, control payloads, logs, or a
 shared cache.
 
 Native model runtimes execute behind the asynchronous `GenerationWorker` port,

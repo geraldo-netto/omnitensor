@@ -145,15 +145,14 @@ different reported GPU/NPU/TPU identity remains unavailable until the provider
 has passed its native runtime, full-offload, parity, memory, and workload gates
 for that identity.
 
-The service refuses to start when `org.cinnamon.OmniTensor1` is already owned,
-because two instances would publish to the same snapshot path. If start fails
-with `already owned`, find the other instance and stop it first — an instance
+The service refuses to start when its control socket
+(`$XDG_RUNTIME_DIR/omnitensor/control.sock`) is already being served, because
+two instances would publish to the same snapshot path. If start fails with
+`already served`, find the other instance and stop it first — an instance
 started by hand outside systemd is the usual cause:
 
 ```sh
-dbus-send --session --dest=org.freedesktop.DBus --print-reply \
-  /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID \
-  string:org.cinnamon.OmniTensor1
+fuser "$XDG_RUNTIME_DIR/omnitensor/control.sock"
 ```
 
 ## Dependencies
@@ -168,7 +167,7 @@ deliberately rather than taking the default.
 
 | Extra | Installs | Needed for |
 | --- | --- | --- |
-| *(none)* | `cryptography`, `jsonschema`, `dbus-fast` | the service, bus, schemas, policy — **no inference** |
+| *(none)* | `cryptography`, `jsonschema`, `msgpack` | the service, control socket, schemas, policy — **no inference** |
 | `[gpu]` | `ncnn`, `numpy` | GPU inference over Vulkan; the only lane that works on AMD |
 | `[gpu-onnx-cuda]` | `onnxruntime-gpu` | GPU inference on NVIDIA |
 | `[gpu-onnx-rocm]` | `onnxruntime-rocm` | GPU inference on AMD via ROCm, instead of Vulkan |
@@ -234,7 +233,6 @@ selected automatically. A table cannot be extended from documentation alone —
 a filter built from the wrong ABI's numbers denies unrelated syscalls — so an
 architecture joins that list only once the suite has been run on it.
 | `mesa-vulkan-drivers` (or vendor driver) | Vulkan GPU inference | `ncnn` reports zero GPUs |
-| `dbus` session bus | the whole control surface | the service cannot own its bus name |
 | `clang`, `bpftool`, `libbpf-dev` | building the eBPF helper only | `helpers/bpf/build.sh` refuses to run |
 
 The kernel must expose BTF at `/sys/kernel/btf/vmlinux` for the eBPF helper;
@@ -641,12 +639,12 @@ omnitensor-grant grant sample-plugin files:read --reason "indexing my pictures"
 omnitensor-grant revoke sample-plugin files:read
 ```
 
-This is a command and not a bus method on purpose. A grant authorises a plugin
-to reach something outside itself, which is a larger thing to hand out than
-enabling a profile, and on a session bus every peer runs as the same user — the
-service cannot tell one from another, so a bus method would accept consent from
-anything already able to talk to it and record it as yours. Running a command
-requires access to this account before it starts.
+This is a command and not a control method on purpose. A grant authorises a
+plugin to reach something outside itself, which is a larger thing to hand out
+than enabling a profile, and every peer of the per-user control socket runs as
+the same user — the service cannot tell one from another, so a socket method
+would accept consent from anything already able to talk to it and record it as
+yours. Running a command requires access to this account before it starts.
 
 What a grant means:
 
@@ -698,12 +696,13 @@ sudo systemctl daemon-reload
 Removing the snapshot while the applet is running is safe: the applet reports
 an absent runtime rather than showing the last values it saw.
 
-## What the bus boundary separates
+## What the control boundary separates
 
-Jobs, quotas, and results are scoped by the caller's uid. On a session bus
-that separates you from another *user*, not from another program you are
-running yourself — see [bus-boundary.md](bus-boundary.md) for what the
-boundary is worth, why per-connection scoping is not offered, and what to
+Jobs, quotas, and results are scoped by the caller's uid, read from
+`SO_PEERCRED` when the control socket accepts a connection. On a per-user
+socket that separates you from another *user*, not from another program you
+are running yourself — see [control-boundary.md](control-boundary.md) for what
+the boundary is worth, why per-connection scoping is not offered, and what to
 change if it ever needs to be stronger.
 
 ## Applet
@@ -760,7 +759,7 @@ It exits non-zero if any check fails and prints one line per check:
 | `workloads` | the bundled catalog does not load — a packaging defect, not a user error |
 | `discovery` | plugin discovery raised instead of returning a catalog |
 | `isolation` | an external worker would launch without a sandbox |
-| `dbus` | the bus did not answer, or its acknowledgement violates the applet contract |
+| `control` | the control socket did not answer, or its acknowledgement violates the applet contract |
 | `snapshot` | no snapshot, an invalid one, or a stale one the applet would still render |
 | `applet` | the installed tree does not match the payload checksums |
 

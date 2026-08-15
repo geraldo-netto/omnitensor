@@ -1,6 +1,6 @@
 """A probe that retries must not report the deadline as the diagnosis.
 
-`omnitensor-verify-install` reported `ApplyCommand raised TimeoutError` for a
+`omnitensor-verify-install` reported `apply-command raised TimeoutError` for a
 service that was still starting and had not claimed the bus name. That is true
 about the probe and useless about the cause: it reads like a wedged service.
 """
@@ -10,11 +10,11 @@ import asyncio
 import pytest
 
 from omnitensor.acceptance_checks import check_bus
-from omnitensor.acceptance_probes import DbusApplyCommandProbe
+from omnitensor.acceptance_probes import SocketApplyCommandProbe
 
 
 def probe(caller, *, timeout_s: float = 0.3):
-    return DbusApplyCommandProbe(timeout_s=timeout_s, retry_interval_s=0.01, caller=caller)
+    return SocketApplyCommandProbe(timeout_s=timeout_s, retry_interval_s=0.01, caller=caller)
 
 
 def failing(error: Exception):
@@ -52,14 +52,14 @@ def test_a_transport_that_never_answers_names_the_first_real_failure():
 
 def test_a_repeated_failure_is_reported_once_rather_than_chained_to_itself():
     detail = check_bus(probe(failing(ConnectionError("name has no owner")))).detail
-    assert detail == "ApplyCommand raised ConnectionError: name has no owner"
+    assert detail == "apply-command raised ConnectionError: name has no owner"
 
 
 def test_a_genuinely_unresponsive_service_still_reports_the_deadline():
     # No earlier failure exists to name, and `wait_for` chains its own
     # cancellation, which describes nothing.
     detail = check_bus(probe(slow(), timeout_s=0.2)).detail
-    assert detail == "ApplyCommand raised TimeoutError"
+    assert detail == "apply-command raised TimeoutError"
 
 
 def test_an_answering_transport_is_reported_with_its_revision():
@@ -79,7 +79,7 @@ def test_a_reply_that_is_not_the_contract_is_refused():
     async def not_json(_text: str) -> str:
         return "<html>"
 
-    assert check_bus(probe(not_json)).detail == "ApplyCommand did not return JSON"
+    assert check_bus(probe(not_json)).detail == "apply-command did not return JSON"
 
     async def wrong_shape(_text: str) -> str:
         return '{"version":2}'
@@ -89,9 +89,9 @@ def test_a_reply_that_is_not_the_contract_is_refused():
 
 def test_probe_timing_must_be_positive():
     with pytest.raises(ValueError, match="timing"):
-        DbusApplyCommandProbe(timeout_s=0)
+        SocketApplyCommandProbe(timeout_s=0)
     with pytest.raises(ValueError, match="timing"):
-        DbusApplyCommandProbe(retry_interval_s=-1)
+        SocketApplyCommandProbe(retry_interval_s=-1)
 
 
 def test_a_command_that_never_answers_is_reported_rather_than_waited_on():

@@ -105,7 +105,7 @@ policy or to probe for a plugin that is not installed.
 Every other method assumes the caller already knows what this service speaks.
 Before this method existed there was no way to ask: a client called something
 and read the failure, and "this service is older than you" arrives looking
-exactly like "this service is broken" — a D-Bus `UnknownMethod`, or a refusal
+exactly like "this service is broken" — a `method-unknown` error, or a refusal
 code. Introspection does not close the gap either, because it enumerates
 method *names*, and two services can both export `SubmitJob` while disagreeing
 completely about what a submission looks like.

@@ -17,13 +17,15 @@ def _load_unit() -> configparser.ConfigParser:
     return parser
 
 
-def test_unit_requires_the_session_bus_socket():
-    """WantedBy=default.target starts the unit in non-graphical sessions too;
-    without Requires=dbus.socket the session bus may be absent there and the
-    service would fail and restart in a loop."""
-    unit = _load_unit()["Unit"]
-    assert "dbus.socket" in unit["Requires"].split()
-    assert "dbus.socket" in unit["After"].split()
+def test_unit_owns_a_runtime_directory_for_the_control_socket():
+    """RuntimeDirectory creates $XDG_RUNTIME_DIR/omnitensor fresh each start
+    and removes it on stop, so the socket file's presence tracks the
+    service's lifetime for anything watching the path — and no dbus.socket
+    dependency remains, because the service no longer speaks D-Bus."""
+    unit = _load_unit()
+    assert unit["Service"]["RuntimeDirectory"] == "omnitensor"
+    assert "Requires" not in unit["Unit"]
+    assert "dbus.socket" not in unit["Unit"].get("After", "")
 
 
 def test_unit_is_ordered_after_the_graphical_session():

@@ -4,7 +4,7 @@ External plugins import their supported API from `omnitensor.sdk`. The package
 exports lifecycle and execution contracts, collector and pipeline hooks,
 artifact references, configuration specifications, permission checks,
 cancellation, bounded progress, and terminal-result factories. It does not
-export the service, scheduler, D-Bus, registry, executor, or persistence
+export the service, scheduler, control socket, registry, executor, or persistence
 implementations.
 
 Subclass `ManagedPlugin` for identity-checked, idempotent startup and shutdown.

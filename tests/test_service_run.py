@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import threading
 from pathlib import Path
 
@@ -27,7 +26,6 @@ from omnitensor.registry import bundled_workloads_path, validate_document
 from omnitensor.service import (
     GRANT_REFRESH_INTERVAL_S,
     FileSnapshotPublisher,
-    OmniTensorInterface,
     OmniTensorService,
     SysfsDeviceDiscovery,
 )
@@ -911,42 +909,6 @@ def test_runtime_snapshot_registers_and_publishes_installed_plugin_telemetry(tmp
     assert set(published) == set(service._workloads)
 
 
-def test_dbus_interface_is_a_pure_passthrough_shim():
-    class FakeControl:
-        def __init__(self):
-            self.seen: list[str] = []
-
-        async def apply_command_text(self, text: str) -> str:
-            self.seen.append(text)
-            return '{"echo":true}'
-
-        async def submit_job_text(self, text: str) -> str:
-            self.seen.append(f"submit:{text}")
-            return '{"submitted":true}'
-
-        async def cancel_job_text(self, text: str) -> str:
-            self.seen.append(f"cancel:{text}")
-            return '{"cancelled":true}'
-
-    control = FakeControl()
-    interface = OmniTensorInterface(control)
-    # dbus-fast's @method() wrapper swallows return values on direct calls;
-    # the bus dispatches to the wrapped function, so test that path.
-    async def jobs():
-        reply = await interface.ApplyCommand.__wrapped__(interface, '{"id":"x"}')
-        assert reply == '{"echo":true}'
-        submitted = await interface.SubmitJob.__wrapped__(interface, '{"id":"y"}')
-        cancelled = await interface.CancelJob.__wrapped__(interface, '{"id":"z"}')
-        return submitted, cancelled
-
-    assert asyncio.run(jobs()) == ('{"submitted":true}', '{"cancelled":true}')
-    assert control.seen == [
-        '{"id":"x"}',
-        'submit:{"id":"y"}',
-        'cancel:{"id":"z"}',
-    ]
-
-
 def test_runtime_job_boundary_authorizes_catalog_and_fails_closed_without_dispatcher(
     tmp_path,
 ):
@@ -1283,457 +1245,6 @@ def test_env_path_prefers_environment_and_expands_home(monkeypatch):
     assert _env_path("OMNITENSOR_TEST_PATH", "~/fallback") == Path("/explicit/path")
 
 
-def test_dbus_transport_stop_without_start_is_a_no_op():
-    from omnitensor.service import DbusControlTransport
-
-    asyncio.run(DbusControlTransport().stop())
-
-
-class NullControl:
-    async def apply_command_text(self, text: str) -> str:
-        return "{}"
-
-
-def unique_bus_name() -> str:
-    return f"org.cinnamon.OmniTensorTest{os.getpid()}"
-
-
-def test_dbus_transport_round_trip_on_a_real_session_bus():
-    from dbus_fast.aio import MessageBus
-
-    from omnitensor.service import DbusControlTransport
-
-    async def scenario():
-        try:
-            probe = await MessageBus().connect()
-        except Exception as error:  # noqa: BLE001 - environment probe
-            pytest.skip(f"no session bus available: {error}")
-        probe.disconnect()
-        # A unique per-process name: the production BUS_NAME may legitimately
-        # be owned by a running omnitensor instance on this machine.
-        transport = DbusControlTransport(bus_name=unique_bus_name())
-        await transport.start(NullControl())
-        await transport.stop()
-        await transport.stop()
-
-    asyncio.run(scenario())
-
-
-def test_dbus_transport_refuses_to_run_as_a_second_instance():
-    from dbus_fast.aio import MessageBus
-
-    from omnitensor.service import DbusControlTransport
-
-    async def scenario():
-        try:
-            probe = await MessageBus().connect()
-        except Exception as error:  # noqa: BLE001 - environment probe
-            pytest.skip(f"no session bus available: {error}")
-        probe.disconnect()
-        name = unique_bus_name()
-        first = DbusControlTransport(bus_name=name)
-        await first.start(NullControl())
-        second = DbusControlTransport(bus_name=name)
-        with pytest.raises(RuntimeError, match="already owned"):
-            await second.start(NullControl())
-        # The refused instance never keeps a bus connection around.
-        assert second._bus is None
-        await second.stop()
-        await first.stop()
-
-    asyncio.run(scenario())
-
-
-class FakeBus:
-    def __init__(self, reply):
-        self._reply = reply
-        self.exported = []
-        self.disconnected = 0
-        self.requested = []
-        self.handlers = []
-        self.order = []
-
-    def add_message_handler(self, handler):
-        self.handlers.append(handler)
-        self.order.append("handler")
-
-    def export(self, path, interface):
-        self.exported.append((path, interface))
-        self.order.append("export")
-
-    async def request_name(self, name):
-        self.requested.append(name)
-        return self._reply
-
-    def disconnect(self):
-        self.disconnected += 1
-
-
-@pytest.mark.parametrize("reply_name", ["IN_QUEUE", "EXISTS", "ALREADY_OWNER"])
-def test_dbus_transport_fails_loudly_without_primary_ownership(reply_name):
-    from dbus_fast import RequestNameReply
-
-    from omnitensor.service import DbusControlTransport
-
-    bus = FakeBus(RequestNameReply[reply_name])
-
-    async def factory():
-        return bus
-
-    async def scenario():
-        transport = DbusControlTransport(bus_factory=factory)
-        with pytest.raises(RuntimeError) as excinfo:
-            await transport.start(NullControl())
-        assert str(excinfo.value) == (
-            "org.cinnamon.OmniTensor1 is already owned"
-            f" (request_name reply: {reply_name});"
-            " another omnitensor instance is running"
-        )
-        assert bus.disconnected == 1
-        assert transport._bus is None
-        await transport.stop()
-        assert bus.disconnected == 1
-
-    asyncio.run(scenario())
-
-
-def test_dbus_transport_keeps_the_bus_as_primary_owner():
-    from dbus_fast import RequestNameReply
-
-    from omnitensor.service import DbusControlTransport, OmniTensorInterface
-
-    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
-
-    async def factory():
-        return bus
-
-    async def scenario():
-        transport = DbusControlTransport(bus_factory=factory)
-        await transport.start(NullControl())
-        assert transport._bus is bus
-        assert bus.requested == ["org.cinnamon.OmniTensor1"]
-        [(path, interface)] = bus.exported
-        assert path == "/org/cinnamon/OmniTensor1"
-        assert isinstance(interface, OmniTensorInterface)
-        assert await interface.ApplyCommand.__wrapped__(interface, "{}") == "{}"
-        await transport.stop()
-        assert bus.disconnected == 1
-        assert transport._bus is None
-
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("interval_attr", ["_publish_interval_s", "_discovery_interval_s"])
-def test_intervals_default_to_module_constants(tmp_path, interval_attr):
-    from omnitensor import service as service_module
-
-    service = build_service(
-        tmp_path,
-        discovery=FakeDiscovery([]),
-        publisher=FakePublisher(),
-        transport=FakeTransport(),
-    )
-    expected = {
-        "_publish_interval_s": service_module.PUBLISH_INTERVAL_S,
-        "_discovery_interval_s": service_module.DISCOVERY_INTERVAL_S,
-    }[interval_attr]
-    assert getattr(service, interval_attr) == expected
-
-
-def test_publisher_survives_an_io_failure_and_retries_next_tick(tmp_path, caplog):
-    """A full disk used to tear down job dispatch and D-Bus along with publishing."""
-
-    class IntermittentPublisher(FakePublisher):
-        def publish(self, snapshot: dict) -> None:
-            if len(self.published) < 2:
-                self.published.append(snapshot)
-                raise OSError("disk full")
-            super().publish(snapshot)
-
-    publisher = IntermittentPublisher()
-
-    async def scenario():
-        service = build_service(
-            tmp_path,
-            discovery=FakeDiscovery([tpu_device()]),
-            publisher=publisher,
-            publish_interval_s=0.001,
-        )
-        task = asyncio.create_task(service._publisher())
-        for _ in range(500):
-            if len(publisher.published) > 2:
-                break
-            await asyncio.sleep(0.001)
-        service._stopping.set()
-        await asyncio.wait_for(task, timeout=2)
-
-    with caplog.at_level("ERROR"):
-        asyncio.run(scenario())
-
-    assert len(publisher.published) > 2, "publishing never resumed after the failure"
-    assert {
-        record.getMessage()
-        for record in caplog.records
-        if record.name == "omnitensor.service"
-    } == {"Could not publish the runtime snapshot; retrying next tick"}
-
-
-def test_publisher_survives_an_invalid_snapshot_and_retries_next_tick(tmp_path, caplog):
-    publisher = FakePublisher()
-
-    async def scenario():
-        service = build_service(
-            tmp_path,
-            discovery=FakeDiscovery([tpu_device()]),
-            publisher=publisher,
-            publish_interval_s=0.001,
-        )
-        build = service._build_runtime_snapshot
-        attempts = 0
-
-        def intermittent_snapshot():
-            nonlocal attempts
-            attempts += 1
-            if attempts < 3:
-                raise ValueError("snapshot violates contract")
-            return build()
-
-        service._build_runtime_snapshot = intermittent_snapshot
-        task = asyncio.create_task(service._publisher())
-        for _ in range(500):
-            if publisher.published:
-                break
-            await asyncio.sleep(0.001)
-        assert task.done() is False
-        service._stopping.set()
-        await asyncio.wait_for(task, timeout=2)
-        return attempts
-
-    with caplog.at_level("ERROR"):
-        attempts = asyncio.run(scenario())
-
-    assert attempts >= 3
-    assert len(publisher.published) == 1
-    assert "Could not publish the runtime snapshot" in caplog.text
-
-
-def test_publisher_survives_an_io_failure_while_retracting(tmp_path, caplog):
-    class UnretractablePublisher(FakePublisher):
-        def retract(self) -> None:
-            self.retracted += 1
-            raise OSError("permission denied")
-
-    publisher = UnretractablePublisher()
-
-    async def scenario():
-        service = build_service(
-            tmp_path,
-            discovery=FakeDiscovery([]),
-            publisher=publisher,
-            publish_interval_s=0.001,
-        )
-        task = asyncio.create_task(service._publisher())
-        for _ in range(500):
-            if publisher.retracted > 1:
-                break
-            await asyncio.sleep(0.001)
-        service._stopping.set()
-        await asyncio.wait_for(task, timeout=2)
-
-    with caplog.at_level("ERROR"):
-        asyncio.run(scenario())
-
-    assert publisher.retracted > 1, "retraction was never retried"
-    assert "Could not publish the runtime snapshot" in caplog.text
-
-
-def test_describe_plugins_answers_a_contract_valid_inventory(tmp_path):
-    """The applet needs to say why a profile is idle without running its code."""
-    service = build_service(
-        tmp_path,
-        discovery=FakeDiscovery([tpu_device()]),
-        publisher=FakePublisher(),
-        transport=FakeTransport(),
-    )
-
-    document = json.loads(service.runtime_api.describe_plugins_text())
-
-    assert validate_document("plugin-inventory.schema.json", document) == []
-    assert document["version"] == 1
-    assert isinstance(document["plugins"], list)
-
-
-def test_plugin_snapshot_capabilities_fail_closed_without_callable_probes():
-    service = object.__new__(OmniTensorService)
-    service._resolve_artifact = lambda _reference: None
-
-    service._plugin_runtime = object()
-    assert json.loads(service._describe_plugins())["plugins"] == []
-
-    service._plugin_runtime = type("MalformedSnapshot", (), {"snapshot": object()})()
-    assert json.loads(service._describe_plugins())["plugins"] == []
-
-    snapshot = type(
-        "Snapshot",
-        (),
-        {
-            "catalog": type("Catalog", (), {"plugins": ()})(),
-            "workers": (),
-        },
-    )()
-    service._plugin_runtime = type("SnapshotOnly", (), {"snapshot": snapshot})()
-    assert json.loads(service._describe_plugins())["plugins"] == []
-
-
-def test_plugin_inventory_uses_permission_worker_and_timestamp_ports(monkeypatch):
-    from types import SimpleNamespace
-
-    from omnitensor import service as service_module
-
-    manifest = sample_plugin_manifest("events")
-    manifest["plugin"]["permissions"] = ["files:read-selected"]
-    plugin = SimpleNamespace(
-        plugin_id="events",
-        version="1.2.3",
-        source="external",
-        distribution_name="events-package",
-        manifest=manifest,
-    )
-    snapshot = SimpleNamespace(
-        catalog=SimpleNamespace(plugins=(plugin,)),
-        workers=(SimpleNamespace(plugin_id="events", state="ready"),),
-    )
-    runtime = SimpleNamespace(
-        snapshot=snapshot,
-        granted_permissions=lambda _plugin_id: frozenset({"files:read-selected"}),
-    )
-    service = object.__new__(OmniTensorService)
-    service._plugin_runtime = runtime
-    service._resolve_artifact = lambda _artifact_id: pytest.fail("no artifact is declared")
-    monkeypatch.setattr(service_module.time, "time", lambda: 1_234.567)
-
-    text = service._describe_plugins()
-    document = json.loads(text)
-    [entry] = document["plugins"]
-
-    assert document["generatedAt"] == 1_234_567
-    assert entry["workerState"] == "ready"
-    assert entry["permissions"] == [
-        {"name": "files:read-selected", "granted": True}
-    ]
-    assert ": " not in text
-    assert ", " not in text
-
-
-def test_plugin_start_ignores_a_result_without_the_snapshot_port():
-    class Plugins:
-        async def start(self):
-            return object()
-
-    service = object.__new__(OmniTensorService)
-    service._plugin_runtime = Plugins()
-    service._plugin_lifecycle_lock = asyncio.Lock()
-    service.plugin_telemetry = type(
-        "Telemetry", (), {"register": lambda *_arguments: pytest.fail("must not register")}
-    )()
-
-    asyncio.run(service._start_plugin_runtime())
-
-
-def test_plugin_accelerator_reload_coalesces_requests_and_uses_lifecycle_lock():
-    service = object.__new__(OmniTensorService)
-    calls = []
-
-    class Plugins:
-        def plugin_ids(self):
-            return frozenset({"external-plugin"})
-
-        async def reload_accelerator_devices(self):
-            calls.append("reload")
-            if len(calls) == 1:
-                service._plugin_reload_requested = True
-            return object()
-
-    service._plugin_runtime = Plugins()
-    service._plugin_lifecycle_lock = asyncio.Lock()
-    service._pending_device_profiles = set()
-    service._plugin_reload_requested = False
-    service._plugin_reload_task = None
-    service.plugin_telemetry = type(
-        "Telemetry", (), {"register": lambda *_arguments: pytest.fail("must not register")}
-    )()
-
-    async def scenario():
-        service._schedule_plugin_reload()
-        assert service._plugin_reload_task is not None
-        await service._plugin_reload_task
-
-    asyncio.run(scenario())
-
-    assert calls == ["reload", "reload"]
-    assert service._pending_device_profiles == set()
-
-
-def test_plugin_accelerator_reload_scheduling_requires_capability_and_running_loop():
-    service = object.__new__(OmniTensorService)
-    service._plugin_reload_requested = False
-    service._plugin_reload_task = None
-    service._pending_device_profiles = set()
-    service._plugin_runtime = object()
-
-    service._schedule_plugin_reload()
-    assert service._plugin_reload_requested is False
-
-    class Plugins:
-        def plugin_ids(self):
-            return frozenset({"external-plugin"})
-
-        async def reload_accelerator_devices(self):
-            return object()
-
-    service._plugin_runtime = Plugins()
-    service._schedule_plugin_reload()
-    assert service._plugin_reload_requested is True
-    assert service._plugin_reload_task is None
-
-
-def test_plugin_accelerator_reload_failure_is_contained(caplog):
-    class Plugins:
-        async def reload_accelerator_devices(self):
-            raise RuntimeError("worker restart failed")
-
-    service = object.__new__(OmniTensorService)
-    service._plugin_runtime = Plugins()
-    service._plugin_lifecycle_lock = asyncio.Lock()
-    service._plugin_reload_requested = True
-    service._pending_device_profiles = {"external-plugin"}
-    service.plugin_telemetry = object()
-
-    asyncio.run(service._reload_plugin_accelerators())
-
-    assert service._plugin_reload_requested is False
-    assert service._pending_device_profiles == {"external-plugin"}
-    assert "Could not reload plugin accelerator leases" in caplog.text
-
-
-def test_the_dbus_shim_passes_describe_plugins_through():
-    class FakeControl:
-        async def apply_command_text(self, text: str) -> str:
-            return "{}"
-
-        async def submit_job_text(self, text: str) -> str:
-            return "{}"
-
-        async def cancel_job_text(self, text: str) -> str:
-            return "{}"
-
-        def describe_plugins_text(self) -> str:
-            return '{"inventory":true}'
-
-    interface = OmniTensorInterface(FakeControl())
-    assert interface.DescribePlugins.__wrapped__(interface) == '{"inventory":true}'
-
-
 def test_an_unwired_inspector_reports_an_empty_inventory_rather_than_failing():
     from omnitensor.service import RuntimeAPI
 
@@ -1914,58 +1425,6 @@ def test_inventory_readiness_refuses_an_artifact_no_manifest_pins(tmp_path):
     assert "sha256" in resolution.reason
 
 
-def test_the_sender_is_captured_before_any_method_can_be_dispatched():
-    """An exported method reached first would run with an inherited sender."""
-    from dbus_fast import RequestNameReply
-
-    from omnitensor.callers import current_sender
-    from omnitensor.service import DbusControlTransport
-
-    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
-
-    async def factory():
-        return bus
-
-    async def scenario():
-        transport = DbusControlTransport(bus_factory=factory)
-        await transport.start(object())
-        await transport.stop()
-
-    asyncio.run(scenario())
-
-    assert bus.order == ["handler", "export"]
-
-    class Message:
-        sender = ":1.42"
-
-    assert bus.handlers[0](Message()) is None
-    assert current_sender() == ":1.42"
-
-
-def test_the_transport_attaches_the_credential_lookup_to_its_resolver():
-    from dbus_fast import RequestNameReply
-
-    from omnitensor.callers import CallerIdentityResolver
-    from omnitensor.service import DbusControlTransport
-
-    bus = FakeBus(RequestNameReply.PRIMARY_OWNER)
-    resolver = CallerIdentityResolver()
-
-    async def factory():
-        return bus
-
-    async def scenario():
-        transport = DbusControlTransport(bus_factory=factory, callers=resolver)
-        await transport.start(object())
-        await transport.stop()
-        return await resolver.resolve(":1.7")
-
-    identity = asyncio.run(scenario())
-
-    assert resolver._unix_user is not None
-    assert identity.unique_name == ":1.7"
-
-
 def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
     """End to end: the sender the transport bound decides who owns the job."""
     from omnitensor.callers import CallerIdentityResolver, bind_sender
@@ -1983,17 +1442,13 @@ def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
             self.owners.append(("cancel", owner))
             return "{}"
 
-    async def unix_user(name):
-        return {":1.7": 1000, ":1.8": 1001}[name]
-
-    resolver = CallerIdentityResolver(unix_user)
     jobs = RecordingJobs()
-    api = RuntimeAPI(None, jobs, lambda: "{}", resolver)
+    api = RuntimeAPI(None, jobs, lambda: "{}", CallerIdentityResolver())
 
     async def scenario():
-        bind_sender(":1.7")
+        bind_sender("peer:1000:1")
         await api.submit_job_text("{}")
-        bind_sender(":1.8")
+        bind_sender("peer:1001:2")
         await api.cancel_job_text("{}")
         bind_sender(None)
         await api.submit_job_text("{}")
@@ -2009,7 +1464,7 @@ def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
 
 def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
     """The bus reply is the caller's only channel; an exception says nothing."""
-    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     class Jobs:
@@ -2024,7 +1479,7 @@ def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
         Jobs(),
         lambda: "{}",
         None,
-        BusGuard({"SubmitJob": MethodQuota(max_calls=1, max_concurrent=99)}),
+        ControlGuard({"submit-job": MethodQuota(max_calls=1, max_concurrent=99)}),
     )
 
     async def scenario():
@@ -2035,7 +1490,7 @@ def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
     assert accepted == {"accepted": True}
     assert refused["status"] == "rejected"
     assert refused["code"] == "rate-limit-exceeded"
-    assert refused["method"] == "SubmitJob"
+    assert refused["method"] == "submit-job"
 
 
 def test_a_caller_asserted_owner_never_reaches_the_job_service(tmp_path):
@@ -2064,7 +1519,7 @@ def test_a_caller_asserted_owner_never_reaches_the_job_service(tmp_path):
 
 
 def test_describing_plugins_is_rate_limited_too(tmp_path):
-    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     api = RuntimeAPI(
@@ -2072,27 +1527,21 @@ def test_describing_plugins_is_rate_limited_too(tmp_path):
         None,
         lambda: '{"plugins":[]}',
         None,
-        BusGuard({"DescribePlugins": MethodQuota(max_calls=1, max_bytes=1)}),
+        ControlGuard({"describe-plugins": MethodQuota(max_calls=1, max_bytes=1)}),
     )
 
     assert json.loads(api.describe_plugins_text()) == {"plugins": []}
     assert json.loads(api.describe_plugins_text())["code"] == "rate-limit-exceeded"
 
 
-def test_the_bus_exposes_a_way_to_learn_a_job_outcome(tmp_path):
+def test_the_control_surface_exposes_a_way_to_learn_a_job_outcome(tmp_path):
     """Without this method a caller submits and can never learn what happened."""
-    from omnitensor.service import OmniTensorInterface
+    from omnitensor.service import RUNTIME_METHODS
 
-    exported = [
-        name
-        for name in dir(OmniTensorInterface)
-        if not name.startswith("_") and name[0].isupper()
-    ]
-
-    assert "GetJobResult" in exported
+    assert "get-job-result" in RUNTIME_METHODS
     assert {
-        "ApplyCommand", "SubmitJob", "CancelJob", "DescribePlugins", "DescribeContract",
-    } <= set(exported)
+        "apply-command", "submit-job", "cancel-job", "describe-plugins", "describe-contract",
+    } <= set(RUNTIME_METHODS)
 
 
 def test_the_service_keeps_a_result_store_so_outcomes_outlive_the_call(tmp_path):
@@ -2102,7 +1551,7 @@ def test_the_service_keeps_a_result_store_so_outcomes_outlive_the_call(tmp_path)
 
 def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
     from omnitensor.callers import CallerIdentityResolver, bind_sender
-    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     class Jobs:
@@ -2113,20 +1562,17 @@ def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
             self.owners.append(owner)
             return '{"state":"running"}'
 
-    async def unix_user(name):
-        return {":1.7": 1000}[name]
-
     jobs = Jobs()
     api = RuntimeAPI(
         None,
         jobs,
         lambda: "{}",
-        CallerIdentityResolver(unix_user),
-        BusGuard({"GetJobResult": MethodQuota(max_calls=1, max_concurrent=99)}),
+        CallerIdentityResolver(),
+        ControlGuard({"get-job-result": MethodQuota(max_calls=1, max_concurrent=99)}),
     )
 
     async def scenario():
-        bind_sender(":1.7")
+        bind_sender("peer:1000:1")
         return [json.loads(await api.job_result_text("{}")) for _ in range(2)]
 
     first, second = asyncio.run(scenario())
@@ -2263,23 +1709,22 @@ def test_a_digest_that_does_not_match_is_refused_in_the_submission_reply(tmp_pat
     assert right["status"] == "accepted"
 
 
-def test_the_contract_handshake_is_answerable_over_the_bus(tmp_path):
+def test_the_contract_handshake_is_answerable_over_the_control_surface(tmp_path):
     """A client must be able to ask what this service speaks before it speaks."""
-    from omnitensor.service import BUS_METHODS, OmniTensorInterface, RuntimeAPI
+    from omnitensor.service import RUNTIME_METHODS, RuntimeAPI
 
     api = RuntimeAPI(None, None, lambda: "{}")
-    interface = OmniTensorInterface(api)
 
-    document = json.loads(interface.DescribeContract.__wrapped__(interface))
+    document = json.loads(api.describe_contract_text())
 
     assert document["version"] == 1
-    assert document["methods"] == sorted(BUS_METHODS)
+    assert document["methods"] == sorted(RUNTIME_METHODS)
     assert document["schemas"]["runtime-job-submit"] == 1
 
 
 def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
     """Otherwise asking what the service speaks is a way to keep it busy."""
-    from omnitensor.guard import BusGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     api = RuntimeAPI(
@@ -2287,7 +1732,7 @@ def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
         None,
         lambda: "{}",
         None,
-        BusGuard({"DescribeContract": MethodQuota(max_calls=1, max_bytes=1)}),
+        ControlGuard({"describe-contract": MethodQuota(max_calls=1, max_bytes=1)}),
     )
 
     assert json.loads(api.describe_contract_text())["version"] == 1

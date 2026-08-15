@@ -3,14 +3,17 @@
 Entry point ``omnitensor`` runs an asyncio loop that
 - rediscovers accelerators every ``DISCOVERY_INTERVAL_S``,
 - publishes a schema-valid snapshot atomically every ``PUBLISH_INTERVAL_S``,
-- owns ``org.cinnamon.OmniTensor1`` on the session bus and answers
-  ``ApplyCommand``, ``SubmitJob``, and ``CancelJob`` through a versioned facade.
+- serves the control socket (framed msgpack over a unix-domain socket,
+  default ``$XDG_RUNTIME_DIR/omnitensor/control.sock``) and answers
+  ``apply-command``, ``submit-job``, and ``cancel-job`` through a versioned
+  facade.
 
 :class:`OmniTensorService` depends on the ports in :mod:`omnitensor.ports`;
-the filesystem, sysfs, and D-Bus adapters live in dedicated host modules and
+the filesystem, sysfs, and socket adapters live in dedicated host modules and
 are supplied through an explicit port bundle or constructor injection.
 
 Configuration comes from environment variables:
+``OMNITENSOR_CONTROL_SOCKET`` (control socket path override),
 ``OMNITENSOR_STATE_PATH`` (snapshot the applet reads),
 ``OMNITENSOR_POLICY_PATH`` (persisted policy + revision),
 ``OMNITENSOR_WORKLOADS`` (manifest directory),
@@ -52,22 +55,10 @@ from .composition import (
 from .composition import (
     build_service_from_env as build_service_from_env,
 )
+from .contract import (
+    RUNTIME_METHODS as RUNTIME_METHODS,
+)
 from .control import ControlService
-from .dbus_transport import (
-    BUS_METHODS as BUS_METHODS,
-)
-from .dbus_transport import (
-    BUS_NAME as BUS_NAME,
-)
-from .dbus_transport import (
-    OBJECT_PATH as OBJECT_PATH,
-)
-from .dbus_transport import (
-    DbusControlTransport as DbusControlTransport,
-)
-from .dbus_transport import (
-    OmniTensorInterface as OmniTensorInterface,
-)
 from .discovery import DiscoveryPaths
 from .execution import build_executors as build_executors
 from .host import FileSnapshotPublisher as FileSnapshotPublisher
@@ -167,7 +158,6 @@ class OmniTensorService:
         self._callers = CallerIdentityResolver()
         host = build_host_ports(
             snapshot_path=snapshot_path,
-            callers=self._callers,
             discovery_paths=discovery_paths,
             accelerator_device_ids=accelerator_device_ids,
             discovery=discovery,

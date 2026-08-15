@@ -1,4 +1,4 @@
-"""Live service, D-Bus, and accelerator probes for installation acceptance."""
+"""Live service, control-socket, and accelerator probes for installation acceptance."""
 
 from __future__ import annotations
 
@@ -70,50 +70,50 @@ def _diagnosed(last: BaseException, first: BaseException) -> BaseException:
     return last
 
 
-class DbusApplyCommandProbe:
-    """:class:`BusProbe` over the session bus."""
+class SocketApplyCommandProbe:
+    """:class:`ControlProbe` over the control socket."""
 
     def __init__(
         self,
         *,
-        bus_name: str = "org.cinnamon.OmniTensor1",
+        socket_path=None,
         timeout_s: float = 30.0,
         retry_interval_s: float = 0.25,
         caller=None,
     ):
         if timeout_s <= 0 or retry_interval_s < 0:
-            raise ValueError("D-Bus probe timing must be positive")
-        self._bus_name = bus_name
+            raise ValueError("control probe timing must be positive")
+        self._socket_path = socket_path
         self._timeout_s = timeout_s
         self._retry_interval_s = retry_interval_s
         self._caller = caller
 
     def apply_command(self, text: str) -> str:
         import asyncio  # noqa: PLC0415
-
-        object_path = "/" + self._bus_name.replace(".", "/")
+        import json  # noqa: PLC0415
 
         async def call_once() -> str:  # pragma: no cover - live adapter wiring
             if self._caller is not None:
                 return await self._caller(text)
-            from dbus_fast import BusType  # noqa: PLC0415
-            from dbus_fast.aio import MessageBus  # noqa: PLC0415
+            from .socket_transport import call_control  # noqa: PLC0415
 
-            bus = await MessageBus(bus_type=BusType.SESSION).connect()
-            try:
-                introspection = await bus.introspect(self._bus_name, object_path)
-                proxy = bus.get_proxy_object(self._bus_name, object_path, introspection)
-                interface = proxy.get_interface(self._bus_name)
-                return await interface.call_apply_command(text)
-            finally:
-                bus.disconnect()
+            # The probe's text is deliberately not a valid command; wrapping a
+            # bare string keeps the envelope valid so the rejection under test
+            # is the method's, not the transport's.
+            result = await call_control(
+                "apply-command",
+                json.loads(text) if text.startswith("{") else {"probe": text},
+                socket_path=self._socket_path,
+                timeout_s=self._timeout_s,
+            )
+            return json.dumps(result, separators=(",", ":"))
 
         async def call() -> str:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._timeout_s
             # A probe that retries for its whole budget and then reports the
-            # deadline says "TimeoutError" for a service that never claimed the
-            # bus name — accurate about the probe and useless about the cause.
+            # deadline says "TimeoutError" for a service that never created its
+            # socket — accurate about the probe and useless about the cause.
             # The first real failure is the one worth carrying out.
             first_error: BaseException | None = None
             while True:
@@ -131,8 +131,8 @@ class DbusApplyCommandProbe:
 
 
 # `systemctl --user is-active` answers immediately or not at all: a stalled
-# user bus leaves it waiting, and an unbounded wait here hangs the whole
-# install report with no diagnostic. The sibling D-Bus probe already bounds
+# manager leaves it waiting, and an unbounded wait here hangs the whole
+# install report with no diagnostic. The sibling socket probe already bounds
 # itself, so this matches rather than being the one unbounded call.
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 10.0
 
@@ -156,5 +156,5 @@ for _legacy_function in (_executor_for, _runtime_verdict, _run_command):
     _legacy_function.__module__ = "omnitensor.acceptance"
 
 
-for _legacy_type in (SystemdUserServiceProbe, DbusApplyCommandProbe):
+for _legacy_type in (SystemdUserServiceProbe, SocketApplyCommandProbe):
     _legacy_type.__module__ = "omnitensor.acceptance"

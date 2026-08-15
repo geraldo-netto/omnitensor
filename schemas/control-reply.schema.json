@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/omnitensor/control-reply.schema.json",
+  "title": "OmniTensor control reply version 1",
+  "description": "One reply frame on the control socket, correlated to its request by id. Exactly one of result and error is present. An error here means the envelope failed — the frame did not validate, the method does not exist, the dispatch itself broke — while a method-level refusal (a quota, a rejected command) is a result, because the method answered and its answer is the refusal document.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id"],
+  "properties": {
+    "version": {
+      "description": "Version of the envelope, not of any method's body.",
+      "const": 1
+    },
+    "id": {
+      "description": "The request's id, echoed verbatim; 0 when the request was too broken to carry one.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "result": {
+      "description": "The method's reply document, exactly as its own wire schema defines it.",
+      "type": "object"
+    },
+    "error": {
+      "description": "Why the envelope could not be answered.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable cause a client can branch on.",
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "message": {
+          "description": "Human-readable detail; diagnostic, never parsed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {"required": ["result"], "properties": {"error": false}},
+    {"required": ["error"], "properties": {"result": false}}
+  ]
+}

@@ -10,8 +10,8 @@ from conftest import add_pcie_tpu, sample_manifest, write_workload
 from omnitensor.acceptance import (
     REQUIRED_SCHEMAS,
     Check,
-    DbusApplyCommandProbe,
     InstallationReport,
+    SocketApplyCommandProbe,
     SystemdUserServiceProbe,
     check_applet,
     check_bus,
@@ -81,20 +81,20 @@ def snapshot_file(tmp_path, fake_nodes, *, generated_at_ms=1_000_000):
 
 def test_a_passing_report_is_ok_and_renders_every_check():
     report = verify_installation(
-        [Check("service", True, "active"), Check("dbus", True, "answered")]
+        [Check("service", True, "active"), Check("control", True, "answered")]
     )
     assert report.ok is True
     assert report.failures == ()
-    assert report.render() == "PASS  service: active\nPASS  dbus: answered"
+    assert report.render() == "PASS  service: active\nPASS  control: answered"
 
 
 def test_one_failure_fails_the_whole_report():
     report = verify_installation(
-        [Check("service", True, "active"), Check("dbus", False, "no reply")]
+        [Check("service", True, "active"), Check("control", False, "no reply")]
     )
     assert report.ok is False
-    assert [check.name for check in report.failures] == ["dbus"]
-    assert "FAIL  dbus: no reply" in report.render()
+    assert [check.name for check in report.failures] == ["control"]
+    assert "FAIL  control: no reply" in report.render()
 
 
 def test_a_missing_executable_is_reported():
@@ -402,7 +402,7 @@ def test_the_cli_reports_failures_and_exits_non_zero(monkeypatch, capsys, tmp_pa
         acceptance,
         "build_default_report",
         lambda **_kwargs: InstallationReport(
-            (Check("service", True, "active"), Check("dbus", False, "no reply"))
+            (Check("service", True, "active"), Check("control", False, "no reply"))
         ),
     )
 
@@ -411,7 +411,7 @@ def test_the_cli_reports_failures_and_exits_non_zero(monkeypatch, capsys, tmp_pa
     assert code == 1
     output = capsys.readouterr().out
     assert "PASS  service: active" in output
-    assert "FAIL  dbus: no reply" in output
+    assert "FAIL  control: no reply" in output
 
 
 def test_the_cli_exits_zero_when_everything_passes(monkeypatch, capsys, tmp_path):
@@ -427,12 +427,12 @@ def test_the_cli_exits_zero_when_everything_passes(monkeypatch, capsys, tmp_path
     assert "PASS  service: active" in capsys.readouterr().out
 
 
-def test_the_dbus_probe_derives_its_object_path_from_the_bus_name():
-    probe = DbusApplyCommandProbe(bus_name="org.cinnamon.OmniTensor1")
-    assert probe._bus_name == "org.cinnamon.OmniTensor1"
+def test_the_socket_probe_accepts_a_socket_path_override(tmp_path):
+    probe = SocketApplyCommandProbe(socket_path=tmp_path / "control.sock")
+    assert probe._socket_path == tmp_path / "control.sock"
 
 
-def test_the_dbus_probe_retries_transient_service_startup_errors():
+def test_the_socket_probe_retries_transient_service_startup_errors():
     attempts = []
 
     async def caller(text):
@@ -441,7 +441,7 @@ def test_the_dbus_probe_retries_transient_service_startup_errors():
             raise ConnectionRefusedError("service is starting")
         return acknowledgement()
 
-    probe = DbusApplyCommandProbe(
+    probe = SocketApplyCommandProbe(
         timeout_s=1,
         retry_interval_s=0,
         caller=caller,
@@ -455,9 +455,9 @@ def test_the_dbus_probe_retries_transient_service_startup_errors():
     ("timeout_s", "retry_interval_s"),
     [(0, 0.25), (-1, 0.25), (30, -0.1)],
 )
-def test_the_dbus_probe_rejects_invalid_retry_timing(timeout_s, retry_interval_s):
+def test_the_socket_probe_rejects_invalid_retry_timing(timeout_s, retry_interval_s):
     with pytest.raises(ValueError, match="timing"):
-        DbusApplyCommandProbe(
+        SocketApplyCommandProbe(
             timeout_s=timeout_s,
             retry_interval_s=retry_interval_s,
         )
