@@ -130,10 +130,25 @@ class DbusApplyCommandProbe:
         return asyncio.run(call())
 
 
-def _run_command(argv: Sequence[str]) -> tuple[int, str]:  # pragma: no cover - thin shim
+# `systemctl --user is-active` answers immediately or not at all: a stalled
+# user bus leaves it waiting, and an unbounded wait here hangs the whole
+# install report with no diagnostic. The sibling D-Bus probe already bounds
+# itself, so this matches rather than being the one unbounded call.
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 10.0
+
+
+def _run_command(
+    argv: Sequence[str], *, timeout_s: float = DEFAULT_COMMAND_TIMEOUT_SECONDS
+) -> tuple[int, str]:
     import subprocess  # noqa: PLC0415
 
-    completed = subprocess.run(argv, capture_output=True, text=True, check=False)
+    try:
+        completed = subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=timeout_s
+        )
+    except subprocess.TimeoutExpired:
+        # A probe reports; it does not raise into the report it is filling.
+        return 1, f"{argv[0]} did not answer within {timeout_s:g}s"
     return completed.returncode, completed.stdout
 
 

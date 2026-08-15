@@ -92,3 +92,25 @@ def test_probe_timing_must_be_positive():
         DbusApplyCommandProbe(timeout_s=0)
     with pytest.raises(ValueError, match="timing"):
         DbusApplyCommandProbe(retry_interval_s=-1)
+
+
+def test_a_command_that_never_answers_is_reported_rather_than_waited_on():
+    """A stalled user bus used to hang the whole install report."""
+    from omnitensor.acceptance_probes import _run_command
+
+    code, output = _run_command(["sleep", "5"], timeout_s=0.2)
+    assert code == 1
+    assert "did not answer within" in output
+
+
+def test_the_service_probe_reports_a_unit_that_never_answers():
+    from omnitensor.acceptance_checks import check_service
+    from omnitensor.acceptance_probes import SystemdUserServiceProbe
+
+    probe = SystemdUserServiceProbe(
+        "omnitensor.service",
+        runner=lambda _argv: (1, "systemctl did not answer within 10s"),
+    )
+    check = check_service(probe)
+    assert check.ok is False
+    assert "did not answer" in check.detail
