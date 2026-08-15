@@ -8,7 +8,7 @@ audit's dependency order without weakening the required status schema.
 - **Low-light delivery:** OMNI-0048, OMNI-0104–OMNI-0106
 - **Profile model, pipeline, and acceptance:** OMNI-0085–OMNI-0098, OMNI-0101, OMNI-0108–OMNI-0115
 - **System acceptance:** OMNI-0122–OMNI-0125
-- **Privileged telemetry:** OMNI-0184, OMNI-0247, OMNI-0339
+- **Privileged telemetry:** OMNI-0184, OMNI-0247
 - **TPU lane:** OMNI-0198, OMNI-0235, OMNI-0289
 - **Production pipeline consolidation:** OMNI-0258, OMNI-0259
 - **Mutation gates:** OMNI-0296, OMNI-0297
@@ -20,7 +20,6 @@ audit's dependency order without weakening the required status schema.
 | id | status | severity | effort | related ids | description |
 | --- | --- | --- | --- | --- | --- |
 | OMNI-0296 | open | medium | l | — | Re-baseline the partial-scope mutation run, then burn it down to 80% per behavioral callable; do not add regressions for equivalent, logging-shape, or prose-only survivors. The recorded baseline (`mutation-baselines/2026-08-14.json`, string-literal mutations disabled, 3,299/3,584 detected, 92.0% overall) was taken at `88d9294` and no longer describes HEAD: 26 `src/` modules changed since, including `scheduler.py`, `dispatch.py`, and `plugins/loading.py`, so the eight sub-80% callables it names — `parse_native_load_report` 67.4%, `_parse_safety` 77.8%, `_validate_bge_evidence` 77.0%, `model_fragment` 70.0%, `ModelCache.__init__` 75.0%, `_declared_version` 66.7%, `Scheduler._degrade` 62.5%, `Scheduler.tick` 79.3% — are stale figures for two of the worst offenders. |
-| OMNI-0339 | open | medium | xs | OMNI-0184, OMNI-0247 | Bound every `bpftool` invocation in the privileged BPF helper. `helpers/bpf/omnitensor-bpf-helper.py` calls `subprocess.run(..., check=True, capture_output=True)` with no `timeout=` at four sites — `verify_pins` `:47` and `:65`, `load_probes` `:77`, `read_histogram` `:96` — while `serve` `:128-146` accepts one connection at a time and calls `aggregate(pin_dir)` per request, so a `bpftool` that never returns wedges the helper permanently and later collectors block in the eight-deep listen backlog with no error. `Restart=on-failure` in `helpers/bpf/omnitensor-bpf.service` cannot recover a hung process and the unit declares no `WatchdogSec`. On expiry, answer with the existing `{"version", "error"}` payload rather than blocking. |
 | OMNI-0342 | open | low | s | OMNI-0297 | Decide what `related ids` means once a referenced row is removed, then repair the ledger. 34 of 47 rows cite at least one ID that no longer has a row; the prerequisite cluster OMNI-0036, OMNI-0038, OMNI-0082 alone is cited by 23 of them, and OMNI-0103 by two. Either restore the prerequisite rows those dependencies point at, or rewrite each dependency as prose in the description. The two rows whose entire dependency list was dangling — OMNI-0297 and the mutation baseline OMNI-0296 — were repaired in place; the rest need the policy decision first. |
 
 ## Blocked

@@ -30,6 +30,13 @@ DEFAULT_PIN_DIR = "/sys/fs/bpf/omnitensor"
 DEFAULT_SOCKET = "/run/omnitensor/bpf-aggregate.sock"
 HISTOGRAMS = (("runq_latency_us", "us"), ("block_latency_us", "us"))
 MAX_SLOTS = 27
+# Every bpftool call is bounded. This helper serves one connection at a time
+# and reads the maps per request, so a bpftool that never returns wedges the
+# privileged process permanently: later collectors then block in the listen
+# backlog with no error, and `Restart=on-failure` cannot recover a process that
+# is hung rather than dead.
+BPFTOOL_TIMEOUT_SECONDS = 10.0
+LOAD_TIMEOUT_SECONDS = 30.0
 BPF_OBJECT_NAME_MAX = 15
 REQUIRED_MAPS = {
     "runq_latency_us": ("array", MAX_SLOTS),
@@ -49,6 +56,7 @@ def verify_pins(pin_dir: Path) -> None:
             check=True,
             capture_output=True,
             text=True,
+            timeout=BPFTOOL_TIMEOUT_SECONDS,
         )
         document = json.loads(result.stdout)
         if isinstance(document, list) and len(document) == 1:
@@ -66,6 +74,7 @@ def verify_pins(pin_dir: Path) -> None:
             [BPFTOOL, "link", "show", "pinned", str(pin_dir / name)],
             check=True,
             capture_output=True,
+            timeout=BPFTOOL_TIMEOUT_SECONDS,
         )
 
 
@@ -87,6 +96,7 @@ def load_probes(object_path: Path, pin_dir: Path) -> None:
         ],
         check=True,
         capture_output=True,
+        timeout=LOAD_TIMEOUT_SECONDS,
     )
     verify_pins(pin_dir)
 
@@ -98,6 +108,7 @@ def read_histogram(pin_dir: Path, name: str) -> list[int]:
         check=True,
         capture_output=True,
         text=True,
+        timeout=BPFTOOL_TIMEOUT_SECONDS,
     )
     buckets: dict[int, int] = {}
     for entry in json.loads(result.stdout):
@@ -140,7 +151,11 @@ def serve(socket_path: Path, pin_dir: Path) -> None:
             with connection:
                 try:
                     payload = json.dumps(aggregate(pin_dir), separators=(",", ":"))
-                except (subprocess.CalledProcessError, ValueError) as error:
+                except (
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                    ValueError,
+                ) as error:
                     payload = json.dumps({"version": AGGREGATE_VERSION, "error": str(error)[:200]})
                 try:
                     connection.sendall(payload.encode("utf-8"))
@@ -160,7 +175,12 @@ def main(argv: list[str] | None = None) -> int:
     pin_dir = Path(DEFAULT_PIN_DIR)
     try:
         load_probes(Path(DEFAULT_OBJECT), pin_dir)
-    except (subprocess.CalledProcessError, OSError, ValueError) as error:
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        OSError,
+        ValueError,
+    ) as error:
         # Fail loudly: a helper that runs without its probes would serve empty
         # histograms, which a reader cannot tell from an idle kernel.
         print(f"could not load BPF probes: {error}", file=sys.stderr)

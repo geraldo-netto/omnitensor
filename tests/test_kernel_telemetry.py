@@ -325,7 +325,7 @@ def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, t
             str(pin_dir),
             "autoattach",
         ],
-        {"check": True, "capture_output": True},
+        {"check": True, "capture_output": True, "timeout": 30.0},
     )
     assert [arguments[1:4] for arguments, _options in calls[1:]] == [
         ["map", "show", "pinned"],
@@ -342,13 +342,13 @@ def test_the_helper_autoattaches_and_verifies_every_pinned_object(monkeypatch, t
         *helper.REQUIRED_MAPS,
         *helper.REQUIRED_LINKS,
     ]
-    assert calls[0][1] == {"check": True, "capture_output": True}
+    assert calls[0][1] == {"check": True, "capture_output": True, "timeout": 30.0}
     assert all(
-        options == {"check": True, "capture_output": True, "text": True}
+        options == {"check": True, "capture_output": True, "text": True, "timeout": 10.0}
         for _, options in calls[1:4]
     )
     assert all(
-        options == {"check": True, "capture_output": True}
+        options == {"check": True, "capture_output": True, "timeout": 10.0}
         for _, options in calls[4:]
     )
 
@@ -439,7 +439,7 @@ def test_the_helper_decodes_little_endian_map_words_and_preserves_empty_slots(mo
     assert calls == [
         (
             [helper.BPFTOOL, "map", "dump", "pinned", "/pins/runq_latency_us", "-j"],
-            {"check": True, "capture_output": True, "text": True},
+            {"check": True, "capture_output": True, "text": True, "timeout": 10.0},
         )
     ]
 
@@ -666,3 +666,35 @@ def test_snapshot_detail_is_bounded_even_when_an_os_error_is_not():
 
 def test_identity_nested_in_a_plain_mapping_is_refused():
     assert forbidden_field({"outer": {"inner": {"uid": 1000}}}) == "uid"
+
+
+def test_every_bpftool_call_in_the_helper_is_bounded():
+    """A hung bpftool would wedge a privileged, single-connection server.
+
+    The helper reads its maps per request, so a call that never returns leaves
+    later collectors blocked in the listen backlog with no error, and
+    ``Restart=on-failure`` cannot recover a process that is hung rather than
+    dead.
+    """
+    import ast
+    from pathlib import Path
+
+    source = Path(HELPER).read_text()
+    tree = ast.parse(source)
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+    ]
+    assert calls, "the helper is expected to shell out to bpftool"
+    for call in calls:
+        keywords = {keyword.arg for keyword in call.keywords}
+        assert "timeout" in keywords, f"unbounded subprocess.run at line {call.lineno}"
+
+    # And an expiry has to be answered rather than escaping the accept loop.
+    assert "TimeoutExpired" in source
