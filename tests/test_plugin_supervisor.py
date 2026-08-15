@@ -406,7 +406,10 @@ def test_supervisor_refuses_missing_or_incompatible_executable_worker():
     run_scenario(scenario())
 
 
-def test_supervisor_enforces_resource_budget_before_writing_a_request():
+# A worker over the old ceilings is executed rather than refused: the ceilings
+# killed work that was already succeeding, and the cgroup meant to enforce the
+# same numbers could never be created.
+def test_supervisor_executes_a_worker_over_the_former_resource_ceilings():
     async def scenario():
         events = []
         offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
@@ -421,17 +424,17 @@ def test_supervisor_enforces_resource_budget_before_writing_a_request():
         )
         await supervisor.start((spec,))
 
-        with pytest.raises(PluginWorkerError) as rejected:
-            await supervisor.execute(
-                PluginRequest("job-1", "events", "manual", {}, 1, None)
-            )
-
-        assert rejected.value.code == "process-budget-exceeded"
-        assert process.writer.closed is True
-        assert not any(
-            decode_frame(frame).type is WorkerMessageType.EXECUTE
-            for frame in process.writer.writes
-        )
+        request = PluginRequest("job-1", "events", "manual", {}, 10, None)
+        pending = asyncio.create_task(supervisor.execute(request))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if decode_frame(process.writer.writes[-1]).type is WorkerMessageType.EXECUTE:
+                break
+        sent = decode_frame(process.writer.writes[-1])
+        assert sent.type is WorkerMessageType.EXECUTE, "the request reached the worker"
+        expected = PluginResult("job-1", PluginResultStatus.SUCCEEDED, {"ok": True}, "done", 12)
+        process.reader.feed_data(encode_frame(result_frame(expected)))
+        assert await pending == expected
         await supervisor.stop()
 
     run_scenario(scenario())

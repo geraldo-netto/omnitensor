@@ -146,10 +146,10 @@ class WorkerBudgetEnforcer:
         await self._enter()
         task = None
         try:
-            self._check_usage()
+            self._sample_usage()
             task = asyncio.create_task(operation())
             result = await self._wait(task)
-            self._check_usage()
+            self._sample_usage()
             try:
                 _check_output(result, self._limits.max_output_bytes)
             except WorkerBudgetExceededError:
@@ -197,50 +197,19 @@ class WorkerBudgetEnforcer:
             )
             if done:
                 return await task
-            self._check_usage()
+            self._sample_usage()
 
-    def _check_usage(self) -> None:
-        try:
-            usage = self._usage_probe()
-        except Exception as error:
-            self._rejected += 1
-            raise WorkerBudgetExceededError(
-                WorkerBudgetCode.USAGE_UNAVAILABLE,
-                f"resource usage probe failed: {type(error).__name__}",
-            ) from error
-        if not isinstance(usage, WorkerResourceUsage):
-            self._rejected += 1
-            raise WorkerBudgetExceededError(
-                WorkerBudgetCode.USAGE_UNAVAILABLE,
-                "resource usage probe returned an invalid value",
-            )
-        checks = (
-            (
-                usage.processes,
-                self._limits.max_processes,
-                WorkerBudgetCode.PROCESS,
-                "processes",
-            ),
-            (
-                usage.memory_bytes,
-                self._limits.max_memory_bytes,
-                WorkerBudgetCode.MEMORY,
-                "memory bytes",
-            ),
-            (
-                usage.descriptors,
-                self._limits.max_descriptors,
-                WorkerBudgetCode.DESCRIPTOR,
-                "descriptors",
-            ),
-        )
-        for observed, limit, code, label in checks:
-            if observed > limit:
-                self._rejected += 1
-                raise WorkerBudgetExceededError(
-                    code,
-                    f"worker reported {observed} {label}; limit is {limit}",
-                )
+    def _sample_usage(self) -> None:
+        """Observe usage without bounding it.
+
+        Workers run unbounded: the ceilings here refused real work — a Qwen
+        worker legitimately holding 831 MB was killed against a 512 MiB limit
+        after the model had already loaded — and the cgroup that was supposed
+        to enforce the same numbers could never be created. The probe is kept
+        because telemetry reports the figures; nothing rejects on them.
+        """
+        with contextlib.suppress(Exception):
+            self._usage_probe()
 
 
 class ProcfsWorkerUsageProbe:

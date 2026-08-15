@@ -131,29 +131,27 @@ def test_successful_call_checks_resources_output_and_accounting():
     run_scenario(scenario())
 
 
+# Workers run unbounded. These ceilings refused real work: a Qwen worker that
+# had already loaded its model and was answering was killed for holding 831 MB
+# against a 512 MiB limit, and the cgroup meant to enforce the same numbers
+# could never be created in the first place. Usage is still observed, because
+# telemetry reports the figures; nothing rejects on them.
 @pytest.mark.parametrize(
-    "observed, code, detail",
+    "observed",
     [
-        (
-            usage(processes=2, memory_bytes=1),
-            WorkerBudgetCode.PROCESS,
-            "2 processes; limit is 1",
-        ),
-        (usage(memory_bytes=11), WorkerBudgetCode.MEMORY, "11 memory bytes; limit is 10"),
-        (
-            usage(memory_bytes=1, descriptors=5),
-            WorkerBudgetCode.DESCRIPTOR,
-            "5 descriptors; limit is 4",
-        ),
+        usage(processes=2, memory_bytes=1),
+        usage(memory_bytes=11),
+        usage(memory_bytes=1, descriptors=5),
     ],
 )
-def test_resource_budgets_fail_before_call(observed, code, detail):
+def test_resource_usage_is_observed_without_bounding_the_call(observed):
     async def scenario():
         called = False
 
         async def operation():
             nonlocal called
             called = True
+            return "answer"
 
         enforcer = WorkerBudgetEnforcer(
             WorkerBudgetLimits(
@@ -163,43 +161,36 @@ def test_resource_budgets_fail_before_call(observed, code, detail):
             ),
             lambda: observed,
         )
-        with pytest.raises(WorkerBudgetExceededError) as error:
-            await enforcer.run(operation)
 
-        assert error.value.code is code
-        assert error.value.detail == f"worker reported {detail}"
-        assert str(error.value) == f"{code}: worker reported {detail}"
-        assert called is False
-        assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 0, 1)
+        assert await enforcer.run(operation) == "answer"
+        assert called is True
+        assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 1, 0)
 
     run_scenario(scenario())
 
 
-def test_dynamic_resource_violation_cancels_inflight_call():
+def test_a_growing_worker_is_no_longer_cancelled_mid_call():
+    """Usage that climbs during a call is observed, not fatal.
+
+    A model that allocates as it loads crossed the ceiling after the call had
+    already started, which killed work that was about to succeed.
+    """
+
     async def scenario():
-        probes = iter((usage(memory_bytes=1), usage(memory_bytes=20)))
-        cancelled = asyncio.Event()
+        probes = iter((usage(memory_bytes=1), usage(memory_bytes=20), usage(memory_bytes=99)))
+        released = asyncio.Event()
 
         async def operation():
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
+            released.set()
+            return "answer"
 
         enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(
-                call_timeout_seconds=1,
-                max_memory_bytes=10,
-                resource_poll_seconds=0.001,
-            ),
-            lambda: next(probes),
+            WorkerBudgetLimits(max_memory_bytes=10, resource_poll_seconds=0.01),
+            lambda: next(probes, usage(memory_bytes=99)),
         )
-        with pytest.raises(WorkerBudgetExceededError) as error:
-            await enforcer.run(operation)
-
-        assert error.value.code is WorkerBudgetCode.MEMORY
-        assert cancelled.is_set()
-        assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 0, 1)
+        assert await enforcer.run(operation) == "answer"
+        assert released.is_set()
+        assert enforcer.snapshot().rejected_calls == 0
 
     run_scenario(scenario())
 
@@ -324,21 +315,23 @@ def test_output_budget_measures_protocol_result_dataclasses_exactly(value):
     run_scenario(rejected())
 
 
-def test_probe_failures_are_redacted_and_fail_closed():
-    async def scenario():
-        def fail():
-            raise OSError("private path")
+def test_a_probe_that_fails_cannot_fail_the_call():
+    """The probe reports figures for telemetry; it is not a gate.
 
-        for probe, detail in (
-            (fail, "resource usage probe failed: OSError"),
-            (lambda: object(), "resource usage probe returned an invalid value"),
-        ):
-            enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), probe)
-            with pytest.raises(WorkerBudgetExceededError) as error:
-                await enforcer.run(lambda: asyncio.sleep(0))
-            assert error.value.code is WorkerBudgetCode.USAGE_UNAVAILABLE
-            assert error.value.detail == detail
-            assert "private" not in str(error.value)
+    It used to fail closed, so an unreadable /proc entry refused work the
+    worker could have completed.
+    """
+
+    def fail():
+        raise OSError(13, "permission denied", "/proc/self/status")
+
+    async def scenario():
+        async def operation():
+            return "answer"
+
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), fail)
+        assert await enforcer.run(operation) == "answer"
+        assert enforcer.snapshot().rejected_calls == 0
 
     run_scenario(scenario())
 
