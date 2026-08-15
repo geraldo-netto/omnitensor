@@ -53,6 +53,13 @@ def test_unit_creates_its_state_directories_instead_of_assuming_them():
     }
 
 
-def test_unit_delegates_a_cgroup_subtree_for_worker_accounting():
-    """Per-worker cgroup accounting needs a subtree the service may write to."""
-    assert _load_unit()["Service"]["Delegate"] == "yes"
+def test_unit_places_no_cgroup_or_resource_bound_on_the_service():
+    """The delegated subtree only ever broke worker launch, so it is gone.
+
+    The service's own PID stays in the delegated root, which makes the kernel
+    refuse to populate `cgroup.subtree_control`; every per-worker cgroup then
+    had no `pids.max` to write and every external worker failed to start.
+    """
+    service = _load_unit()["Service"]
+    for bound in ("Delegate", "MemoryMax", "MemoryHigh", "CPUQuota", "TasksMax"):
+        assert bound not in service, bound

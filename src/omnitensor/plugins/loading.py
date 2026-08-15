@@ -27,7 +27,6 @@ from . import loading_staging as _staging
 from . import worker_specs as _specs
 from .artifacts import ArtifactReference as _ArtifactReference
 from .artifacts import ArtifactResolution as _ArtifactResolution
-from .budgets import current_process_cgroup
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
@@ -147,18 +146,10 @@ class InstalledPluginRuntime:
         resolve_artifact: ArtifactProvider | None = None,
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
         profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
-        require_worker_cgroup: bool = True,
     ) -> None:
         self._bundled_root = Path(bundled_root)
-        cgroup_parent = (
-            current_process_cgroup() if os.environ.get("INVOCATION_ID") else None
-        )
-        self._supervisor = supervisor or PluginWorkerSupervisor(
-            AsyncioSubprocessLauncher(
-                cgroup_parent=cgroup_parent,
-                require_cgroup=require_worker_cgroup,
-            )
-        )
+        # Workers run unbounded: no delegated cgroup, no CPU or memory ceiling.
+        self._supervisor = supervisor or PluginWorkerSupervisor(AsyncioSubprocessLauncher())
         self._entry_points_provider = entry_points_provider
         self._python_executable = _executable(python_executable)
         self._worker_import_paths = _import_paths(worker_import_paths)
@@ -291,8 +282,10 @@ class InstalledPluginRuntime:
         changes.add(change)
         local_monitor = None
         await asyncio.sleep(0)
-        if not execution.done() and self._grant_monitor is None and isinstance(
-            self._grant_source, ReloadablePermissionGrantSource
+        if (
+            not execution.done()
+            and self._grant_monitor is None
+            and isinstance(self._grant_source, ReloadablePermissionGrantSource)
         ):
             local_monitor = asyncio.ensure_future(self._monitor_permission_grants())
         changed = asyncio.ensure_future(change.wait())

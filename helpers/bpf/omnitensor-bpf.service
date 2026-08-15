@@ -23,7 +23,6 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=true
-MemoryMax=128M
 RuntimeDirectory=omnitensor
 ReadWritePaths=/sys/fs/bpf
 

@@ -233,7 +233,6 @@ def build_service(tmp_path, manifests=(), **kwargs):
         InstalledPluginRuntime(
             workloads_root,
             entry_points_provider=lambda **_kwargs: (),
-            require_worker_cgroup=False,
         ),
     )
     return OmniTensorService(
@@ -2306,7 +2305,6 @@ def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):
         plugin_runtime=InstalledPluginRuntime(
             bundled_workloads_path(),
             entry_points_provider=lambda **_kwargs: (),
-            require_worker_cgroup=False,
         ),
     )
 

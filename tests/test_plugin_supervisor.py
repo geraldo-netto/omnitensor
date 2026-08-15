@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import dataclass
 
 import pytest
@@ -1242,7 +1241,7 @@ class StubSubprocess:
         self.kill_calls += 1
 
 
-def test_asyncio_launcher_uses_isolated_bounded_process_options(monkeypatch):
+def test_asyncio_launcher_uses_isolated_unbounded_process_options(monkeypatch):
     async def scenario():
         reader = asyncio.StreamReader()
         events = []
@@ -1268,16 +1267,20 @@ def test_asyncio_launcher_uses_isolated_bounded_process_options(monkeypatch):
         assert argv == ("python", "worker.py", "real")
         assert options["stdin"] is asyncio.subprocess.PIPE
         assert options["stdout"] is asyncio.subprocess.PIPE
-        assert options["stderr"] is asyncio.subprocess.DEVNULL
+        # Kept, not discarded: throwing worker stderr away is what made a
+        # launch failure look like an unqualified provider.
+        assert options["stderr"] is asyncio.subprocess.PIPE
         assert options["close_fds"] is True
         assert options["start_new_session"] is True
 
     run_scenario(scenario())
 
 
-def test_asyncio_launcher_confines_worker_to_configured_cgroup(
-    monkeypatch, tmp_path
-):
+# Workers run unbounded. The delegated-subtree design could never work here:
+# the service's own PID stays in the delegated root, so the kernel refuses to
+# populate `cgroup.subtree_control`, and a child of a controller-less parent
+# has no `pids.max` to write — every external worker died at launch.
+def test_asyncio_launcher_applies_no_cgroup_or_resource_bound(monkeypatch, tmp_path):
     async def scenario():
         reader = asyncio.StreamReader()
         owner = type("Owner", (), {"plugin_id": "real", "reader": reader})()
@@ -1288,8 +1291,6 @@ def test_asyncio_launcher_confines_worker_to_configured_cgroup(
             calls.append((argv, options))
             return process
 
-        parent = tmp_path / "delegated"
-        parent.mkdir()
         limits = WorkerBudgetLimits(max_processes=7, max_memory_bytes=4096)
         spec = WorkerSpec(
             "real",
@@ -1299,24 +1300,14 @@ def test_asyncio_launcher_confines_worker_to_configured_cgroup(
         )
         monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
 
-        launched = await AsyncioSubprocessLauncher(
-            cgroup_parent=parent,
-            proc_root=tmp_path / "proc",
-        ).launch(spec)
+        launched = await AsyncioSubprocessLauncher(proc_root=tmp_path / "proc").launch(spec)
 
-        cgroup = parent / "omnitensor-worker-real"
-        assert (cgroup / "pids.max").read_text(encoding="ascii") == "7"
-        assert (cgroup / "memory.max").read_text(encoding="ascii") == "4096"
-        assert calls[0][0] == (
-            sys.executable,
-            "-m",
-            "omnitensor.plugins.cgroup_exec",
-            str(cgroup),
-            "python",
-            "worker.py",
-        )
+        # The worker is executed directly: no cgroup_exec shim, no subtree.
+        assert calls[0][0] == ("python", "worker.py")
         assert "preexec_fn" not in calls[0][1]
-        assert type(launched.usage_probe).__name__ == "CgroupWorkerUsageProbe"
+        assert type(launched.usage_probe).__name__ == "ProcfsWorkerUsageProbe"
+        assert not list(tmp_path.glob("**/pids.max"))
+        assert not list(tmp_path.glob("**/memory.max"))
 
     run_scenario(scenario())
 

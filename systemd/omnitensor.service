@@ -12,10 +12,6 @@ ExecStart=%h/.local/bin/omnitensor
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
-# Own a cgroup subtree so each plugin worker can be accounted in its own
-# cgroup.  Process-tree walking cannot see a worker that double-forks;
-# cgroup membership survives it.
-Delegate=yes
 ProtectSystem=strict
 ProtectHome=read-only
 # ReadWritePaths= cannot be used here: it requires the directories to already

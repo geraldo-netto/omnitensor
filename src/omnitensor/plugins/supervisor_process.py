@@ -12,12 +12,9 @@ from pathlib import Path
 from typing import Protocol
 
 from .budgets import (
-    CgroupWorkerUsageProbe,
     ProcfsWorkerUsageProbe,
     WorkerBudgetLimits,
     WorkerResourceUsage,
-    configure_worker_cgroup,
-    create_worker_cgroup,
     kill_worker_cgroup,
     remove_worker_cgroup,
 )
@@ -123,61 +120,38 @@ class _SubprocessWorker:
 class AsyncioSubprocessLauncher:
     """Launch workers without a shell, inherited descriptors, or a shared session."""
 
-    def __init__(
-        self,
-        *,
-        cgroup_parent: Path | None = None,
-        require_cgroup: bool = False,
-        proc_root: Path = Path("/proc"),
-    ) -> None:
-        self._cgroup_parent = Path(cgroup_parent) if cgroup_parent is not None else None
-        self._require_cgroup = require_cgroup
+    # Workers are launched without a cgroup and without CPU or memory bounds.
+    #
+    # The unit delegated a cgroup subtree and every worker was given a child of
+    # it carrying `pids.max` and `memory.max`. That could never work here: the
+    # service's own PID stays in the delegated root, the kernel's
+    # no-internal-process rule then refuses to populate
+    # `cgroup.subtree_control`, and a child of a controller-less parent has no
+    # `pids.max` to write. Every external worker failed at launch with
+    # `FileNotFoundError`, which — with stderr discarded — surfaced in the
+    # applet as "Configure and qualify …", sending users to look for artifacts
+    # that were already installed and ready.
+    #
+    # Confinement that matters is still in force: `spec.sandbox` wraps the argv
+    # and seccomp still gates whether a worker may start at all.
+    def __init__(self, *, proc_root: Path = Path("/proc")) -> None:
         self._proc_root = Path(proc_root)
 
     async def launch(self, spec: WorkerSpec) -> WorkerProcess:
-        if self._require_cgroup and self._cgroup_parent is None:
-            raise RuntimeError("a delegated cgroup-v2 subtree is required for workers")
         argv = spec.sandbox.wrap(spec.argv) if spec.sandbox is not None else spec.argv
-        cgroup = None
-        options = {
-            "stdin": asyncio.subprocess.PIPE,
-            "stdout": asyncio.subprocess.PIPE,
-            "stderr": asyncio.subprocess.DEVNULL,
-            "close_fds": True,
-            "start_new_session": True,
-        }
-        if self._cgroup_parent is not None:
-            cgroup = create_worker_cgroup(
-                self._cgroup_parent,
-                f"omnitensor-worker-{spec.plugin_id}",
-            )
-            try:
-                configure_worker_cgroup(cgroup, spec.budget_limits)
-            except Exception:
-                with suppress(OSError):
-                    remove_worker_cgroup(cgroup)
-                raise
-            argv = (
-                sys.executable,
-                "-m",
-                "omnitensor.plugins.cgroup_exec",
-                str(cgroup),
-                *argv,
-            )
-        try:
-            process = await asyncio.create_subprocess_exec(*argv, **options)
-        except Exception:
-            if cgroup is not None:
-                with suppress(OSError):
-                    remove_worker_cgroup(cgroup)
-            raise
-        usage_probe = (
-            CgroupWorkerUsageProbe(cgroup, proc_root=self._proc_root)
-            if cgroup is not None
-            else ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            # Kept rather than discarded: a worker that dies on import said why,
+            # and throwing that away is what made this failure invisible.
+            stderr=asyncio.subprocess.PIPE,
+            close_fds=True,
+            start_new_session=True,
         )
         wrapper = _facade_value("_SubprocessWorker", _SubprocessWorker)
-        return wrapper(process, usage_probe, cgroup)
+        probe = ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
+        return wrapper(process, probe, None)
 
 
 def validate_specs(
