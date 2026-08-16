@@ -1,52 +1,52 @@
 {
-  "version": 1,
-  "recordedAt": "2026-08-13",
   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+  "models": {
+    "dictalm2-hebrew-q4-k-m": {
+      "contextTokens": 32768,
+      "fullyOffloadedLayers": 33,
+      "keyCache": "q8_0",
+      "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
+      "valueCache": "q8_0"
+    },
+    "qwen3-8b-q4-k-m": {
+      "contextTokens": 32768,
+      "fullyOffloadedLayers": 37,
+      "keyCache": "q8_0",
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "valueCache": "q8_0"
+    }
+  },
+  "recordedAt": "2026-08-13",
   "runtime": {
-    "distribution": "llama-cpp-python",
-    "version": "0.3.34",
-    "wheelSha256": "8fe651093900aa4b2a21c1bd5d0ca6bc6bed619511f2962deac6a06689a19aca",
     "binaries": {
       "libggml-vulkan.so": "505fd5f88249babd789a5ef9272617893833526b69616d08e269cd7562b48ccf",
       "libllama.so": "dc289c1fe7f93c2433cbc7f5aafc6f72e8b86cc3772a22071b8b33aabf7de2a3"
-    }
-  },
-  "models": {
-    "qwen3-8b-q4-k-m": {
-      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
-      "fullyOffloadedLayers": 37,
-      "contextTokens": 32768,
-      "keyCache": "q8_0",
-      "valueCache": "q8_0"
     },
-    "dictalm2-hebrew-q4-k-m": {
-      "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
-      "fullyOffloadedLayers": 33,
-      "contextTokens": 32768,
-      "keyCache": "q8_0",
-      "valueCache": "q8_0"
-    }
+    "distribution": "llama-cpp-python",
+    "version": "0.3.34",
+    "wheelSha256": "8fe651093900aa4b2a21c1bd5d0ca6bc6bed619511f2962deac6a06689a19aca"
   },
+  "version": 1,
   "workloads": {
     "ask-selected-files": {
       "modelId": "qwen3-8b-q4-k-m",
-      "taskSha256": "c84e10f5734347ebb44f6566187b5d7a4aacb1357c52ebfb5cca2546b643cc85",
-      "result": "passed"
+      "result": "passed",
+      "taskSha256": "ee2e1b207b19789de6990e75459820906b1608e62396c5c1ca62e48ce8c4dd39"
     },
     "event-extraction": {
       "modelId": "qwen3-8b-q4-k-m",
-      "taskSha256": "7634ecb26f3de71ae2232e35782e47b494d49f20d154b2cc0ca6641ca7b3dc63",
-      "result": "passed"
+      "result": "passed",
+      "taskSha256": "7634ecb26f3de71ae2232e35782e47b494d49f20d154b2cc0ca6641ca7b3dc63"
     },
     "file-organizer": {
       "modelId": "qwen3-8b-q4-k-m",
-      "taskSha256": "5cfc4943339ed59f21bd6bfdfea17cb7c3d387a8e86700aa2309b27acc64a6a0",
-      "result": "passed"
+      "result": "passed",
+      "taskSha256": "5cfc4943339ed59f21bd6bfdfea17cb7c3d387a8e86700aa2309b27acc64a6a0"
     },
     "selected-text-tools": {
       "modelId": "qwen3-8b-q4-k-m",
-      "taskSha256": "b27d00d228d50fe7bd1fbf6eb5a0a1937e33a261912256ba82d3cd0f0d5be127",
-      "result": "passed"
+      "result": "passed",
+      "taskSha256": "b27d00d228d50fe7bd1fbf6eb5a0a1937e33a261912256ba82d3cd0f0d5be127"
     }
   }
 }
