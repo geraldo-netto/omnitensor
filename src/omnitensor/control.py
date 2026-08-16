@@ -86,6 +86,50 @@ class ControlService:
     def state(self) -> PolicyState:
         return self._state
 
+    async def adopt_profiles(
+        self, profile_ids, default: ProfilePolicy | None = None
+    ) -> tuple[str, ...]:
+        """Give governed profiles a policy the stored state does not hold yet.
+
+        Policy is seeded from the workload catalog, which is complete before
+        the first command arrives.  Plugins are not in it: they are discovered
+        after the store is loaded, so every ``set-profile-enabled`` naming one
+        was answered ``Unknown workload profile`` and the surfaces that read
+        the published profile set drew three controls that could not work.
+
+        Adoption is a policy change like any other — persisted, and counted in
+        the revision, so a caller holding the previous revision refreshes
+        rather than committing against a profile set it never saw.  Profiles
+        that already have policy are untouched: this never overwrites what
+        somebody chose.
+        """
+        default = default or ProfilePolicy(enabled=True, weight=MIN_WEIGHT)
+        async with self._lock:
+            candidate = copy.deepcopy(self._state)
+            adopted = tuple(
+                profile_id
+                for profile_id in sorted(set(profile_ids))
+                if isinstance(profile_id, str) and profile_id not in candidate.profiles
+            )
+            if not adopted:
+                return ()
+            for profile_id in adopted:
+                candidate.profiles[profile_id] = ProfilePolicy(
+                    enabled=default.enabled, weight=default.weight
+                )
+            candidate.revision += 1
+            try:
+                await run_off_loop(self._store.save, candidate)
+            except OSError:
+                # Unpersisted adoption would be forgotten on the next start
+                # while the running process believed it had happened.
+                return ()
+            self._state = candidate
+        if self._on_applied is not None:
+            with contextlib.suppress(Exception):
+                self._on_applied()
+        return adopted
+
     async def apply_command_text(self, text: str) -> str:
         try:
             acknowledgement = await self._apply(text)

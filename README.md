@@ -48,6 +48,11 @@ documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and
 mandatory versus optional producer dependencies.
 
+Tuning how many plugin jobs run at once, or wondering what a profile's weight
+does for a plugin workload? [Plugin admission](docs/plugin-admission.md)
+documents the weighted pool in front of plugin workers and
+`OMNITENSOR_PLUGIN_SLOTS`.
+
 Publishing a qualified local artifact? The
 [publisher identity section](docs/local-training.md#machine-local-artifact-publisher-identity)
 explains why signatures are required and how the idempotent `xpuwlm` Ed25519

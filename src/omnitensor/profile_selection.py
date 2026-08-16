@@ -10,6 +10,10 @@ from .registry import Workload
 from .scheduler import Scheduler, select_backend
 from .state import PolicyState
 
+# The snapshot contract publishes at most 128 profiles; past that the document
+# is invalid and nothing is published at all, so extra plugins are dropped from
+# the list rather than costing every reader the whole snapshot.
+MAX_PUBLISHED_PROFILES = 128
 PAUSED_BY_POLICY = "paused-by-policy"
 PROFILE_DISABLED = "profile-disabled"
 NO_MODEL = "no-model"
@@ -115,16 +119,80 @@ def profile_status(
     }
 
 
+def plugin_profile_statuses(
+    profile_ids,
+    counts_of: dict[str, dict],
+    policy: PolicyState,
+    limit: int = MAX_PUBLISHED_PROFILES,
+) -> dict[str, dict]:
+    """Status per installed plugin profile, for the snapshot document.
+
+    Plugins are not in the workload catalog, so they had no entry here and the
+    published profile set never named them — which is what let a surface tell
+    enabled from disabled for catalog profiles and nothing at all for the ones
+    a person actually runs.  They are governed the same way, and now say so.
+    """
+    return {
+        profile_id: plugin_profile_status(
+            profile_id,
+            counts_of.get(profile_id, {"queued": 0, "running": 0}),
+            policy,
+        )
+        for profile_id in sorted(profile_ids)[:limit]
+    }
+
+
+def plugin_profile_status(profile_id: str, counts: dict, policy: PolicyState) -> dict:
+    """One plugin profile's status.
+
+    A plugin has no model contract and no scheduler lane to be unavailable on:
+    what can be said about it is whether policy lets it run, and whether it is
+    running now or waiting for a worker slot.
+    """
+    queued = counts["queued"]
+    profile_policy = policy.profiles.get(profile_id)
+    if policy.paused:
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Runtime paused by policy",
+            "reason": _reason("PAUSED_BY_POLICY", PAUSED_BY_POLICY),
+        }
+    if profile_policy is not None and not profile_policy.enabled:
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Profile disabled by policy",
+            "reason": _reason("PROFILE_DISABLED", PROFILE_DISABLED),
+        }
+    running = counts["running"]
+    weight = profile_policy.weight if profile_policy is not None else 1
+    detail = (
+        f"Running in a plugin worker; {queued} waiting at weight {weight}"
+        if running
+        else "Ready; runs in a plugin worker when asked"
+    )
+    return {
+        "status": "running" if running else "idle",
+        "queued": queued,
+        "detail": detail[:240],
+        "reason": _reason("SERVING", SERVING),
+    }
+
+
 profile_statuses.__module__ = "omnitensor.service"
 
 
 __all__ = [
     "ARTIFACT_UNAVAILABLE",
     "CONSENT_MISSING",
+    "MAX_PUBLISHED_PROFILES",
     "NO_MODEL",
     "PAUSED_BY_POLICY",
     "PROFILE_DISABLED",
     "SERVING",
+    "plugin_profile_status",
+    "plugin_profile_statuses",
     "profile_status",
     "profile_statuses",
 ]

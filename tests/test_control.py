@@ -536,3 +536,52 @@ def test_a_batch_still_obeys_the_revision_compare_and_swap(control):
 
     assert stale["status"] == "rejected"
     assert "revision" in stale["message"].lower()
+
+
+def test_adopting_a_plugin_profile_makes_its_policy_settable(control):
+    """The refusal F4 named: a plugin has no policy until the runtime adopts it."""
+    refusal = apply(control, command("set-profile-enabled", "file-organizer", False))
+    assert refusal["status"] == "rejected"
+    assert refusal["message"] == "Unknown workload profile: file-organizer"
+
+    adopted = asyncio.run(control.adopt_profiles(["file-organizer"]))
+
+    assert adopted == ("file-organizer",)
+    assert control.state.profiles["file-organizer"] == ProfilePolicy(enabled=True, weight=1)
+    applied = apply(
+        control,
+        command("set-profile-enabled", "file-organizer", False, revision=control.state.revision),
+    )
+    assert applied["status"] == "applied"
+    assert applied["portfolio"]["profiles"]["file-organizer"]["enabled"] is False
+
+
+def test_adoption_never_overwrites_a_decision_already_made(control):
+    asyncio.run(control.adopt_profiles(["file-organizer"]))
+    apply(
+        control,
+        command("set-profile-weight", "file-organizer", 4, revision=control.state.revision),
+    )
+
+    again = asyncio.run(control.adopt_profiles(["file-organizer", "media-transcription"]))
+
+    assert again == ("media-transcription",)
+    assert control.state.profiles["file-organizer"].weight == 4
+
+
+def test_adoption_is_persisted_and_counted_in_the_revision(control, tmp_path):
+    before = control.state.revision
+
+    asyncio.run(control.adopt_profiles(["file-organizer"]))
+
+    assert control.state.revision == before + 1
+    stored = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+    assert stored["profiles"]["file-organizer"] == {"enabled": True, "weight": 1}
+
+
+def test_adopting_nothing_new_spends_no_revision(control):
+    asyncio.run(control.adopt_profiles(["file-organizer"]))
+    revision = control.state.revision
+
+    assert asyncio.run(control.adopt_profiles(["file-organizer"])) == ()
+    assert control.state.revision == revision

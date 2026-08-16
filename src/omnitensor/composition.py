@@ -9,6 +9,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from .plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
 from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
 
 DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
@@ -64,6 +65,20 @@ def _env_accelerator_device_ids(
     }
 
 
+def _env_plugin_slots(environ: Mapping[str, str] | None = None) -> int:
+    """How many plugin jobs may run at once, from the environment.
+
+    An unset or unreadable value is the default rather than a startup failure:
+    the pool is a tuning knob, and refusing to start over a typo in it would
+    take the whole runtime down for a number that has a sane answer.
+    """
+    source = os.environ if environ is None else environ
+    raw = source.get("OMNITENSOR_PLUGIN_SLOTS", "").strip()
+    if not raw.isdigit():
+        return DEFAULT_MAX_CONCURRENT
+    return max(1, min(MAX_CONCURRENT_LIMIT, int(raw)))
+
+
 @dataclass(frozen=True)
 class ServiceEnvironment:
     """Validated path/device values at the process environment boundary."""
@@ -76,6 +91,7 @@ class ServiceEnvironment:
     grants_path: Path
     input_roots: tuple[Path, ...]
     accelerator_device_ids: dict[str, str]
+    plugin_slots: int
 
     @classmethod
     def read(cls, environ: Mapping[str, str] | None = None) -> ServiceEnvironment:
@@ -90,6 +106,7 @@ class ServiceEnvironment:
             grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH, environ),
             input_roots=_env_input_roots(environ),
             accelerator_device_ids=_env_accelerator_device_ids(environ),
+            plugin_slots=_env_plugin_slots(environ),
         )
 
     def service_options(self) -> dict[str, Any]:
@@ -102,6 +119,7 @@ class ServiceEnvironment:
             "grants_path": self.grants_path,
             "input_roots": self.input_roots,
             "accelerator_device_ids": self.accelerator_device_ids,
+            "plugin_slots": self.plugin_slots,
         }
 
 

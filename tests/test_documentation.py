@@ -397,3 +397,16 @@ def test_installation_guide_states_conversion_parity_and_evidence_limits():
         "no target NPU needed to convert",
     ):
         assert term in normalized
+
+
+def test_plugin_admission_guide_documents_the_pool_and_how_to_tune_it():
+    """A knob nobody can find is a knob nobody has."""
+    from omnitensor.plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
+
+    guide = (ROOT / "docs/plugin-admission.md").read_text(encoding="utf-8")
+    assert "OMNITENSOR_PLUGIN_SLOTS" in guide
+    assert f"| {DEFAULT_MAX_CONCURRENT} | {MAX_CONCURRENT_LIMIT} |" in guide
+    assert "1 / weight" in guide
+    assert "[Plugin admission](docs/plugin-admission.md)" in (
+        ROOT / "README.md"
+    ).read_text(encoding="utf-8")

@@ -19,7 +19,11 @@ from .atomicio import write_json_atomic
 MIN_WEIGHT = 1
 MAX_WEIGHT = 5
 MAX_DEVICE_CHOICES = 128
+# The snapshot contract publishes at most 128 profiles, so policy that could
+# never be published is policy this file will not grow to hold.
+MAX_PROFILES = 128
 GPU_DEVICE_ID_PATTERN = re.compile(r"^gpu-renderD[0-9]{1,6}$")
+PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 
 
 def _clamp_weight(value: object, fallback: int) -> int:
@@ -59,6 +63,32 @@ class PolicyState:
         }
 
 
+def _adopt_stored_profiles(
+    profiles: dict[str, ProfilePolicy], supplied: dict
+) -> None:
+    """Keep policy for profiles this store has no default for.
+
+    Defaults come from the workload catalog, which is read at construction and
+    knows nothing of the plugins discovered afterwards.  Seeding from defaults
+    alone therefore dropped every adopted plugin profile on restart, and the
+    runtime re-adopted it at its default — so a plugin someone had disabled or
+    weighted came back enabled at weight one on every start.  An entry that is
+    stored, well-formed and not a default is that person's decision.
+    """
+    for profile_id, entry in sorted(supplied.items()):
+        if len(profiles) >= MAX_PROFILES:
+            return
+        if profile_id in profiles or not isinstance(entry, dict):
+            continue
+        if not isinstance(profile_id, str) or not PROFILE_ID_PATTERN.fullmatch(profile_id):
+            continue
+        enabled = entry.get("enabled")
+        profiles[profile_id] = ProfilePolicy(
+            enabled=enabled if isinstance(enabled, bool) else True,
+            weight=_clamp_weight(entry.get("weight"), MIN_WEIGHT),
+        )
+
+
 class PolicyStore:
     """Loads, sanitizes, and atomically persists :class:`PolicyState`."""
 
@@ -84,6 +114,7 @@ class PolicyStore:
                 enabled=enabled if isinstance(enabled, bool) else default.enabled,
                 weight=_clamp_weight(entry.get("weight"), default.weight),
             )
+        _adopt_stored_profiles(profiles, supplied)
         device_choices = raw.get("deviceChoices")
         device_choices = device_choices if isinstance(device_choices, dict) else {}
         sanitized_choices = {

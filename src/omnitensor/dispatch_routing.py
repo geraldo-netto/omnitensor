@@ -7,8 +7,9 @@ from functools import partial
 from pathlib import Path
 
 from .dispatch import InferenceJobDispatcher, inference_result_payload
-from .job_ports import JobAdmission, JobDispatcher
+from .job_ports import JobAdmission, JobDispatcher, JobDispatchError
 from .jobs import UnavailableJobDispatcher
+from .plugin_admission import PluginAdmissionQueue
 from .plugins.orchestration import RunnerSet, build_plugin_runners, required_permissions
 from .ports import PluginIdentitySource, PluginRuntime
 from .registry import Workload
@@ -30,12 +31,20 @@ def admit_plugin_job(
     inference: JobDispatcher,
     plugins: PluginRuntime,
     plugin_ids_provider: Callable[[], frozenset[str]],
+    queue: PluginAdmissionQueue | None,
     workload_id: str,
     payload: dict,
 ) -> None:
     if workload_id in plugin_ids_provider():
         if not isinstance(plugins, JobAdmission):
             raise RuntimeError("plugin runtime does not implement admission")
+        if queue is not None and not queue.has_room():
+            # Refused here rather than queued: admission runs before an id is
+            # minted, so a caller learns now instead of polling a job that will
+            # never be served.
+            raise JobDispatchError(
+                "plugin-queue-full", "Too many plugin jobs are waiting for a worker slot"
+            )
         plugins.admit(workload_id, payload)
         return
     if isinstance(inference, JobAdmission):
@@ -45,14 +54,21 @@ def admit_plugin_job(
 class PluginAwareDispatcher:
     """Route installed plugin IDs to workers and model profiles to inference."""
 
-    def __init__(self, inference: JobDispatcher, plugins: PluginRuntime) -> None:
+    def __init__(
+        self,
+        inference: JobDispatcher,
+        plugins: PluginRuntime,
+        queue: PluginAdmissionQueue | None = None,
+    ) -> None:
         self._inference = inference
         self._plugins = plugins
+        self._queue = queue
         self.admit = partial(
             admit_plugin_job,
             self._inference,
             self._plugins,
             self._plugin_ids,
+            self._queue,
         )
 
     def _plugin_ids(self) -> frozenset[str]:
@@ -64,7 +80,15 @@ class PluginAwareDispatcher:
         if workload_id in self._plugin_ids():
             if not isinstance(self._plugins, JobDispatcher):
                 raise RuntimeError("plugin runtime does not implement dispatch")
-            return self._plugins.dispatch(job_id, workload_id, payload)
+            if self._queue is None:
+                return self._plugins.dispatch(job_id, workload_id, payload)
+            # The worker call is started by the queue, once this profile's
+            # weight has earned it a slot — never here, or the pool would bound
+            # nothing and weight would order nothing.
+            return self._queue.run(
+                workload_id,
+                lambda: self._plugins.dispatch(job_id, workload_id, payload),
+            )
         return self._inference.dispatch(job_id, workload_id, payload)
 
     def prepare_lane(self, workload_id: str):

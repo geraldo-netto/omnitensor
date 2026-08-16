@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from omnitensor.state import MAX_DEVICE_CHOICES, PolicyState, PolicyStore, ProfilePolicy
+from omnitensor.state import (
+    MAX_DEVICE_CHOICES,
+    MAX_PROFILES,
+    MAX_WEIGHT,
+    PolicyState,
+    PolicyStore,
+    ProfilePolicy,
+)
 
 DEFAULTS = {
     "hardware-health": ProfilePolicy(enabled=True, weight=2),
@@ -59,7 +66,9 @@ def test_load_keeps_valid_revision_and_clamps_weights(tmp_path):
     assert state.paused is True
     assert state.profiles["hardware-health"] == ProfilePolicy(enabled=False, weight=5)
     assert state.profiles["visual-library"] == ProfilePolicy(enabled=False, weight=3)
-    assert "unknown-profile" not in state.profiles
+    # Kept, not dropped: a profile with no default here is a plugin discovered
+    # after this store was built, and its policy is somebody's decision.
+    assert state.profiles["unknown-profile"] == ProfilePolicy(enabled=True, weight=4)
 
 
 def test_save_round_trips_and_leaves_no_temp_files(tmp_path):
@@ -119,3 +128,51 @@ def test_device_choice_load_is_bounded_deterministically(tmp_path):
 
     assert len(loaded) == MAX_DEVICE_CHOICES
     assert tuple(loaded) == tuple(sorted(choices)[:MAX_DEVICE_CHOICES])
+
+
+def test_policy_for_a_profile_the_defaults_never_knew_survives_a_reload(tmp_path):
+    """Plugins are discovered after the store is built; their policy is still theirs."""
+    (tmp_path / "policy.json").write_text(
+        json.dumps({
+            "profiles": {
+                "hardware-health": {"enabled": False, "weight": 1},
+                "file-organizer": {"enabled": False, "weight": 4},
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    profiles = store(tmp_path).load().profiles
+
+    assert profiles["file-organizer"] == ProfilePolicy(enabled=False, weight=4)
+    assert profiles["hardware-health"] == ProfilePolicy(enabled=False, weight=1)
+
+
+def test_an_adopted_profile_with_junk_values_falls_back_rather_than_failing(tmp_path):
+    (tmp_path / "policy.json").write_text(
+        json.dumps({"profiles": {"file-organizer": {"enabled": "yes", "weight": 99}}}),
+        encoding="utf-8",
+    )
+
+    assert store(tmp_path).load().profiles["file-organizer"] == ProfilePolicy(
+        enabled=True, weight=MAX_WEIGHT
+    )
+
+
+def test_a_stored_profile_id_the_contract_could_not_publish_is_ignored(tmp_path):
+    (tmp_path / "policy.json").write_text(
+        json.dumps({"profiles": {"../escape": {"enabled": True, "weight": 1}}}),
+        encoding="utf-8",
+    )
+
+    assert "../escape" not in store(tmp_path).load().profiles
+
+
+def test_stored_profiles_are_bounded_by_what_the_snapshot_can_carry(tmp_path):
+    stored = {
+        f"plugin-{index:03d}": {"enabled": True, "weight": 1}
+        for index in range(MAX_PROFILES + 20)
+    }
+    (tmp_path / "policy.json").write_text(json.dumps({"profiles": stored}), encoding="utf-8")
+
+    assert len(store(tmp_path).load().profiles) == MAX_PROFILES

@@ -167,15 +167,16 @@ def test_plugin_admission_helper_routes_exact_ports_directly():
         provider_calls.append(True)
         return frozenset({"events"})
 
-    admit_plugin_job(inference, plugins, plugin_ids, "events", {"source": 1})
-    admit_plugin_job(inference, plugins, plugin_ids, "profile", {"value": 2})
+    # No pool: admission is exactly what it was before plugin jobs queued.
+    admit_plugin_job(inference, plugins, plugin_ids, None, "events", {"source": 1})
+    admit_plugin_job(inference, plugins, plugin_ids, None, "profile", {"value": 2})
 
     assert provider_calls == [True, True]
     assert plugins.calls == [("events", {"source": 1})]
     assert inference.calls == [("profile", {"value": 2})]
 
     with pytest.raises(RuntimeError) as incomplete:
-        admit_plugin_job(inference, object(), plugin_ids, "events", {})
+        admit_plugin_job(inference, object(), plugin_ids, None, "events", {})
     assert str(incomplete.value) == "plugin runtime does not implement admission"
 
 

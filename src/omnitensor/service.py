@@ -69,6 +69,7 @@ from .jobs import (
     JobSubmissionService,
     PredicateJobAuthorizer,
 )
+from .plugin_admission import DEFAULT_MAX_CONCURRENT, PluginAdmissionQueue
 from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.cancellation import JobCancellationRegistry
@@ -100,6 +101,9 @@ from .profile_selection import (
     CONSENT_MISSING as CONSENT_MISSING,
 )
 from .profile_selection import (
+    MAX_PUBLISHED_PROFILES as MAX_PUBLISHED_PROFILES,
+)
+from .profile_selection import (
     NO_MODEL as NO_MODEL,
 )
 from .profile_selection import (
@@ -110,6 +114,9 @@ from .profile_selection import (
 )
 from .profile_selection import (
     SERVING as SERVING,
+)
+from .profile_selection import (
+    plugin_profile_statuses as plugin_profile_statuses,
 )
 from .profile_selection import (
     profile_statuses as profile_statuses,
@@ -160,6 +167,7 @@ class OmniTensorService:
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
         accelerator_device_ids: dict[str, str] | None = None,
+        plugin_slots: int = DEFAULT_MAX_CONCURRENT,
     ):
         self._callers = CallerIdentityResolver()
         host = build_host_ports(
@@ -226,8 +234,17 @@ class OmniTensorService:
         self._plugin_reload_requested = False
         self._plugin_reload_task: asyncio.Task | None = None
         self._plugin_lifecycle_lock = asyncio.Lock()
+        # Plugin jobs run in worker processes rather than scheduler lanes, so
+        # this pool is where a plugin profile's weight decides anything at all.
+        self._plugin_queue = PluginAdmissionQueue(
+            weight_of=self._weight_of,
+            admits=self._admits,
+            max_concurrent=plugin_slots,
+        )
         self._job_dispatcher = routing.PluginAwareDispatcher(
-            job_dispatcher or self._default_dispatcher(), self._plugin_runtime
+            job_dispatcher or self._default_dispatcher(),
+            self._plugin_runtime,
+            self._plugin_queue,
         )
         # Constructed here because submission answers with an acceptance: if no
         # store outlives the call, the outcome has nowhere to be kept and a
@@ -298,6 +315,10 @@ class OmniTensorService:
 
     def _policy_changed(self) -> None:
         self._scheduler.kick()
+        # Same reason the scheduler is kicked: a plugin job held because its
+        # profile was disabled must be re-evaluated now, not when whatever is
+        # running happens to finish.
+        self._plugin_queue.kick()
         choices = dict(self.control.state.device_choices)
         if choices == self._last_device_choices:
             return
@@ -559,8 +580,35 @@ class OmniTensorService:
             plugin_telemetry=self.plugin_telemetry,
             input_roots=self._input_roots,
             kernel_telemetry_source=self._kernel_telemetry_source,
-            profile_statuses_of=profile_statuses,
+            profile_statuses_of=self._profile_statuses,
         )
+
+    def _profile_statuses(
+        self,
+        workloads,
+        executors,
+        scheduler,
+        policy,
+        artifact_ready,
+        permissions_missing,
+    ) -> dict[str, dict]:
+        """Catalog profiles as before, plus the installed plugins.
+
+        Both are governed by the same policy, so both belong in the published
+        profile set: a reader that finds only catalog profiles there cannot
+        tell a plugin whose policy it may set from one the runtime has never
+        heard of, and drew its controls dead for both.
+        """
+        statuses = profile_statuses(
+            workloads, executors, scheduler, policy, artifact_ready, permissions_missing
+        )
+        room = max(0, MAX_PUBLISHED_PROFILES - len(statuses))
+        statuses.update(
+            plugin_profile_statuses(
+                self._plugin_ids(), self._plugin_queue.profile_stats(), policy, room
+            )
+        )
+        return statuses
 
     def publish_once(self) -> dict:
         """Synchronously build and publish one snapshot (test/adapter API)."""
@@ -675,7 +723,23 @@ class OmniTensorService:
             plugin_snapshot,
             self.plugin_telemetry,
         )
+        await self._adopt_plugin_profiles()
         await self._record_plugin_readiness()
+
+    async def _adopt_plugin_profiles(self) -> None:
+        """Give every discovered plugin a policy, once it is known to exist.
+
+        Policy is seeded from the workload catalog at construction, and plugins
+        are discovered after that: until they are adopted, every command naming
+        one is refused as an unknown profile and the published profile set
+        omits them, so a surface can only draw controls that cannot work.
+        """
+        plugin_ids = self._plugin_ids()
+        if not plugin_ids:
+            return
+        adopted = await self.control.adopt_profiles(plugin_ids)
+        if adopted:
+            LOGGER.info("Adopted policy for %d plugin profile(s)", len(adopted))
 
     async def _record_plugin_readiness(self) -> None:
         """Record artifact readiness and worker health for every plugin.

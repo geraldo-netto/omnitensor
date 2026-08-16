@@ -17,6 +17,7 @@ from omnitensor.discovery import Device, detect_devices
 from omnitensor.executors.base import Availability
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import UnavailableJobDispatcher
+from omnitensor.plugin_admission import DEFAULT_MAX_CONCURRENT
 from omnitensor.plugins import ArtifactInstaller, ArtifactReference, ArtifactResolution
 from omnitensor.plugins.kernel_telemetry import parse_aggregate
 from omnitensor.profile_selection import profile_status
@@ -836,3 +837,78 @@ def test_a_resolution_is_not_recomputed_until_the_artifact_moves(fake_nodes, tmp
     assert len(calls) == 2
     assert service._resolve_artifact("runnable-model").ready is False
     assert hashlib.sha256(installed.read_bytes()).hexdigest() != MODEL_DIGEST
+
+
+def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(
+    fake_nodes, tmp_path
+):
+    """F4/F5: policy was seeded from the catalog only, so plugins had none."""
+    add_gpu(fake_nodes, node=128)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"file-organizer"})
+
+    service._plugin_runtime = Plugins()
+
+    refused = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                json.dumps({
+                    "version": CONTROL_VERSION,
+                    "id": "disable-organizer",
+                    "issuedAt": 1,
+                    "expectedRevision": 0,
+                    "operation": "set-profile-enabled",
+                    "profileId": "file-organizer",
+                    "value": False,
+                })
+            )
+        )
+    )
+    assert refused["status"] == "rejected"
+
+    asyncio.run(service._adopt_plugin_profiles())
+
+    applied = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                json.dumps({
+                    "version": CONTROL_VERSION,
+                    "id": "disable-organizer",
+                    "issuedAt": 1,
+                    "expectedRevision": service.control.state.revision,
+                    "operation": "set-profile-enabled",
+                    "profileId": "file-organizer",
+                    "value": False,
+                })
+            )
+        )
+    )
+
+    assert applied["status"] == "applied"
+    # And the decision reaches the job path and the published document.
+    assert service._admits("file-organizer") is False
+    assert service._job_authorized("submit", "file-organizer") is False
+    published = service.publish_once()["profiles"]["file-organizer"]
+    assert published["status"] == "paused"
+    assert published["reason"] == "profile-disabled"
+
+
+def test_a_plugin_weight_reaches_the_pool_that_orders_plugin_jobs(
+    fake_nodes, tmp_path
+):
+    add_gpu(fake_nodes, node=128)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"file-organizer"})
+
+    service._plugin_runtime = Plugins()
+    asyncio.run(service._adopt_plugin_profiles())
+    service.control.state.profiles["file-organizer"].weight = 4
+
+    assert service._weight_of("file-organizer") == 4
+    assert service._plugin_queue.max_concurrent == DEFAULT_MAX_CONCURRENT

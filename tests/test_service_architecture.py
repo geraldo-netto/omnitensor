@@ -485,6 +485,7 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
         "runtime_snapshot",
         lambda **arguments: arguments["profile_statuses_of"],
     )
+    statuses_of = object()
     snapshot_owner = SimpleNamespace(
         _devices=(),
         _device_load=lambda *_args: None,
@@ -498,8 +499,21 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
         plugin_telemetry=object(),
         _input_roots=(),
         _kernel_telemetry_source=object(),
+        _profile_statuses=statuses_of,
     )
-    assert service.OmniTensorService._build_runtime_snapshot(snapshot_owner) is public_profiles
+    # The snapshot's profile set is the owner's own selector, because it must
+    # add the installed plugins to whatever the catalog selector returns.
+    assert service.OmniTensorService._build_runtime_snapshot(snapshot_owner) is statuses_of
+
+    # That selector still resolves the module-level catalog function at call
+    # time, so patching it keeps working.
+    catalog_owner = SimpleNamespace(
+        _plugin_ids=frozenset,
+        _plugin_queue=SimpleNamespace(profile_stats=dict),
+    )
+    assert service.OmniTensorService._profile_statuses(
+        catalog_owner, {}, {}, object(), SimpleNamespace(profiles={}, paused=False), None, None
+    ) == {"profile": "patched"}
 
 
 class DiscoveryPort:
