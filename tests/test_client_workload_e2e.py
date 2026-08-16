@@ -228,6 +228,16 @@ class TestFileOrganizer:
         named = {entry.get("fileName") for entry in output["plan"]}
         assert named == {Path(source).name for source in sources}
 
+    def test_one_file_is_a_plan_like_any_other(self, source_file):
+        """A person organising one file is the smallest reasonable use of this
+        workload, and the window's chooser allows it: the manifest's floor is
+        one source, not two."""
+        source = source_file("only.txt", INVOICE)
+
+        output = succeeded("file-organizer", {"sources": [source]}, "file-organizer-result")
+
+        assert len(output["plan"]) == 1
+
 
 class TestEventExtraction:
     """Calendar events, with the evidence for each one."""
