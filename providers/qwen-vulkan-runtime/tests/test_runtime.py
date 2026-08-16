@@ -383,7 +383,8 @@ def test_receipt_binds_each_exact_task_and_model(
         tuple(sorted(document["runtime"]["binaries"].items())),
     )
     assert (
-        qualification.task_sha256(task_factory()) == document["workloads"][plugin_id]["taskSha256"]
+        qualification.task_sha256(task_factory())
+        == document["workloads"][plugin_id]["models"][model_id]["taskSha256"]
     )
 
 
@@ -444,12 +445,12 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
             "Qwen qualification receipt fields are invalid",
         ),
         (
-            lambda value: value.update(version=2),
+            lambda value: value.update(version=1),
             "Qwen qualification receipt version is invalid",
         ),
         (
             lambda value: value.update(recordedAt="moving"),
-            "Qwen qualification receipt version is invalid",
+            "Qwen qualification receipt date is invalid",
         ),
         (
             lambda value: value.update(device=""),
@@ -489,8 +490,29 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
             "Qwen workload qualification is invalid",
         ),
         (
-            lambda value: value["workloads"]["event-extraction"].update(result="failed"),
-            "Qwen workload differs from qualification",
+            lambda value: value["workloads"]["event-extraction"]["models"][
+                "qwen3-8b-q4-k-m"
+            ].update(result="failed", reason="refused its own contract"),
+            # The workload's default is that model, and a default that did not
+            # pass is caught before anything asks to run it.
+            "Qwen workload default is not a passing model",
+        ),
+        (
+            # A failure recorded without its reason is a note saying only "no".
+            lambda value: value["workloads"]["event-extraction"]["models"][
+                "qwen3-8b-q4-k-m"
+            ].update(result="failed"),
+            "Qwen workload failure has no reason",
+        ),
+        (
+            lambda value: value["workloads"]["event-extraction"].update(
+                default="qwen3-4b-q4-k-m"
+            ),
+            "Qwen workload default is not a passing model",
+        ),
+        (
+            lambda value: value["workloads"]["event-extraction"].update(models={}),
+            "Qwen workload qualification lists no model",
         ),
     ],
 )
@@ -507,6 +529,77 @@ def test_receipt_refuses_identity_and_shape_tampering(tmp_path, monkeypatch, mut
             event_generation_task(),
         )
     assert str(excinfo.value) == detail
+
+
+def _with_second_model(document, model_id, record):
+    """The receipt as it looks once a second model has been qualified."""
+    document["models"][model_id] = dict(document["models"]["qwen3-8b-q4-k-m"])
+    document["models"][model_id]["sha256"] = "a" * 64
+    document["workloads"]["event-extraction"]["models"][model_id] = record
+    return document
+
+
+def test_a_second_model_that_passed_is_offered_and_runs(tmp_path, monkeypatch):
+    """Version 2 exists for this: one workload, more than one qualified model,
+    so a person can trade accuracy for speed — and so the Hebrew model can be
+    reached at all."""
+    digest = qualification.task_sha256(event_generation_task())
+    document = _with_second_model(
+        _receipt(), "qwen3-4b-q4-k-m", {"result": "passed", "taskSha256": digest}
+    )
+    _load_receipt(monkeypatch, tmp_path, document)
+
+    receipt = qualification.load_qualification(
+        "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
+    )
+
+    assert receipt.device == document["device"]
+    assert qualification.qualified_models("event-extraction") == (
+        "qwen3-8b-q4-k-m",
+        "qwen3-4b-q4-k-m",
+    )
+
+
+def test_a_pair_that_failed_is_neither_offered_nor_run(tmp_path, monkeypatch):
+    """An unqualified model is not a slower answer, it is a worker that
+    refuses to start. Better refused here, with the reason recorded."""
+    digest = qualification.task_sha256(event_generation_task())
+    document = _with_second_model(
+        _receipt(),
+        "qwen3-4b-q4-k-m",
+        {"result": "failed", "taskSha256": digest, "reason": "drops half the events"},
+    )
+    _load_receipt(monkeypatch, tmp_path, document)
+
+    assert qualification.qualified_models("event-extraction") == ("qwen3-8b-q4-k-m",)
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification(
+            "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
+        )
+
+    assert str(excinfo.value) == "Qwen model did not pass qualification for this workload"
+
+
+def test_a_model_nobody_qualified_for_this_workload_is_refused(tmp_path, monkeypatch):
+    """Qualified *as a model* is not qualified *for this task*: DictaLM has
+    been the first for months and never the second."""
+    _load_receipt(monkeypatch, tmp_path, _receipt())
+
+    with pytest.raises(RuntimeError) as excinfo:
+        qualification.load_qualification(
+            "event-extraction",
+            factories.HEBREW_ARTIFACT_ID,
+            _receipt()["models"][factories.HEBREW_ARTIFACT_ID]["sha256"],
+            event_generation_task(),
+        )
+
+    assert str(excinfo.value) == "Qwen model has no qualification for this workload"
+
+
+def test_the_default_model_is_the_one_a_job_that_chose_nothing_runs(tmp_path, monkeypatch):
+    _load_receipt(monkeypatch, tmp_path, _receipt())
+
+    assert qualification.default_model("event-extraction") == "qwen3-8b-q4-k-m"
 
 
 def test_receipt_refuses_invalid_json_and_oversized_resource(tmp_path, monkeypatch):

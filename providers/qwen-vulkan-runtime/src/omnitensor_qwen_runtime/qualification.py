@@ -14,6 +14,14 @@ from omnitensor.plugins.generation import GenerationTask
 from omnitensor.preparation import file_digest
 
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
+_RECORDED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Version 2 keys each workload by model. Version 1 named exactly one, which is
+# why a model could be installed, qualified as a model, and still unreachable:
+# DictaLM was, for as long as this file could hold one Hebrew-capable model and
+# no way to ask for it.
+_RECEIPT_VERSION = 2
+PASSED = "passed"
+FAILED = "failed"
 _MAX_RECEIPT_BYTES = 64 * 1024
 
 
@@ -65,8 +73,15 @@ def _qualification_document() -> dict:
         "workloads",
     }:
         raise RuntimeError("Qwen qualification receipt fields are invalid")
-    if document["version"] != 1 or document["recordedAt"] != "2026-08-13":
+    if document["version"] != _RECEIPT_VERSION:
         raise RuntimeError("Qwen qualification receipt version is invalid")
+    # A date, not one particular date: re-qualifying a pair is expected work,
+    # and a literal here would mean every run edits the check that guards it.
+    # Nothing is trusted because of this field; the digests do that.
+    if not isinstance(document["recordedAt"], str) or not _RECORDED_AT.fullmatch(
+        document["recordedAt"]
+    ):
+        raise RuntimeError("Qwen qualification receipt date is invalid")
     device = document["device"]
     if not isinstance(device, str) or not device:
         raise RuntimeError("Qwen qualification device is invalid")
@@ -145,21 +160,69 @@ def _model(value: object, model_id: str, digest: str) -> int:
     return layers
 
 
-def _workload(value: object, plugin_id: str, model_id: str, task_digest: str) -> None:
+def qualified_models(plugin_id: str) -> tuple[str, ...]:
+    """Every model this workload passed on, in the order the receipt lists.
+
+    What a client may offer. A pair that failed is deliberately not here: an
+    unqualified model is not a slower answer, it is a worker that refuses to
+    start.
+    """
+    workload = _workload_entry(_qualification_document()["workloads"], plugin_id)
+    return tuple(
+        model_id
+        for model_id, record in workload["models"].items()
+        if record["result"] == PASSED
+    )
+
+
+def default_model(plugin_id: str) -> str:
+    """The model this workload runs when nobody has chosen one."""
+    return _workload_entry(_qualification_document()["workloads"], plugin_id)["default"]
+
+
+def _workload_entry(value: object, plugin_id: str) -> dict:
     if not isinstance(value, dict) or plugin_id not in value:
         raise RuntimeError("Qwen workload has no qualification")
     workload = value[plugin_id]
-    if not isinstance(workload, dict) or set(workload) != {
-        "modelId",
-        "taskSha256",
-        "result",
-    }:
+    if not isinstance(workload, dict) or set(workload) != {"default", "models"}:
         raise RuntimeError("Qwen workload qualification is invalid")
-    if workload != {
-        "modelId": model_id,
-        "taskSha256": task_digest,
-        "result": "passed",
-    }:
+    models = workload["models"]
+    if not isinstance(models, dict) or not models:
+        raise RuntimeError("Qwen workload qualification lists no model")
+    for record in models.values():
+        _workload_model(record)
+    chosen = workload["default"]
+    if chosen not in models or models[chosen]["result"] != PASSED:
+        # A default nobody qualified would hand every job that did not choose
+        # a model to a worker that cannot start.
+        raise RuntimeError("Qwen workload default is not a passing model")
+    return workload
+
+
+def _workload_model(record: object) -> None:
+    if not isinstance(record, dict) or not {"result", "taskSha256"} <= set(record):
+        raise RuntimeError("Qwen workload qualification is invalid")
+    if set(record) - {"result", "taskSha256", "reason"}:
+        raise RuntimeError("Qwen workload qualification is invalid")
+    if record["result"] not in (PASSED, FAILED):
+        raise RuntimeError("Qwen workload result is invalid")
+    if not _is_digest(record["taskSha256"]):
+        raise RuntimeError("Qwen workload task digest is invalid")
+    # A failure is recorded rather than dropped, so nobody re-derives it in six
+    # months — and a recorded failure without its reason is a note that says
+    # only "no".
+    if record["result"] == FAILED and not str(record.get("reason", "")).strip():
+        raise RuntimeError("Qwen workload failure has no reason")
+
+
+def _workload(value: object, plugin_id: str, model_id: str, task_digest: str) -> None:
+    workload = _workload_entry(value, plugin_id)
+    record = workload["models"].get(model_id)
+    if record is None:
+        raise RuntimeError("Qwen model has no qualification for this workload")
+    if record["result"] != PASSED:
+        raise RuntimeError("Qwen model did not pass qualification for this workload")
+    if record["taskSha256"] != task_digest:
         raise RuntimeError("Qwen workload differs from qualification")
 
 
