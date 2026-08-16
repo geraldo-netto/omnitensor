@@ -1,0 +1,127 @@
+{
+ "workload": "event-extraction",
+ "note": "One fragment per document. A case that states refuses expects the workload to decline rather than invent a date.",
+ "cases": [
+  {
+   "id": "event-explicit-date-time",
+   "sources": [
+    "Project review with Ana on 2026-09-03 at 14:00 in Lisbon."
+   ],
+   "expect": {
+    "event_starts": [
+     "2026-09-03T14:00"
+    ],
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-written-month",
+   "sources": [
+    "The board meets on 12 October 2026 at 09:30 in the Porto office."
+   ],
+   "expect": {
+    "event_starts": [
+     "2026-10-12T09:30"
+    ],
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-two-in-one-document",
+   "sources": [
+    "Kick-off on 2026-05-04 at 10:00. Retrospective on 2026-05-29 at 16:00."
+   ],
+   "expect": {
+    "at_least": {
+     "events": 2
+    }
+   }
+  },
+  {
+   "id": "event-with-location",
+   "sources": [
+    "Contract signing on 2026-04-02 at 11:00 at the notary in Lisbon."
+   ],
+   "expect": {
+    "event_starts": [
+     "2026-04-02T11:00"
+    ],
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-ics-like",
+   "sources": [
+    "BEGIN:VEVENT\nSUMMARY:Quarterly review\nDTSTART:20260903T140000Z\nLOCATION:Lisbon\nEND:VEVENT"
+   ],
+   "expect": {
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-afternoon-24h",
+   "sources": [
+    "Delivery inspection is scheduled for 2026-11-20 at 15:45 at the warehouse."
+   ],
+   "expect": {
+    "event_starts": [
+     "2026-11-20T15:45"
+    ],
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-named-activity",
+   "sources": [
+    "Budget review with Marta Oliveira takes place on 2026-09-30 at 08:00."
+   ],
+   "expect": {
+    "event_starts": [
+     "2026-09-30T08:00"
+    ],
+    "at_least": {
+     "events": 1
+    }
+   }
+  },
+  {
+   "id": "event-no-time-refuses",
+   "sources": [
+    "We should meet some time in September to review the budget."
+   ],
+   "note": "No explicit date and time: refusing is the correct answer.",
+   "expect": {
+    "refuses": true
+   }
+  },
+  {
+   "id": "event-no-activity-refuses",
+   "sources": [
+    "The invoice total is 4,235.00 EUR and the amount is due within 30 days."
+   ],
+   "expect": {
+    "refuses": true
+   }
+  },
+  {
+   "id": "event-relative-date-refuses",
+   "sources": [
+    "Let us do the retrospective next Tuesday afternoon."
+   ],
+   "note": "Relative to nothing this document states.",
+   "expect": {
+    "refuses": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,138 @@
+{
+ "workload": "selected-text-tools",
+ "note": "Source order is the production order: the closed operation/language control first, then the selection.",
+ "cases": [
+  {
+   "id": "text-summarize",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"summarize\"}",
+    "The migration ran overnight and moved 1.4 million rows. Two tables failed on a unique constraint and were retried by hand at 06:20. Marta Oliveira signed the change off at 08:00, and the rollback plan was never needed."
+   ],
+   "expect": {
+    "operation": "summarize",
+    "contains": [
+     "migration"
+    ]
+   }
+  },
+  {
+   "id": "text-summarize-keeps-the-name",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"summarize\"}",
+    "Ana Ribeiro approved the budget of 42,000 EUR for the second phase, on condition that the supplier delivers the report by 2026-09-30."
+   ],
+   "expect": {
+    "operation": "summarize",
+    "contains": [
+     "Ana Ribeiro"
+    ]
+   }
+  },
+  {
+   "id": "text-explain",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"explain\"}",
+    "The socket read timed out after 30 seconds because the worker holding the accelerator lease never released it."
+   ],
+   "expect": {
+    "operation": "explain",
+    "contains": [
+     "lease"
+    ]
+   }
+  },
+  {
+   "id": "text-rewrite",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"rewrite\"}",
+    "we cant do the thing by friday because the guy with the key is out, sorry"
+   ],
+   "expect": {
+    "operation": "rewrite",
+    "contains": [
+     "Friday"
+    ]
+   }
+  },
+  {
+   "id": "text-extract-tasks",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"extract-tasks\"}",
+    "Rui will send the invoice on Monday. Marta has to review the contract before the board meeting. Somebody needs to book the room for 2026-09-03."
+   ],
+   "expect": {
+    "operation": "extract-tasks",
+    "at_least": {
+     "tasks": 3
+    }
+   }
+  },
+  {
+   "id": "text-extract-single-task",
+   "sources": [
+    "{\"language\": \"\", \"operation\": \"extract-tasks\"}",
+    "The only outstanding item is that Ana must approve the revised budget."
+   ],
+   "expect": {
+    "operation": "extract-tasks",
+    "at_least": {
+     "tasks": 1
+    }
+   }
+  },
+  {
+   "id": "text-translate-hebrew",
+   "sources": [
+    "{\"language\": \"Hebrew\", \"operation\": \"translate\"}",
+    "The meeting will take place on 2026-09-03 at 14:00 in Lisbon."
+   ],
+   "note": "The case model choice exists for: DictaLM against Qwen on Hebrew.",
+   "expect": {
+    "operation": "translate",
+    "hebrew": true,
+    "contains": [
+     "2026"
+    ]
+   }
+  },
+  {
+   "id": "text-translate-hebrew-names",
+   "sources": [
+    "{\"language\": \"Hebrew\", \"operation\": \"translate\"}",
+    "Marta Oliveira approved a budget of 42,000 EUR for the second phase."
+   ],
+   "expect": {
+    "operation": "translate",
+    "hebrew": true,
+    "contains": [
+     "42,000"
+    ]
+   }
+  },
+  {
+   "id": "text-translate-hebrew-paragraph",
+   "sources": [
+    "{\"language\": \"Hebrew\", \"operation\": \"translate\"}",
+    "The supplier must deliver the report by 30 September 2026. If the report is late, interest of 3.5 percent per year applies to the outstanding amount."
+   ],
+   "expect": {
+    "operation": "translate",
+    "hebrew": true,
+    "contains": [
+     "3.5"
+    ]
+   }
+  },
+  {
+   "id": "text-translate-portuguese",
+   "sources": [
+    "{\"language\": \"Portuguese\", \"operation\": \"translate\"}",
+    "The meeting will take place on Monday at 14:00."
+   ],
+   "expect": {
+    "operation": "translate",
+    "hebrew": false
+   }
+  }
+ ]
+}

@@ -1,0 +1,137 @@
+{
+ "workload": "ask-selected-files",
+ "note": "Source order is the production order: the question first, then the document spans. Only the spans are citable.",
+ "cases": [
+  {
+   "id": "ask-invoice-total",
+   "sources": [
+    "What is the total amount due on this invoice?",
+    "INVOICE 2026-0417\nSupplier: Nordwind Lda\nSubtotal: 3,500.00 EUR\nVAT (21%): 735.00 EUR\nTotal due: 4,235.00 EUR\nDue date: 2026-09-30"
+   ],
+   "expect": {
+    "contains": [
+     "4,235"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-who-signed",
+   "sources": [
+    "Who signed this agreement, and in what role?",
+    "SERVICE AGREEMENT\nSigned in Lisbon on 2026-04-02.\nFor the client: Marta Oliveira, Chief Financial Officer.\nFor the supplier: Nordwind Lda."
+   ],
+   "expect": {
+    "contains": [
+     "Marta Oliveira"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-deadline",
+   "sources": [
+    "By what date must the work be finished?",
+    "STATEMENT OF WORK\nKick-off: 2026-05-04.\nAll deliverables must be accepted by 2026-09-30.\nInvoicing follows acceptance."
+   ],
+   "expect": {
+    "contains": [
+     "2026-09-30"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-warranty-length",
+   "sources": [
+    "How long is the warranty?",
+    "WARRANTY TERMS\nThe equipment carries a warranty of 24 months from delivery.\nConsumables are excluded."
+   ],
+   "expect": {
+    "contains": [
+     "24"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-two-documents",
+   "sources": [
+    "Which of these two reports is the more recent, and what date does it carry?",
+    "QUARTERLY REPORT\nPeriod ending 2026-03-31.\nRevenue grew 4 percent.",
+    "QUARTERLY REPORT\nPeriod ending 2026-06-30.\nRevenue grew 6 percent."
+   ],
+   "expect": {
+    "contains": [
+     "2026-06-30"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-percentage",
+   "sources": [
+    "What interest rate applies to late payment?",
+    "PAYMENT TERMS\nPayment is due within 30 days.\nLate payment accrues interest at 3.5 percent per year."
+   ],
+   "expect": {
+    "contains": [
+     "3.5"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-role-and-name",
+   "sources": [
+    "Who is responsible for approving changes of scope?",
+    "GOVERNANCE\nDay-to-day contact: Rui Santos, project manager.\nChanges of scope are approved only by Ana Ribeiro, programme director."
+   ],
+   "expect": {
+    "contains": [
+     "Ana Ribeiro"
+    ],
+    "absent": [
+     "Rui Santos approves"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-language-portuguese",
+   "sources": [
+    "Qual e o prazo de garantia deste equipamento?",
+    "WARRANTY TERMS\nThe equipment carries a warranty of 24 months from delivery."
+   ],
+   "note": "The answer must follow the language of the question, not of the document.",
+   "expect": {
+    "contains": [
+     "24",
+     "meses"
+    ],
+    "cites_supplied_sources": true
+   }
+  },
+  {
+   "id": "ask-absent-fact",
+   "sources": [
+    "What is the supplier's VAT identification number?",
+    "INVOICE 2026-0417\nSupplier: Nordwind Lda\nTotal due: 4,235.00 EUR"
+   ],
+   "note": "Nothing in the document answers this; inventing one is the failure that matters.",
+   "expect": {
+    "refuses": true
+   }
+  },
+  {
+   "id": "ask-absent-person",
+   "sources": [
+    "Who witnessed the signature?",
+    "SERVICE AGREEMENT\nSigned in Lisbon on 2026-04-02 by Marta Oliveira for the client."
+   ],
+   "expect": {
+    "refuses": true
+   }
+  }
+ ]
+}
