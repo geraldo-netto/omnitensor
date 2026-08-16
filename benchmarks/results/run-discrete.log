@@ -21,3 +21,4 @@
 [2026-08-17 01:48:24]   event-written-month                FAIL   30.9s  failed: answers-rather-than-refusing, at_least, event_starts
 [2026-08-17 01:48:57]   event-two-in-one-document          FAIL   32.8s  failed: answers-rather-than-refusing, at_least
 [2026-08-17 01:49:28]   event-with-location                FAIL   30.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 01:50:00]   event-ics-like                     FAIL   32.6s  failed: answers-rather-than-refusing, at_least

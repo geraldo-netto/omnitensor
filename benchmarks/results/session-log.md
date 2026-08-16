@@ -49,6 +49,30 @@ Started 01:32, `benchmarks/results/run-discrete.log`, models
 each. About 100 seconds per case, so roughly two and a half hours. Results are
 rewritten after each model, so an interrupted run still leaves findings.
 
+## Findings so far, while it runs
+
+- **`ask-selected-files` on the 8B: 8/10, and both failures were mine.** The
+  two unanswerable cases expected a refusal, and that workload's contract has
+  no refusal state — it holds an answer and citations, nothing else. No answer
+  could have passed. Fixed in `7eed161`: what those cases check now is
+  invention, which is the thing that actually harms somebody — a VAT number the
+  invoice never carried, a witness who does not exist. Those two rows are being
+  re-measured (see below); everything else in that workload stood.
+- **`event-extraction` is refusing documents that state an explicit date and
+  time.** That is OMNI-0354, and this is the first time it has been reproduced
+  by something other than a person clicking. It is a known open defect, not a
+  regression from this work.
+
+## Queued, in order
+
+1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
+2. Integrated 610M, same models and cases — starts automatically when the
+   first finishes, into `benchmarks/results/integrated/`. This is OMNI-0364's
+   measurement. Serialised because both take the same accelerator lease.
+3. `ask-selected-files` only, both models, with the corrected cases, into
+   `benchmarks/results/ask-corrected/`. Those two rows supersede the ones in
+   the first table.
+
 ## Still to do
 
 - OMNI-0360 second half: the `document-translation` workload itself.
