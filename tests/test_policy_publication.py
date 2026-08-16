@@ -317,3 +317,66 @@ class TestChoosingAModel:
         )
 
         assert validate_document("runtime-snapshot.schema.json", snapshot) == []
+
+
+class TestAChangedModelReplacesTheWorker:
+    """A worker holds its model for as long as it lives — the weights are
+    mapped at load — so changing the choice means replacing the worker, exactly
+    as changing its card does. Without this a person would choose a model, see
+    the command accepted, and keep getting answers from the old one until
+    something else happened to restart it."""
+
+    class Runtime:
+        def __init__(self):
+            self.reloaded = []
+
+        def plugin_ids(self):
+            return frozenset({PROFILE})
+
+        async def reload_accelerators(self, profile_ids=None):
+            self.reloaded.append(frozenset(profile_ids or ()))
+
+    def service_with(self, fake_nodes, tmp_path):
+        built = service(fake_nodes, tmp_path)
+        built._plugin_runtime = self.Runtime()
+        return built
+
+    def test_choosing_a_different_model_marks_that_workload_for_reload(
+        self, fake_nodes, tmp_path
+    ):
+        built = self.service_with(fake_nodes, tmp_path)
+        built.control.state.model_choices[PROFILE] = "qwen3-4b-q4-k-m"
+
+        changed = built._changed_models()
+
+        assert changed == {PROFILE}
+
+    def test_choosing_the_same_model_again_changes_nothing(self, fake_nodes, tmp_path):
+        """A reload costs every queued job on that workload its wait, so it
+        happens when something actually changed."""
+        built = self.service_with(fake_nodes, tmp_path)
+        built.control.state.model_choices[PROFILE] = "qwen3-4b-q4-k-m"
+        built._changed_models()
+
+        assert built._changed_models() == set()
+
+    def test_clearing_a_choice_is_a_change_too(self, fake_nodes, tmp_path):
+        """Going back to the receipt's default is as much a different worker
+        as choosing a model was."""
+        built = self.service_with(fake_nodes, tmp_path)
+        built.control.state.model_choices[PROFILE] = "qwen3-4b-q4-k-m"
+        built._changed_models()
+        built.control.state.model_choices.pop(PROFILE)
+
+        assert built._changed_models() == {PROFILE}
+
+    def test_the_worker_is_built_with_whatever_policy_says_now(
+        self, fake_nodes, tmp_path
+    ):
+        """Asked each time rather than cached, so a worker started after a
+        change gets the change."""
+        built = self.service_with(fake_nodes, tmp_path)
+
+        assert built._plugin_model_choice(PROFILE) is None
+        built.control.state.model_choices[PROFILE] = "dictalm2-hebrew-q4-k-m"
+        assert built._plugin_model_choice(PROFILE) == "dictalm2-hebrew-q4-k-m"

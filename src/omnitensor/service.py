@@ -199,6 +199,7 @@ class OmniTensorService:
             resolve_artifact=self._resolve_plugin_artifact,
             accelerator_devices=self._plugin_accelerator_devices,
             profile_accelerator_devices=self._plugin_accelerator_devices,
+            profile_model_choice=self._plugin_model_choice,
             progress_sink=lambda progress: self._note_job_progress(
                 progress.job_id,
                 progress.stage,
@@ -232,6 +233,7 @@ class OmniTensorService:
             admits=self._admits,
         )
         self._last_device_choices = dict(self.control.state.device_choices)
+        self._last_model_choices = dict(self.control.state.model_choices)
         self._pending_device_profiles: set[str] = set()
         self._plugin_reload_requested = False
         self._plugin_reload_task: asyncio.Task | None = None
@@ -325,18 +327,42 @@ class OmniTensorService:
         # profile was disabled must be re-evaluated now, not when whatever is
         # running happens to finish.
         self._plugin_queue.kick()
+        changed_profiles = self._changed_choices() | self._changed_models()
+        plugin_profiles = changed_profiles & self._plugin_ids()
+        if plugin_profiles:
+            self._schedule_plugin_reload(plugin_profiles)
+
+    def _changed_choices(self) -> set[str]:
         choices = dict(self.control.state.device_choices)
         if choices == self._last_device_choices:
-            return
-        changed_profiles = {
+            return set()
+        changed = {
             profile_id
             for profile_id in set(choices) | set(self._last_device_choices)
             if choices.get(profile_id) != self._last_device_choices.get(profile_id)
         }
         self._last_device_choices = choices
-        plugin_profiles = changed_profiles & self._plugin_ids()
-        if plugin_profiles:
-            self._schedule_plugin_reload(plugin_profiles)
+        return changed
+
+    def _changed_models(self) -> set[str]:
+        """Which workloads were told to run a different model.
+
+        A worker holds its model for as long as it lives — the weights are
+        mapped at load — so changing the choice means replacing the worker, in
+        exactly the way changing its card does. Without this a person would
+        choose a model, see the command accepted, and keep getting answers from
+        the old one until something else happened to restart the worker.
+        """
+        chosen = dict(self.control.state.model_choices)
+        if chosen == self._last_model_choices:
+            return set()
+        changed = {
+            profile_id
+            for profile_id in set(chosen) | set(self._last_model_choices)
+            if chosen.get(profile_id) != self._last_model_choices.get(profile_id)
+        }
+        self._last_model_choices = chosen
+        return changed
 
     def _plugin_ids(self) -> frozenset[str]:
         return (
@@ -370,6 +396,15 @@ class OmniTensorService:
 
     def _profile_exists(self, profile_id: str) -> bool:
         return profile_id in self._workloads or profile_id in self._plugin_ids()
+
+    def _plugin_model_choice(self, profile_id: str) -> str | None:
+        """The model this workload was told to run, or nothing.
+
+        Asked of the policy store each time a worker is built rather than
+        cached, for the same reason the device choice is: a worker started
+        after a change must get the change.
+        """
+        return self.control.state.model_choices.get(profile_id)
 
     def _profile_models(self, profile_id: str) -> tuple[str, ...]:
         """The artifacts this workload's manifest pins, by id.

@@ -195,7 +195,10 @@ def _generation(plugin_id: str):
     bootstrap = current_plugin_bootstrap(plugin_id)
     if bootstrap.accelerator_lease_path is None:
         raise RuntimeError("GPU accelerator grant is unavailable")
-    model = bootstrap.require_artifact(QWEN_ARTIFACT_ID)
+    # The model a person chose, or this provider's default. Its receipt is
+    # verified for *this* workload below, so an unqualified pair refuses to
+    # start rather than quietly answering with something nobody measured.
+    model = bootstrap.chosen_or(QWEN_ARTIFACT_ID)
     qualification = load_qualification(
         plugin_id,
         model.id,

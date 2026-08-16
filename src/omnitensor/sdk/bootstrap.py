@@ -32,6 +32,20 @@ class PluginBootstrap:
     artifacts: tuple[BootstrapArtifact, ...]
     state_path: Path | None
     accelerator_lease_path: Path | None = None
+    # Which model a person chose for this workload, empty when nobody chose.
+    # It arrives here rather than being read from policy inside the factory
+    # because a worker is sandboxed and has no policy to read: the host decides
+    # what it may use, as it already does for artifacts and devices.
+    model_choice: str = ""
+
+    def chosen_or(self, default_artifact_id: str) -> BootstrapArtifact:
+        """The artifact a person chose, or this workload's default.
+
+        Refuses rather than falling back when the choice is not mounted: a
+        person who chose a model and silently got the other one would have no
+        reason to believe anything the window says about what ran.
+        """
+        return self.require_artifact(self.model_choice or default_artifact_id)
 
     def require_artifact(self, artifact_id: str) -> BootstrapArtifact:
         matches = tuple(item for item in self.artifacts if item.id == artifact_id)

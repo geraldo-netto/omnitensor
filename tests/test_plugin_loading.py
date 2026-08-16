@@ -145,6 +145,13 @@ def test_worker_parser_exposes_the_exact_trusted_bootstrap_contract():
             "action": "_StoreAction",
             "help": None,
         },
+        "model_choice": {
+            "options": ("--model-choice",),
+            "required": False,
+            "default": "",
+            "action": "_StoreAction",
+            "help": None,
+        },
         "no_seccomp": {
             "options": ("--no-seccomp",),
             "required": False,
@@ -2857,6 +2864,7 @@ def test_worker_bootstrap_accepts_only_exact_absolute_resources(tmp_path):
         ],
         state_path=str(state),
         accelerator_lease_path=str(lease),
+        model_choice="",
     )
 
     bootstrap = worker_module._bootstrap(arguments)
@@ -2879,6 +2887,8 @@ def test_worker_bootstrap_accepts_only_exact_absolute_resources(tmp_path):
         ),
         ({"state_path": "relative"}, "state bootstrap path is invalid"),
         ({"accelerator_lease_path": "relative"}, "lease bootstrap path is invalid"),
+        ({"model_choice": "../etc/passwd"}, "model choice bootstrap is invalid"),
+        ({"model_choice": "Qwen3-8B"}, "model choice bootstrap is invalid"),
     ],
 )
 def test_worker_bootstrap_rejects_malformed_or_untrusted_resources(tmp_path, change, detail):
@@ -2887,6 +2897,7 @@ def test_worker_bootstrap_rejects_malformed_or_untrusted_resources(tmp_path, cha
         "artifact": [],
         "state_path": None,
         "accelerator_lease_path": None,
+        "model_choice": "",
     }
     values.update(change)
     with pytest.raises(SystemExit, match=detail):
@@ -2921,3 +2932,141 @@ def test_a_worker_told_not_to_confine_itself_does_not(monkeypatch):
     )
 
     assert installed == []
+
+
+class TestCarryingAModelChoiceToTheWorker:
+    """A person's model choice has to reach the process that loads weights.
+
+    It travels the same road as the device: chosen in a window, refused or
+    stored by the control service, handed to the worker on its command line by
+    the host. A sandboxed worker has no policy to read, so nothing else would
+    work — and until this existed, `dictalm2-hebrew-q4-k-m` could be installed,
+    qualified, chosen, and still never loaded by anything.
+    """
+
+    def spec(self, tmp_path, model_choice=""):
+        provider = tmp_path / "provider"
+        provider.mkdir(exist_ok=True)
+        return loading_module._external_worker_spec(
+            _resolved(tmp_path=tmp_path),
+            executable="/opt/omnitensor/bin/python",
+            import_paths=(str(provider),),
+            granted=frozenset(),
+            selected_files_root=None,
+            worker_state_root=None,
+            resolve_artifact=None,
+            accelerator_devices={},
+            model_choice=model_choice,
+        )
+
+    def test_a_chosen_model_is_named_on_the_worker_command_line(self, tmp_path):
+        argv = self.spec(tmp_path, "dictalm2-hebrew-q4-k-m").argv
+
+        assert "--model-choice" in argv
+        assert argv[argv.index("--model-choice") + 1] == "dictalm2-hebrew-q4-k-m"
+
+    def test_choosing_nothing_says_nothing(self, tmp_path):
+        """Absent means "run what the receipt defaults to", which is not the
+        same as naming that model — and an argument that is always present is
+        one more thing that can be wrong."""
+        assert "--model-choice" not in self.spec(tmp_path).argv
+
+    def test_the_worker_reads_it_back_into_its_bootstrap(self):
+        from omnitensor.plugins import worker as worker_module
+
+        parsed = worker_module._parser().parse_args(
+            [
+                "--plugin-id",
+                "external-example",
+                "--entry-point",
+                "external-example",
+                "--target",
+                "module:factory",
+                "--distribution",
+                "external-dist",
+                "--model-choice",
+                "qwen3-4b-q4-k-m",
+            ]
+        )
+
+        assert worker_module._bootstrap(parsed).model_choice == "qwen3-4b-q4-k-m"
+
+    def test_a_choice_shaped_wrong_is_refused_by_the_worker(self):
+        """The host already refuses anything a manifest does not pin; this is
+        the second check, at the boundary that actually loads the file."""
+        from omnitensor.plugins import worker as worker_module
+
+        parsed = worker_module._parser().parse_args(
+            [
+                "--plugin-id",
+                "external-example",
+                "--entry-point",
+                "external-example",
+                "--target",
+                "module:factory",
+                "--distribution",
+                "external-dist",
+                "--model-choice",
+                "../../etc/passwd",
+            ]
+        )
+
+        with pytest.raises(SystemExit):
+            worker_module._bootstrap(parsed)
+
+    def test_the_factory_takes_the_choice_over_the_default(self, tmp_path):
+        from omnitensor.sdk.bootstrap import BootstrapArtifact, PluginBootstrap
+
+        def artifact(identifier):
+            return BootstrapArtifact(
+                identifier, "1.0.0", "gguf", "a" * 64, tmp_path / f"{identifier}.gguf"
+            )
+
+        bootstrap = PluginBootstrap(
+            "external-example",
+            (artifact("qwen3-8b-q4-k-m"), artifact("qwen3-4b-q4-k-m")),
+            None,
+            None,
+            "qwen3-4b-q4-k-m",
+        )
+
+        assert bootstrap.chosen_or("qwen3-8b-q4-k-m").id == "qwen3-4b-q4-k-m"
+
+    def test_a_choice_that_was_never_mounted_refuses_rather_than_falling_back(
+        self, tmp_path
+    ):
+        """Silently answering with the other model would leave a person no
+        reason to believe anything the window says about what ran."""
+        from omnitensor.sdk.bootstrap import BootstrapArtifact, PluginBootstrap
+        from omnitensor.sdk.helpers import SDKContractError
+
+        bootstrap = PluginBootstrap(
+            "external-example",
+            (
+                BootstrapArtifact(
+                    "qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"
+                ),
+            ),
+            None,
+            None,
+            "qwen3-14b-q4-k-m",
+        )
+
+        with pytest.raises(SDKContractError):
+            bootstrap.chosen_or("qwen3-8b-q4-k-m")
+
+    def test_nobody_choosing_gets_the_default(self, tmp_path):
+        from omnitensor.sdk.bootstrap import BootstrapArtifact, PluginBootstrap
+
+        bootstrap = PluginBootstrap(
+            "external-example",
+            (
+                BootstrapArtifact(
+                    "qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"
+                ),
+            ),
+            None,
+            None,
+        )
+
+        assert bootstrap.chosen_or("qwen3-8b-q4-k-m").id == "qwen3-8b-q4-k-m"

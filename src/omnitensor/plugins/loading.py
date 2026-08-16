@@ -146,6 +146,7 @@ class InstalledPluginRuntime:
         resolve_artifact: ArtifactProvider | None = None,
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
         profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
+        profile_model_choice: Callable[[str], str | None] | None = None,
     ) -> None:
         self._bundled_root = Path(bundled_root)
         # Workers run unbounded: no delegated cgroup, no CPU or memory ceiling.
@@ -161,6 +162,9 @@ class InstalledPluginRuntime:
         self._resolve_artifact = resolve_artifact
         self._accelerator_devices = accelerator_devices or (lambda: {})
         self._profile_accelerator_devices = profile_accelerator_devices
+        # Which model each workload was told to run, asked of the host rather
+        # than stored, so a worker started after a change gets the change.
+        self._profile_model_choice = profile_model_choice
         self._granted: dict[str, frozenset[str]] = {}
         self._revoked_workers: set[str] = set()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
@@ -431,6 +435,12 @@ class InstalledPluginRuntime:
         if self._profile_accelerator_devices is not None:
             spec_options["accelerator_devices_by_plugin"] = {
                 plugin.plugin_id: self._profile_accelerator_devices(plugin.plugin_id)
+                for plugin in catalog.plugins
+                if plugin.source is PluginSource.EXTERNAL
+            }
+        if self._profile_model_choice is not None:
+            spec_options["model_choices"] = {
+                plugin.plugin_id: self._profile_model_choice(plugin.plugin_id) or ""
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }

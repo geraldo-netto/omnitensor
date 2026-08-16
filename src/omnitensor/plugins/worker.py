@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -356,6 +357,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("--state-path", default=None)
     parser.add_argument("--accelerator-lease-path", default=None)
+    parser.add_argument("--model-choice", default="")
     parser.add_argument(
         "--no-seccomp",
         action="store_true",
@@ -418,6 +420,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
 
+# An artifact id as the manifests write them; the host has already refused
+# anything a manifest does not pin, and this refuses anything shaped wrong.
+_MODEL_CHOICE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
 def _bootstrap(arguments) -> PluginBootstrap:
     artifacts = []
     for raw in arguments.artifact:
@@ -458,7 +465,12 @@ def _bootstrap(arguments) -> PluginBootstrap:
     )
     if lease_path is not None and (not lease_path.is_absolute() or not lease_path.is_file()):
         raise SystemExit("plugin accelerator lease bootstrap path is invalid")
-    return PluginBootstrap(arguments.plugin_id, tuple(artifacts), state_path, lease_path)
+    model_choice = str(arguments.model_choice or "")
+    if model_choice and _MODEL_CHOICE.fullmatch(model_choice) is None:
+        raise SystemExit("plugin model choice bootstrap is invalid")
+    return PluginBootstrap(
+        arguments.plugin_id, tuple(artifacts), state_path, lease_path, model_choice
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - module process entry point

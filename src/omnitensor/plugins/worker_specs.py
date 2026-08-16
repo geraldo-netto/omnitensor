@@ -47,6 +47,7 @@ def external_worker_specs(
     resolve_artifact: ArtifactProvider | None = None,
     accelerator_devices: Mapping[str, Path] | None = None,
     accelerator_devices_by_plugin: Mapping[str, Mapping[str, Path]] | None = None,
+    model_choices: Mapping[str, str] | None = None,
 ) -> tuple[WorkerSpec, ...]:
     """Build deterministic argv without importing plugin code in the service."""
     executable = executable_path(python_executable)
@@ -54,6 +55,7 @@ def external_worker_specs(
     permissions_by_plugin = granted_permissions or {}
     device_map = dict(accelerator_devices or {})
     per_plugin = accelerator_devices_by_plugin or {}
+    chosen_models = model_choices or {}
     specs = []
     for plugin in plugins:
         if plugin.source is not PluginSource.EXTERNAL:
@@ -68,6 +70,7 @@ def external_worker_specs(
                 worker_state_root=worker_state_root,
                 resolve_artifact=resolve_artifact,
                 accelerator_devices=dict(per_plugin.get(plugin.plugin_id, device_map)),
+                model_choice=str(chosen_models.get(plugin.plugin_id, "")),
             )
         except ValueError as error:
             if (
@@ -92,6 +95,7 @@ def external_worker_spec(
     worker_state_root: Path | None,
     resolve_artifact: ArtifactProvider | None,
     accelerator_devices: Mapping[str, Path],
+    model_choice: str = "",
 ) -> WorkerSpec:
     protocol = plugin.manifest["plugin"]["protocol"]
     declared = frozenset(plugin.manifest["plugin"]["permissions"])
@@ -106,6 +110,8 @@ def external_worker_spec(
     lease_path = accelerator_lease_path(worker_state_root, declared, granted)
     if lease_path is not None:
         argv.extend(("--accelerator-lease-path", str(lease_path)))
+    if model_choice:
+        argv.extend(("--model-choice", model_choice))
     runtime_paths = [
         *trusted_runtime_paths(import_paths),
         *((TIMEZONE_METADATA_ROOT,) if TIMEZONE_METADATA_ROOT.is_dir() else ()),
