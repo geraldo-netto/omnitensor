@@ -22,6 +22,11 @@ Two properties are deliberate:
 * **The slot spans the worker call, not the queue.**  Releasing on dispatch
   would make the pool a rate limiter over submission rather than a bound on
   concurrent work, and weight would again decide nothing.
+* **A full host holds the pool, it does not empty it.**  When the machine is
+  above its memory threshold no *additional* job starts, but one always may:
+  the pressure is often somebody else's browser, and a runtime that stopped
+  entirely until an unrelated process let go would be worse than one that
+  slows down.
 
 Tuning lives in ``docs/plugin-admission.md``.
 """
@@ -32,11 +37,11 @@ import asyncio
 from collections import deque
 from collections.abc import Callable
 
-# How many plugin jobs may run at once, across every plugin.  Two, because a
-# plugin worker is a whole Python process that commonly holds a model: the
-# point of the pool is that contention exists and weight resolves it, and a
-# pool as wide as the callers can never be contended.
-DEFAULT_MAX_CONCURRENT = 2
+# How many plugin jobs may run at once, across every plugin.  Four: wide enough
+# that ordinary use does not queue behind one long answer, narrow enough that
+# four model workers still fit while the host-pressure gate decides whether a
+# fifth would.  Weight still orders whatever waits.
+DEFAULT_MAX_CONCURRENT = 4
 # The ceiling the pool may be tuned to, so a bad configuration cannot ask for
 # more concurrent model processes than the host can hold.
 MAX_CONCURRENT_LIMIT = 32
@@ -64,9 +69,14 @@ class PluginAdmissionQueue:
         admits: Callable[[str], bool] | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         max_waiting: int = DEFAULT_MAX_WAITING,
+        pressure: Callable[[], object] | None = None,
     ) -> None:
         self._weight_of = weight_of
         self._admits = admits
+        # Read at the moment a slot would be handed out, not on a timer: a
+        # reading from two seconds ago is a reading from before the model that
+        # just loaded.
+        self._pressure = pressure
         self._max_concurrent = _bounded(max_concurrent, "max_concurrent", MAX_CONCURRENT_LIMIT)
         self._max_waiting = _bounded(max_waiting, "max_waiting", MAX_WAITING_LIMIT)
         self._waiting: dict[str, deque[asyncio.Future]] = {}
@@ -173,8 +183,23 @@ class PluginAdmissionQueue:
             self._running.pop(profile_id, None)
         self._pump()
 
+    def width(self) -> int:
+        """How many jobs may run right now.
+
+        The configured width while the host has room; one while it does not, so
+        work continues at the slowest rate that still makes progress. Never
+        zero: a queue that can never be served is a queue that never empties.
+        """
+        if self._pressure is None:
+            return self._max_concurrent
+        try:
+            reading = self._pressure()
+        except Exception:  # noqa: BLE001 - a failed probe must not stop work
+            return self._max_concurrent
+        return 1 if getattr(reading, "saturated", False) else self._max_concurrent
+
     def _pump(self) -> None:
-        while self.running() < self._max_concurrent:
+        while self.running() < self.width():
             profile_id = self._next_profile()
             if profile_id is None:
                 return

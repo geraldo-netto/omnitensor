@@ -64,6 +64,7 @@ from .execution import build_executors as build_executors
 from .host import FileSnapshotPublisher as FileSnapshotPublisher
 from .host import SysfsDeviceDiscovery as SysfsDeviceDiscovery
 from .host import build_host_ports
+from .host_pressure import read_pressure
 from .job_ports import JobAdmission, JobDispatcher
 from .jobs import (
     JobSubmissionService,
@@ -236,10 +237,14 @@ class OmniTensorService:
         self._plugin_lifecycle_lock = asyncio.Lock()
         # Plugin jobs run in worker processes rather than scheduler lanes, so
         # this pool is where a plugin profile's weight decides anything at all.
+        # Its width answers to the host: the per-worker ceilings that used to
+        # guess what the machine could hold are gone, and what replaced them is
+        # one measurement of how full the machine actually is.
         self._plugin_queue = PluginAdmissionQueue(
             weight_of=self._weight_of,
             admits=self._admits,
             max_concurrent=plugin_slots,
+            pressure=read_pressure,
         )
         self._job_dispatcher = routing.PluginAwareDispatcher(
             job_dispatcher or self._default_dispatcher(),
@@ -602,10 +607,9 @@ class OmniTensorService:
         statuses = profile_statuses(
             workloads, executors, scheduler, policy, artifact_ready, permissions_missing
         )
-        room = max(0, MAX_PUBLISHED_PROFILES - len(statuses))
         statuses.update(
             plugin_profile_statuses(
-                self._plugin_ids(), self._plugin_queue.profile_stats(), policy, room
+                self._plugin_ids(), self._plugin_queue.profile_stats(), policy
             )
         )
         return statuses

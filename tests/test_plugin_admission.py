@@ -262,11 +262,12 @@ class TestPublishedStatus:
         entry = plugin_profile_statuses(["media-transcription"], {}, PolicyState())
         assert entry["media-transcription"]["status"] == "idle"
 
-    def test_more_plugins_than_the_contract_publishes_are_dropped_not_invalid(self):
+    def test_every_installed_plugin_is_published_however_many_there_are(self):
+        """The 128-profile ceiling is gone: a plugin is never dropped to fit."""
         statuses = plugin_profile_statuses(
             [f"plugin-{index:03d}" for index in range(200)], {}, PolicyState()
         )
-        assert len(statuses) == 128
+        assert len(statuses) == 200
 
 
 class _RecordingPlugins:
@@ -288,3 +289,49 @@ class _RecordingPlugins:
 class _NoInference:
     async def dispatch(self, job_id: str, workload_id: str, payload: dict) -> dict:
         raise AssertionError("inference dispatch is not part of the plugin pool")
+
+
+class TestHostPressure:
+    """The control that replaced the per-worker ceilings."""
+
+    async def test_a_full_host_narrows_the_pool_without_closing_it(self):
+        # One slot, never zero: the pressure is often somebody else's browser,
+        # and a runtime that stopped until an unrelated process let go would be
+        # worse than one that slows down.
+        full = type("Reading", (), {"saturated": True})()
+        queue = pool(max_concurrent=4, pressure=lambda: full)
+        assert queue.width() == 1
+
+        roomy = type("Reading", (), {"saturated": False})()
+        assert pool(max_concurrent=4, pressure=lambda: roomy).width() == 4
+
+    async def test_work_waits_for_room_rather_than_being_refused(self):
+        state = {"full": True}
+        reading = type("Reading", (), {"saturated": property(lambda _self: state["full"])})
+        queue = pool(max_concurrent=4, pressure=reading)
+        released = asyncio.Event()
+
+        async def holder():
+            await released.wait()
+
+        held = asyncio.ensure_future(queue.run("a", holder))
+        await asyncio.sleep(0)
+        waiting = asyncio.ensure_future(queue.run("b", returning(2)))
+        await asyncio.sleep(0)
+        # The one slot is taken, so the second job waits — it is not refused.
+        assert queue.waiting() == 1
+
+        state["full"] = False
+        queue.kick()
+        assert await waiting == 2
+        released.set()
+        await held
+
+    async def test_a_probe_that_fails_does_not_stop_the_runtime(self):
+        def broken():
+            raise OSError("/proc is not what this expects")
+
+        queue = pool(max_concurrent=4, pressure=broken)
+
+        assert queue.width() == 4
+        assert await queue.run("a", returning(1)) == 1

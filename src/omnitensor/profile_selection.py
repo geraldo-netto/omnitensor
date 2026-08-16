@@ -10,10 +10,10 @@ from .registry import Workload
 from .scheduler import Scheduler, select_backend
 from .state import PolicyState
 
-# The snapshot contract publishes at most 128 profiles; past that the document
-# is invalid and nothing is published at all, so extra plugins are dropped from
-# the list rather than costing every reader the whole snapshot.
-MAX_PUBLISHED_PROFILES = 128
+# No ceiling: the snapshot contract no longer caps how many profiles it
+# carries, so a plugin is never dropped from the published set to fit a number.
+# The parameter stays on the helper for a caller that wants a bound of its own.
+MAX_PUBLISHED_PROFILES = None
 PAUSED_BY_POLICY = "paused-by-policy"
 PROFILE_DISABLED = "profile-disabled"
 NO_MODEL = "no-model"
@@ -123,7 +123,7 @@ def plugin_profile_statuses(
     profile_ids,
     counts_of: dict[str, dict],
     policy: PolicyState,
-    limit: int = MAX_PUBLISHED_PROFILES,
+    limit: int | None = MAX_PUBLISHED_PROFILES,
 ) -> dict[str, dict]:
     """Status per installed plugin profile, for the snapshot document.
 

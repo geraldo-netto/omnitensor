@@ -168,11 +168,13 @@ def test_a_stored_profile_id_the_contract_could_not_publish_is_ignored(tmp_path)
     assert "../escape" not in store(tmp_path).load().profiles
 
 
-def test_stored_profiles_are_bounded_by_what_the_snapshot_can_carry(tmp_path):
+def test_stored_policy_is_kept_for_every_profile_however_many_there_are(tmp_path):
+    """The 128-profile ceiling is gone from the contract and from here."""
     stored = {
         f"plugin-{index:03d}": {"enabled": True, "weight": 1}
-        for index in range(MAX_PROFILES + 20)
+        for index in range(200)
     }
     (tmp_path / "policy.json").write_text(json.dumps({"profiles": stored}), encoding="utf-8")
 
-    assert len(store(tmp_path).load().profiles) == MAX_PROFILES
+    assert MAX_PROFILES is None
+    assert len(store(tmp_path).load().profiles) == 200 + len(DEFAULTS)

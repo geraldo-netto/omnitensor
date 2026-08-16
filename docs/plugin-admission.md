@@ -51,22 +51,24 @@ previous revision refreshes, exactly as after any other policy change.
 
 | Knob | Default | Ceiling | What it controls |
 | --- | --- | --- | --- |
-| `OMNITENSOR_PLUGIN_SLOTS` | 2 | 32 | Plugin jobs running at once, across every plugin |
-| `plugin_slots=` (service argument) | 2 | 32 | The same, for an embedded service |
+| `OMNITENSOR_PLUGIN_SLOTS` | 4 | 32 | Plugin jobs running at once, across every plugin |
+| `plugin_slots=` (service argument) | 4 | 32 | The same, for an embedded service |
 | `max_waiting=` (queue argument) | 64 | 1024 | Jobs allowed to wait before submissions are refused |
+| `OMNITENSOR_MEMORY_PRESSURE_PERCENT` | 80 | 99 | Memory-plus-swap use at which the pool narrows to one |
+| `OMNITENSOR_CPU_PRESSURE_PERCENT` | 80 | 99 | Load per core reported as saturated; does not hold work by itself |
 
 An unreadable `OMNITENSOR_PLUGIN_SLOTS` is the default rather than a startup
 failure: a typo in a tuning knob should not take the runtime down.
 
 Choosing a value:
 
-- **2 (default).** A plugin worker is a whole process, usually holding a model.
-  Two keeps one running while another loads, and keeps the pool contended
-  enough that weight is a real setting.
+- **4 (default).** A plugin worker is a whole process, usually holding a model.
+  Four is wide enough that ordinary use does not queue behind one long answer,
+  and the pressure gate below decides whether a fifth would fit.
 - **1.** Strict serialisation. Useful on a machine with one GPU and a large
   model, where two concurrent workers means both are slow or one is killed.
   Weight still orders who goes next.
-- **4 or more.** Only with the memory to hold that many workers at once. Past
+- **8 or more.** Only with the memory to hold that many workers at once. Past
   the point where jobs stop waiting, weight stops meaning anything, because
   nothing contends.
 
@@ -75,6 +77,39 @@ Set it where the service reads its environment:
 ```sh
 OMNITENSOR_PLUGIN_SLOTS=1 omnitensor-service
 ```
+
+## Host pressure
+
+The per-worker ceilings this service used to carry — a memory budget, a process
+count, a descriptor count — are gone. They guessed, one worker at a time, what
+the machine could hold, and guessed wrong in both directions: a 512 MiB memory
+budget killed a Qwen worker that legitimately held 831 MB once its model had
+loaded, while nothing at all stopped four such workers starting together.
+
+What replaces them is one measurement of the whole host, taken at the moment a
+slot would be handed out:
+
+- **Memory including swap**, as a share of total memory plus total swap, using
+  the kernel's own `MemAvailable` rather than free memory — reclaimable cache is
+  available, not pressure. At or above `OMNITENSOR_MEMORY_PRESSURE_PERCENT` the
+  pool narrows to **one** slot.
+- **CPU**, as one-minute load average per core. Reported, and never holds work
+  on its own: a pegged CPU is usually a job doing exactly what it was asked to.
+
+Three properties worth knowing:
+
+- **It narrows, it never closes.** One job always runs. The pressure is often
+  somebody else's browser, and a runtime that stopped until an unrelated
+  process let go would be worse than one that slows down.
+- **Work waits rather than being refused.** A held job stays in the weighted
+  queue and is served when there is room, in the order weight decides.
+- **It cannot stop a single job from filling the machine.** Admission sees the
+  host before the worker maps its model. The gate limits how many such loads
+  happen at once; it does not predict the size of one.
+
+An unreadable `/proc` reads as no pressure, which lets the runtime work on a
+host whose `/proc` is not what this expects rather than stopping every job on
+it.
 
 ## Reading it back
 

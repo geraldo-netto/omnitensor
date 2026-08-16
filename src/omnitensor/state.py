@@ -19,9 +19,10 @@ from .atomicio import write_json_atomic
 MIN_WEIGHT = 1
 MAX_WEIGHT = 5
 MAX_DEVICE_CHOICES = 128
-# The snapshot contract publishes at most 128 profiles, so policy that could
-# never be published is policy this file will not grow to hold.
-MAX_PROFILES = 128
+# No ceiling on stored policy: the snapshot contract no longer caps how many
+# profiles it publishes, so policy for a profile that exists is policy this
+# file keeps.
+MAX_PROFILES = None
 GPU_DEVICE_ID_PATTERN = re.compile(r"^gpu-renderD[0-9]{1,6}$")
 PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 
@@ -76,7 +77,7 @@ def _adopt_stored_profiles(
     stored, well-formed and not a default is that person's decision.
     """
     for profile_id, entry in sorted(supplied.items()):
-        if len(profiles) >= MAX_PROFILES:
+        if MAX_PROFILES is not None and len(profiles) >= MAX_PROFILES:
             return
         if profile_id in profiles or not isinstance(entry, dict):
             continue
