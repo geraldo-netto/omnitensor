@@ -288,13 +288,25 @@ class TestTheCaseFiles:
                 unknown = set(loaded.expect) - set(RULES) - {"refuses"}
                 assert not unknown, f"{loaded.id} states unchecked expectations: {unknown}"
 
-    def test_each_workload_has_cases_it_must_refuse_or_none_at_all(self):
+    def test_every_grounded_workload_is_asked_something_it_cannot_answer(self):
         """A benchmark of only answerable cases rewards a model that answers
-        everything, which is the failure mode of a grounded workload."""
+        everything, which is the failure mode of a grounded workload.
+
+        How that is checked differs by contract, and both forms count.
+        `event-extraction` can refuse, so its cases say so. `ask-selected-files`
+        has no refusal state at all — it holds an answer and citations — so its
+        unanswerable cases check that nothing was invented instead."""
         for workload in ("ask-selected-files", "event-extraction"):
             loaded = case_files.load(workload)
+            unanswerable = [
+                item
+                for item in loaded
+                if not item.answerable
+                or "no_invented_numbers" in item.expect
+                or "no_invented_names" in item.expect
+            ]
 
-            assert any(not item.answerable for item in loaded)
+            assert unanswerable, f"{workload} is only asked what it can answer"
             assert any(item.answerable for item in loaded)
 
     def test_a_case_without_sources_is_refused(self, tmp_path):
@@ -371,3 +383,99 @@ class TestWritingItDown:
         write_results([run(), run(model_id="qwen3-4b-q4-k-m")], tmp_path)
 
         assert len(json.loads((tmp_path / "benchmark.json").read_text())["runs"]) == 2
+
+
+class TestCatchingAnInvention:
+    """What replaces "did it refuse" for a workload whose contract has no
+    refusal state.
+
+    `document-question-result` holds an answer and citations and nothing else,
+    so asking whether it refused is asking about a field that does not exist —
+    a flaw in the first version of these cases, found when the 8B "failed" two
+    of them by answering perfectly reasonably. What a grounded workload may not
+    do is produce a fact that was never there, and that is checkable.
+    """
+
+    def sources(self):
+        return (
+            "What is the supplier's VAT identification number?",
+            "INVOICE 2026-0417\nSupplier: Nordwind Lda\nTotal due: 4,235.00 EUR",
+        )
+
+    def judged(self, answer, expect):
+        return judge(
+            case(expect=expect),
+            {"answer": answer},
+            ["case:x:0", "case:x:1"],
+            self.sources(),
+        )
+
+    def test_saying_the_document_does_not_carry_it_passes(self):
+        """At any length it likes: this measures whether the answer is right,
+        never whether it is short."""
+        judgement = self.judged(
+            "The invoice does not state a VAT identification number for Nordwind "
+            "Lda. It carries the invoice number 2026-0417 and a total of 4,235.00 "
+            "EUR, but no tax identifier appears anywhere in the document.",
+            {"no_invented_numbers": True},
+        )
+
+        assert judgement.correct is True
+
+    def test_a_plausible_invented_number_fails(self):
+        judgement = self.judged(
+            "The supplier's VAT number is PT501234567.", {"no_invented_numbers": True}
+        )
+
+        assert judgement.failed == ("no_invented_numbers",)
+
+    def test_numbers_that_were_in_the_document_are_not_inventions(self):
+        judgement = self.judged(
+            "Invoice 2026-0417 totals 4,235.00 EUR.", {"no_invented_numbers": True}
+        )
+
+        assert judgement.correct is True
+
+    def test_a_name_that_was_never_supplied_fails(self):
+        judgement = judge(
+            case(expect={"no_invented_names": True}),
+            {"answer": "The signature was witnessed by Carlos Pereira."},
+            ["case:x:0"],
+            ("SERVICE AGREEMENT signed in Lisbon by Marta Oliveira.",),
+        )
+
+        assert judgement.failed == ("no_invented_names",)
+
+    def test_a_name_from_the_document_is_fine(self):
+        judgement = judge(
+            case(expect={"no_invented_names": True}),
+            {"answer": "The document names only Marta Oliveira, who signed it."},
+            ["case:x:0"],
+            ("SERVICE AGREEMENT signed in Lisbon by Marta Oliveira.",),
+        )
+
+        assert judgement.correct is True
+
+    def test_a_sentence_starting_with_a_capital_is_not_a_name(self):
+        """Capitalisation there is grammar, and treating it as invention would
+        fail every well-formed answer."""
+        judgement = judge(
+            case(expect={"no_invented_names": True}),
+            {"answer": "Nothing in the document names a witness. The agreement "
+                       "records only the signatory."},
+            ["case:x:0"],
+            ("SERVICE AGREEMENT signed in Lisbon by Marta Oliveira.",),
+        )
+
+        assert judgement.correct is True
+
+    def test_the_citation_rule_still_reads_references_not_text(self):
+        """Both halves travel together now; each rule takes the half it needs."""
+        judgement = judge(
+            case(expect={"cites_supplied_sources": True}),
+            {"answer": "x", "citations": [{"sourceRef": "case:x:1"}]},
+            ["case:x:0", "case:x:1"],
+            self.sources(),
+        )
+
+        assert judgement.correct is True

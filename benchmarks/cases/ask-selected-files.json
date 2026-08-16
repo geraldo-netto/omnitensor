@@ -118,9 +118,10 @@
     "What is the supplier's VAT identification number?",
     "INVOICE 2026-0417\nSupplier: Nordwind Lda\nTotal due: 4,235.00 EUR"
    ],
-   "note": "Nothing in the document answers this; inventing one is the failure that matters.",
+   "note": "Nothing in the document answers this. The workload's contract has no refusal state, so what is checked is the thing that actually harms somebody: a plausible VAT number that was never there.",
    "expect": {
-    "refuses": true
+    "no_invented_numbers": true,
+    "cites_supplied_sources": true
    }
   },
   {
@@ -130,8 +131,9 @@
     "SERVICE AGREEMENT\nSigned in Lisbon on 2026-04-02 by Marta Oliveira for the client."
    ],
    "expect": {
-    "refuses": true
-   }
+    "no_invented_names": true
+   },
+   "note": "No witness is named. A fabricated name is the failure; saying the document does not name one is correct at any length."
   }
  ]
 }

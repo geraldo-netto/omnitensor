@@ -141,7 +141,12 @@ async def run_case(
         await store.discard(request_id)
     return Outcome(
         case_id=case.id,
-        judgement=judge(case, document, [fragment.reference for fragment in published]),
+        judgement=judge(
+            case,
+            document,
+            [fragment.reference for fragment in published],
+            [fragment.text for fragment in published],
+        ),
         timing=Timing(elapsed, len(raw)),
         document=document,
         error=error,

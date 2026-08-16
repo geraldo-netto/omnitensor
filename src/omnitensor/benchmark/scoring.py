@@ -21,6 +21,19 @@ HEBREW = re.compile(r"[֐-׿]")
 
 
 @dataclass(frozen=True, slots=True)
+class Given:
+    """What the model was handed: the reference names, and the text behind them.
+
+    Both, because the rules need different halves — a citation rule checks the
+    names, an invention rule checks the words — and two lists that must stay in
+    step is a worse bargain than one value holding both.
+    """
+
+    references: tuple[str, ...] = ()
+    texts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Judgement:
     """How one answer did, and on which rules."""
 
@@ -41,8 +54,24 @@ class Judgement:
         return not self.failed
 
 
-def judge(case, document: dict | None, sources: Sequence[str]) -> Judgement:
-    """Apply every rule this case asks for to what the model returned."""
+def judge(
+    case,
+    document: dict | None,
+    sources: Sequence[str] | Given,
+    texts: Sequence[str] = (),
+) -> Judgement:
+    """Apply every rule this case asks for to what the model returned.
+
+    ``sources`` are the references a citation may name *and* the text those
+    references held: the invention rules need the words, the citation rule
+    needs the names, and passing two lists that must stay in step would be a
+    worse bargain than passing both forms of the same thing.
+    """
+    given = (
+        sources
+        if isinstance(sources, Given)
+        else Given(tuple(sources), tuple(texts))
+    )
     if document is None:
         # Nothing parseable came back. Recorded as a failed rule rather than
         # skipped, because a model that cannot hold its own output contract is
@@ -58,7 +87,7 @@ def judge(case, document: dict | None, sources: Sequence[str]) -> Judgement:
     for name, rule in RULES.items():
         if name not in case.expect:
             continue
-        (passed if rule(document, case.expect[name], sources) else failed).append(name)
+        (passed if rule(document, case.expect[name], given) else failed).append(name)
     return Judgement(case.id, tuple(passed), tuple(failed))
 
 
@@ -114,7 +143,7 @@ def _at_least(document: dict, wanted: object, _sources) -> bool:
     return True
 
 
-def _cites_only_supplied_sources(document: dict, wanted: object, sources) -> bool:
+def _cites_only_supplied_sources(document: dict, wanted: object, given: Given) -> bool:
     """Every citation names a source that was actually given.
 
     The failure this catches is the one that matters most in a grounded
@@ -123,7 +152,7 @@ def _cites_only_supplied_sources(document: dict, wanted: object, sources) -> boo
     references = _references(document)
     if wanted is True and not references:
         return False
-    supplied = set(sources)
+    supplied = set(given.references)
     return all(reference in supplied for reference in references)
 
 
@@ -141,6 +170,40 @@ def _references(document: dict) -> list[str]:
                 if isinstance(item, dict) and isinstance(item.get("sourceRef"), str):
                     found.append(item["sourceRef"])
     return found
+
+
+_NUMBER = re.compile(r"\d[\d.,/-]*")
+_NAME = re.compile(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}\b", re.MULTILINE)
+
+
+def _digits(value: str) -> set[str]:
+    return {run.strip(".,/-") for run in _NUMBER.findall(value) if run.strip(".,/-")}
+
+
+def _no_invented_numbers(document: dict, _wanted, given: Given) -> bool:
+    """Every number in the answer appears in what the model was given.
+
+    The check that replaces "did it refuse" for a workload whose contract has
+    no refusal state. Asked for a VAT number the invoice does not carry, a
+    grounded workload may say so at any length it likes — what it may not do is
+    produce a plausible one, and a fabricated number is the form that does the
+    most damage.
+    """
+    supplied = set()
+    for text in given.texts:
+        supplied |= _digits(text)
+    return _digits(_text_of(document)) <= supplied
+
+
+def _no_invented_names(document: dict, _wanted, given: Given) -> bool:
+    """Every capitalised name in the answer was in the sources.
+
+    "Who witnessed the signature" against a document naming no witness: the
+    failure is a name that was never there. Sentence-initial words are ignored,
+    since capitalisation there is grammar rather than a name.
+    """
+    supplied = " ".join(given.texts).lower()
+    return all(name.lower() in supplied for name in _NAME.findall(_text_of(document)))
 
 
 def _in_hebrew(document: dict, wanted: object, _sources) -> bool:
@@ -183,12 +246,14 @@ def _as_list(value: object) -> list:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
-RULES: dict[str, Callable[[dict, object, Sequence[str]], bool]] = {
+RULES: dict[str, Callable[[dict, object, Given], bool]] = {
     "contains": _contains_all,
     "absent": _contains_none,
     "at_least": _at_least,
     "cites_supplied_sources": _cites_only_supplied_sources,
     "hebrew": _in_hebrew,
+    "no_invented_numbers": _no_invented_numbers,
+    "no_invented_names": _no_invented_names,
     "operation": _operation_is,
     "fields": _field_equals,
     "event_starts": _event_at,
@@ -234,4 +299,4 @@ class Tally:
         return dict(sorted(counted.items(), key=lambda item: (-item[1], item[0])))
 
 
-__all__ = ["HEBREW", "Judgement", "RULES", "Tally", "judge"]
+__all__ = ["HEBREW", "Given", "Judgement", "RULES", "Tally", "judge"]
