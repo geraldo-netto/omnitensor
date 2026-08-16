@@ -31,7 +31,7 @@
     "ask-selected-files": {
       "modelId": "qwen3-8b-q4-k-m",
       "result": "passed",
-      "taskSha256": "ee2e1b207b19789de6990e75459820906b1608e62396c5c1ca62e48ce8c4dd39"
+      "taskSha256": "ccc9037e411cf00b9d4fb5f45a9c073b879262340e82be40bf0068e5601eacf4"
     },
     "event-extraction": {
       "modelId": "qwen3-8b-q4-k-m",
