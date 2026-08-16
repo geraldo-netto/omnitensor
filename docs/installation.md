@@ -41,23 +41,27 @@ each plugin worker can be accounted in its own cgroup.
 
 ### Deploy the applet before, or with, the service
 
-The applet validates a snapshot as a closed record. A field this service adds
-and the installed applet does not know invalidates the *whole* document, and
-the applet reports that as "No runtime service is publishing state" — which is
-exactly what a service that has stopped looks like.
-
-Making the field optional does not prevent it, and neither does merging the
-applet change first: what matters is the order the two are *deployed*. Install
-the applet payload built from the same contracts before restarting a service
-that publishes a new field, or accept a window where the desktop reads as dead.
+The Cinnamon panel is now a helper: it reads a handful of fields out of the
+published snapshot to colour an icon and fill five lines, and the Python client
+is what validates the document against these canonical schemas. That removes the
+old closed-record failure — a field this service adds no longer invalidates the
+whole document for the panel — but it does not remove the ordering rule for the
+*client*, which does validate. Install the client built from the same contracts
+before restarting a service that publishes a new field, or accept a window where
+it refuses a document the panel is happily drawing.
 
 `omnitensor-verify-install` now checks this against the snapshot actually on
 disk and the applet actually installed, so a mismatch is named at install time
 rather than turning up later as an outage:
 
 ```
-PASS  applet-contract: the installed applet reads the snapshot this service publishes
+PASS  applet-contract: the installed panel reads the snapshot this service publishes
 ```
+
+The check adapts to what is installed: a panel that ships a mirrored
+`runtime-snapshot.schema.json` is still validated against it, and the current
+helper — which ships none — is checked on the fields it actually reads and on
+both sides naming the same file.
 
 The service publishes one file and the Cinnamon applet reads it; that file is
 the only place the two meet. Each side names it independently, so moving it is

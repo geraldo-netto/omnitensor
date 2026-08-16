@@ -255,30 +255,91 @@ def check_confinement() -> Check:
     )
 
 
-def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
-    schema_file = Path(applet_root) / "runtime-snapshot.schema.json"
-    if not schema_file.is_file():
-        return Check("applet-contract", False, f"applet ships no snapshot contract: {schema_file}")
+# The fields the Cinnamon helper actually reads out of the snapshot. It ships
+# no schema of its own any more — it draws an icon and five lines, and the
+# client is what validates the document against the canonical schemas — so what
+# has to hold between service and panel is that these fields are there and that
+# both sides name the same file.
+HELPER_SNAPSHOT_FIELDS = ("version", "generatedAt", "devices", "metrics", "alerts")
+
+
+def _helper_state_path(applet_root: Path) -> str | None:
+    """The path the installed helper reads, from its own settings schema."""
     try:
-        schema = json.loads(schema_file.read_text(encoding="utf-8"))
+        settings = json.loads(
+            (Path(applet_root) / "settings-schema.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return None
+    entry = settings.get("runtime-state-path")
+    return entry.get("default") if isinstance(entry, dict) else None
+
+
+def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
+    """Whether the installed panel can read what this service publishes.
+
+    Two shapes are accepted, because both have shipped. An applet that carries
+    a mirrored `runtime-snapshot.schema.json` is validated against it, exactly
+    as before: a field this service adds and that applet does not know
+    invalidates the whole document, and the desktop reads as dead.
+
+    The current helper carries no mirror. It reads a handful of fields to
+    colour an icon, so its half of the contract is those fields being present
+    and both sides naming the same file — a helper pointed at a path nobody
+    writes reports "the runtime is not running", which looks exactly like a
+    service that has stopped.
+    """
+    root = Path(applet_root)
+    try:
         snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         return Check("applet-contract", False, f"could not compare contracts: {error}")
-    violations = [
-        f"{'/'.join(str(part) for part in error.path)}: {error.message}"
-        for error in jsonschema.Draft202012Validator(schema).iter_errors(snapshot)
-    ]
-    if violations:
+
+    schema_file = root / "runtime-snapshot.schema.json"
+    if schema_file.is_file():
+        try:
+            schema = json.loads(schema_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            return Check("applet-contract", False, f"could not compare contracts: {error}")
+        violations = [
+            f"{'/'.join(str(part) for part in error.path)}: {error.message}"
+            for error in jsonschema.Draft202012Validator(schema).iter_errors(snapshot)
+        ]
+        if violations:
+            return Check(
+                "applet-contract",
+                False,
+                "the installed applet cannot read the snapshot this service publishes "
+                f"({violations[0]}); install the applet built from these contracts",
+            )
+        return Check(
+            "applet-contract",
+            True,
+            "the installed applet reads the snapshot this service publishes",
+        )
+
+    if not (root / "applet.js").is_file():
+        return Check("applet-contract", False, f"no applet is installed at {root}")
+    missing = [field for field in HELPER_SNAPSHOT_FIELDS if field not in snapshot]
+    if missing:
         return Check(
             "applet-contract",
             False,
-            "the installed applet cannot read the snapshot this service publishes "
-            f"({violations[0]}); install the applet built from these contracts",
+            f"the published snapshot omits what the panel reads: {', '.join(missing)}",
+        )
+    configured = _helper_state_path(root)
+    published = str(Path(snapshot_path).expanduser())
+    if configured is not None and str(Path(configured).expanduser()) != published:
+        return Check(
+            "applet-contract",
+            False,
+            f"the panel reads {configured} but this service publishes {published}; "
+            "set the same path on both sides",
         )
     return Check(
         "applet-contract",
         True,
-        "the installed applet reads the snapshot this service publishes",
+        "the installed panel reads the snapshot this service publishes",
     )
 
 

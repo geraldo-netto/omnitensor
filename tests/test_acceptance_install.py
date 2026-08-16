@@ -643,7 +643,7 @@ def test_an_applet_that_knows_the_field_passes(tmp_path):
     assert check.ok is True
 
 
-def test_an_applet_shipping_no_contract_is_a_broken_payload(tmp_path):
+def test_a_directory_with_no_applet_in_it_is_a_broken_payload(tmp_path):
     from omnitensor.acceptance import check_applet_contract
 
     snapshot = tmp_path / "state.json"
@@ -654,7 +654,73 @@ def test_an_applet_shipping_no_contract_is_a_broken_payload(tmp_path):
     check = check_applet_contract(empty, snapshot)
 
     assert check.ok is False
-    assert "ships no snapshot contract" in check.detail
+    assert "no applet is installed" in check.detail
+
+
+def _helper_applet(root: Path, state_path: str) -> Path:
+    """The current payload shape: an applet, a setting, and no schema mirror."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "applet.js").write_text("// helper\n", encoding="utf-8")
+    (root / "settings-schema.json").write_text(
+        json.dumps({"runtime-state-path": {"type": "entry", "default": state_path}}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _published(snapshot: Path) -> Path:
+    snapshot.write_text(
+        json.dumps({
+            "version": 1,
+            "generatedAt": 1_700_000_000_000,
+            "devices": [],
+            "metrics": {"queueDepth": 0, "runningProfiles": 0},
+            "profiles": {},
+            "alerts": [],
+        }),
+        encoding="utf-8",
+    )
+    return snapshot
+
+
+def test_a_panel_that_ships_no_schema_is_checked_on_what_it_actually_reads(tmp_path):
+    """The helper carries no mirror; the client validates the document."""
+    from omnitensor.acceptance import check_applet_contract
+
+    snapshot = _published(tmp_path / "state.json")
+    root = _helper_applet(tmp_path / "applet", str(snapshot))
+
+    check = check_applet_contract(root, snapshot)
+
+    assert check.ok is True
+    assert "reads the snapshot this service publishes" in check.detail
+
+
+def test_a_snapshot_missing_what_the_panel_draws_is_named(tmp_path):
+    from omnitensor.acceptance import check_applet_contract
+
+    snapshot = tmp_path / "state.json"
+    snapshot.write_text(json.dumps({"version": 1}), encoding="utf-8")
+    root = _helper_applet(tmp_path / "applet", str(snapshot))
+
+    check = check_applet_contract(root, snapshot)
+
+    assert check.ok is False
+    assert "omits what the panel reads" in check.detail
+    assert "devices" in check.detail
+
+
+def test_a_panel_pointed_at_another_file_is_named_rather_than_read_as_a_dead_service(tmp_path):
+    """Both sides name the path independently, so a mismatch is silent."""
+    from omnitensor.acceptance import check_applet_contract
+
+    snapshot = _published(tmp_path / "state.json")
+    root = _helper_applet(tmp_path / "applet", str(tmp_path / "somewhere-else.json"))
+
+    check = check_applet_contract(root, snapshot)
+
+    assert check.ok is False
+    assert "set the same path on both sides" in check.detail
 
 
 def test_an_unreadable_pair_is_reported_rather_than_raised(tmp_path):
