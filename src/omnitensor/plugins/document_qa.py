@@ -252,7 +252,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
         ) as error:
             return failed_result(
                 request,
-                str(getattr(error, "code", "document-question-failed")),
+                failure_detail(getattr(error, "code", "document-question-failed")),
                 completed_at_ms=self._clock_ms(),
             )
         finally:
@@ -521,6 +521,46 @@ def grounded_answer_document(
     return result
 
 
+# What a failure code means to the person who asked the question. The codes
+# themselves reach the surface as "the job failed: provider-output-invalid",
+# which names the layer that refused rather than anything anyone can act on.
+#
+# Deliberately written here rather than forwarded from the validator: a schema
+# violation message quotes the value that violated it, and the values here are
+# spans of the person's own documents. The code is safe to forward, the
+# validator's prose is not.
+FAILURE_DETAILS = {
+    "provider-output-truncated": (
+        "The answer was cut off before it finished. Ask for less at once — a "
+        "narrower question, or one section rather than the whole document."
+    ),
+    "provider-output-invalid": (
+        "The model did not answer in the shape this workload requires. Trying "
+        "the question again usually works; if it never does, the model is not "
+        "honouring its contract."
+    ),
+    "answer-invalid": (
+        "The answer did not cite the sources it was built from, so it was "
+        "refused rather than shown ungrounded."
+    ),
+    "selected-file-unavailable": (
+        "That file could not be read. Files outside the runtime's own input "
+        "roots are not visible to it."
+    ),
+    "embedder-unqualified": (
+        "The embedding model this workload needs is not installed or not "
+        "qualified on this machine."
+    ),
+}
+
+
+def failure_detail(code: object) -> str:
+    """A sentence someone can act on, or the bare code when there is none."""
+    name = str(code)
+    explanation = FAILURE_DETAILS.get(name)
+    return f"{name}: {explanation}" if explanation else name
+
+
 def document_question_task():
     return parse_generation_task(
         {
@@ -544,7 +584,13 @@ def document_question_task():
             "outputSchema": load_schema("document-question-answer.schema.json"),
             "limits": {
                 "contextTokens": 32_768,
-                "outputTokens": 1_024,
+                # 1,024 was not enough for the ordinary case of summarising a
+                # long selection: the answer plus its citations ran past the
+                # budget and the JSON was cut off mid-object, which surfaced as
+                # an unexplained invalid-output failure. Doubling it costs
+                # latency only on answers that actually get that long, and the
+                # byte ceiling below is unchanged.
+                "outputTokens": 2_048,
                 "outputBytes": 262_144,
             },
         }
@@ -567,12 +613,14 @@ def _validate_embedding_provider(
 
 
 __all__ = [
+    "FAILURE_DETAILS",
     "DocumentQuestionError",
     "DocumentQuestionPlugin",
     "EmbeddingProvider",
     "IndexedSpan",
     "TextEmbeddingWorker",
     "document_question_task",
+    "failure_detail",
     "grounded_answer_document",
     "page_spans",
     "retrieve_spans",

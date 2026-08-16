@@ -431,7 +431,6 @@ def test_structured_output_round_trips_only_schema_valid_strict_json():
 
     for raw in (
         b'{"events":[]}',
-        "{bad",
         '{"events":[],"extra":1}',
         '{"events":[1]}',
         '{"events":NaN}',
@@ -439,6 +438,21 @@ def test_structured_output_round_trips_only_schema_valid_strict_json():
         with pytest.raises(GenerationError) as excinfo:
             validate_structured_output(task(), raw)
         assert excinfo.value.code == "provider-output-invalid"
+
+    # An object that opens and never closes is a provider that ran out of
+    # output budget, which asks the caller for a narrower question rather than
+    # telling them the provider is broken.
+    with pytest.raises(GenerationError) as truncated:
+        validate_structured_output(task(), "{bad")
+    assert (truncated.value.code, truncated.value.detail) == (
+        "provider-output-truncated",
+        "provider stopped before its JSON was complete",
+    )
+
+    # Text that never opened one is malformed, not cut off.
+    with pytest.raises(GenerationError) as malformed:
+        validate_structured_output(task(), "events: one")
+    assert malformed.value.code == "provider-output-invalid"
 
 
 def test_structured_output_reports_exact_type_and_strict_json_refusals():

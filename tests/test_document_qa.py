@@ -924,7 +924,7 @@ def test_generation_task_freezes_prompt_schema_and_every_limit():
         task.limits.context_tokens,
         task.limits.output_tokens,
         task.limits.output_bytes,
-    ) == (32768, 1024, 262144)
+    ) == (32768, 2048, 262144)
     assert task.output_schema == json.loads(
         (Path(__file__).parents[1] / "schemas/document-question-answer.schema.json").read_text()
     )
@@ -969,3 +969,43 @@ async def test_extract_span_failures_keep_exact_private_contract(tmp_path):
             )
         assert caught.value.code == code
         assert caught.value.detail == detail
+
+
+def test_a_reply_that_stops_mid_object_is_named_as_truncation():
+    """Cut-off JSON and malformed JSON need different answers from the person."""
+    from omnitensor.plugins.document_qa import document_question_task
+    from omnitensor.plugins.generation import GenerationError, validate_structured_output
+
+    task = document_question_task()
+
+    with pytest.raises(GenerationError) as truncated:
+        validate_structured_output(task, '{"answer": "the deploy owner is')
+    assert truncated.value.code == "provider-output-truncated"
+
+    with pytest.raises(GenerationError) as malformed:
+        validate_structured_output(task, "not json at all")
+    assert malformed.value.code == "provider-output-invalid"
+
+
+def test_every_failure_a_person_sees_says_what_to_do_about_it():
+    from omnitensor.plugins.document_qa import FAILURE_DETAILS, failure_detail
+
+    detail = failure_detail("provider-output-truncated")
+
+    assert detail.startswith("provider-output-truncated: ")
+    assert "narrower question" in detail
+    # An unknown code still names itself rather than inventing an explanation.
+    assert failure_detail("something-new") == "something-new"
+    for explanation in FAILURE_DETAILS.values():
+        assert explanation.endswith(".")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_reaches_the_caller_as_a_sentence_not_a_code(tmp_path):
+    """The complaint this fixes: "job failed: provider-output-invalid"."""
+    from omnitensor.plugins.document_qa import failure_detail
+
+    # The mapping is what the plugin hands to failed_result, so the surface a
+    # person reads is checked here rather than through a whole worker run.
+    assert "cut off" in failure_detail("provider-output-truncated")
+    assert "could not be read" in failure_detail("selected-file-unavailable")

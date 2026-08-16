@@ -222,6 +222,17 @@ def generation_request(
     return GenerationRequest(request, task, references)
 
 
+def _looks_truncated(raw: str) -> bool:
+    """Whether the reply stops mid-structure rather than being malformed.
+
+    A closed JSON object is the contract, so text that opens one and never
+    closes it is output that ran out of room — the ordinary result of asking a
+    long question of a task with a bounded token budget.
+    """
+    text = raw.strip()
+    return bool(text) and text.startswith(("{", "[")) and not text.endswith(("}", "]"))
+
+
 def validate_structured_output(task: GenerationTask, raw: str) -> dict:
     """Decode one provider reply within the task's exact byte and schema limits."""
     if not isinstance(raw, str):
@@ -232,6 +243,15 @@ def validate_structured_output(task: GenerationTask, raw: str) -> dict:
     try:
         document = json.loads(raw, parse_constant=lambda value: (_raise_json_constant(value)))
     except (UnicodeError, json.JSONDecodeError, ValueError) as error:
+        # Told apart because they need different answers from the person: a
+        # model that ran out of output budget mid-object is asking for a
+        # narrower question, while genuinely malformed JSON is a provider that
+        # does not honour its own contract.
+        if _looks_truncated(raw):
+            raise GenerationError(
+                "provider-output-truncated",
+                "provider stopped before its JSON was complete",
+            ) from error
         raise GenerationError(
             "provider-output-invalid", "provider output is not strict JSON"
         ) from error

@@ -108,14 +108,14 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         3,
         30,
         21,
-        15,
+        16,
         2,
         5,
         24,
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 164
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 165
     modules = {
         selector.split(".x", 1)[0]
         for shard in manifest.shards
