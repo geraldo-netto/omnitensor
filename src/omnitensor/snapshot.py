@@ -80,6 +80,7 @@ def build_snapshot(
     generated_at_ms: int | None = None,
     inputs: dict | None = None,
     kernel_telemetry: dict | None = None,
+    policy: dict | None = None,
 ) -> dict:
     """Build a contract-valid snapshot document.
 
@@ -106,6 +107,10 @@ def build_snapshot(
         }
     if kernel_telemetry is not None:
         snapshot["kernelTelemetry"] = kernel_telemetry
+    if policy is not None:
+        # What a client changes, published from the store that enforces it, so
+        # a client renders policy rather than remembering its own copy of it.
+        snapshot["policy"] = policy
     violations = validate_document("runtime-snapshot.schema.json", snapshot)
     if violations:
         raise ValueError(f"snapshot violates contract: {'; '.join(violations)}")

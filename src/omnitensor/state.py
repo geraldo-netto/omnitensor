@@ -53,6 +53,24 @@ class PolicyState:
     device_choices: dict[str, str] = field(default_factory=dict)
     revision: int = 0
 
+    def snapshot_document(self) -> dict:
+        """The policy a client renders, as the published snapshot carries it.
+
+        The same fields as :meth:`portfolio`, shaped for the snapshot contract:
+        the device choice sits on the profile it belongs to rather than in a
+        map beside it, because a client draws one row per profile — and the
+        revision travels, so a client that has read a snapshot never has to
+        guess what to send as ``expectedRevision``.
+        """
+        profiles = {}
+        for profile_id, policy in sorted(self.profiles.items()):
+            entry = {"enabled": policy.enabled, "weight": policy.weight}
+            device_id = self.device_choices.get(profile_id)
+            if device_id is not None:
+                entry["deviceId"] = device_id
+            profiles[profile_id] = entry
+        return {"revision": self.revision, "paused": self.paused, "profiles": profiles}
+
     def portfolio(self) -> dict:
         return {
             "paused": self.paused,

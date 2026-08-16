@@ -468,6 +468,54 @@
           }
         }
       }
+    },
+    "policy": {
+      "description": "The policy this runtime is enforcing, from the same store that answers apply-command. A client sets these and renders them back rather than keeping its own copy: two stores for one fact drift, and the one a window draws is not the one a scheduler obeys. Absent means the runtime predates the field, and a consumer that finds it absent falls back to whatever it did before. The revision is the value to send as expectedRevision, so a client that has read a snapshot never has to guess it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "paused",
+        "profiles"
+      ],
+      "properties": {
+        "revision": {
+          "description": "Increments on every applied command; what to send as expectedRevision.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "paused": {
+          "description": "Whether every profile is held. Runtime state: a pause that ended when a window closed would not be a pause.",
+          "type": "boolean"
+        },
+        "profiles": {
+          "type": "object",
+          "maxProperties": 256,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enabled",
+              "weight"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "weight": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "deviceId": {
+                "description": "The card this profile is pinned to, when a person pinned one. Absent means the runtime chooses.",
+                "type": "string",
+                "pattern": "^gpu-renderD[0-9]{1,6}$"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

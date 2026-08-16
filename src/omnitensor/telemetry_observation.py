@@ -219,6 +219,7 @@ def runtime_snapshot(
         plugin_telemetry=plugin_telemetry.documents(),
         inputs=input_roots_document(input_roots),
         kernel_telemetry=kernel_telemetry_source.read().document(),
+        policy=policy.snapshot_document(),
     )
 
 
