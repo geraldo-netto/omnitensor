@@ -8,3 +8,5 @@
 [2026-08-17 01:36:20]   ask-who-signed                     ok    105.8s
 [2026-08-17 01:37:58]   ask-deadline                       ok     98.2s
 [2026-08-17 01:39:21]   ask-warranty-length                ok     83.3s
+[2026-08-17 01:41:05]   ask-two-documents                  ok    104.1s
+[2026-08-17 01:42:34]   ask-percentage                     ok     89.1s
