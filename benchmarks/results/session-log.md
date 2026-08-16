@@ -58,10 +58,15 @@ rewritten after each model, so an interrupted run still leaves findings.
   invention, which is the thing that actually harms somebody — a VAT number the
   invoice never carried, a witness who does not exist. Those two rows are being
   re-measured (see below); everything else in that workload stood.
-- **`event-extraction` is refusing documents that state an explicit date and
-  time.** That is OMNI-0354, and this is the first time it has been reproduced
-  by something other than a person clicking. It is a known open defect, not a
-  regression from this work.
+- **`event-extraction` refuses everything.** Seven answerable documents, seven
+  refusals: an ISO date with a named activity and a location, a written month,
+  two events in one document, a 24-hour time, and a valid `.ics` with
+  `DTSTART:20260903T140000Z`. Its 3/10 is not a partial score — the three it
+  "passes" are precisely the three that expect a refusal, so the number is a
+  100% refusal rate wearing a score. Every answer was well-formed, so the
+  earlier note that the refusal was "not stable either" is wrong: it is
+  perfectly stable and perfectly useless. This is OMNI-0354, sharpened, and it
+  is a known defect rather than anything this work caused.
 
 ## Queued, in order
 

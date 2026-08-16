@@ -22,3 +22,11 @@
 [2026-08-17 01:48:57]   event-two-in-one-document          FAIL   32.8s  failed: answers-rather-than-refusing, at_least
 [2026-08-17 01:49:28]   event-with-location                FAIL   30.7s  failed: answers-rather-than-refusing, at_least, event_starts
 [2026-08-17 01:50:00]   event-ics-like                     FAIL   32.6s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 01:50:32]   event-afternoon-24h                FAIL   31.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 01:51:03]   event-named-activity               FAIL   31.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 01:51:35]   event-no-time-refuses              ok     31.8s
+[2026-08-17 01:52:07]   event-no-activity-refuses          ok     32.4s
+[2026-08-17 01:52:39]   event-relative-date-refuses        ok     31.8s
+[2026-08-17 01:52:39] qwen3-8b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 31.7s per case
+[2026-08-17 01:52:39]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 01:52:39] qwen3-8b-q4-k-m · file-organizer: 10 cases
