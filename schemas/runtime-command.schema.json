@@ -36,6 +36,7 @@
         "set-profile-enabled",
         "set-profile-weight",
         "set-profile-device",
+        "set-profile-model",
         "set-paused",
         "apply-profiles"
       ]
@@ -59,6 +60,10 @@
         {
           "type": "string",
           "pattern": "^gpu-renderD[0-9]{1,6}$"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
         },
         {
           "type": "null"
@@ -100,6 +105,17 @@
                 "type": "null"
               }
             ]
+          },
+          "modelId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       }
@@ -124,6 +140,34 @@
               {
                 "type": "string",
                 "pattern": "^gpu-renderD[0-9]{1,6}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changes": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-profile-model"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
               },
               {
                 "type": "null"

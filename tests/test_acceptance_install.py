@@ -60,7 +60,12 @@ def acknowledgement(**changes):
         "revision": 4,
         "appliedAt": 1_700_000_000_000,
         "message": "Command is not valid JSON",
-        "portfolio": {"paused": False, "profiles": {}, "deviceChoices": {}},
+        "portfolio": {
+            "paused": False,
+            "profiles": {},
+            "deviceChoices": {},
+            "modelChoices": {},
+        },
     }
     document.update(changes)
     return json.dumps(document)

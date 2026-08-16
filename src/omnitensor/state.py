@@ -19,11 +19,16 @@ from .atomicio import write_json_atomic
 MIN_WEIGHT = 1
 MAX_WEIGHT = 5
 MAX_DEVICE_CHOICES = 128
+MAX_MODEL_CHOICES = 128
 # No ceiling on stored policy: the snapshot contract no longer caps how many
 # profiles it publishes, so policy for a profile that exists is policy this
 # file keeps.
 MAX_PROFILES = None
 GPU_DEVICE_ID_PATTERN = re.compile(r"^gpu-renderD[0-9]{1,6}$")
+# An artifact id as the manifests write them, which is what a model choice
+# names: the manifest pins the digest, so a choice this pattern accepts is
+# still refused unless that workload's manifest declares it.
+MODEL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 
 
@@ -51,6 +56,10 @@ class PolicyState:
     paused: bool = False
     profiles: dict[str, ProfilePolicy] = field(default_factory=dict)
     device_choices: dict[str, str] = field(default_factory=dict)
+    # Which model a person chose for a profile. Absent means the workload runs
+    # what its qualification receipt defaults to — which is not the same fact
+    # as having chosen that model, and a client draws the two differently.
+    model_choices: dict[str, str] = field(default_factory=dict)
     revision: int = 0
 
     def snapshot_document(self) -> dict:
@@ -68,6 +77,9 @@ class PolicyState:
             device_id = self.device_choices.get(profile_id)
             if device_id is not None:
                 entry["deviceId"] = device_id
+            model_id = self.model_choices.get(profile_id)
+            if model_id is not None:
+                entry["modelId"] = model_id
             profiles[profile_id] = entry
         return {"revision": self.revision, "paused": self.paused, "profiles": profiles}
 
@@ -79,6 +91,7 @@ class PolicyState:
                 for profile_id, policy in sorted(self.profiles.items())
             },
             "deviceChoices": dict(sorted(self.device_choices.items())),
+            "modelChoices": dict(sorted(self.model_choices.items())),
         }
 
 
@@ -144,12 +157,23 @@ class PolicyStore:
             and isinstance(device_id, str)
             and GPU_DEVICE_ID_PATTERN.fullmatch(device_id)
         }
+        model_choices = raw.get("modelChoices")
+        model_choices = model_choices if isinstance(model_choices, dict) else {}
+        sanitized_models = {
+            profile_id: model_id
+            for profile_id, model_id in sorted(model_choices.items())
+            if isinstance(profile_id, str)
+            and 1 <= len(profile_id) <= 80
+            and isinstance(model_id, str)
+            and MODEL_ID_PATTERN.fullmatch(model_id)
+        }
         return PolicyState(
             paused=raw.get("paused") is True,
             profiles=profiles,
             device_choices=dict(
                 list(sanitized_choices.items())[:MAX_DEVICE_CHOICES]
             ),
+            model_choices=dict(list(sanitized_models.items())[:MAX_MODEL_CHOICES]),
             revision=_sanitized_revision(raw.get("revision")),
         )
 
@@ -161,6 +185,7 @@ class PolicyStore:
                 for profile_id, policy in sorted(state.profiles.items())
             },
             "deviceChoices": dict(sorted(state.device_choices.items())),
+            "modelChoices": dict(sorted(state.model_choices.items())),
             "revision": state.revision,
         }
         write_json_atomic(self._path, payload, prefix=".policy-")

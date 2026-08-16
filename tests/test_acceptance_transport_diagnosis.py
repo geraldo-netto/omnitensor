@@ -67,7 +67,7 @@ def test_an_answering_transport_is_reported_with_its_revision():
         return (
             '{"version":2,"commandId":"invalid","status":"rejected","revision":7,'
             '"appliedAt":1,"message":"Command does not match the version 2 contract",'
-            '"portfolio":{"paused":false,"profiles":{},"deviceChoices":{}}}'
+            '"portfolio":{"paused":false,"profiles":{},"deviceChoices":{},"modelChoices":{}}}'
         )
 
     check = check_bus(probe(call))

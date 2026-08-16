@@ -215,3 +215,105 @@ class TestWhatTheServicePublishes:
 
         assert snapshot["policy"]["revision"] == state.revision
         assert snapshot["policy"]["profiles"][PROFILE]["enabled"] is False
+
+
+class TestChoosingAModel:
+    """A person choosing which model a workload runs.
+
+    The reason this exists: `dictalm2-hebrew-q4-k-m` is installed and
+    qualified, `HebrewTranslationRuntime` is written and working, and until the
+    receipt could hold more than one model per workload there was no way to ask
+    for either. Choosing is intent, so it is a command and a published fact,
+    exactly like the card a profile is pinned to.
+    """
+
+    def control(self, tmp_path, declared=("qwen3-8b-q4-k-m", "qwen3-4b-q4-k-m")):
+        from omnitensor.control import ControlService
+        from omnitensor.state import PolicyStore
+
+        store = PolicyStore(
+            tmp_path / "policy.json",
+            {PROFILE: ProfilePolicy(enabled=True, weight=1)},
+        )
+        return ControlService(
+            store,
+            profile_exists=lambda profile_id: profile_id == PROFILE,
+            profile_models=lambda profile_id: declared if profile_id == PROFILE else (),
+        )
+
+    def apply(self, control, value, revision=0, profile_id=PROFILE):
+        text = json.dumps(command("set-profile-model", profile_id, value, revision))
+        return json.loads(asyncio.run(control.apply_command_text(text)))
+
+    def test_a_declared_model_is_accepted_and_published(self, tmp_path):
+        control = self.control(tmp_path)
+
+        reply = self.apply(control, "qwen3-4b-q4-k-m")
+
+        assert reply["status"] == "applied"
+        assert control.state.snapshot_document()["profiles"][PROFILE]["modelId"] == (
+            "qwen3-4b-q4-k-m"
+        )
+
+    def test_a_model_the_manifest_never_pinned_is_refused(self, tmp_path):
+        """Every declared artifact has a digest this service verifies; anything
+        else has none, so choosing it could only end at a worker that refuses
+        to start. Better refused where the refusal can be read."""
+        control = self.control(tmp_path)
+
+        reply = self.apply(control, "some-model-from-the-internet")
+
+        assert reply["status"] == "rejected"
+        assert "not declared by this workload" in reply["message"]
+        assert control.state.model_choices == {}
+
+    def test_clearing_the_choice_returns_the_workload_to_its_default(self, tmp_path):
+        """Absent is not the same fact as having chosen what the receipt
+        defaults to, so it is published as absent."""
+        control = self.control(tmp_path)
+        self.apply(control, "qwen3-4b-q4-k-m")
+
+        reply = self.apply(control, None, revision=control.state.revision)
+
+        assert reply["status"] == "applied"
+        assert "modelId" not in control.state.snapshot_document()["profiles"][PROFILE]
+
+    def test_a_profile_nobody_installed_is_refused(self, tmp_path):
+        control = self.control(tmp_path)
+
+        reply = self.apply(control, "qwen3-4b-q4-k-m", profile_id="not-installed")
+
+        assert reply["status"] == "rejected"
+        assert "Unknown workload profile" in reply["message"]
+
+    def test_the_choice_survives_a_restart(self, tmp_path):
+        """A policy this service enforces with no client attached, so it is
+        stored here rather than in whichever window happened to set it."""
+        from omnitensor.state import PolicyStore
+
+        control = self.control(tmp_path)
+        self.apply(control, "qwen3-4b-q4-k-m")
+
+        reloaded = PolicyStore(tmp_path / "policy.json", {}).load()
+
+        assert reloaded.model_choices == {PROFILE: "qwen3-4b-q4-k-m"}
+
+    def test_a_snapshot_carrying_a_chosen_model_is_contract_valid(self):
+        snapshot = build_snapshot(
+            devices=[device()],
+            metrics={"queueDepth": 0, "runningProfiles": 0},
+            profiles={},
+            policy={
+                "revision": 4,
+                "paused": False,
+                "profiles": {
+                    PROFILE: {
+                        "enabled": True,
+                        "weight": 1,
+                        "modelId": "dictalm2-hebrew-q4-k-m",
+                    }
+                },
+            },
+        )
+
+        assert validate_document("runtime-snapshot.schema.json", snapshot) == []

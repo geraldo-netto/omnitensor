@@ -202,6 +202,7 @@ def test_control_service_holds_no_dead_defaults_state():
         "on_applied",
         "profile_exists",
         "gpu_device_ids",
+        "profile_models",
     ]
 
 

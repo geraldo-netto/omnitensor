@@ -185,6 +185,7 @@ def test_policy_save_writes_the_complete_policy_document(tmp_path):
     ))
     assert json.loads(path.read_text()) == {
         "deviceChoices": {},
+        "modelChoices": {},
         "paused": False,
         "profiles": {
             "alpha": {"enabled": False, "weight": 1},

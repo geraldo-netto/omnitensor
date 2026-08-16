@@ -222,6 +222,7 @@ class OmniTensorService:
             on_applied=self._policy_changed,
             profile_exists=self._profile_exists,
             gpu_device_ids=self._gpu_device_ids,
+            profile_models=self._profile_models,
         )
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
@@ -369,6 +370,17 @@ class OmniTensorService:
 
     def _profile_exists(self, profile_id: str) -> bool:
         return profile_id in self._workloads or profile_id in self._plugin_ids()
+
+    def _profile_models(self, profile_id: str) -> tuple[str, ...]:
+        """The artifacts this workload's manifest pins, by id.
+
+        The bound on what a person may choose. A model outside it has no
+        verified digest for this workload, so choosing it could only ever end
+        at a worker that refuses to start — better refused here, where the
+        refusal has somewhere to be read.
+        """
+        declared = getattr(self._plugin_runtime, "declared_artifacts", None)
+        return tuple(declared(profile_id)) if callable(declared) else ()
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
         return tuple(

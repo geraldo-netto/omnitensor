@@ -31,7 +31,7 @@ machine usable while jobs are queued, and there is no client in that loop.
 
 ## Policy has one writer and one store
 
-Enabled, weight, device choice and paused are **intent** — a person's, so a
+Enabled, weight, device choice, model choice and paused are **intent** — a person's, so a
 client sets them — but they are stored *here*, in the policy store that answers
 `apply-command`, because this service enforces them with or without that client.
 
@@ -47,7 +47,11 @@ service's behalf: it is unprivileged, replaceable, and frequently absent.
 
 - Permission grants and the sandbox that enforces them.
 - Digest-pinned artifacts, and the qualification receipt a worker is checked
-  against before it loads a task.
+  against before it loads a task. **Which models a workload may run** is part
+  of that: a client offers only the models the receipt records as passing for
+  that workload, and this service refuses any other — a model qualified *as a
+  model* is not qualified *for a task*, and an unqualified pair is not a
+  slower answer, it is a worker that refuses to start.
 - Input roots: a source outside them is refused here, whatever a chooser
   offered.
 
@@ -73,6 +77,7 @@ small:
 | Start or stop one workload | `apply-command` `set-profile-enabled` |
 | Pause everything | `apply-command` `set-paused` |
 | Prefer a card, set a weight | `apply-command` `set-profile-device`, `set-profile-weight` |
+| Choose the model a workload runs | `apply-command` `set-profile-model` |
 | Run something | `submit-job`, `get-job-result`, `cancel-job` |
 | Configure a workload | `set-plugin-configuration` (planned, OMNI-0355) |
 

@@ -84,6 +84,7 @@ def test_save_round_trips_and_leaves_no_temp_files(tmp_path):
         "paused": True,
         "profiles": {"hardware-health": {"enabled": False, "weight": 4}},
         "deviceChoices": {},
+        "modelChoices": {},
         "revision": 3,
     }
     leftovers = [entry for entry in tmp_path.iterdir() if entry.name.startswith(".policy-")]

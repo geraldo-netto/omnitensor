@@ -179,6 +179,22 @@ class InstalledPluginRuntime:
             if plugin.source is PluginSource.EXTERNAL
         )
 
+    def declared_artifacts(self, plugin_id: str) -> tuple[str, ...]:
+        """The artifact ids this plugin's manifest pins, in declared order.
+
+        The bound on which model a person may choose for it: every id here has
+        a pinned digest this service verifies, and anything else has none.
+        """
+        plugin = self._plugin(plugin_id)
+        if plugin is None:
+            return ()
+        artifacts = plugin.manifest.get("plugin", {}).get("artifacts", ())
+        return tuple(
+            str(artifact["id"])
+            for artifact in artifacts
+            if isinstance(artifact, dict) and isinstance(artifact.get("id"), str)
+        )
+
     def granted_permissions(self, plugin_id: str) -> frozenset[str]:
         """What this plugin was actually granted when its worker started."""
         return self._granted.get(plugin_id, frozenset())

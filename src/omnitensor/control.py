@@ -21,6 +21,7 @@ from .ports import PolicyStorage
 from .registry import validate_document
 from .state import (
     MAX_DEVICE_CHOICES,
+    MAX_MODEL_CHOICES,
     MAX_WEIGHT,
     MIN_WEIGHT,
     PolicyState,
@@ -38,6 +39,16 @@ MAX_MESSAGE_LENGTH = 240
 
 def _now_ms() -> int:
     return max(1, int(time.time() * 1000))
+
+
+_CHOOSERS = {
+    "set-profile-device": lambda control, state, profile_id, value: (
+        control._set_profile_device(state, profile_id, value)
+    ),
+    "set-profile-model": lambda control, state, profile_id, value: (
+        control._set_profile_model(state, profile_id, value)
+    ),
+}
 
 
 def _integral_weight(value: object) -> int | None:
@@ -74,11 +85,16 @@ class ControlService:
         *,
         profile_exists=None,
         gpu_device_ids=None,
+        profile_models=None,
     ):
         self._store = store
         self._on_applied = on_applied
         self._profile_exists = profile_exists
         self._gpu_device_ids = gpu_device_ids or (lambda: ())
+        # Which models a profile may be given, from the artifacts its manifest
+        # pins. A model no manifest declares has no verified digest here, so
+        # choosing it could only ever end at a worker that refuses to start.
+        self._profile_models = profile_models or (lambda _profile_id: ())
         self._state: PolicyState = store.load()
         self._lock = asyncio.Lock()
 
@@ -190,10 +206,15 @@ class ControlService:
             state.paused = command["value"] is True
             return None
         profile_id = command["profileId"]
-        if operation == "set-profile-device":
+        # Device and model are choices *about* a profile rather than settings
+        # inside its policy, so they are answerable for a profile that has no
+        # stored policy yet — hence one gate for both, before the policy lookup
+        # the rest need.
+        chooser = _CHOOSERS.get(operation)
+        if chooser is not None:
             if not self._known_profile(state, profile_id):
                 return f"Unknown workload profile: {profile_id}"
-            return self._set_profile_device(state, profile_id, command["value"])
+            return chooser(self, state, profile_id, command["value"])
         policy = state.profiles.get(profile_id)
         if policy is None:
             return f"Unknown workload profile: {profile_id}"
@@ -240,8 +261,14 @@ class ControlService:
                 return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
             policy.weight = weight
         if "deviceId" in change:
-            return self._set_profile_device(
+            error = self._set_profile_device(
                 state, change["profileId"], change["deviceId"]
+            )
+            if error is not None:
+                return error
+        if "modelId" in change:
+            return self._set_profile_model(
+                state, change["profileId"], change["modelId"]
             )
         return None
 
@@ -249,20 +276,25 @@ class ControlService:
         profile_id = change["profileId"]
         if not self._known_profile(state, profile_id):
             return f"Unknown workload profile: {profile_id}"
-        if "enabled" not in change and "weight" not in change and "deviceId" not in change:
+        if not {"enabled", "weight", "deviceId", "modelId"} & set(change):
             # A change that changes nothing is a caller mistake worth naming:
             # silently accepting it would spend a revision and alter nothing.
             return f"Change for {profile_id} sets neither enabled nor weight"
         if ("enabled" in change or "weight" in change) and profile_id not in state.profiles:
             return f"Profile policy unavailable: {profile_id}"
         if "deviceId" in change:
-            return self._device_choice_error(change["deviceId"])
+            error = self._device_choice_error(change["deviceId"])
+            if error is not None:
+                return error
+        if "modelId" in change:
+            return self._model_choice_error(change["profileId"], change["modelId"])
         return None
 
     def _known_profile(self, state: PolicyState, profile_id: str) -> bool:
         return (
             profile_id in state.profiles
             or profile_id in state.device_choices
+            or profile_id in state.model_choices
             or (
                 self._profile_exists is not None
                 and self._profile_exists(profile_id) is True
@@ -274,6 +306,35 @@ class ControlService:
             return None
         if device_id not in set(self._gpu_device_ids()):
             return f"GPU device is unavailable: {device_id}"
+        return None
+
+    def _model_choice_error(self, profile_id: str, model_id: str | None) -> str | None:
+        if model_id is None:
+            return None
+        declared = tuple(self._profile_models(profile_id))
+        if model_id not in declared:
+            # Named rather than silently ignored: a person who chose a model
+            # and got the old one back would rightly not believe the window.
+            return f"Model is not declared by this workload: {model_id}"
+        return None
+
+    def _set_profile_model(
+        self, state: PolicyState, profile_id: str, model_id: str | None
+    ) -> str | None:
+        error = self._model_choice_error(profile_id, model_id)
+        if error is not None:
+            return error
+        if model_id is None:
+            # Back to whatever the qualification receipt defaults to, which is
+            # a different fact from having chosen that model.
+            state.model_choices.pop(profile_id, None)
+        else:
+            if (
+                profile_id not in state.model_choices
+                and len(state.model_choices) >= MAX_MODEL_CHOICES
+            ):
+                return f"Model choices are limited to {MAX_MODEL_CHOICES} profiles"
+            state.model_choices[profile_id] = model_id
         return None
 
     def _set_profile_device(
