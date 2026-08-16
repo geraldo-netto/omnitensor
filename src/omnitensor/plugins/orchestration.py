@@ -45,6 +45,7 @@ from .pipeline import (
 )
 from .policy import PipelinePolicyGate
 from .runner import STAGE_ORDER, PipelineRunner
+from .worker_budgets import flow_deadline_for
 
 MAX_RUNNERS = 256
 
@@ -433,12 +434,21 @@ def build_plugin_runners(
                 artifact_ready=lambda _profile: (True, ""),
             ),
             # Each profile gets its own controller so one plugin's backlog
-            # cannot consume the admission budget of every other plugin.
-            flow=PluginFlowController(profile_id, **dict(flow_options or {})),
+            # cannot consume the admission budget of every other plugin, and
+            # its own deadline, because a language model and a classifier do
+            # not take comparable time to answer.
+            flow=PluginFlowController(profile_id, **_flow_options(flow_options, workload)),
             cancellations=cancellations,
             clock_ms=clock_ms,
         )
     return RunnerSet(runners, skipped)
+
+
+def _flow_options(supplied: Mapping[str, object] | None, workload: Workload) -> dict:
+    """Caller's options, with a deadline the profile's own manifest implies."""
+    options = dict(supplied or {})
+    options.setdefault("deadline_seconds", flow_deadline_for(workload.manifest))
+    return options
 
 
 def required_permissions(workload: Workload) -> tuple[str, ...]:

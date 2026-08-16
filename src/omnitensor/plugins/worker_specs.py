@@ -21,6 +21,7 @@ from .loading_accelerator import (
 from .loading_staging import _STAGING_COMPONENT
 from .sandbox import FilesystemSandbox
 from .supervisor_process import WorkerSpec
+from .worker_budgets import limits_for
 
 MAX_WORKER_IMPORT_PATHS = 16
 WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
@@ -123,6 +124,7 @@ def external_worker_spec(
     return WorkerSpec(
         plugin.plugin_id,
         tuple(argv),
+        budget_limits=limits_for(plugin.manifest),
         minimum_protocol=protocol["minimum"],
         maximum_protocol=protocol["maximum"],
         capabilities=frozenset(protocol.get("capabilities", ())) & WORKER_CAPABILITIES,
