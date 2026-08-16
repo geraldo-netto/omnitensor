@@ -1,0 +1,63 @@
+# Unattended session, 2026-08-17
+
+What was done while you were away, in order, with where to look. Times are
+local. Benchmark numbers land in `benchmark.md` beside this file as each model
+finishes; the raw per-case detail is in `benchmark.json`.
+
+## Standing constraints followed
+
+- **Nothing was capped or degraded.** No context was shortened, no cache
+  precision lowered, no output bounded to make something fit. Where size was
+  the problem, the work was split instead.
+- **No model was changed.** Every default, every receipt, every policy is as
+  it was. The benchmark reads and measures; deciding is a separate act.
+
+## Committed
+
+| time | item | commit | what |
+| --- | --- | --- | --- |
+| 01:23 | OMNI-0362 | `489a582` | Fit prober: `python -m omnitensor.probe_cli`. Reads model headers and sysfs, loads nothing. |
+| 01:31 | OMNI-0363 | `f9cf3aa` | Benchmark harness through the real generation path, 40 labelled cases. |
+| 01:40 | OMNI-0359 | `5a860c6` | A workload runs the model it was told to run — the last link that kept the Hebrew model unreachable. |
+| 01:41 | OMNI-0360 (part) | `b94373c` | Span splitter: translation stops being capped and starts being split. |
+
+## What the prober found
+
+At the 32,768-token context the tasks declare, on the discrete RX 6600 XT
+(7.88 GiB free):
+
+| artifact | weights | cache | total | fits |
+| --- | --- | --- | --- | --- |
+| qwen3-8b-q4-k-m | 4.68 GiB | 2.39 GiB | 7.57 GiB | yes, 0.31 GiB spare |
+| dictalm2-hebrew-q4-k-m | 4.07 GiB | 2.12 GiB | 6.70 GiB | yes, 1.18 GiB spare |
+| qwen3-4b-q4-k-m | 2.33 GiB | 2.39 GiB | 5.22 GiB | yes, 2.67 GiB spare |
+| qwen3-0-6b-q8-0 | 0.75 GiB | 1.86 GiB | 3.11 GiB | yes, 4.77 GiB spare |
+
+The ceiling is real: the shipped 8B leaves 0.31 GiB. **The cache is 2.39 GiB of
+that** — larger than the 4B model itself.
+
+Correction to what I said earlier: the **integrated 610M has ~45 GiB
+available**, not the 4 GiB its VRAM aperture advertises, because its real pool
+is mapped system memory. A 14B or a 32B fits there outright. Speed is the open
+question — that is OMNI-0364, and it needs the discrete run to finish first so
+the two are not competing for the accelerator lease.
+
+## Benchmark run
+
+Started 01:32, `benchmarks/results/run-discrete.log`, models
+`qwen3-8b-q4-k-m` then `qwen3-4b-q4-k-m`, all four text workloads, ten cases
+each. About 100 seconds per case, so roughly two and a half hours. Results are
+rewritten after each model, so an interrupted run still leaves findings.
+
+## Still to do
+
+- OMNI-0360 second half: the `document-translation` workload itself.
+- OMNI-0364: the 610M lane, after the discrete run finishes.
+- OMNI-0365: the larger candidates. **This one needs your say-so** — it is
+  about 15 GB of downloads, and I would rather not pull that unasked.
+- OMNI-0361: the qualification runs, which the benchmark now has the harness
+  for.
+- xpuwlm G2 (Translate route, 10 MB warning) and G3 (model dropdown).
+
+Nothing is deployed. The service and client still run the code they ran
+yesterday; a reinstall and reload happens once, at the end, as usual.
