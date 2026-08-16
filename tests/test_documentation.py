@@ -410,3 +410,24 @@ def test_plugin_admission_guide_documents_the_pool_and_how_to_tune_it():
     assert "[Plugin admission](docs/plugin-admission.md)" in (
         ROOT / "README.md"
     ).read_text(encoding="utf-8")
+
+
+def test_boundary_guide_splits_capability_from_intent_and_records_the_refusals():
+    """The rule a new feature is placed by, and the two rejected shortcuts.
+
+    Both rejections cost something real if re-derived: a socket verb that stops
+    the service strands every watching workload, and renaming the published
+    snapshot path costs three consumers a migration for tidiness.
+    """
+    guide = (ROOT / "docs/runtime-client-boundary.md").read_text(encoding="utf-8")
+
+    assert "capability against intent" in guide
+    assert "correct with no client attached" in guide
+    assert "pause is service state" in guide.lower()
+    assert "one writer" in guide
+    assert "No socket verb that stops the service" in guide
+    assert "No rename of the published snapshot path" in guide
+
+
+def test_readme_links_the_boundary_guide():
+    assert "docs/runtime-client-boundary.md" in (ROOT / "README.md").read_text(encoding="utf-8")

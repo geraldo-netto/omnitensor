@@ -18,6 +18,8 @@ Installing the four local Qwen workflows? The
 five-wheel layout, pinned Qwen/BGE artifacts, mandatory and optional
 dependencies, grants, readiness, rollback, and removal without a CPU fallback.
 
+Building a client, or wondering which side a feature belongs on? [What this service owns, and what a client owns](docs/runtime-client-boundary.md) splits capability from intent and says why this service must stay correct with no client attached.
+
 Writing a plugin? Start with the [extension guide](docs/extension-guide.md),
 which walks packaging, discovery, schemas, permissions, artifacts, local
 testing, install, upgrade, rollback, and the compatibility policy in order.
