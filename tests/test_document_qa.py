@@ -920,11 +920,13 @@ def test_generation_task_freezes_prompt_schema_and_every_limit():
         "one later private span. If those spans do not support an answer, say so "
         "without inventing facts. {{UNTRUSTED_CONTENT}}"
     )
+    # No byte ceiling: the token budget bounds the answer, and host pressure
+    # protects the machine.
     assert (
         task.limits.context_tokens,
         task.limits.output_tokens,
         task.limits.output_bytes,
-    ) == (32768, 2048, 262144)
+    ) == (32768, 2048, None)
     assert task.output_schema == json.loads(
         (Path(__file__).parents[1] / "schemas/document-question-answer.schema.json").read_text()
     )

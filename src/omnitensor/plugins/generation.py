@@ -52,7 +52,11 @@ class ProviderGenerationError(GenerationError):
 class GenerationLimits:
     context_tokens: int
     output_tokens: int
-    output_bytes: int
+    # No ceiling by default: a reply is bounded by the token budget that
+    # produced it and by host pressure, not by a byte count nobody can predict
+    # from the question. A task may still declare one; ``None`` means it did
+    # not, and nothing here refuses on size alone.
+    output_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,9 +241,12 @@ def validate_structured_output(task: GenerationTask, raw: str) -> dict:
     """Decode one provider reply within the task's exact byte and schema limits."""
     if not isinstance(raw, str):
         raise GenerationError("provider-output-invalid", "provider output must be JSON text")
-    encoded = raw.encode("utf-8")
-    if len(encoded) > task.limits.output_bytes:
-        raise GenerationError("provider-output-invalid", "provider output exceeds its byte limit")
+    if task.limits.output_bytes is not None:
+        encoded = raw.encode("utf-8")
+        if len(encoded) > task.limits.output_bytes:
+            raise GenerationError(
+                "provider-output-invalid", "provider output exceeds its byte limit"
+            )
     try:
         document = json.loads(raw, parse_constant=lambda value: (_raise_json_constant(value)))
     except (UnicodeError, json.JSONDecodeError, ValueError) as error:
@@ -417,11 +424,13 @@ def _parse_output_schema(value: object) -> dict:
 
 
 def _parse_limits(value: object) -> GenerationLimits:
-    if not isinstance(value, Mapping) or set(value) != {
+    # ``outputBytes`` is optional: the byte ceiling was dropped, and a task
+    # written before that is still valid rather than being rejected for
+    # carrying a limit this no longer requires.
+    if not isinstance(value, Mapping) or not {
         "contextTokens",
         "outputTokens",
-        "outputBytes",
-    }:
+    } <= set(value) <= {"contextTokens", "outputTokens", "outputBytes"}:
         raise GenerationError("task-invalid", "generation limits do not match version 1")
     context_tokens = _bounded_integer(
         value["contextTokens"], "context token limit", 1, MAX_CONTEXT_TOKENS
@@ -429,8 +438,10 @@ def _parse_limits(value: object) -> GenerationLimits:
     output_tokens = _bounded_integer(
         value["outputTokens"], "output token limit", 1, MAX_OUTPUT_TOKENS
     )
-    output_bytes = _bounded_integer(
-        value["outputBytes"], "output byte limit", 2, MAX_OUTPUT_BYTES
+    output_bytes = (
+        _bounded_integer(value["outputBytes"], "output byte limit", 2, MAX_OUTPUT_BYTES)
+        if "outputBytes" in value
+        else None
     )
     if output_tokens >= context_tokens:
         raise GenerationError("task-invalid", "output token limit must be below context limit")

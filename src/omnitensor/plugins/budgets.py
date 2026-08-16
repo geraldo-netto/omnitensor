@@ -18,9 +18,15 @@ DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
 # Bubblewrap retains a supervisor and namespace init around the worker.  Four
 # covers that fixed three-process sandbox topology plus no more than one
 # short-lived helper; additional forks are rejected.
-DEFAULT_MAX_PROCESSES = 4
-DEFAULT_MAX_MEMORY_BYTES = 512 * 1024 * 1024
-DEFAULT_MAX_DESCRIPTORS = 128
+# Unbounded by default. These ceilings refused real work — a Qwen worker
+# legitimately holding 831 MB was killed against a 512 MiB limit once its model
+# had loaded — and the in-process check was already observe-only for that
+# reason. What protects the machine now is host pressure, measured across the
+# whole host rather than guessed per worker. A caller may still set any of
+# these; ``None`` means no ceiling, and the worker cgroup is told "max".
+DEFAULT_MAX_PROCESSES = None
+DEFAULT_MAX_MEMORY_BYTES = None
+DEFAULT_MAX_DESCRIPTORS = None
 DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_MAX_CONCURRENCY = 1
 DEFAULT_RESOURCE_POLL_SECONDS = 0.05
@@ -60,9 +66,9 @@ class WorkerBudgetExceededError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class WorkerBudgetLimits:
     call_timeout_seconds: float = DEFAULT_CALL_TIMEOUT_SECONDS
-    max_processes: int = DEFAULT_MAX_PROCESSES
-    max_memory_bytes: int = DEFAULT_MAX_MEMORY_BYTES
-    max_descriptors: int = DEFAULT_MAX_DESCRIPTORS
+    max_processes: int | None = DEFAULT_MAX_PROCESSES
+    max_memory_bytes: int | None = DEFAULT_MAX_MEMORY_BYTES
+    max_descriptors: int | None = DEFAULT_MAX_DESCRIPTORS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY
     resource_poll_seconds: float = DEFAULT_RESOURCE_POLL_SECONDS
@@ -73,11 +79,11 @@ class WorkerBudgetLimits:
             "call_timeout_seconds",
             MAX_CALL_TIMEOUT_SECONDS,
         )
-        _bounded_integer(self.max_processes, "max_processes", MAX_PROCESSES_LIMIT)
-        _bounded_integer(
+        _optional_bounded_integer(self.max_processes, "max_processes", MAX_PROCESSES_LIMIT)
+        _optional_bounded_integer(
             self.max_memory_bytes, "max_memory_bytes", MAX_MEMORY_BYTES_LIMIT
         )
-        _bounded_integer(
+        _optional_bounded_integer(
             self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT
         )
         _bounded_integer(
@@ -337,14 +343,24 @@ def create_worker_cgroup(parent: Path, name: str) -> Path:
 
 
 def configure_worker_cgroup(cgroup: Path, limits: WorkerBudgetLimits) -> None:
-    """Install kernel-enforced process and aggregate-memory ceilings."""
+    """Install whatever ceilings this worker was given, or none.
+
+    ``max`` is the kernel's own word for no limit, so a worker with no declared
+    ceiling is still placed in its own cgroup — the accounting is what
+    telemetry reads, and what a future pressure control would act on — without
+    a number that would kill it mid-model-load.
+    """
     root = Path(cgroup)
     (root / CGROUP_PROCESS_LIMIT_FILE).write_text(
-        str(limits.max_processes), encoding="ascii"
+        _cgroup_limit(limits.max_processes), encoding="ascii"
     )
     (root / CGROUP_MEMORY_LIMIT_FILE).write_text(
-        str(limits.max_memory_bytes), encoding="ascii"
+        _cgroup_limit(limits.max_memory_bytes), encoding="ascii"
     )
+
+
+def _cgroup_limit(value: int | None) -> str:
+    return "max" if value is None else str(value)
 
 
 def current_process_cgroup(
@@ -434,6 +450,13 @@ def _check_output(value: object, limit: int) -> None:
             WorkerBudgetCode.OUTPUT,
             f"worker output is {len(body)} bytes; limit is {limit}",
         )
+
+
+def _optional_bounded_integer(value: object, name: str, maximum: int) -> None:
+    """Validate a ceiling that may be absent; ``None`` is "no ceiling"."""
+    if value is None:
+        return
+    _bounded_integer(value, name, maximum)
 
 
 def _bounded_integer(value: int, name: str, maximum: int) -> None:

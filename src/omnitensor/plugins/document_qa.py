@@ -587,11 +587,10 @@ def document_question_task():
                 # 1,024 was not enough for the ordinary case of summarising a
                 # long selection: the answer plus its citations ran past the
                 # budget and the JSON was cut off mid-object, which surfaced as
-                # an unexplained invalid-output failure. Doubling it costs
-                # latency only on answers that actually get that long, and the
-                # byte ceiling below is unchanged.
+                # an unexplained invalid-output failure.
                 "outputTokens": 2_048,
-                "outputBytes": 262_144,
+                # No byte ceiling: the token budget above is what bounds an
+                # answer, and host pressure is what protects the machine.
             },
         }
     )

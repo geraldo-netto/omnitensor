@@ -721,3 +721,28 @@ def test_property_private_reference_order_is_preserved(references):
 def test_property_schema_valid_outputs_round_trip(events):
     raw = json.dumps({"events": events}, ensure_ascii=False, allow_nan=False)
     assert validate_structured_output(task(), raw) == {"events": events}
+
+
+def test_a_task_without_a_byte_ceiling_accepts_any_size_its_tokens_produced():
+    """The ceiling was dropped: a long answer is bounded by tokens, not bytes."""
+    document = task_document()
+    document["limits"] = {"contextTokens": 32_768, "outputTokens": 2_048}
+    task = parse_generation_task(document)
+
+    assert task.limits.output_bytes is None
+    # Comfortably past the old 1 MiB ceiling, and accepted: what bounds a reply
+    # now is the schema it must satisfy and the tokens that produced it.
+    long_event = "e" * 80
+    huge = '{"events":[' + ",".join([f'"{long_event}"'] * 8) + "]}"
+    assert validate_structured_output(task, huge)["events"][0] == long_event
+    assert len(huge.encode("utf-8")) > 2 * task_document()["limits"]["outputBytes"] // 1000
+
+
+def test_a_task_that_still_declares_a_ceiling_is_still_held_to_it():
+    document = task_document()
+    document["limits"] = {"contextTokens": 4_096, "outputTokens": 512, "outputBytes": 32}
+    task = parse_generation_task(document)
+
+    with pytest.raises(GenerationError) as excinfo:
+        validate_structured_output(task, '{"events":["' + "x" * 64 + '"]}')
+    assert excinfo.value.detail == "provider output exceeds its byte limit"
