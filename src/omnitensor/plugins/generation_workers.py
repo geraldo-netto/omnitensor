@@ -1,4 +1,4 @@
-"""Fail-closed native Qwen generation workers."""
+"""Fail-closed native generation workers."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ class _GenerationWorker:
 
 
 class LlamaCppVulkanWorker(_GenerationWorker):
-    """Qwen GGUF provider that requires every model layer on Vulkan."""
+    """GGUF provider that requires every model layer on Vulkan."""
 
     accelerator = "gpu"
     runtime_name = "llama.cpp-vulkan"

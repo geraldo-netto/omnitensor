@@ -1,4 +1,4 @@
-"""Frozen-corpus scoring and qualification for Qwen event providers."""
+"""Frozen-corpus scoring and qualification for event generation providers."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Pinned Qwen source catalog parsing and discovery."""
+"""Pinned generation-model source catalog parsing and discovery."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
         or document["catalogVersion"] != 1
     ):
         raise GenerationProviderError(
-            "catalog-invalid", "Qwen catalog fields or version are invalid"
+            "catalog-invalid", "catalog fields or version are invalid"
         )
     license_document = bounded_mapping(document["license"], "catalog license", "catalog-invalid")
     upstream = bounded_mapping(document["upstream"], "catalog upstream", "catalog-invalid")

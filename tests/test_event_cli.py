@@ -243,7 +243,7 @@ def test_parser_help_and_argument_contract_is_stable():
         "  {preview,export,check-model,legacy-files}\n"
         "    preview             show pending candidates\n"
         "    export              write confirmed candidates as ICS\n"
-        "    check-model         verify pinned local Qwen artifacts\n"
+        "    check-model         verify pinned local model artifacts\n"
         "    legacy-files        list an explicitly selected legacy folder\n\n"
         "options:\n"
         "  -h, --help            show this help message and exit\n"

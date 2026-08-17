@@ -1,4 +1,4 @@
-"""Stable value and port contracts shared by Qwen provider modules."""
+"""Stable value and port contracts shared by the generation provider modules."""
 
 from __future__ import annotations
 

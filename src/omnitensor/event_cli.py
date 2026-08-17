@@ -63,7 +63,7 @@ def preview_document(document: object) -> dict:
 
 
 def verify_event_artifacts(root: Path) -> dict:
-    """Verify the pinned Qwen files already placed in a private artifact root."""
+    """Verify the pinned model files already placed in a private artifact root."""
     catalog = load_generation_catalog()
     checked = []
     for source in catalog.sources:
@@ -113,7 +113,7 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--confirm", action="append", default=[])
     export.add_argument("--reject", action="append", default=[])
     export.add_argument("--output", type=Path, required=True)
-    setup = commands.add_parser("check-model", help="verify pinned local Qwen artifacts")
+    setup = commands.add_parser("check-model", help="verify pinned local model artifacts")
     setup.add_argument("artifact_root", type=Path)
     legacy = commands.add_parser("legacy-files", help="list an explicitly selected legacy folder")
     legacy.add_argument("directory", type=Path)

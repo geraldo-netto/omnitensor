@@ -16,7 +16,7 @@ import omnitensor.plugins.document_acceptance as acceptance_module
 from omnitensor.plugins.document_acceptance import (
     MAX_CORPUS_BYTES,
     MAX_EVIDENCE_BYTES,
-    QWEN_MODEL_SHA256,
+    PRIMARY_MODEL_SHA256,
     DocumentAcceptanceError,
     DocumentAcceptancePolicy,
     _boolean,
@@ -148,7 +148,7 @@ def test_qwen3_catalog_is_official_revision_pinned_and_gpu_default():
             f"https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/{revision}/Qwen3-8B-Q4_K_M.gguf"
         ),
         "filename": "Qwen3-8B-Q4_K_M.gguf",
-        "sha256": QWEN_MODEL_SHA256,
+        "sha256": PRIMARY_MODEL_SHA256,
         "sizeBytes": 5027783488,
     }
     assert [(item["accelerator"], item["default"]) for item in catalog["providers"]] == [
@@ -554,7 +554,7 @@ def test_evidence_read_is_bounded_and_object_only(tmp_path):
     ("change", "code", "detail"),
     [
         ({"corpus_sha256": "0" * 64}, "evidence-stale", "evidence names another corpus version"),
-        ({"qwen_model_sha256": "0" * 64}, "evidence-stale", "evidence names another Qwen model"),
+        ({"primary_model_sha256": "0" * 64}, "evidence-stale", "evidence names another primary model"),
         ({"generator_device_name": "Vulkan"}, "device-unqualified", "generator GPU must be named"),
         (
             {"generator_device_name": "llvmpipe"},

@@ -38,8 +38,8 @@ MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 MAX_WORKER_LOAD_RECEIPT_BYTES = 64 * 1024
 SELECTED_TEXT_WORKER_LOAD_RECEIPT = "selected-text-worker-load.json"
-QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
-QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+PRIMARY_MODEL_ID = "qwen3-8b-q4-k-m"
+PRIMARY_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
 HEBREW_MODEL_ID = "dictalm2-hebrew-q4-k-m"
 HEBREW_MODEL_SHA256 = "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735"
 SELECTED_TEXT_RUNTIME_VERSION = "llama-cpp-python-0.3.34"
@@ -156,7 +156,7 @@ class SelectedTextReport:
             "evidenceSha256": self.evidence.evidence_sha256,
             "corpusSha256": self.corpus_sha256,
             "models": {
-                "primary": _model_document(QWEN_MODEL_ID, self.evidence.primary),
+                "primary": _model_document(PRIMARY_MODEL_ID, self.evidence.primary),
                 "hebrewTranslation": _model_document(HEBREW_MODEL_ID, self.evidence.hebrew),
             },
             "metrics": {
@@ -412,7 +412,7 @@ def _validate_selected_text_models(
     *,
     identity_code: str = "evidence-stale",
 ) -> None:
-    if primary.model_sha256 != QWEN_MODEL_SHA256:
+    if primary.model_sha256 != PRIMARY_MODEL_SHA256:
         raise SelectedTextAcceptanceError(identity_code, "primary model bytes changed")
     if hebrew.model_sha256 != HEBREW_MODEL_SHA256:
         raise SelectedTextAcceptanceError(identity_code, "Hebrew model bytes changed")
@@ -684,7 +684,7 @@ __all__ = [
     "HEBREW_MODEL_SHA256",
     "MAX_WORKER_LOAD_RECEIPT_BYTES",
     "ModelEvidence",
-    "QWEN_MODEL_SHA256",
+    "PRIMARY_MODEL_SHA256",
     "SELECTED_TEXT_GPU_DEVICE",
     "SELECTED_TEXT_RUNTIME_VERSION",
     "SELECTED_TEXT_WORKER_LOAD_RECEIPT",

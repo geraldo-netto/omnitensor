@@ -15,7 +15,7 @@ import omnitensor.plugins.selected_text_acceptance as acceptance
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
     MAX_WORKER_LOAD_RECEIPT_BYTES,
-    QWEN_MODEL_SHA256,
+    PRIMARY_MODEL_SHA256,
     SELECTED_TEXT_GPU_DEVICE,
     SELECTED_TEXT_RUNTIME_VERSION,
     SelectedTextAcceptanceError,
@@ -102,7 +102,7 @@ def _worker_receipt_document():
         "receiptVersion": 1,
         "pluginId": "selected-text-tools",
         "models": {
-            "primary": _model(QWEN_MODEL_SHA256, 37),
+            "primary": _model(PRIMARY_MODEL_SHA256, 37),
             "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33),
         },
     }
@@ -252,7 +252,7 @@ def _evidence_document(corpus):
         "evidenceVersion": 1,
         "corpusSha256": corpus.sha256,
         "models": {
-            "primary": _model(QWEN_MODEL_SHA256, 37),
+            "primary": _model(PRIMARY_MODEL_SHA256, 37),
             "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33),
         },
         "observations": [

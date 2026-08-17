@@ -41,8 +41,8 @@ from .generation import ProviderGenerationError
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
-QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
-QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
+PRIMARY_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+PRIMARY_MODEL_ID = "qwen3-8b-q4-k-m"
 
 
 class DocumentAcceptanceError(ValueError):
@@ -106,7 +106,7 @@ class DocumentAcceptanceEvidence:
     bge_report_path: Path
     bge_report_sha256: str
     bge_artifact_sha256: str
-    qwen_model_sha256: str
+    primary_model_sha256: str
     runtime_version: str
     generator_device_name: str
     generator_load: NativeLoadReport
@@ -130,7 +130,7 @@ class DocumentAcceptanceReport:
     corpus_sha256: str
     bge_report_sha256: str
     bge_artifact_sha256: str
-    qwen_model_sha256: str
+    primary_model_sha256: str
     embedding_device_name: str
     generator_device_name: str
     runtime_version: str
@@ -155,8 +155,8 @@ class DocumentAcceptanceReport:
                     "deviceName": self.embedding_device_name,
                 },
                 "generation": {
-                    "modelId": QWEN_MODEL_ID,
-                    "artifactSha256": self.qwen_model_sha256,
+                    "modelId": PRIMARY_MODEL_ID,
+                    "artifactSha256": self.primary_model_sha256,
                     "runtimeVersion": self.runtime_version,
                     "deviceName": self.generator_device_name,
                 },
@@ -311,7 +311,7 @@ def qualify_document_questions(
         corpus.sha256,
         evidence.bge_report_sha256,
         evidence.bge_artifact_sha256,
-        evidence.qwen_model_sha256,
+        evidence.primary_model_sha256,
         embedding_device,
         evidence.generator_device_name,
         evidence.runtime_version,
@@ -337,8 +337,8 @@ def _validate_acceptance_identity(
 ) -> str:
     if evidence.corpus_sha256 != corpus.sha256:
         raise DocumentAcceptanceError("evidence-stale", "evidence names another corpus version")
-    if evidence.qwen_model_sha256 != QWEN_MODEL_SHA256:
-        raise DocumentAcceptanceError("evidence-stale", "evidence names another Qwen model")
+    if evidence.primary_model_sha256 != PRIMARY_MODEL_SHA256:
+        raise DocumentAcceptanceError("evidence-stale", "evidence names another primary model")
     embedding_device = _validate_bge_evidence(evidence)
     try:
         validate_gpu_load(evidence.generator_load)

@@ -1,4 +1,4 @@
-"""Shared native provider used by the four isolated Qwen workload wheels."""
+"""Shared native provider used by the four isolated workload wheels."""
 
 from .factories import (
     create_ask_selected_files,

@@ -59,11 +59,11 @@ def _qualification_document() -> dict:
     resource = importlib.resources.files("omnitensor_vulkan_runtime").joinpath("qualification.json")
     raw = resource.read_bytes()
     if len(raw) > _MAX_RECEIPT_BYTES:
-        raise RuntimeError("Qwen qualification receipt is oversized")
+        raise RuntimeError("qualification receipt is oversized")
     try:
         document = json.loads(raw)
     except (UnicodeError, ValueError) as error:
-        raise RuntimeError("Qwen qualification receipt is invalid") from error
+        raise RuntimeError("qualification receipt is invalid") from error
     if not isinstance(document, dict) or set(document) != {
         "version",
         "recordedAt",
@@ -72,19 +72,19 @@ def _qualification_document() -> dict:
         "models",
         "workloads",
     }:
-        raise RuntimeError("Qwen qualification receipt fields are invalid")
+        raise RuntimeError("qualification receipt fields are invalid")
     if document["version"] != _RECEIPT_VERSION:
-        raise RuntimeError("Qwen qualification receipt version is invalid")
+        raise RuntimeError("qualification receipt version is invalid")
     # A date, not one particular date: re-qualifying a pair is expected work,
     # and a literal here would mean every run edits the check that guards it.
     # Nothing is trusted because of this field; the digests do that.
     if not isinstance(document["recordedAt"], str) or not _RECORDED_AT.fullmatch(
         document["recordedAt"]
     ):
-        raise RuntimeError("Qwen qualification receipt date is invalid")
+        raise RuntimeError("qualification receipt date is invalid")
     device = document["device"]
     if not isinstance(device, str) or not device:
-        raise RuntimeError("Qwen qualification device is invalid")
+        raise RuntimeError("qualification device is invalid")
     return document
 
 
@@ -117,25 +117,25 @@ def _runtime(value: object) -> tuple[str, tuple[tuple[str, str], ...]]:
         "wheelSha256",
         "binaries",
     }:
-        raise RuntimeError("Qwen qualification runtime is invalid")
+        raise RuntimeError("qualification runtime is invalid")
     if value["distribution"] != "llama-cpp-python" or value["version"] != "0.3.34":
-        raise RuntimeError("Qwen qualification runtime identity is invalid")
+        raise RuntimeError("qualification runtime identity is invalid")
     if not _is_digest(value["wheelSha256"]):
-        raise RuntimeError("Qwen qualification wheel digest is invalid")
+        raise RuntimeError("qualification wheel digest is invalid")
     binaries = value["binaries"]
     if not isinstance(binaries, dict) or set(binaries) != {
         "libggml-vulkan.so",
         "libllama.so",
     }:
-        raise RuntimeError("Qwen qualification native inventory is invalid")
+        raise RuntimeError("qualification native inventory is invalid")
     if any(not _is_digest(digest) for digest in binaries.values()):
-        raise RuntimeError("Qwen qualification native digest is invalid")
+        raise RuntimeError("qualification native digest is invalid")
     return str(value["version"]), tuple(sorted(binaries.items()))
 
 
 def _model(value: object, model_id: str, digest: str) -> int:
     if not isinstance(value, dict) or model_id not in value:
-        raise RuntimeError("Qwen model has no qualification")
+        raise RuntimeError("model has no qualification")
     model = value[model_id]
     if not isinstance(model, dict) or set(model) != {
         "sha256",
@@ -144,7 +144,7 @@ def _model(value: object, model_id: str, digest: str) -> int:
         "keyCache",
         "valueCache",
     }:
-        raise RuntimeError("Qwen model qualification is invalid")
+        raise RuntimeError("model qualification is invalid")
     layers = model["fullyOffloadedLayers"]
     if (
         model["sha256"] != digest
@@ -154,9 +154,9 @@ def _model(value: object, model_id: str, digest: str) -> int:
         or isinstance(layers, bool)
         or not isinstance(layers, int)
     ):
-        raise RuntimeError("Qwen model differs from qualification")
+        raise RuntimeError("model differs from qualification")
     if layers < 1:
-        raise RuntimeError("Qwen layer qualification is invalid")
+        raise RuntimeError("layer qualification is invalid")
     return layers
 
 
@@ -180,48 +180,48 @@ def default_model(plugin_id: str) -> str:
 
 def _workload_entry(value: object, plugin_id: str) -> dict:
     if not isinstance(value, dict) or plugin_id not in value:
-        raise RuntimeError("Qwen workload has no qualification")
+        raise RuntimeError("workload has no qualification")
     workload = value[plugin_id]
     if not isinstance(workload, dict) or set(workload) != {"default", "models"}:
-        raise RuntimeError("Qwen workload qualification is invalid")
+        raise RuntimeError("workload qualification is invalid")
     models = workload["models"]
     if not isinstance(models, dict) or not models:
-        raise RuntimeError("Qwen workload qualification lists no model")
+        raise RuntimeError("workload qualification lists no model")
     for record in models.values():
         _workload_model(record)
     chosen = workload["default"]
     if chosen not in models or models[chosen]["result"] != PASSED:
         # A default nobody qualified would hand every job that did not choose
         # a model to a worker that cannot start.
-        raise RuntimeError("Qwen workload default is not a passing model")
+        raise RuntimeError("workload default is not a passing model")
     return workload
 
 
 def _workload_model(record: object) -> None:
     if not isinstance(record, dict) or not {"result", "taskSha256"} <= set(record):
-        raise RuntimeError("Qwen workload qualification is invalid")
+        raise RuntimeError("workload qualification is invalid")
     if set(record) - {"result", "taskSha256", "reason"}:
-        raise RuntimeError("Qwen workload qualification is invalid")
+        raise RuntimeError("workload qualification is invalid")
     if record["result"] not in (PASSED, FAILED):
-        raise RuntimeError("Qwen workload result is invalid")
+        raise RuntimeError("workload result is invalid")
     if not _is_digest(record["taskSha256"]):
-        raise RuntimeError("Qwen workload task digest is invalid")
+        raise RuntimeError("workload task digest is invalid")
     # A failure is recorded rather than dropped, so nobody re-derives it in six
     # months — and a recorded failure without its reason is a note that says
     # only "no".
     if record["result"] == FAILED and not str(record.get("reason", "")).strip():
-        raise RuntimeError("Qwen workload failure has no reason")
+        raise RuntimeError("workload failure has no reason")
 
 
 def _workload(value: object, plugin_id: str, model_id: str, task_digest: str) -> None:
     workload = _workload_entry(value, plugin_id)
     record = workload["models"].get(model_id)
     if record is None:
-        raise RuntimeError("Qwen model has no qualification for this workload")
+        raise RuntimeError("model has no qualification for this workload")
     if record["result"] != PASSED:
-        raise RuntimeError("Qwen model did not pass qualification for this workload")
+        raise RuntimeError("model did not pass qualification for this workload")
     if record["taskSha256"] != task_digest:
-        raise RuntimeError("Qwen workload differs from qualification")
+        raise RuntimeError("workload differs from qualification")
 
 
 def _is_digest(value: object) -> bool:

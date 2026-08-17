@@ -1,4 +1,4 @@
-"""Trusted evidence binding and bounded result normalization for Qwen workloads."""
+"""Trusted evidence binding and bounded result normalization for generation workloads."""
 
 from __future__ import annotations
 

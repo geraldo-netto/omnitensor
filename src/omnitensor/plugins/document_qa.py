@@ -2,7 +2,7 @@
 
 The worker never watches a directory and never turns a selected parent into a
 grant.  It extracts only the brokered files in the request, builds a bounded
-in-memory BGE span index, sends only the best spans to a qualified Qwen worker,
+in-memory BGE span index, sends only the best spans to a qualified generation worker,
 and discards every source fragment before returning.  Public results contain
 file/page/span addresses and digests, never source text or absolute paths.
 """

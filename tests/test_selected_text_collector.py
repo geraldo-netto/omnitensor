@@ -10,7 +10,7 @@ import pytest
 
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
-    QWEN_MODEL_SHA256,
+    PRIMARY_MODEL_SHA256,
     SelectedTextAcceptanceError,
     parse_selected_text_worker_load_receipt,
 )
@@ -48,7 +48,7 @@ def _receipt():
             "receiptVersion": 1,
             "pluginId": "selected-text-tools",
             "models": {
-                "primary": _model(QWEN_MODEL_SHA256, 37),
+                "primary": _model(PRIMARY_MODEL_SHA256, 37),
                 "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33),
             },
         }
@@ -103,7 +103,7 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
     monkeypatch.setattr(
         collector,
         "file_digest",
-        lambda path: QWEN_MODEL_SHA256 if path.name == "qwen.gguf" else HEBREW_MODEL_SHA256,
+        lambda path: PRIMARY_MODEL_SHA256 if path.name == "qwen.gguf" else HEBREW_MODEL_SHA256,
     )
 
     async def run_case(_interface, _case, _index, _timeout):
@@ -203,7 +203,7 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
         if path.name == wrong_name:
             return "0" * 64
         if path.name == "qwen.gguf":
-            return QWEN_MODEL_SHA256
+            return PRIMARY_MODEL_SHA256
         return HEBREW_MODEL_SHA256
 
     monkeypatch.setattr(collector, "file_digest", digest)

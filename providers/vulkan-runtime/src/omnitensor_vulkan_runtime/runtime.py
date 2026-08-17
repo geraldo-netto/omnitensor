@@ -84,7 +84,7 @@ _MONTHS = {
 
 
 class LlamaVulkanRuntime:
-    """Load Qwen only while holding the host's cross-worker GPU lease."""
+    """Load any GGUF only while holding the host's cross-worker GPU lease."""
 
     def __init__(self, store: PrivateFragmentStore, lease_path: Path) -> None:
         if not isinstance(store, PrivateFragmentStore):
@@ -103,12 +103,12 @@ class LlamaVulkanRuntime:
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport:
         if accelerator != "gpu" or len(artifacts) != 1:
             raise ProviderGenerationError(
-                "model-load-failed", "Qwen Vulkan requires one GPU GGUF", generation_started=False
+                "model-load-failed", "Vulkan generation requires one GPU GGUF", generation_started=False
             )
         model = Path(artifacts[0])
         if model.suffix != ".gguf" or not model.is_file():
             raise ProviderGenerationError(
-                "model-load-failed", "Qwen GGUF is unavailable", generation_started=False
+                "model-load-failed", "generation GGUF is unavailable", generation_started=False
             )
         if self._llama is not None:
             assert self._load_report is not None
@@ -134,7 +134,7 @@ class LlamaVulkanRuntime:
     ) -> str:
         if self._model_path is None:
             raise ProviderGenerationError(
-                "model-load-failed", "Qwen model was not loaded", generation_started=False
+                "model-load-failed", "generation model was not loaded", generation_started=False
             )
         try:
             cancellation.raise_if_cancelled()

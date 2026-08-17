@@ -317,7 +317,7 @@ def test_catalog_rejects_unpinned_or_unsafe_changes(tmp_path, mutate):
 @pytest.mark.parametrize(
     ("mutate", "detail"),
     [
-        (lambda value: value.update(extra=True), "Qwen catalog fields or version are invalid"),
+        (lambda value: value.update(extra=True), "catalog fields or version are invalid"),
         (lambda value: value.update(license=[]), "catalog license must be an object"),
         (
             lambda value: value["license"].pop("attribution"),
