@@ -449,4 +449,4 @@ def test_external_provider_factory_imports_only_the_public_load_validator():
     }
 
     assert ("omnitensor.plugins.acceptance_kit", "validate_gpu_load") in imports
-    assert ("omnitensor.plugins.qwen_providers", "_validate_gpu_load") not in imports
+    assert ("omnitensor.plugins.generation_workers", "_validate_gpu_load") not in imports

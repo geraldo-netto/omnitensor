@@ -15,18 +15,18 @@ from .acceptance_kit import (
 )
 from .events import EventResultError, parse_grounded_event_result
 from .generation import GenerationProviderDescriptor
-from .qwen_contracts import (
+from .generation_contracts import (
     EventProviderEvidence,
     EventProviderObservation,
     EventQualificationPolicy,
     EventQualificationReport,
     FrozenEventCase,
     FrozenEventCorpus,
-    QwenProviderError,
-    qwen_mapping,
-    qwen_positive_integer,
-    qwen_sequence,
-    qwen_text,
+    GenerationProviderError,
+    bounded_mapping,
+    bounded_positive_integer,
+    bounded_sequence,
+    bounded_text,
     validate_event_policy,
 )
 
@@ -41,13 +41,13 @@ def load_event_corpus(path: Path | str | None = None) -> FrozenEventCorpus:
     try:
         snapshot = read_bounded_json(corpus_path, MAX_CORPUS_BYTES)
     except JsonTooLargeError as error:
-        raise QwenProviderError(
+        raise GenerationProviderError(
             "corpus-invalid", "evaluation corpus exceeds its byte limit"
         ) from error
     except OSError as error:
-        raise QwenProviderError("corpus-invalid", "cannot read evaluation corpus") from error
+        raise GenerationProviderError("corpus-invalid", "cannot read evaluation corpus") from error
     except (UnicodeError, ValueError) as error:
-        raise QwenProviderError("corpus-invalid", "evaluation corpus is not JSON") from error
+        raise GenerationProviderError("corpus-invalid", "evaluation corpus is not JSON") from error
     document = snapshot.document
     if (
         not isinstance(document, dict)
@@ -61,18 +61,21 @@ def load_event_corpus(path: Path | str | None = None) -> FrozenEventCorpus:
         }
         or document["corpusVersion"] != 1
     ):
-        raise QwenProviderError("corpus-invalid", "evaluation corpus fields are invalid")
-    corpus_id = qwen_text(document["id"], "corpus id", "corpus-invalid", 120)
+        raise GenerationProviderError("corpus-invalid", "evaluation corpus fields are invalid")
+    corpus_id = bounded_text(document["id"], "corpus id", "corpus-invalid", 120)
     if document["license"] != "CC0-1.0":
-        raise QwenProviderError("corpus-invalid", "evaluation corpus license is invalid")
-    qwen_text(document["provenance"], "corpus provenance", "corpus-invalid", 500)
+        raise GenerationProviderError("corpus-invalid", "evaluation corpus license is invalid")
+    bounded_text(document["provenance"], "corpus provenance", "corpus-invalid", 500)
     cases = tuple(
-        _case(item) for item in qwen_sequence(document["cases"], "corpus cases", "corpus-invalid")
+        _case(item)
+        for item in bounded_sequence(document["cases"], "corpus cases", "corpus-invalid")
     )
     if len(cases) < 2 or len({item.case_id for item in cases}) != len(cases):
-        raise QwenProviderError("corpus-invalid", "evaluation case ids must be unique")
+        raise GenerationProviderError("corpus-invalid", "evaluation case ids must be unique")
     if not any(item.prompt_injection_probe for item in cases):
-        raise QwenProviderError("corpus-invalid", "evaluation corpus needs an injection probe")
+        raise GenerationProviderError(
+            "corpus-invalid", "evaluation corpus needs an injection probe"
+        )
     return FrozenEventCorpus(corpus_id, snapshot.sha256, cases)
 
 
@@ -91,17 +94,21 @@ def qualify_event_provider(
     precision = true_positive / max(1, true_positive + false_positive)
     recall = true_positive / max(1, true_positive + false_negative)
     p95 = sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1]
-    cancellation = qwen_positive_integer(
+    cancellation = bounded_positive_integer(
         evidence.cancellation_latency_ms, "cancellation latency", "evidence-invalid"
     )
     if precision < policy.minimum_precision or recall < policy.minimum_recall:
-        raise QwenProviderError("quality-failed", "event precision or recall is below the gate")
+        raise GenerationProviderError(
+            "quality-failed", "event precision or recall is below the gate"
+        )
     if p95 > policy.maximum_p95_latency_ms:
-        raise QwenProviderError("quality-failed", "event generation latency exceeds the gate")
+        raise GenerationProviderError("quality-failed", "event generation latency exceeds the gate")
     if peak_memory > policy.maximum_peak_memory_bytes:
-        raise QwenProviderError("quality-failed", "event generation memory exceeds the gate")
+        raise GenerationProviderError("quality-failed", "event generation memory exceeds the gate")
     if cancellation > policy.maximum_cancellation_latency_ms:
-        raise QwenProviderError("quality-failed", "event cancellation latency exceeds the gate")
+        raise GenerationProviderError(
+            "quality-failed", "event cancellation latency exceeds the gate"
+        )
     _validate_lane_load(descriptor.accelerator, evidence.load)
     return EventQualificationReport(
         descriptor.provider_id,
@@ -141,7 +148,9 @@ def _score_observations(
     if len(observed_by_id) != len(evidence.observations) or set(observed_by_id) != set(
         expected_by_id
     ):
-        raise QwenProviderError("evidence-invalid", "evidence must cover every corpus case once")
+        raise GenerationProviderError(
+            "evidence-invalid", "evidence must cover every corpus case once"
+        )
     true_positive = false_positive = false_negative = 0
     latencies: list[int] = []
     peak_memory = 0
@@ -163,15 +172,19 @@ def _score_observation(
     try:
         result = parse_grounded_event_result(observation.result)
     except EventResultError as error:
-        raise QwenProviderError(
+        raise GenerationProviderError(
             "quality-failed", "provider output violates the grounded-event contract"
         ) from error
     actual = {_event_key(item) for item in result.events}
     expected = set(case.expected)
     if case.prompt_injection_probe and actual != expected:
-        raise QwenProviderError("quality-failed", "prompt-injection probe changed grounded output")
-    latency = qwen_positive_integer(observation.latency_ms, "latency", "evidence-invalid")
-    memory = qwen_positive_integer(observation.peak_memory_bytes, "peak memory", "evidence-invalid")
+        raise GenerationProviderError(
+            "quality-failed", "prompt-injection probe changed grounded output"
+        )
+    latency = bounded_positive_integer(observation.latency_ms, "latency", "evidence-invalid")
+    memory = bounded_positive_integer(
+        observation.peak_memory_bytes, "peak memory", "evidence-invalid"
+    )
     return (
         len(actual & expected),
         len(actual - expected),
@@ -187,7 +200,7 @@ def _validate_lane_load(accelerator: str, report: NativeLoadReport) -> None:
     elif accelerator == "npu":
         validate_npu_load(report)
     else:
-        raise QwenProviderError("evidence-invalid", "generation lane must be GPU or NPU")
+        raise GenerationProviderError("evidence-invalid", "generation lane must be GPU or NPU")
 
 
 def _validate_evidence_identity(
@@ -196,17 +209,19 @@ def _validate_evidence_identity(
     evidence: EventProviderEvidence,
 ) -> None:
     if descriptor.qualified:
-        raise QwenProviderError("evidence-invalid", "qualification input must start unqualified")
+        raise GenerationProviderError(
+            "evidence-invalid", "qualification input must start unqualified"
+        )
     if evidence.provider_id != descriptor.provider_id:
-        raise QwenProviderError("evidence-invalid", "evidence names another provider")
+        raise GenerationProviderError("evidence-invalid", "evidence names another provider")
     if evidence.corpus_sha256 != corpus.sha256:
-        raise QwenProviderError("evidence-invalid", "evidence names another frozen corpus")
+        raise GenerationProviderError("evidence-invalid", "evidence names another frozen corpus")
     for label, value in (
         ("runtime version", evidence.runtime_version),
         ("device name", evidence.device_name),
     ):
         if not isinstance(value, str) or not 1 <= len(value) <= 200:
-            raise QwenProviderError("evidence-invalid", f"{label} is invalid")
+            raise GenerationProviderError("evidence-invalid", f"{label} is invalid")
 
 
 def _event_key(event) -> tuple[str, str, str, str]:
@@ -229,23 +244,23 @@ def _event_key(event) -> tuple[str, str, str, str]:
 
 
 def _case(document: object) -> FrozenEventCase:
-    value = qwen_mapping(document, "corpus case", "corpus-invalid")
+    value = bounded_mapping(document, "corpus case", "corpus-invalid")
     if set(value) != {"caseId", "modality", "content", "promptInjectionProbe", "expected"}:
-        raise QwenProviderError("corpus-invalid", "corpus case fields are invalid")
+        raise GenerationProviderError("corpus-invalid", "corpus case fields are invalid")
     if value["modality"] not in {"text", "image"} or not isinstance(
         value["promptInjectionProbe"], bool
     ):
-        raise QwenProviderError("corpus-invalid", "corpus case modality or probe is invalid")
+        raise GenerationProviderError("corpus-invalid", "corpus case modality or probe is invalid")
     content = value["content"]
     if not isinstance(content, str) or not 1 <= len(content) <= 16_384:
-        raise QwenProviderError("corpus-invalid", "corpus case content is invalid")
+        raise GenerationProviderError("corpus-invalid", "corpus case content is invalid")
     expected = tuple(
         _expected_event(item)
-        for item in qwen_sequence(value["expected"], "expected events", "corpus-invalid")
+        for item in bounded_sequence(value["expected"], "expected events", "corpus-invalid")
     )
     case_id = value["caseId"]
     if not isinstance(case_id, str) or not 1 <= len(case_id) <= 120:
-        raise QwenProviderError("corpus-invalid", "corpus case id is invalid")
+        raise GenerationProviderError("corpus-invalid", "corpus case id is invalid")
     return FrozenEventCase(
         case_id,
         str(value["modality"]),
@@ -256,19 +271,19 @@ def _case(document: object) -> FrozenEventCase:
 
 
 def _expected_event(document: object) -> tuple[str, str, str, str]:
-    value = qwen_mapping(document, "expected event", "corpus-invalid")
+    value = bounded_mapping(document, "expected event", "corpus-invalid")
     if set(value) != {"label", "date", "time", "place"}:
-        raise QwenProviderError("corpus-invalid", "expected event fields are invalid")
+        raise GenerationProviderError("corpus-invalid", "expected event fields are invalid")
     # A corpus case may state an empty date, time or place: that is what a
     # banner without a year actually says, and version 2 records it rather than
     # refusing the event.
     if not isinstance(value["label"], str) or not value["label"]:
-        raise QwenProviderError("corpus-invalid", "expected event needs a label")
+        raise GenerationProviderError("corpus-invalid", "expected event needs a label")
     for name in ("date", "time", "place"):
         if value[name] is not None and not isinstance(value[name], str):
-            raise QwenProviderError("corpus-invalid", f"expected event {name} is invalid")
+            raise GenerationProviderError("corpus-invalid", f"expected event {name} is invalid")
     return tuple(
-        qwen_text(value[name], name, "corpus-invalid", 200) if value[name] else ""
+        bounded_text(value[name], name, "corpus-invalid", 200) if value[name] else ""
         for name in ("label", "date", "time", "place")
     )
 

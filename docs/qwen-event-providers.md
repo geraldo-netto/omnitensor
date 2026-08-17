@@ -23,7 +23,7 @@ Read `generation-models/qwen2-5-vl-7b.json`, obtain both files from their pinned
 HTTPS `uri` values, and verify `sizeBytes` and `sha256` before installing them
 in a private worker-owned artifact directory. Keep the model first and the
 projector as its named companion when constructing
-`LlamaCppVulkanQwenWorker`. For NPU, convert from that recorded source through
+`LlamaCppVulkanWorker`. For NPU, convert from that recorded source through
 a separately versioned local toolchain; record the resulting artifact digest,
 runtime version, and device before creating a provider descriptor.
 

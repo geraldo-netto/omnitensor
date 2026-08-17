@@ -11,11 +11,16 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from omnitensor.plugins import qwen_catalog as catalog_module
-from omnitensor.plugins import qwen_providers as providers_module
-from omnitensor.plugins import qwen_qualification as qualification_module
+from omnitensor.plugins import event_qualification as qualification_module
+from omnitensor.plugins import generation_catalog as catalog_module
+from omnitensor.plugins import generation_workers as providers_module
 from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.cancellation import CancellationReason, JobCancellationToken
+from omnitensor.plugins.event_qualification import (
+    MAX_CORPUS_BYTES,
+    load_event_corpus,
+    qualify_event_provider,
+)
 from omnitensor.plugins.generation import (
     GenerationRequest,
     GenerationRouter,
@@ -23,21 +28,16 @@ from omnitensor.plugins.generation import (
     ProviderGenerationError,
     parse_provider_descriptor,
 )
-from omnitensor.plugins.qwen_catalog import MAX_CATALOG_BYTES, load_qwen_catalog
-from omnitensor.plugins.qwen_contracts import (
+from omnitensor.plugins.generation_catalog import MAX_CATALOG_BYTES, load_generation_catalog
+from omnitensor.plugins.generation_contracts import (
     EventProviderEvidence,
     EventProviderObservation,
     EventQualificationPolicy,
-    QwenProviderError,
+    GenerationProviderError,
 )
-from omnitensor.plugins.qwen_providers import (
-    LlamaCppVulkanQwenWorker,
-    OpenVinoNpuQwenWorker,
-)
-from omnitensor.plugins.qwen_qualification import (
-    MAX_CORPUS_BYTES,
-    load_event_corpus,
-    qualify_event_provider,
+from omnitensor.plugins.generation_workers import (
+    LlamaCppVulkanWorker,
+    OpenVinoNpuWorker,
 )
 
 
@@ -204,20 +204,20 @@ def write_changed_json(tmp_path, source, mutate):
 
 def assert_catalog_error(tmp_path, mutate, detail):
     source = Path(__file__).parents[1] / "generation-models" / "qwen2-5-vl-7b.json"
-    with pytest.raises(QwenProviderError) as excinfo:
-        load_qwen_catalog(write_changed_json(tmp_path, source, mutate))
+    with pytest.raises(GenerationProviderError) as excinfo:
+        load_generation_catalog(write_changed_json(tmp_path, source, mutate))
     assert (excinfo.value.code, excinfo.value.detail) == ("catalog-invalid", detail)
 
 
 def assert_corpus_error(tmp_path, mutate, detail):
     source = Path(__file__).parents[1] / "evaluation-corpora" / "event-extraction-v1.json"
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         load_event_corpus(write_changed_json(tmp_path, source, mutate))
     assert (excinfo.value.code, excinfo.value.detail) == ("corpus-invalid", detail)
 
 
 def test_catalog_pins_license_sources_and_gpu_default():
-    catalog = load_qwen_catalog()
+    catalog = load_generation_catalog()
 
     assert (catalog.model_id, catalog.version, catalog.license_spdx) == (
         "qwen2-5-vl-7b-instruct",
@@ -261,7 +261,7 @@ def test_frozen_corpus_is_synthetic_multimodal_and_injection_aware():
 
 
 def test_qwen_error_preserves_stable_machine_and_human_contract():
-    error = QwenProviderError("stable-code", "stable detail")
+    error = GenerationProviderError("stable-code", "stable detail")
 
     assert error.code == "stable-code"
     assert error.detail == "stable detail"
@@ -297,8 +297,8 @@ def test_catalog_rejects_unpinned_or_unsafe_changes(tmp_path, mutate):
     source = Path(__file__).parents[1] / "generation-models/qwen2-5-vl-7b.json"
     path = write_changed_json(tmp_path, source, mutate)
 
-    with pytest.raises(QwenProviderError) as excinfo:
-        load_qwen_catalog(path)
+    with pytest.raises(GenerationProviderError) as excinfo:
+        load_generation_catalog(path)
 
     assert excinfo.value.code in {"catalog-invalid", "policy-invalid"}
 
@@ -423,9 +423,9 @@ def test_catalog_and_corpus_reads_are_bounded_and_have_stable_codes(tmp_path):
     corpus = tmp_path / "corpus.json"
     corpus.write_bytes(b"{" + b" " * MAX_CORPUS_BYTES)
 
-    with pytest.raises(QwenProviderError) as catalog_error:
-        load_qwen_catalog(catalog)
-    with pytest.raises(QwenProviderError) as corpus_error:
+    with pytest.raises(GenerationProviderError) as catalog_error:
+        load_generation_catalog(catalog)
+    with pytest.raises(GenerationProviderError) as corpus_error:
         load_event_corpus(corpus)
 
     assert catalog_error.value.code == "catalog-invalid"
@@ -439,22 +439,22 @@ def test_catalog_and_corpus_reject_missing_non_object_and_malformed_json(tmp_pat
     malformed = tmp_path / "malformed.json"
     malformed.write_bytes(b"\xff")
 
-    with pytest.raises(QwenProviderError) as missing_catalog:
-        load_qwen_catalog(missing)
+    with pytest.raises(GenerationProviderError) as missing_catalog:
+        load_generation_catalog(missing)
     assert (missing_catalog.value.code, missing_catalog.value.detail.split(":")[0]) == (
         "catalog-invalid",
         "cannot read catalog",
     )
-    with pytest.raises(QwenProviderError) as object_catalog:
-        load_qwen_catalog(non_object)
+    with pytest.raises(GenerationProviderError) as object_catalog:
+        load_generation_catalog(non_object)
     assert object_catalog.value.detail == "catalog must be an object"
-    with pytest.raises(QwenProviderError) as missing_corpus:
+    with pytest.raises(GenerationProviderError) as missing_corpus:
         load_event_corpus(missing)
     assert missing_corpus.value.detail == "cannot read evaluation corpus"
-    with pytest.raises(QwenProviderError) as object_corpus:
+    with pytest.raises(GenerationProviderError) as object_corpus:
         load_event_corpus(non_object)
     assert object_corpus.value.detail == "evaluation corpus fields are invalid"
-    with pytest.raises(QwenProviderError) as malformed_corpus:
+    with pytest.raises(GenerationProviderError) as malformed_corpus:
         load_event_corpus(malformed)
     assert malformed_corpus.value.detail == "evaluation corpus is not JSON"
 
@@ -481,7 +481,7 @@ def test_corpus_rejects_drift_and_malformed_cases(tmp_path, mutate):
     source = Path(__file__).parents[1] / "evaluation-corpora" / "event-extraction-v1.json"
     path = write_changed_json(tmp_path, source, mutate)
 
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         load_event_corpus(path)
 
     assert excinfo.value.code == "corpus-invalid"
@@ -531,7 +531,7 @@ def test_gpu_worker_verifies_artifacts_loads_once_and_generates(tmp_path):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     projector, projector_digest = artifact(tmp_path, "projector.gguf", b"projector")
     runtime = NativeRuntime(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 28, False))
-    worker = LlamaCppVulkanQwenWorker(
+    worker = LlamaCppVulkanWorker(
         descriptor(digest=digest),
         runtime,
         (primary, projector),
@@ -562,7 +562,7 @@ def test_gpu_worker_verifies_artifacts_loads_once_and_generates(tmp_path):
 )
 def test_gpu_worker_refuses_every_incomplete_offload_report(tmp_path, report):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), NativeRuntime(report), (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), NativeRuntime(report), (primary,))
 
     with pytest.raises(ProviderGenerationError) as excinfo:
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
@@ -585,7 +585,7 @@ def test_gpu_worker_refuses_artifact_identity_defects(tmp_path, defect):
         artifacts = (primary,)
     else:
         projector.write_bytes(b"changed")
-    worker = LlamaCppVulkanQwenWorker(
+    worker = LlamaCppVulkanWorker(
         descriptor(digest=digest), NativeRuntime(None), artifacts, companion_sha256=companions
     )
 
@@ -600,7 +600,7 @@ def test_gpu_worker_refuses_artifact_identity_defects(tmp_path, defect):
 
 def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path):
     missing = tmp_path / "missing.gguf"
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest="0" * 64), NativeRuntime(None), (missing,))
+    worker = LlamaCppVulkanWorker(descriptor(digest="0" * 64), NativeRuntime(None), (missing,))
     with pytest.raises(ProviderGenerationError) as primary_error:
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
     assert (primary_error.value.code, primary_error.value.detail) == (
@@ -610,7 +610,7 @@ def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path)
 
     ready_primary, ready_digest = artifact(tmp_path, "ready.gguf", b"ready")
     runtime = NativeRuntime(None)
-    ready = LlamaCppVulkanQwenWorker(descriptor(digest=ready_digest), runtime, (ready_primary,))
+    ready = LlamaCppVulkanWorker(descriptor(digest=ready_digest), runtime, (ready_primary,))
     GenerationRouter((ready,)).require_ready()
     assert runtime.loads == []
     with pytest.raises(ProviderGenerationError) as unavailable:
@@ -619,7 +619,7 @@ def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path)
 
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     companion, companion_digest = artifact(tmp_path, "projector.gguf", b"projector")
-    worker = LlamaCppVulkanQwenWorker(
+    worker = LlamaCppVulkanWorker(
         descriptor(digest=digest),
         NativeRuntime(None),
         (primary,),
@@ -630,7 +630,7 @@ def test_artifact_errors_distinguish_missing_primary_set_and_companion(tmp_path)
     assert set_error.value.detail == "model companion set is incomplete"
 
     companion.unlink()
-    worker = LlamaCppVulkanQwenWorker(
+    worker = LlamaCppVulkanWorker(
         descriptor(digest=digest),
         NativeRuntime(None),
         (primary, companion),
@@ -646,7 +646,7 @@ def test_every_named_companion_is_verified(tmp_path):
     first, first_digest = artifact(tmp_path, "first.gguf", b"first")
     second, second_digest = artifact(tmp_path, "second.gguf", b"second")
     first.write_bytes(b"changed")
-    worker = LlamaCppVulkanQwenWorker(
+    worker = LlamaCppVulkanWorker(
         descriptor(digest=digest),
         NativeRuntime(None),
         (primary, first, second),
@@ -662,7 +662,7 @@ def test_every_named_companion_is_verified(tmp_path):
 def test_native_load_errors_are_stable_and_generation_failure_terminates(tmp_path):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     load_runtime = NativeRuntime(None, load_error=RuntimeError("private driver detail"))
-    load_worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), load_runtime, (primary,))
+    load_worker = LlamaCppVulkanWorker(descriptor(digest=digest), load_runtime, (primary,))
 
     with pytest.raises(ProviderGenerationError) as excinfo:
         run(load_worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
@@ -677,7 +677,7 @@ def test_native_load_errors_are_stable_and_generation_failure_terminates(tmp_pat
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False),
         generation_error=failure,
     )
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), runtime, (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), runtime, (primary,))
     with pytest.raises(ProviderGenerationError) as started:
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
     assert started.value is failure
@@ -694,7 +694,7 @@ def test_native_load_errors_are_stable_and_generation_failure_terminates(tmp_pat
 def test_explicit_termination_unloads_before_the_next_request(tmp_path):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     runtime = NativeRuntime(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False))
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), runtime, (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), runtime, (primary,))
 
     run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
     run(worker.terminate("request-1"))
@@ -708,7 +708,7 @@ def test_native_provider_errors_before_generation_are_preserved_without_terminat
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     failure = ProviderGenerationError("model-load-failed", "bounded", generation_started=False)
     runtime = NativeRuntime(None, load_error=failure)
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), runtime, (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), runtime, (primary,))
 
     with pytest.raises(ProviderGenerationError) as excinfo:
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
@@ -720,14 +720,14 @@ def test_native_provider_errors_before_generation_are_preserved_without_terminat
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False),
         generation_error=failure,
     )
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), runtime, (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), runtime, (primary,))
     with pytest.raises(ProviderGenerationError):
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
     assert runtime.terminations == []
 
 
 def test_base_worker_load_validator_is_fail_closed(tmp_path):
-    class IncompleteWorker(providers_module._QwenWorker):
+    class IncompleteWorker(providers_module._GenerationWorker):
         accelerator = "gpu"
         runtime_name = "llama.cpp-vulkan"
 
@@ -745,7 +745,7 @@ def test_base_worker_load_validator_is_fail_closed(tmp_path):
 def test_cancellation_before_load_never_touches_native_runtime(tmp_path):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     runtime = NativeRuntime(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False))
-    worker = LlamaCppVulkanQwenWorker(descriptor(digest=digest), runtime, (primary,))
+    worker = LlamaCppVulkanWorker(descriptor(digest=digest), runtime, (primary,))
     token = JobCancellationToken("request-1")
     token.cancel(CancellationReason.CALLER)
 
@@ -759,32 +759,32 @@ def test_cancellation_before_load_never_touches_native_runtime(tmp_path):
 def test_workers_reject_wrong_unqualified_or_unimplemented_boundaries(tmp_path):
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
 
-    with pytest.raises(QwenProviderError) as unqualified:
-        LlamaCppVulkanQwenWorker(
+    with pytest.raises(GenerationProviderError) as unqualified:
+        LlamaCppVulkanWorker(
             descriptor(digest=digest, qualified=False), NativeRuntime(None), (primary,)
         )
     assert (unqualified.value.code, unqualified.value.detail) == (
         "provider-unqualified",
         "provider has no accepted evidence",
     )
-    with pytest.raises(QwenProviderError) as wrong_lane:
-        LlamaCppVulkanQwenWorker(descriptor("npu", digest=digest), NativeRuntime(None), (primary,))
+    with pytest.raises(GenerationProviderError) as wrong_lane:
+        LlamaCppVulkanWorker(descriptor("npu", digest=digest), NativeRuntime(None), (primary,))
     assert (wrong_lane.value.code, wrong_lane.value.detail) == (
         "provider-invalid",
         "provider descriptor names another lane",
     )
     wrong_runtime = replace(descriptor(digest=digest), runtime="wrong")
-    with pytest.raises(QwenProviderError) as wrong_runtime_error:
-        LlamaCppVulkanQwenWorker(wrong_runtime, NativeRuntime(None), (primary,))
+    with pytest.raises(GenerationProviderError) as wrong_runtime_error:
+        LlamaCppVulkanWorker(wrong_runtime, NativeRuntime(None), (primary,))
     assert wrong_runtime_error.value.code == "provider-invalid"
-    with pytest.raises(QwenProviderError) as runtime_error:
-        LlamaCppVulkanQwenWorker(descriptor(digest=digest), object(), (primary,))
+    with pytest.raises(GenerationProviderError) as runtime_error:
+        LlamaCppVulkanWorker(descriptor(digest=digest), object(), (primary,))
     assert (runtime_error.value.code, runtime_error.value.detail) == (
         "runtime-invalid",
         "native runtime does not implement its port",
     )
-    with pytest.raises(QwenProviderError) as artifact_error:
-        LlamaCppVulkanQwenWorker(descriptor(digest=digest), NativeRuntime(None), ())
+    with pytest.raises(GenerationProviderError) as artifact_error:
+        LlamaCppVulkanWorker(descriptor(digest=digest), NativeRuntime(None), ())
     assert (artifact_error.value.code, artifact_error.value.detail) == (
         "artifact-invalid",
         "at least one model artifact is required",
@@ -794,15 +794,15 @@ def test_workers_reject_wrong_unqualified_or_unimplemented_boundaries(tmp_path):
 def test_npu_worker_requires_explicit_enablement_and_npu_only_load(tmp_path):
     primary, digest = artifact(tmp_path, "model.xml", b"model")
     desc = descriptor("npu", digest=digest)
-    with pytest.raises(QwenProviderError) as disabled:
-        OpenVinoNpuQwenWorker(desc, NativeRuntime(None), (primary,))
+    with pytest.raises(GenerationProviderError) as disabled:
+        OpenVinoNpuWorker(desc, NativeRuntime(None), (primary,))
     assert (disabled.value.code, disabled.value.detail) == (
         "provider-disabled",
         "NPU generation needs explicit local configuration",
     )
 
     runtime = NativeRuntime(NativeLoadReport("openvino-genai", "NPU", 1, 1, False))
-    worker = OpenVinoNpuQwenWorker(desc, runtime, (primary,), explicitly_enabled=True)
+    worker = OpenVinoNpuWorker(desc, runtime, (primary,), explicitly_enabled=True)
     assert (
         run(worker.generate(task(), request(), JobCancellationToken("request-1"), Progress()))
         == "ok"
@@ -814,7 +814,7 @@ def test_npu_worker_forwards_companion_identity_configuration(tmp_path):
     primary, digest = artifact(tmp_path, "model.xml", b"model")
     weights, weights_digest = artifact(tmp_path, "model.bin", b"weights")
     runtime = NativeRuntime(NativeLoadReport("openvino-genai", "NPU", 1, 1, False))
-    worker = OpenVinoNpuQwenWorker(
+    worker = OpenVinoNpuWorker(
         descriptor("npu", digest=digest),
         runtime,
         (primary, weights),
@@ -840,7 +840,7 @@ def test_npu_worker_forwards_companion_identity_configuration(tmp_path):
 )
 def test_npu_worker_refuses_non_npu_or_cpu_fallback_reports(tmp_path, report):
     primary, digest = artifact(tmp_path, "model.xml", b"model")
-    worker = OpenVinoNpuQwenWorker(
+    worker = OpenVinoNpuWorker(
         descriptor("npu", digest=digest),
         NativeRuntime(report),
         (primary,),
@@ -925,7 +925,7 @@ def test_empty_location_and_exact_quality_performance_limits_qualify():
 def test_qualification_rejects_identity_boundaries_and_cpu_evidence(changes, code):
     corpus = load_event_corpus()
 
-    with pytest.raises((QwenProviderError, ProviderGenerationError)) as excinfo:
+    with pytest.raises((GenerationProviderError, ProviderGenerationError)) as excinfo:
         qualify_event_provider(descriptor(qualified=False), corpus, evidence(corpus, **changes))
 
     assert excinfo.value.code == code
@@ -947,7 +947,7 @@ def test_qualification_rejects_identity_boundaries_and_cpu_evidence(changes, cod
 )
 def test_evidence_identity_errors_are_stable(descriptor_value, changes, detail):
     corpus = load_event_corpus()
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         qualify_event_provider(descriptor_value, corpus, evidence(corpus, **changes))
     assert (excinfo.value.code, excinfo.value.detail) == ("evidence-invalid", detail)
 
@@ -958,7 +958,7 @@ def test_evidence_identity_accepts_exact_text_limit_and_rejects_one_more():
     assert qualify_event_provider(descriptor(qualified=False), corpus, accepted).qualified
 
     for field in ("runtime_version", "device_name"):
-        with pytest.raises(QwenProviderError) as excinfo:
+        with pytest.raises(GenerationProviderError) as excinfo:
             qualify_event_provider(
                 descriptor(qualified=False),
                 corpus,
@@ -971,10 +971,10 @@ def test_qualification_requires_unqualified_input_and_complete_unique_evidence()
     corpus = load_event_corpus()
     observations = evidence(corpus).observations
 
-    with pytest.raises(QwenProviderError, match="start unqualified"):
+    with pytest.raises(GenerationProviderError, match="start unqualified"):
         qualify_event_provider(descriptor(), corpus, evidence(corpus))
     for changed in (observations[:-1], observations + observations[:1]):
-        with pytest.raises(QwenProviderError) as excinfo:
+        with pytest.raises(GenerationProviderError) as excinfo:
             qualify_event_provider(
                 descriptor(qualified=False), corpus, evidence(corpus, observations=changed)
             )
@@ -984,7 +984,7 @@ def test_qualification_requires_unqualified_input_and_complete_unique_evidence()
         )
 
     invalid_lane = replace(descriptor(qualified=False), accelerator="cpu")
-    with pytest.raises(QwenProviderError) as lane_error:
+    with pytest.raises(GenerationProviderError) as lane_error:
         qualify_event_provider(invalid_lane, corpus, evidence(corpus))
     assert (lane_error.value.code, lane_error.value.detail) == (
         "evidence-invalid",
@@ -996,7 +996,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
     corpus = load_event_corpus()
     observations = list(evidence(corpus).observations)
     observations[0] = replace(observations[0], result={})
-    with pytest.raises(QwenProviderError) as malformed:
+    with pytest.raises(GenerationProviderError) as malformed:
         qualify_event_provider(
             descriptor(qualified=False), corpus, evidence(corpus, observations=tuple(observations))
         )
@@ -1014,7 +1014,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
         confirmationState="refused",
     )
     observations[-1] = replace(observations[-1], result=injected_result)
-    with pytest.raises(QwenProviderError) as injection_error:
+    with pytest.raises(GenerationProviderError) as injection_error:
         qualify_event_provider(
             descriptor(qualified=False), corpus, evidence(corpus, observations=tuple(observations))
         )
@@ -1031,7 +1031,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
         confirmationState="refused",
     )
     observations[0] = replace(observations[0], result=missed_result)
-    with pytest.raises(QwenProviderError) as quality_error:
+    with pytest.raises(GenerationProviderError) as quality_error:
         qualify_event_provider(
             descriptor(qualified=False),
             corpus,
@@ -1049,7 +1049,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
     observations[0] = replace(
         observations[0], result=event_document(corpus.cases[0], events=expected + (extra,))
     )
-    with pytest.raises(QwenProviderError) as precision_error:
+    with pytest.raises(GenerationProviderError) as precision_error:
         qualify_event_provider(
             descriptor(qualified=False),
             corpus,
@@ -1076,7 +1076,7 @@ def test_qualification_enforces_performance_gates(observation_change, policy, de
         replace(item, **observation_change) for item in evidence(corpus).observations
     )
 
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         qualify_event_provider(
             descriptor(qualified=False),
             corpus,
@@ -1095,7 +1095,7 @@ def test_qualification_rejects_nonpositive_observation_measurements(field):
     observations = list(evidence(corpus).observations)
     observations[0] = replace(observations[0], **{field: 0})
 
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         qualify_event_provider(
             descriptor(qualified=False),
             corpus,
@@ -1172,11 +1172,11 @@ def test_packaged_paths_remain_usable_without_a_source_checkout(tmp_path, monkey
 )
 def test_qualification_rejects_invalid_policy(policy):
     corpus = load_event_corpus()
-    with pytest.raises(QwenProviderError) as excinfo:
+    with pytest.raises(GenerationProviderError) as excinfo:
         qualify_event_provider(descriptor(qualified=False), corpus, evidence(corpus), policy)
     assert excinfo.value.code == "policy-invalid"
 
-    with pytest.raises(QwenProviderError) as wrong_type:
+    with pytest.raises(GenerationProviderError) as wrong_type:
         qualify_event_provider(descriptor(qualified=False), corpus, evidence(corpus), object())
     assert wrong_type.value.code == "policy-invalid"
 

@@ -14,8 +14,8 @@ from .atomicio import JsonTooLargeError, read_json_bounded
 from .atomicio import write_bytes_atomic as _write_bytes_atomic
 from .plugins.event_workload import EventWorkloadError, confirmed_ics, select_sources
 from .plugins.events import EventResultError, parse_grounded_event_result
-from .plugins.qwen_catalog import load_qwen_catalog
-from .plugins.qwen_contracts import QwenProviderError
+from .plugins.generation_catalog import load_generation_catalog
+from .plugins.generation_contracts import GenerationProviderError
 
 MAX_RESULT_BYTES = 1024 * 1024
 
@@ -64,7 +64,7 @@ def preview_document(document: object) -> dict:
 
 def verify_event_artifacts(root: Path) -> dict:
     """Verify the pinned Qwen files already placed in a private artifact root."""
-    catalog = load_qwen_catalog()
+    catalog = load_generation_catalog()
     checked = []
     for source in catalog.sources:
         path = Path(root) / source.filename
@@ -145,7 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         EventClientError,
         EventResultError,
         EventWorkloadError,
-        QwenProviderError,
+        GenerationProviderError,
         OSError,
         ValueError,
     ) as error:

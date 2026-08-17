@@ -20,6 +20,7 @@ from omnitensor.plugins.generation import (
     GenerationProviderDescriptor,
     GenerationRouter,
 )
+from omnitensor.plugins.generation_workers import LlamaCppVulkanWorker
 from omnitensor.plugins.protocol import (
     CancellationToken,
     PluginContext,
@@ -29,7 +30,6 @@ from omnitensor.plugins.protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
-from omnitensor.plugins.qwen_providers import LlamaCppVulkanQwenWorker
 from omnitensor.plugins.selected_text import SelectedTextPlugin, selected_text_task
 from omnitensor.plugins.selected_text_acceptance import (
     SELECTED_TEXT_WORKER_LOAD_RECEIPT,
@@ -216,7 +216,7 @@ def _generation(plugin_id: str):
             "Apache-2.0",
         ),
     )
-    worker = LlamaCppVulkanQwenWorker(descriptor, runtime, (model.path,))
+    worker = LlamaCppVulkanWorker(descriptor, runtime, (model.path,))
     return bootstrap, store, runtime, model, qualification, GenerationRouter((worker,))
 
 
@@ -282,9 +282,7 @@ def create_selected_text_tools() -> QualifiedWorkload:
             "Apache-2.0",
         ),
     )
-    hebrew_worker = LlamaCppVulkanQwenWorker(
-        hebrew_descriptor, hebrew_runtime, (hebrew_model.path,)
-    )
+    hebrew_worker = LlamaCppVulkanWorker(hebrew_descriptor, hebrew_runtime, (hebrew_model.path,))
     plugin = SelectedTextPlugin(
         router,
         store,

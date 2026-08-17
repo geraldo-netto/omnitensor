@@ -18,7 +18,7 @@ from .generation import GenerationRequest, GenerationTask
 from .protocol import CancellationToken, ProgressReporter
 
 
-class QwenProviderError(ValueError):
+class GenerationProviderError(ValueError):
     """Stable provider configuration or qualification refusal."""
 
     def __init__(self, code: str, detail: str):
@@ -28,7 +28,7 @@ class QwenProviderError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class QwenSource:
+class ModelSource:
     role: str
     uri: str
     revision: str
@@ -38,18 +38,18 @@ class QwenSource:
 
 
 @dataclass(frozen=True, slots=True)
-class QwenCatalog:
+class ModelCatalog:
     model_id: str
     version: str
     upstream_revision: str
     license_spdx: str
-    sources: tuple[QwenSource, ...]
+    sources: tuple[ModelSource, ...]
     providers: tuple[tuple[str, str, str, bool, str], ...]
-    evaluation: QwenEvaluation
+    evaluation: ModelEvaluation
 
 
 @runtime_checkable
-class NativeQwenRuntime(Protocol):
+class NativeGenerationRuntime(Protocol):
     """Native SDK adapter hosted inside a killable plugin worker."""
 
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport: ...
@@ -110,7 +110,7 @@ class EventQualificationPolicy:
 
 
 @dataclass(frozen=True, slots=True)
-class QwenEvaluation:
+class ModelEvaluation:
     corpus: str
     policy: EventQualificationPolicy
 
@@ -130,39 +130,39 @@ class EventQualificationReport:
     qualified: bool
 
 
-def qwen_mapping(value: object, label: str, code: str) -> Mapping[str, object]:
+def bounded_mapping(value: object, label: str, code: str) -> Mapping[str, object]:
     return require_mapping(
         value,
-        error_type=QwenProviderError,
+        error_type=GenerationProviderError,
         code=code,
         detail=f"{label} must be an object",
     )
 
 
-def qwen_sequence(value: object, label: str, code: str) -> Sequence[object]:
+def bounded_sequence(value: object, label: str, code: str) -> Sequence[object]:
     return require_sequence(
         value,
-        error_type=QwenProviderError,
+        error_type=GenerationProviderError,
         code=code,
         detail=f"{label} must be a non-empty sequence",
         allow_empty=False,
     )
 
 
-def qwen_positive_integer(value: object, label: str, code: str) -> int:
+def bounded_positive_integer(value: object, label: str, code: str) -> int:
     return require_integer(
         value,
-        error_type=QwenProviderError,
+        error_type=GenerationProviderError,
         code=code,
         detail=f"{label} must be a positive integer",
         minimum=1,
     )
 
 
-def qwen_text(value: object, label: str, code: str, limit: int) -> str:
+def bounded_text(value: object, label: str, code: str, limit: int) -> str:
     return require_text(
         value,
-        error_type=QwenProviderError,
+        error_type=GenerationProviderError,
         code=code,
         detail=f"{label} must be bounded text",
         maximum=limit,
@@ -172,19 +172,17 @@ def qwen_text(value: object, label: str, code: str, limit: int) -> str:
 
 def validate_event_policy(policy: EventQualificationPolicy) -> None:
     if not isinstance(policy, EventQualificationPolicy):
-        raise QwenProviderError("policy-invalid", "qualification policy is invalid")
+        raise GenerationProviderError("policy-invalid", "qualification policy is invalid")
     for name in ("minimum_precision", "minimum_recall"):
         value = getattr(policy, name)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
-            raise QwenProviderError("policy-invalid", f"{name} must be in [0, 1]")
+            raise GenerationProviderError("policy-invalid", f"{name} must be in [0, 1]")
     for name in (
         "maximum_p95_latency_ms",
         "maximum_peak_memory_bytes",
         "maximum_cancellation_latency_ms",
     ):
-        qwen_positive_integer(getattr(policy, name), name, "policy-invalid")
-
-
+        bounded_positive_integer(getattr(policy, name), name, "policy-invalid")
 
 
 __all__ = [
@@ -194,9 +192,9 @@ __all__ = [
     "EventQualificationReport",
     "FrozenEventCase",
     "FrozenEventCorpus",
-    "NativeQwenRuntime",
-    "QwenCatalog",
-    "QwenEvaluation",
-    "QwenProviderError",
-    "QwenSource",
+    "NativeGenerationRuntime",
+    "ModelCatalog",
+    "ModelEvaluation",
+    "GenerationProviderError",
+    "ModelSource",
 ]

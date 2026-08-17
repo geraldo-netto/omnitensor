@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from omnitensor import event_cli
-from omnitensor.plugins.qwen_contracts import QwenCatalog, QwenEvaluation, QwenSource
+from omnitensor.plugins.generation_contracts import ModelCatalog, ModelEvaluation, ModelSource
 
 
 def result_document():
@@ -131,19 +131,21 @@ def test_model_check_never_downloads_and_requires_every_digest(tmp_path, monkeyp
     model.write_bytes(b"model")
     companion.write_bytes(b"projector")
     sources = (
-        QwenSource("model", "https://example.invalid/m", "a" * 40, model.name, "1" * 64, 5),
-        QwenSource("projector", "https://example.invalid/p", "a" * 40, companion.name, "2" * 64, 9),
+        ModelSource("model", "https://example.invalid/m", "a" * 40, model.name, "1" * 64, 5),
+        ModelSource(
+            "projector", "https://example.invalid/p", "a" * 40, companion.name, "2" * 64, 9
+        ),
     )
-    catalog = QwenCatalog(
+    catalog = ModelCatalog(
         "qwen",
         "1",
         "a" * 40,
         "Apache-2.0",
         sources,
         (),
-        QwenEvaluation("x", object()),
+        ModelEvaluation("x", object()),
     )
-    monkeypatch.setattr(event_cli, "load_qwen_catalog", lambda: catalog)
+    monkeypatch.setattr(event_cli, "load_generation_catalog", lambda: catalog)
     digests = {model: "1" * 64, companion: "2" * 64}
     monkeypatch.setattr(event_cli, "file_digest", lambda path: digests[path])
 

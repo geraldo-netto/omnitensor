@@ -214,12 +214,12 @@ def test_import_star_and_submodule_from_import_keep_standard_semantics():
 namespace = {}
 exec("from omnitensor.plugins import *", namespace)
 import omnitensor.plugins as plugins
-from omnitensor.plugins import qwen_catalog
-import omnitensor.plugins.qwen_catalog as direct
+from omnitensor.plugins import generation_catalog
+import omnitensor.plugins.generation_catalog as direct
 assert [name for name in namespace if name != "__builtins__"] == plugins.__all__
 assert namespace["ArtifactReference"] is plugins.ArtifactReference
 assert namespace["KernelAggregate"] is plugins.KernelAggregate
-assert qwen_catalog is direct
+assert generation_catalog is direct
 """
     completed = subprocess.run(
         [sys.executable, "-c", statement],

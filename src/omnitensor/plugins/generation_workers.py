@@ -14,31 +14,39 @@ from .generation import (
     GenerationTask,
     ProviderGenerationError,
 )
+from .generation_contracts import GenerationProviderError, NativeGenerationRuntime
 from .protocol import CancellationToken, ProgressReporter
-from .qwen_contracts import NativeQwenRuntime, QwenProviderError
 
 
-class _QwenWorker:
+class _GenerationWorker:
     accelerator: str
     runtime_name: str
 
     def __init__(
         self,
         descriptor: GenerationProviderDescriptor,
-        runtime: NativeQwenRuntime,
+        runtime: NativeGenerationRuntime,
         artifacts: Sequence[Path | str],
         *,
         companion_sha256: Mapping[str, str] | None = None,
     ) -> None:
-        if not isinstance(runtime, NativeQwenRuntime):
-            raise QwenProviderError("runtime-invalid", "native runtime does not implement its port")
+        if not isinstance(runtime, NativeGenerationRuntime):
+            raise GenerationProviderError(
+                "runtime-invalid", "native runtime does not implement its port"
+            )
         if descriptor.accelerator != self.accelerator or descriptor.runtime != self.runtime_name:
-            raise QwenProviderError("provider-invalid", "provider descriptor names another lane")
+            raise GenerationProviderError(
+                "provider-invalid", "provider descriptor names another lane"
+            )
         if not descriptor.qualified:
-            raise QwenProviderError("provider-unqualified", "provider has no accepted evidence")
+            raise GenerationProviderError(
+                "provider-unqualified", "provider has no accepted evidence"
+            )
         paths = tuple(Path(path) for path in artifacts)
         if not paths:
-            raise QwenProviderError("artifact-invalid", "at least one model artifact is required")
+            raise GenerationProviderError(
+                "artifact-invalid", "at least one model artifact is required"
+            )
         self._descriptor = descriptor
         self._runtime = runtime
         self._artifacts = paths
@@ -111,7 +119,7 @@ class _QwenWorker:
         raise NotImplementedError
 
 
-class LlamaCppVulkanQwenWorker(_QwenWorker):
+class LlamaCppVulkanWorker(_GenerationWorker):
     """Qwen GGUF provider that requires every model layer on Vulkan."""
 
     accelerator = "gpu"
@@ -121,7 +129,7 @@ class LlamaCppVulkanQwenWorker(_QwenWorker):
         validate_gpu_load(report)
 
 
-class OpenVinoNpuQwenWorker(_QwenWorker):
+class OpenVinoNpuWorker(_GenerationWorker):
     """Explicit local OpenVINO GenAI provider that must stay on NPU."""
 
     accelerator = "npu"
@@ -129,7 +137,7 @@ class OpenVinoNpuQwenWorker(_QwenWorker):
 
     def __init__(self, *args, explicitly_enabled: bool = False, **kwargs) -> None:
         if not explicitly_enabled:
-            raise QwenProviderError(
+            raise GenerationProviderError(
                 "provider-disabled", "NPU generation needs explicit local configuration"
             )
         super().__init__(*args, **kwargs)
@@ -139,6 +147,6 @@ class OpenVinoNpuQwenWorker(_QwenWorker):
 
 
 __all__ = [
-    "LlamaCppVulkanQwenWorker",
-    "OpenVinoNpuQwenWorker",
+    "LlamaCppVulkanWorker",
+    "OpenVinoNpuWorker",
 ]
