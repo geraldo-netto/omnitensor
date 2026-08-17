@@ -26,3 +26,15 @@ jobs:
         run: uv run --no-sync ruff check
       - name: Test with coverage
         run: uv run --no-sync pytest --cov=omnitensor --cov-report=term --cov-fail-under=80
+      # The root run collects `tests/` and never descends into `providers/`, so
+      # each provider distribution's suite ran only if something ran it
+      # deliberately. Nothing did: media-transcription sat at 35 failures of
+      # 107 that no gate reported.
+      - name: Install provider distributions
+        run: |
+          for provider in providers/*/; do
+            uv pip install --no-deps -e "$provider"
+            uv pip install -r <(uv run --no-sync python scripts/provider-requirements.py "$provider")
+          done
+      - name: Test provider suites
+        run: OMNI_PYTHON="$(uv run --no-sync python -c 'import sys; print(sys.executable)')" ./scripts/run-provider-suites.sh
