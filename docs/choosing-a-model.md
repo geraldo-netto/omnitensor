@@ -34,10 +34,27 @@ between runs. The accuracy columns are stable.
 
 ## Choosing another one
 
-Per workload, through the control socket:
+Per workload, through the control socket's `apply-command` method with the
+`set-profile-model` operation — the same surface the desktop client uses.
+`expectedRevision` is the policy revision the caller last read from the
+published snapshot:
 
 ```sh
-omnitensor-apply set-profile-model ask-selected-files qwen3-4b-q4-k-m
+python3 - <<'PY'
+import asyncio, json, time
+from omnitensor.socket_transport import call_control
+
+reply = asyncio.run(call_control("apply-command", {
+    "version": 2,
+    "id": "choose-model",
+    "issuedAt": int(time.time() * 1000),
+    "operation": "set-profile-model",
+    "profileId": "ask-selected-files",
+    "value": "qwen3-8b-q4-k-m",
+    "expectedRevision": 0,
+}))
+print(json.dumps(reply, indent=2))
+PY
 ```
 
 The choice is published in the runtime snapshot as the profile's `modelId`, so
@@ -45,7 +62,9 @@ the client shows what is actually running rather than what was asked for. The
 worker restarts on the change; jobs already running finish on the model they
 started with.
 
-To go back to the default, choose the default explicitly. There is no "unset".
+To go back to the default, send `null` as the value: the stored choice is
+cleared and the workload follows whatever the qualification receipt defaults
+to, which is a different fact from having chosen that model.
 
 ## What is installed here
 
@@ -63,8 +82,8 @@ Candidates that were measured but not installed live in
 
 ## Your machine, your choice
 
-A model you select is your decision, and the runtime will run it. Two things it
-will still refuse, because they are not preferences:
+A model you select is your decision, and the runtime will run it. Two things
+are still not preferences:
 
 - **A model that does not fit.** Weights plus the KV cache at 32,768 tokens must
   hold on the card. Check before choosing:
@@ -73,10 +92,11 @@ will still refuse, because they are not preferences:
   crawls, and the load log claims full offload throughout. On the integrated
   610M the practical ceiling is about 12.5 GiB per process, well under the 45
   GiB of mapped memory it advertises.
-- **A model whose task digest does not match its receipt.** The prompt, schema
-  and limits a workload runs are digest-bound; if they change, the receipt is
-  reissued or the worker refuses to start. This protects you from a workload
-  silently becoming a different one, not from choosing.
+- **What the receipt covers.** The prompt, schema and limits a workload runs
+  are digest-bound into the qualification receipt, per workload and per model.
+  A pair the receipt did not measure — or a task digest that has moved since —
+  is reported as uncovered rather than refused, so you can see that your
+  choice runs outside the measured evidence while still making it.
 
 Speed follows the card as much as the model. The same 9B answers in about 19
 seconds on the discrete RX 6600 XT and roughly twice that on the integrated

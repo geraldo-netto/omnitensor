@@ -31,7 +31,7 @@ Inference stays fail-closed until an artifact store is configured, because
 nothing else can prove a model file is the model a manifest declares. Point
 `OMNITENSOR_ARTIFACT_ROOT` at the verified store (default
 `~/.local/share/omnitensor/artifacts`); with no store the service still runs,
-publishes, and answers the bus, but refuses every inference job.
+publishes, and answers the control socket, but refuses every inference job.
 
 The unit uses `StateDirectory=`, so systemd creates the state directories on
 first start; it needs no pre-existing paths. It also declares `Delegate=yes` so
@@ -142,12 +142,13 @@ installed external workers are automatically rebuilt when the selected device
 map or detected device set changes.
 
 Selecting a node does not transfer model qualification to another device
-family or runtime stack. The current Qwen receipt matches the native runtime
-bytes and Vulkan-reported device name, not a unique card serial or PCI address;
-two indistinguishable same-name devices satisfy that identity check. A
-different reported GPU/NPU/TPU identity remains unavailable until the provider
-has passed its native runtime, full-offload, parity, memory, and workload gates
-for that identity.
+family or runtime stack. The current Qwen receipt pins the native runtime
+bytes and records the Vulkan-reported device name its measurements came from,
+not a unique card serial or PCI address. Startup still refuses mismatched
+native runtime bytes and a load that does not prove complete Vulkan offload;
+a different reported device is recorded and reported against the receipt
+rather than refused, and its measurements do not transfer until the workload
+gates are rerun on that identity.
 
 The service refuses to start when its control socket
 (`$XDG_RUNTIME_DIR/omnitensor/control.sock`) is already being served, because
@@ -162,7 +163,7 @@ fuser "$XDG_RUNTIME_DIR/omnitensor/control.sock"
 ## Dependencies
 
 An install with no accelerator extra starts, publishes a contract-valid
-snapshot, answers the bus, and passes every acceptance check — while being
+snapshot, answers the control socket, and passes every acceptance check — while being
 unable to run a single inference, because no execution runtime is importable.
 That is the most misleading state this service has, so choose an extra
 deliberately rather than taking the default.
@@ -768,7 +769,7 @@ It exits non-zero if any check fails and prints one line per check:
 | `snapshot` | no snapshot, an invalid one, or a stale one the applet would still render |
 | `applet` | the installed tree does not match the payload checksums |
 
-The D-Bus check sends a deliberately invalid command and requires a
+The control check sends a deliberately invalid command and requires a
 contract-valid rejection, so it exercises the whole transport without changing
 any policy.
 

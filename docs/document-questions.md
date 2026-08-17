@@ -22,9 +22,10 @@ fixed pooling graph, semantic parity, compiler evidence, and named-device runs
 pass the recipe gates.
 
 Qwen generation uses the same provider-neutral worker boundary as private event
-extraction. All four Qwen workloads share the official Apache-2.0
-`Qwen/Qwen3-8B-GGUF` Q4_K_M artifact at an immutable upstream revision. GPU through
-llama.cpp/Vulkan is the default. An NPU through
+extraction. All four Qwen workloads declare the same pinned Apache-2.0
+generation artifacts — Qwen3.5-9B IQ4_XS as the measured default plus
+Qwen3-8B Q4_K_M — and a person may choose any declared, installed model per
+workload. GPU through llama.cpp/Vulkan is the default. An NPU through
 OpenVINO GenAI is used only after explicit configuration and local
 qualification; it may fall back to GPU only before generation starts. There is
 no CPU lane. Install producer-only dependencies only where models are built:

@@ -1,9 +1,13 @@
-# The event contract, proposed
+# The event contract
 
-Status: proposal. Nothing here is implemented, and implementing it moves the
-task digest, so it lands with a new qualification receipt or not at all — a
-worker whose task does not match its receipt refuses to start, which is the
-failure OMNI-0352 was.
+Status: implemented. The version 2 result schema
+(`event-extraction-result.schema.json`), the `needs`-based partial events,
+`readAs` evidence, the floating/all-day/`VTODO` export mapping, and the
+removal of the answer ceilings have landed; this document remains the design
+record and the measurements that motivated them. Implementing it moved the
+task digest, so the qualification receipt was reissued — the receipt now
+reports coverage per workload and model rather than gating a person's model
+choice.
 
 ## Why it changes
 

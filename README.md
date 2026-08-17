@@ -2,7 +2,7 @@
 
 Unified local inference service for heterogeneous accelerators. OmniTensor owns
 device discovery, per-backend model execution, weighted workload scheduling,
-runtime snapshot publishing, and the D-Bus control surface consumed by the
+runtime snapshot publishing, and the control-socket surface consumed by the
 [cinnamon-xpuwlm](../cinnamon-xpuwlm) panel applet.
 
 See [Cinnamon workload use cases](docs/use-cases.md) for the nine shared
@@ -93,9 +93,9 @@ mirror copies. OmniTensor:
 - publishes bounded, independently versioned plugin telemetry as an optional
   runtime-snapshot extension described in
   [docs/runtime-snapshot.md](docs/runtime-snapshot.md);
-- owns the D-Bus name `org.cinnamon.OmniTensor1` and answers `ApplyCommand`
-  with optimistic-concurrency revision checks, persisting policy state
-  atomically.
+- serves the control socket at `$XDG_RUNTIME_DIR/omnitensor/control.sock` and
+  answers `apply-command` with optimistic-concurrency revision checks,
+  persisting policy state atomically.
 
 ## Routing
 
@@ -110,7 +110,7 @@ model format is compatible; otherwise the profile reports `unavailable`.
 ```sh
 pip install .[dev]          # development
 pip install .[tpu,gpu,npu]  # runtime extras per available hardware
-pip install .[train,convert] # separate producer environment, GPU artifact
+pip install .[convert] 'packaging/omnitensor-training[train]' # separate producer environment
 ```
 
 `systemd/omnitensor.service` runs the service as a user unit.

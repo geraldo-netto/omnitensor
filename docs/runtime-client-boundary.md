@@ -46,12 +46,13 @@ Everything that refuses lives here, because a client cannot refuse on this
 service's behalf: it is unprivileged, replaceable, and frequently absent.
 
 - Permission grants and the sandbox that enforces them.
-- Digest-pinned artifacts, and the qualification receipt a worker is checked
-  against before it loads a task. **Which models a workload may run** is part
-  of that: a client offers only the models the receipt records as passing for
-  that workload, and this service refuses any other — a model qualified *as a
-  model* is not qualified *for a task*, and an unqualified pair is not a
-  slower answer, it is a worker that refuses to start.
+- Digest-pinned artifacts, and the native-runtime bytes the qualification
+  receipt pins. **Which models a workload may run** is bounded by what its
+  manifest declares: this service refuses a model the manifest does not name,
+  and full GPU offload remains the live load gate. The receipt's per-workload
+  results are reported rather than enforced — a client can show which
+  declared models were measured as passing, and a person may still choose any
+  declared, installed model.
 - Input roots: a source outside them is refused here, whatever a chooser
   offered.
 

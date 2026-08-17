@@ -60,15 +60,26 @@ OmniTensor plugin distribution may own exactly one identity and exactly one
 `omnitensor-plugin.json`, so each workload needs an identity-isolated thin
 wheel. All four depend on one implementation wheel:
 
-| Wheel | Responsibility | Pinned model |
+| Wheel | Responsibility | Pinned models |
 | --- | --- | --- |
 | `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the four factories | runtime only |
-| `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3-8B Q4_K_M |
-| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3-8B Q4_K_M plus BGE-small-en-v1.5 |
-| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-8B Q4_K_M plus operation-specific DictaLM2 Hebrew |
-| `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3-8B Q4_K_M |
+| `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
+| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus BGE-small-en-v1.5 |
+| `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus operation-specific DictaLM2 Hebrew |
+| `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
 
-The single shared generation artifact is the official
+Each manifest declares more than one pinned generation artifact, and a person
+may choose any declared, installed model per workload (see
+[Choosing the model a workload runs](choosing-a-model.md)). The default for
+all four text workloads is `qwen3-5-9b-iq4-xs`, recorded in the runtime
+wheel's `qualification.json` with SHA-256
+`7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429`; the
+manifests declare its origin as the `unsloth/Qwen3.5-9B-GGUF`
+`Qwen3.5-9B-IQ4_XS.gguf` upload. The one-shot installer below currently
+imports only the Qwen3-8B artifact; installing the 9B default is a separate
+verified import against that manifest digest.
+
+The shared Qwen3-8B artifact is the official
 `Qwen/Qwen3-8B-GGUF` `Qwen3-8B-Q4_K_M.gguf` at upstream revision
 `7c41481f57cb95916b40956ab2f0b139b296d974`. It is Apache-2.0,
 5,027,783,488 bytes, and has SHA-256
@@ -77,7 +88,7 @@ The checked-in [generation catalog](../generation-models/qwen3-8b.json)
 binds those bytes to their license, provider, and deliberately narrow
 qualification scope. Review the pinned
 [Qwen3-8B Apache-2.0 license](https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/7c41481f57cb95916b40956ab2f0b139b296d974/LICENSE)
-before downloading it. Sharing one immutable artifact removes duplicate model
+before downloading it. Sharing immutable artifacts removes duplicate model
 selection and installation paths; every workload retains an independent worker,
 task contract, grant set, and acceptance status. No checkout, package install,
 or catalog entry is by itself a live readiness or quality claim;
@@ -120,7 +131,7 @@ ncnn export is not interchangeable with this graph.
 | Access to the selected `/dev/dri/renderD*` device | The sandbox mounts only the device granted to that worker |
 | The exact accepted `llama-cpp-python==0.3.34` Vulkan wheel | In-process Qwen execution inside the seccomp worker; startup verifies its native-library hashes, so an arbitrary rebuild or ordinary CPU wheel is not acceptable |
 | All five provider wheels | The runtime implementation and all four independently discoverable workload identities |
-| The pinned Qwen3-8B Q4_K_M GGUF | One digest-locked primary generation artifact shared by all four workload providers |
+| At least one pinned Qwen generation GGUF (the Qwen3.5-9B IQ4_XS default, or the Qwen3-8B Q4_K_M this guide installs) | A digest-locked generation artifact declared by all four workload providers |
 | The pinned DictaLM2.0 7B Instruct Q4_K_M GGUF | Explicit Hebrew translation for selected-text tools only |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
 | A user runtime directory (`$XDG_RUNTIME_DIR`) | The OmniTensor control socket and job-result surface |
@@ -236,10 +247,10 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_WHEELS"/omnitensor_vulkan_runtime-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_event_extraction_extraction-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_ask_selected_files_selected_files-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_selected_text_tools_tools-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_file_organizer-0.2.0-*.whl
+  "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl
 ```
 
 Install optional document/media parsing only when needed:
@@ -327,10 +338,11 @@ Do not copy a `renderD*` value from another computer: Linux node numbers are
 host-local and the service derives the selected node's major/minor and exact
 sysfs identity at runtime. Restart the service after changing the selection or
 after GPU hotplug so each external-worker sandbox is rebuilt. This provider
-still starts only when the selected GPU's Vulkan-reported name matches its
-qualification receipt and proves complete Vulkan offload; the receipt does not
-distinguish two same-name cards by serial number or PCI address, and selection
-is not a way to bypass hardware acceptance.
+starts only when llama.cpp proves complete Vulkan layer offload on the
+selected GPU — that is the live hardware gate. The qualification receipt
+records the device the measurements were taken on; a different card is
+reported against that record rather than refused, and the receipt does not
+distinguish two same-name cards by serial number or PCI address.
 
 ## 4. Grant only the declared access
 
@@ -397,12 +409,12 @@ For each of the four IDs, `describe-plugins` must report:
 - every declared artifact with `ready: true`; and
 - every permission with `granted: true`.
 
-Startup loads Qwen in the worker and accepts it only when llama.cpp reports all
-model layers offloaded to Vulkan. Ask selected files also preflights the exact
-BGE graph, tokenizer, finite 384-value output, and its qualified named Vulkan
-device. A CPU build, partial layer offload, wrong GPU, missing tokenizer,
-changed model, absent grant, sandbox failure, or startup timeout leaves the
-worker failed/unavailable. Do not enable a failed workload by weakening these
+Startup loads the selected model in the worker and accepts it only when
+llama.cpp reports all model layers offloaded to Vulkan. Ask selected files
+also preflights the exact BGE graph, tokenizer, and finite 384-value output.
+A CPU build, partial layer offload, missing tokenizer, changed model, absent
+grant, sandbox failure, or startup timeout leaves the worker
+failed/unavailable. Do not enable a failed workload by weakening these
 checks.
 
 ## Acceptance and what is not claimed
@@ -444,9 +456,11 @@ OMNI_SELECTED_LOAD="$OMNI_STATE/plugin-state/selected-text-tools/selected-text-w
 ```
 
 The private receipt is usable only while `describe-plugins` reports the
-current selected-text worker ready. The worker writes it after both actual model loads
-prove the exact runtime, named GPU, full 37/37 and 33/33 Vulkan layer counts,
-and no CPU fallback. Startup clears stale bytes; startup failure and normal
+current selected-text worker ready. The worker writes it after both actual
+model loads: it records the artifact digests, runtime version, physical
+device, and layer counts that actually loaded rather than enforcing a frozen
+identity — complete Vulkan layer offload with no CPU fallback is the only
+live load gate. Startup clears stale bytes; startup failure and normal
 worker stop remove them. If `OMNITENSOR_STATE_PATH` is customized, locate
 `plugin-state` beside that snapshot instead of using the default path above.
 The collector refuses a missing, stale, malformed, or disagreeing receipt
@@ -468,15 +482,16 @@ code change does not recollect or rewrite the archived run: a fresh evidence
 artifact requires reinstalling the matching wheels and observing the current
 worker on the named hardware.
 
-The provider wheel contains `qualification.json`. It binds the exact task
-contract hashes, Qwen hashes, `llama-cpp-python` version and native-library
-hashes, Vulkan-reported RX 6600 XT name, full 37/37 layer offload, Q8_0 key/value
-caches, and the four
-representative closed-contract results run for this release. Startup verifies
-that receipt before advertising a worker as ready. This receipt is a runtime
-compatibility and representative-behavior gate; it does not replace the Ask
-full-corpus report, uniquely identify a same-name physical card, or create
-undeclared quality metrics for the other tasks.
+The runtime wheel contains the version 2 `qualification.json`. It records the
+`llama-cpp-python` version and native-library hashes, the Vulkan-reported
+device the measurements were taken on, and — per workload, per model — the
+task-contract digest and pass/fail result, with a default model for each
+workload. Startup still verifies the native llama.cpp bytes against it and
+refuses a mismatched runtime; the per-workload model coverage is *reported*
+rather than enforced, so a person may run any model the manifest declares and
+the client can show whether that pair was measured. The receipt does not
+replace the Ask full-corpus report, uniquely identify a same-name physical
+card, or create undeclared quality metrics for unmeasured pairs.
 
 ## Runtime privacy, isolation, and cancellation
 
@@ -501,10 +516,10 @@ undeclared quality metrics for the other tasks.
 
 ## Future GPU models and NPU providers
 
-The four current manifests select one shared primary Qwen3-8B Q4_K_M artifact;
-selected text additionally selects its dedicated Hebrew artifact only at the
-explicit operation boundary. A future
-larger or differently quantized GPU model must be a new provider release rather
+The four current manifests declare the pinned Qwen3.5-9B IQ4_XS default and
+the Qwen3-8B Q4_K_M alternative; selected text additionally selects its
+dedicated Hebrew artifact only at the explicit operation boundary. A model
+the manifests do not declare must arrive as a new provider release rather
 than a replacement under the existing identity. Such a release must:
 
 1. pin the upstream revision, filename, byte count, SHA-256, quantization, SPDX
@@ -513,7 +528,7 @@ than a replacement under the existing identity. Such a release must:
    digest verification;
 3. update only the thin workload wheels selecting that model, leaving unrelated
    workloads on their accepted pin;
-4. prove complete layer offload, bounded context/output, peak GPU/system memory,
+4. prove complete layer offload, its context window, peak GPU/system memory,
    quality on that workload's frozen corpus, cancellation, revocation, and
    recovery on every advertised GPU; and
 5. remain disabled on download, digest, memory, compatibility, partial-offload,
@@ -539,10 +554,10 @@ systemctl --user stop omnitensor.service
 "$OMNI_SERVICE/pip" install --force-reinstall --no-deps \
   /absolute/path/to/previous/llama_cpp_python-0.3.34-*.whl \
   /absolute/path/to/previous/omnitensor_vulkan_runtime-*.whl \
-  /absolute/path/to/previous/omnitensor_event_extraction_extraction-*.whl \
-  /absolute/path/to/previous/omnitensor_ask_selected_files_selected_files-*.whl \
-  /absolute/path/to/previous/omnitensor_selected_text_tools_tools-*.whl \
-  /absolute/path/to/previous/omnitensor_file_organizer-*.whl
+  /absolute/path/to/previous/omnitensor_qwen_event_extraction-*.whl \
+  /absolute/path/to/previous/omnitensor_qwen_ask_selected_files-*.whl \
+  /absolute/path/to/previous/omnitensor_qwen_selected_text_tools-*.whl \
+  /absolute/path/to/previous/omnitensor_qwen_file_organizer-*.whl
 systemctl --user start omnitensor.service
 ```
 

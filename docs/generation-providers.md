@@ -2,7 +2,9 @@
 
 OmniTensor's generation boundary is task- and provider-neutral. A workload
 defines a versioned prompt, accepted modalities, a closed JSON output schema,
-and hard context, output-token, and output-byte ceilings. A provider implements
+and a hard context-token ceiling; output-token and output-byte budgets are
+optional, and absent budgets mean generation is bounded only by the model's
+context window. A provider implements
 that contract through `omnitensor.plugins.generation.GenerationWorker`.
 Neither side is coupled to Qwen, llama.cpp, OpenVINO, or a particular consumer.
 
@@ -31,7 +33,9 @@ echo source content or generated tokens.
   `{{UNTRUSTED_CONTENT}}` boundary;
 - unique `text` and/or `image` modalities;
 - a valid Draft 2020-12 closed object schema; and
-- context-token, output-token, and encoded-output byte limits.
+- a context-token limit, with optional output-token and encoded-output byte
+  budgets — a task that declares neither is bounded only by its context
+  window.
 
 The marker forces prompt authors to state where untrusted data enters the
 instruction. It is not a claim that a model cannot be prompt-injected; each
@@ -58,8 +62,9 @@ and could return a result from a different model after a partial side effect.
    workload worker.
 2. Parse a checked-in provider descriptor and verify artifact provenance before
    advertising `qualified: true`.
-3. Enforce the task's token ceilings in the native SDK as well as at the shared
-   contract boundary.
+3. Enforce the task's context limit and any declared budgets in the native SDK
+   as well as at the shared contract boundary; never add an output ceiling the
+   task did not declare.
 4. Distinguish `admission-refused` and `model-load-failed` before generation
    from failures after generation begins.
 5. Validate the final structured document with `validate_structured_output`.

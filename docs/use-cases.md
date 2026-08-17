@@ -20,7 +20,7 @@ trusted integrations unless explicitly listed below.
 | Routing | Ordered `tpu`, `npu`, `gpu` selection constrained by model format; never CPU fallback |
 | Scheduling | Serialized dispatch per backend with weighted soft shares |
 | Observation | Contract-valid devices, queue depth, profile state, and routing detail in snapshots |
-| Inference pipeline | Version 1 bounded `SubmitJob`/`CancelJob` D-Bus methods and backend scheduler exist; verified artifact dispatch and host use-case pipelines remain readiness-gated |
+| Inference pipeline | Version 1 bounded `submit-job`/`cancel-job` control-socket methods and backend scheduler exist; verified artifact dispatch and host use-case pipelines remain readiness-gated |
 
 `idle` with `no model bundled` means the catalog profile has no concrete model
 selection. `watching` means a manifest names a model format and a compatible
@@ -52,8 +52,9 @@ providers advertise readiness. `selected-text-tools` processes only the text
 captured by an explicit action; it never monitors clipboard changes or stores
 selection history. Its five operations share the generation-provider contract
 and return reviewable output plus a digest/span evidence record. Its installed
-1.1.0 Vulkan worker passed the frozen 16-case gate on the RX 6600 XT: Qwen3-8B
-remains primary for English and all routes except explicit Hebrew translation,
+1.1.0 Vulkan worker passed the frozen 16-case gate on the RX 6600 XT with
+Qwen3-8B; the workload's configured Qwen model (default `qwen3-5-9b-iq4-xs`)
+is primary for English and all routes except explicit Hebrew translation,
 which alone uses pinned DictaLM2. Language is never inferred from source text
 or fixed globally. Arbitrary-selection quality and NPU/TPU lanes are not
 claimed.
@@ -135,8 +136,8 @@ Before adding inference:
 2. Build a trusted host adapter that bounds and validates inputs before tensor
    conversion.
 3. Submit only allowlisted model paths and validated tensors through an
-   in-process application integration; version the D-Bus contract before
-   exposing job submission to external clients.
+   in-process application integration; version the control-socket contract
+   before exposing job submission to external clients.
 4. Keep post-processing, actions, safety limits, authorization, and persistence
    outside model output.
 5. Add unit, integration, regression, property, coverage, and changed-function

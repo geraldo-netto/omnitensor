@@ -716,10 +716,10 @@ takes exactly the newest complete window from bounded recorder history.
 "$TRAIN/omnitensor-run-forecast" --profile resource-scheduler
 ```
 
-The base OmniTensor dependency set includes the local D-Bus client used by the
-runner; no training or accelerator extra is needed to submit. The running
+The base OmniTensor dependency set includes the control-socket client used by
+the runner; no training or accelerator extra is needed to submit. The running
 service still needs the runtime extra for the selected native lane. The runner
-checks `DescribeContract` before submission, uses the declared oldest-first
+checks `describe-contract` before submission, uses the declared oldest-first
 observation and feature order, and polls at most 40 times by default. A missing
 feature in any newest row is a refusal; it never searches backward for an
 older complete row and silently changes the forecast time.

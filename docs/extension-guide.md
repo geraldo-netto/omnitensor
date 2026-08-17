@@ -83,7 +83,9 @@ granted set. Free-form permissions do not imply filesystem access; see
 ## 5. Artifacts
 
 Models are immutable, content-addressed, and verified. Declare each artifact in
-the manifest with its id, version, format, and SHA-256. The host resolves an
+the manifest with its id, version, format, and SHA-256, plus the optional
+`sourceUri` and `licenseSpdx` origin fields, which are carried through to the
+worker as artifact provenance. The host resolves an
 artifact only through the digest gate, so a file that no longer matches its
 declared digest is never executed.
 

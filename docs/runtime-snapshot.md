@@ -116,19 +116,19 @@ completely about what a submission looks like.
 ```json
 {
   "version": 1,
-  "methods": ["ApplyCommand", "CancelJob", "DescribeContract", "…"],
+  "methods": ["apply-command", "cancel-job", "describe-contract", "…"],
   "schemas": {"runtime-job-submit": 1, "runtime-snapshot": 1, "…": 1}
 }
 ```
 
 `version` is the version of this description, not of the contracts it
-describes. `methods` is every method the bus interface exports, including this
+describes. `methods` is every method the control surface exports, including this
 one — a handshake a client must already know another method to reach is not a
 handshake. `schemas` maps each wire contract to the version its own schema
 pins; a name absent from the map is a document this service does not speak.
 
-Neither list is written by hand. `methods` is asserted against the decorated
-methods on the bus interface and `schemas` is read from the shipped schema
+Neither list is written by hand. `methods` is asserted against the methods
+the control transport dispatches and `schemas` is read from the shipped schema
 files, so a method or a contract added on one side cannot go unannounced on
 the other. A schema pinning no version is omitted rather than guessed at: an
 announced version nobody enforces is worse than no announcement.

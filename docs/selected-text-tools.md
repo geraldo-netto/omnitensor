@@ -14,8 +14,9 @@ The supported operations are closed and versioned:
 - `translate`, with one explicit bounded target language
 - `extract-tasks`
 
-Language selection does not globally replace the primary model. Qwen3-8B
-Q4_K_M remains the route for English, Italian, Russian, every other declared
+Language selection does not globally replace the primary model. The
+workload's configured Qwen generation model (default `qwen3-5-9b-iq4-xs`)
+remains the route for English, Italian, Russian, every other declared
 target, and every non-translation operation. The dedicated DictaLM2 route is
 selected only when the request is exactly `translate` with the explicit target
 `Hebrew` (case-insensitive). Hebrew-looking source text does not select it, and
@@ -51,10 +52,11 @@ No additional base dependency is needed for the schemas, validation, private
 fragment lifecycle, or plugin contract. A usable installation additionally
 needs an external qualified `GenerationWorker`, its pinned model artifacts,
 tokenizer, and native runtime. The accepted Vulkan implementation uses the
-pinned Qwen3-8B Q4_K_M artifact as its primary route and the pinned DictaLM2.0
-7B Instruct Q4_K_M artifact only for explicit Hebrew translation. Both models
-are Apache-2.0 and are verified by exact size and SHA-256 before import. The
-workload contract itself remains provider-neutral.
+manifest-declared Qwen model chosen for the profile (default Qwen3.5-9B
+IQ4_XS, with Qwen3-8B Q4_K_M also declared) as its primary route and the
+pinned DictaLM2.0 7B Instruct Q4_K_M artifact only for explicit Hebrew
+translation. All of these models are Apache-2.0 and are verified by exact
+digest before import. The workload contract itself remains provider-neutral.
 
 The frozen 16-case CC0 corpus covers all five operations, English default
 routing, Italian translation through Qwen, six explicit Hebrew translations,

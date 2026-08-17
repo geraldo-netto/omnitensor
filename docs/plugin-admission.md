@@ -75,7 +75,7 @@ Choosing a value:
 Set it where the service reads its environment:
 
 ```sh
-OMNITENSOR_PLUGIN_SLOTS=1 omnitensor-service
+OMNITENSOR_PLUGIN_SLOTS=1 omnitensor
 ```
 
 ## Host pressure
