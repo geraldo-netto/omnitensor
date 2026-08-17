@@ -99,3 +99,17 @@
 [2026-08-17 11:59:51] qwen3-8b-q4-k-m · file-organizer: 8/10 correct (80%), rules 93%, 193.9s per case
 [2026-08-17 11:59:51]   what failed: {"contains": 2}
 [2026-08-17 11:59:51] qwen3-8b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 12:02:11]   text-summarize                     ok    139.1s
+[2026-08-17 12:05:16]   text-summarize-keeps-the-name      ok    185.0s
+[2026-08-17 12:06:28]   text-explain                       ok     72.8s
+[2026-08-17 12:07:38]   text-rewrite                       ok     69.4s
+[2026-08-17 12:09:18]   text-extract-tasks                 ok    100.2s
+[2026-08-17 12:10:29]   text-extract-single-task           ok     71.4s
+[2026-08-17 12:12:26]   text-translate-hebrew              ok    116.6s
+[2026-08-17 12:13:58]   text-translate-hebrew-names        ok     91.6s
+[2026-08-17 12:16:09]   text-translate-hebrew-paragraph    FAIL  131.5s  failed: no_foreign_script
+[2026-08-17 12:17:54]   text-translate-portuguese          ok    104.4s
+[2026-08-17 12:17:54] qwen3-8b-q4-k-m · selected-text-tools: 9/10 correct (90%), rules 97%, 108.2s per case
+[2026-08-17 12:17:54]   what failed: {"no_foreign_script": 1}
+[2026-08-17 12:17:54] results written to benchmarks/results/integrated/benchmark.md
+[2026-08-17 12:17:54] done

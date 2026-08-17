@@ -1,0 +1,146 @@
+[2026-08-17 12:01:06] measuring on 1: AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 12:01:06] models: qwen3-5-9b-iq4-xs, qwen3-5-9b-deepseek-v4-flash-q4-k-m, qwen3-5-9b-q4-k-m, qwen3-8b-q5-k-m
+[2026-08-17 12:01:06] workloads: ask-selected-files, event-extraction, file-organizer, selected-text-tools
+[2026-08-17 12:01:06] qwen3-5-9b-iq4-xs: 4.81 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 12:01:07] loading qwen3-5-9b-iq4-xs from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 12:01:09] loaded in 2.6s — 33/33 layers on Vulkan
+[2026-08-17 12:01:09] qwen3-5-9b-iq4-xs · ask-selected-files: 10 cases
+[2026-08-17 12:01:25]   ask-invoice-total                  ok     15.5s
+[2026-08-17 12:01:44]   ask-who-signed                     ok     19.3s
+[2026-08-17 12:02:02]   ask-deadline                       ok     17.6s
+[2026-08-17 12:02:20]   ask-warranty-length                ok     18.1s
+[2026-08-17 12:02:39]   ask-two-documents                  ok     19.4s
+[2026-08-17 12:02:56]   ask-percentage                     ok     16.7s
+[2026-08-17 12:03:13]   ask-role-and-name                  ok     16.8s
+[2026-08-17 12:03:30]   ask-language-portuguese            ok     17.1s
+[2026-08-17 12:03:58]   ask-absent-fact                    FAIL   28.1s  failed: no_invented_numbers
+[2026-08-17 12:04:14]   ask-absent-person                  ok     16.3s
+[2026-08-17 12:04:14] qwen3-5-9b-iq4-xs · ask-selected-files: 9/10 correct (90%), rules 97%, 18.5s per case
+[2026-08-17 12:04:14]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 12:04:14] qwen3-5-9b-iq4-xs · event-extraction: 10 cases
+[2026-08-17 12:04:22]   event-explicit-date-time           FAIL    7.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:04:29]   event-written-month                FAIL    7.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:04:37]   event-two-in-one-document          FAIL    7.9s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:04:45]   event-with-location                FAIL    7.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:04:53]   event-ics-like                     FAIL    7.7s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:05:00]   event-afternoon-24h                FAIL    7.8s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:05:08]   event-named-activity               FAIL    7.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:05:16]   event-no-time-refuses              ok      7.8s
+[2026-08-17 12:05:24]   event-no-activity-refuses          ok      7.8s
+[2026-08-17 12:05:32]   event-relative-date-refuses        ok      7.7s
+[2026-08-17 12:05:32] qwen3-5-9b-iq4-xs · event-extraction: 3/10 correct (30%), rules 14%, 7.7s per case
+[2026-08-17 12:05:32]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 12:05:32] qwen3-5-9b-iq4-xs · file-organizer: 10 cases
+[2026-08-17 12:06:12]   organize-two-invoices              ok     40.5s
+[2026-08-17 12:06:52]   organize-mixed-kinds               ok     39.7s
+[2026-08-17 12:07:15]   organize-single-file               ok     23.0s
+[2026-08-17 12:07:46]   organize-duplicates                FAIL   31.4s  failed: at_least
+[2026-08-17 12:08:44]   organize-three-mixed               ok     57.9s
+[2026-08-17 12:09:27]   organize-photos                    ok     43.5s
+[2026-08-17 12:10:03]   organize-code-and-docs             ok     35.6s
+[2026-08-17 12:10:26]   organize-keeps-names               ok     23.4s
+[2026-08-17 12:11:40]   organize-four-files                FAIL   74.0s  output was not JSON  failed: produced-a-usable-document
+[2026-08-17 12:12:06]   organize-ambiguous-name            ok     25.9s
+[2026-08-17 12:12:06] qwen3-5-9b-iq4-xs · file-organizer: 8/10 correct (80%), rules 92%, 39.5s per case
+[2026-08-17 12:12:06]   what failed: {"at_least": 1, "produced-a-usable-document": 1}
+[2026-08-17 12:12:06] qwen3-5-9b-iq4-xs · selected-text-tools: 10 cases
+[2026-08-17 12:12:28]   text-summarize                     ok     21.4s
+[2026-08-17 12:12:48]   text-summarize-keeps-the-name      ok     19.8s
+[2026-08-17 12:13:06]   text-explain                       ok     18.2s
+[2026-08-17 12:13:23]   text-rewrite                       ok     17.0s
+[2026-08-17 12:13:45]   text-extract-tasks                 ok     22.5s
+[2026-08-17 12:14:03]   text-extract-single-task           ok     17.8s
+[2026-08-17 12:14:22]   text-translate-hebrew              ok     18.7s
+[2026-08-17 12:14:40]   text-translate-hebrew-names        ok     18.2s
+[2026-08-17 12:15:02]   text-translate-hebrew-paragraph    ok     21.8s
+[2026-08-17 12:15:20]   text-translate-portuguese          ok     18.4s
+[2026-08-17 12:15:20] qwen3-5-9b-iq4-xs · selected-text-tools: 10/10 correct (100%), rules 100%, 19.4s per case
+[2026-08-17 12:15:20] results written to benchmarks/results/candidates-discrete/benchmark.md
+[2026-08-17 12:15:21] qwen3-5-9b-deepseek-v4-flash-q4-k-m: 5.24 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — short 0.00 GiB
+[2026-08-17 12:15:21] loading qwen3-5-9b-deepseek-v4-flash-q4-k-m from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 12:15:33] loaded in 12.5s — 33/33 layers on Vulkan
+[2026-08-17 12:15:33] qwen3-5-9b-deepseek-v4-flash-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 12:15:50]   ask-invoice-total                  ok     16.9s
+[2026-08-17 12:16:10]   ask-who-signed                     ok     20.0s
+[2026-08-17 12:16:29]   ask-deadline                       ok     18.2s
+[2026-08-17 12:16:47]   ask-warranty-length                ok     18.4s
+[2026-08-17 12:17:07]   ask-two-documents                  ok     20.5s
+[2026-08-17 12:17:25]   ask-percentage                     ok     17.6s
+[2026-08-17 12:17:42]   ask-role-and-name                  ok     17.3s
+[2026-08-17 12:18:01]   ask-language-portuguese            ok     18.8s
+[2026-08-17 12:18:31]   ask-absent-fact                    FAIL   30.2s  failed: no_invented_numbers
+[2026-08-17 12:18:50]   ask-absent-person                  ok     18.8s
+[2026-08-17 12:18:50] qwen3-5-9b-deepseek-v4-flash-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 19.7s per case
+[2026-08-17 12:18:50]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 12:18:50] qwen3-5-9b-deepseek-v4-flash-q4-k-m · event-extraction: 10 cases
+[2026-08-17 12:18:58]   event-explicit-date-time           FAIL    8.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:19:06]   event-written-month                FAIL    7.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:19:14]   event-two-in-one-document          FAIL    8.1s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:19:22]   event-with-location                FAIL    8.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:19:30]   event-ics-like                     FAIL    8.2s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:19:39]   event-afternoon-24h                FAIL    8.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:19:47]   event-named-activity               FAIL    8.1s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:19:55]   event-no-time-refuses              ok      7.7s
+[2026-08-17 12:20:02]   event-no-activity-refuses          ok      7.7s
+[2026-08-17 12:20:12]   event-relative-date-refuses        ok      9.7s
+[2026-08-17 12:20:12] qwen3-5-9b-deepseek-v4-flash-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 8.2s per case
+[2026-08-17 12:20:12]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 12:20:12] qwen3-5-9b-deepseek-v4-flash-q4-k-m · file-organizer: 10 cases
+[2026-08-17 12:20:52]   organize-two-invoices              ok     39.7s
+[2026-08-17 12:21:28]   organize-mixed-kinds               ok     36.6s
+[2026-08-17 12:21:50]   organize-single-file               ok     21.5s
+[2026-08-17 12:22:20]   organize-duplicates                FAIL   30.7s  failed: at_least
+[2026-08-17 12:23:13]   organize-three-mixed               ok     52.8s
+[2026-08-17 12:23:54]   organize-photos                    ok     40.7s
+[2026-08-17 12:24:26]   organize-code-and-docs             ok     32.2s
+[2026-08-17 12:24:48]   organize-keeps-names               ok     22.3s
+[2026-08-17 12:25:57]   organize-four-files                FAIL   68.1s  output was not JSON  failed: produced-a-usable-document
+[2026-08-17 12:26:21]   organize-ambiguous-name            ok     24.9s
+[2026-08-17 12:26:21] qwen3-5-9b-deepseek-v4-flash-q4-k-m · file-organizer: 8/10 correct (80%), rules 92%, 36.9s per case
+[2026-08-17 12:26:21]   what failed: {"at_least": 1, "produced-a-usable-document": 1}
+[2026-08-17 12:26:21] qwen3-5-9b-deepseek-v4-flash-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 12:26:41]   text-summarize                     ok     20.0s
+[2026-08-17 12:27:01]   text-summarize-keeps-the-name      ok     19.1s
+[2026-08-17 12:27:18]   text-explain                       ok     17.0s
+[2026-08-17 12:27:34]   text-rewrite                       ok     16.6s
+[2026-08-17 12:27:56]   text-extract-tasks                 ok     21.6s
+[2026-08-17 12:28:13]   text-extract-single-task           ok     16.8s
+[2026-08-17 12:28:31]   text-translate-hebrew              ok     18.2s
+[2026-08-17 12:28:49]   text-translate-hebrew-names        ok     18.6s
+[2026-08-17 12:29:10]   text-translate-hebrew-paragraph    ok     20.7s
+[2026-08-17 12:29:28]   text-translate-portuguese          ok     17.8s
+[2026-08-17 12:29:28] qwen3-5-9b-deepseek-v4-flash-q4-k-m · selected-text-tools: 10/10 correct (100%), rules 100%, 18.7s per case
+[2026-08-17 12:29:28] results written to benchmarks/results/candidates-discrete/benchmark.md
+[2026-08-17 12:29:28] qwen3-5-9b-q4-k-m: 5.29 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — short 0.03 GiB
+[2026-08-17 12:29:28] loading qwen3-5-9b-q4-k-m from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 12:29:31] loaded in 2.7s — 33/33 layers on Vulkan
+[2026-08-17 12:29:31] qwen3-5-9b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 12:29:47]   ask-invoice-total                  ok     15.7s
+[2026-08-17 12:30:07]   ask-who-signed                     ok     20.7s
+[2026-08-17 12:30:25]   ask-deadline                       ok     17.8s
+[2026-08-17 12:30:44]   ask-warranty-length                ok     18.9s
+[2026-08-17 12:31:03]   ask-two-documents                  ok     19.3s
+[2026-08-17 12:31:22]   ask-percentage                     ok     18.2s
+[2026-08-17 12:31:39]   ask-role-and-name                  ok     17.6s
+[2026-08-17 12:31:56]   ask-language-portuguese            ok     17.2s
+[2026-08-17 12:32:13]   ask-absent-fact                    FAIL   16.2s  failed: no_invented_numbers
+[2026-08-17 12:32:28]   ask-absent-person                  ok     15.5s
+[2026-08-17 12:32:28] qwen3-5-9b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 17.7s per case
+[2026-08-17 12:32:28]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 12:32:28] qwen3-5-9b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 12:32:36]   event-explicit-date-time           FAIL    7.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:32:44]   event-written-month                FAIL    7.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:32:52]   event-two-in-one-document          FAIL    8.0s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:33:00]   event-with-location                FAIL    7.8s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:33:08]   event-ics-like                     FAIL    8.0s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:33:16]   event-afternoon-24h                FAIL    8.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:33:24]   event-named-activity               FAIL    7.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:33:32]   event-no-time-refuses              ok      7.9s
+[2026-08-17 12:33:39]   event-no-activity-refuses          ok      7.9s
+[2026-08-17 12:33:47]   event-relative-date-refuses        ok      7.9s
+[2026-08-17 12:33:47] qwen3-5-9b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 7.9s per case
+[2026-08-17 12:33:47]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 12:33:47] qwen3-5-9b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 12:34:24]   organize-two-invoices              ok     36.8s
+[2026-08-17 12:35:05]   organize-mixed-kinds               ok     41.2s
+[2026-08-17 12:35:28]   organize-single-file               ok     22.7s

@@ -3,19 +3,19 @@
  "runs": [
   {
    "workload": "ask-selected-files",
-   "modelId": "qwen3-4b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.13,
+   "layersOffloaded": 33,
+   "loadSeconds": 2.57,
    "accuracy": 0.9,
    "ruleScore": 0.9667,
    "correct": 9,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 55.71,
-   "charactersPerSecond": 7.0,
+   "secondsPerCase": 18.48,
+   "charactersPerSecond": 22.9,
    "failures": {
     "no_invented_numbers": 1
    },
@@ -29,7 +29,7 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 61.22,
+     "seconds": 15.47,
      "outputCharacters": 377,
      "error": "",
      "document": {
@@ -59,11 +59,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 59.71,
-     "outputCharacters": 421,
+     "seconds": 19.33,
+     "outputCharacters": 503,
      "error": "",
      "document": {
-      "answer": "The agreement was signed by Marta Oliveira as Chief Financial Officer and Nordwind Lda as the supplier.",
+      "answer": "The agreement was signed by Marta Oliveira in the role of Chief Financial Officer for the client, and by Nordwind Lda for the supplier. The agreement was signed in Lisbon on 2026-04-02.",
       "citations": [
        {
         "page": 1,
@@ -89,11 +89,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 62.62,
-     "outputCharacters": 354,
+     "seconds": 17.64,
+     "outputCharacters": 362,
      "error": "",
      "document": {
-      "answer": "The work must be finished by 2026-09-30.",
+      "answer": "All deliverables must be accepted by 2026-09-30.",
       "citations": [
        {
         "page": 1,
@@ -119,11 +119,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 49.18,
-     "outputCharacters": 387,
+     "seconds": 18.06,
+     "outputCharacters": 414,
      "error": "",
      "document": {
-      "answer": "The warranty period is 24 months from the date of delivery.",
+      "answer": "The equipment carries a warranty of 24 months from delivery. Consumables are excluded.",
       "citations": [
        {
         "page": 1,
@@ -149,11 +149,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 55.68,
-     "outputCharacters": 374,
+     "seconds": 19.35,
+     "outputCharacters": 426,
      "error": "",
      "document": {
-      "answer": "The second report is more recent, dated 2026-06-30.",
+      "answer": "The more recent report is the one with the period ending 2026-06-30, which carries the date 2026-06-30.",
       "citations": [
        {
         "page": 1,
@@ -179,11 +179,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 51.8,
-     "outputCharacters": 386,
+     "seconds": 16.68,
+     "outputCharacters": 337,
      "error": "",
      "document": {
-      "answer": "The interest rate applicable to late payment is 3.5 percent per year.",
+      "answer": "3.5 percent per year",
       "citations": [
        {
         "page": 1,
@@ -210,11 +210,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 49.99,
-     "outputCharacters": 413,
+     "seconds": 16.83,
+     "outputCharacters": 355,
      "error": "",
      "document": {
-      "answer": "The person responsible for approving changes of scope is Ana Ribeiro, programme director.",
+      "answer": "Ana Ribeiro, programme director",
       "citations": [
        {
         "page": 1,
@@ -240,7 +240,7 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 47.48,
+     "seconds": 17.07,
      "outputCharacters": 407,
      "error": "",
      "document": {
@@ -271,19 +271,29 @@
      "failed": [
       "no_invented_numbers"
      ],
-     "seconds": 67.75,
-     "outputCharacters": 401,
+     "seconds": 28.11,
+     "outputCharacters": 687,
      "error": "",
      "document": {
-      "answer": "The supplier's VAT identification number is not provided in the given information.",
+      "answer": "The provided documents do not contain the supplier's VAT identification number.",
       "citations": [
+       {
+        "page": 1,
+        "sourceRef": "case:bench-ask-absent-fact:0",
+        "sourceSha256": "59a8410112ca11b48b94f9dba7d3efdbcb9019643ab400d87cee9b8af0cb4b0e",
+        "span": {
+         "end": 49,
+         "start": 0
+        },
+        "textSha256": "59a8410112ca11b48b94f9dba7d3efdbcb9019643ab400d87cee9b8af0cb4b0e"
+       },
        {
         "page": 1,
         "sourceRef": "case:bench-ask-absent-fact:1",
         "sourceSha256": "7b6d523593dfbe552d29498a6a7b0e0900e2882ae89037f4fb7704374aae3b2a",
         "span": {
-         "start": 0,
-         "end": 64
+         "end": 64,
+         "start": 0
         },
         "textSha256": "7b6d523593dfbe552d29498a6a7b0e0900e2882ae89037f4fb7704374aae3b2a"
        }
@@ -300,11 +310,11 @@
       "no_invented_names"
      ],
      "failed": [],
-     "seconds": 51.68,
-     "outputCharacters": 393,
+     "seconds": 16.29,
+     "outputCharacters": 362,
      "error": "",
      "document": {
-      "answer": "The signature was witnessed by Marta Oliveira in Lisbon on 2026-04-02.",
+      "answer": "Marta Oliveira witnessed the signature.",
       "citations": [
        {
         "page": 1,
@@ -325,19 +335,19 @@
   },
   {
    "workload": "event-extraction",
-   "modelId": "qwen3-4b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.13,
+   "layersOffloaded": 33,
+   "loadSeconds": 2.57,
    "accuracy": 0.3,
    "ruleScore": 0.1364,
    "correct": 3,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 23.19,
-   "charactersPerSecond": 10.9,
+   "secondsPerCase": 7.75,
+   "charactersPerSecond": 39.4,
    "failures": {
     "answers-rather-than-refusing": 7,
     "at_least": 7,
@@ -353,13 +363,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 21.2,
-     "outputCharacters": 245,
+     "seconds": 7.71,
+     "outputCharacters": 308,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -376,13 +386,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 22.59,
-     "outputCharacters": 240,
+     "seconds": 7.61,
+     "outputCharacters": 303,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -398,13 +408,13 @@
       "answers-rather-than-refusing",
       "at_least"
      ],
-     "seconds": 24.58,
-     "outputCharacters": 246,
+     "seconds": 7.88,
+     "outputCharacters": 313,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -421,13 +431,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 21.24,
-     "outputCharacters": 240,
+     "seconds": 7.63,
+     "outputCharacters": 312,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence fragment.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -443,13 +453,13 @@
       "answers-rather-than-refusing",
       "at_least"
      ],
-     "seconds": 23.73,
-     "outputCharacters": 235,
+     "seconds": 7.74,
+     "outputCharacters": 298,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -466,13 +476,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 23.77,
-     "outputCharacters": 240,
+     "seconds": 7.85,
+     "outputCharacters": 303,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -489,13 +499,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 22.38,
-     "outputCharacters": 241,
+     "seconds": 7.71,
+     "outputCharacters": 304,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no event supported",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -510,13 +520,13 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 23.52,
-     "outputCharacters": 288,
+     "seconds": 7.77,
+     "outputCharacters": 292,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in evidence.",
+      "detail": "No named activity with an explicit date and time found in evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -531,13 +541,13 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 23.13,
-     "outputCharacters": 273,
+     "seconds": 7.82,
+     "outputCharacters": 309,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "no named activity with explicit date and time",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -552,13 +562,13 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 25.73,
-     "outputCharacters": 278,
+     "seconds": 7.74,
+     "outputCharacters": 311,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity has an explicit date and time.",
+      "detail": "No named activity with an explicit date and time found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -570,20 +580,23 @@
   },
   {
    "workload": "file-organizer",
-   "modelId": "qwen3-4b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.13,
-   "accuracy": 1.0,
-   "ruleScore": 1.0,
-   "correct": 10,
+   "layersOffloaded": 33,
+   "loadSeconds": 2.57,
+   "accuracy": 0.8,
+   "ruleScore": 0.9231,
+   "correct": 8,
    "cases": 10,
-   "errors": 0,
-   "secondsPerCase": 153.94,
-   "charactersPerSecond": 7.0,
-   "failures": {},
+   "errors": 1,
+   "secondsPerCase": 39.49,
+   "charactersPerSecond": 28.4,
+   "failures": {
+    "at_least": 1,
+    "produced-a-usable-document": 1
+   },
    "outcomes": [
     {
      "caseId": "organize-two-invoices",
@@ -594,8 +607,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 115.82,
-     "outputCharacters": 1109,
+     "seconds": 40.49,
+     "outputCharacters": 1053,
      "error": "",
      "document": {
       "requestId": "bench-organize-two-invoices",
@@ -613,17 +626,14 @@
           "textSha256": "1d89c0b052cdab884da6465f31b791b5a7f3d417ead88d927bbe5e901b4b5bd4"
          }
         ],
-        "fileId": "file-0",
-        "proposedFolder": "Invoices",
-        "proposedName": "invoice-0417.pdf",
-        "reason": "The file contains an invoice from Nordwind Lda for 4,235.00 EUR, due on 2026-09-30.",
+        "fileId": "invoice-0417.pdf",
+        "proposedFolder": "Invoices/2026",
+        "proposedName": "Nordwind_Lda_2026-0417_4235.00EUR.pdf",
+        "reason": "Organize invoice by vendor and year for easier retrieval.",
         "tags": [
          "invoice",
-         "nordwind-lda",
-         "2026-09-30",
-         "eur",
-         "4-235-00-eur",
-         "invoices"
+         "2026",
+         "nordwind-lda"
         ]
        },
        {
@@ -639,17 +649,14 @@
           "textSha256": "3f50b019849463f0481833fccc2f286dcf2f2e823eb4fde6c2a4a4d2012b0508"
          }
         ],
-        "fileId": "file-1",
-        "proposedFolder": "Invoices",
-        "proposedName": "invoice-0418.pdf",
-        "reason": "The file contains an invoice from Nordwind Lda for 1,120.00 EUR, due on 2026-10-15.",
+        "fileId": "invoice-0418.pdf",
+        "proposedFolder": "Invoices/2026",
+        "proposedName": "Nordwind_Lda_2026-0418_1120.00EUR.pdf",
+        "reason": "Organize invoice by vendor and year for easier retrieval.",
         "tags": [
          "invoice",
-         "nordwind-lda",
-         "2026-10-15",
-         "eur",
-         "1-120-00-eur",
-         "invoices"
+         "2026",
+         "nordwind-lda"
         ]
        }
       ],
@@ -665,8 +672,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 100.25,
-     "outputCharacters": 981,
+     "seconds": 39.68,
+     "outputCharacters": 1205,
      "error": "",
      "document": {
       "requestId": "bench-organize-mixed-kinds",
@@ -685,13 +692,15 @@
          }
         ],
         "fileId": "holiday-lisbon.jpg",
-        "proposedFolder": "Portraits",
-        "proposedName": "lisbon-2026.jpg",
-        "reason": "Photograph taken in Lisbon, August 2026.",
+        "proposedFolder": "Photos/2026/August",
+        "proposedName": "holiday-lisbon.jpg",
+        "reason": "File content explicitly states the photograph was taken in Lisbon in August 2026, indicating a specific date and location for organization.",
         "tags": [
+         "photo",
          "travel",
          "2026",
-         "portraits"
+         "august",
+         "lisbon"
         ]
        },
        {
@@ -708,13 +717,15 @@
          }
         ],
         "fileId": "contract-nordwind.pdf",
-        "proposedFolder": "Contracts",
-        "proposedName": "nordwind-2026.pdf",
-        "reason": "SERVICE AGREEMENT with Nordwind Lda signed 2026-04-02.",
+        "proposedFolder": "Contracts/2026/April",
+        "proposedName": "contract-nordwind.pdf",
+        "reason": "File content explicitly states the service agreement was signed on 2026-04-02, indicating a specific date for organization.",
         "tags": [
-         "business",
+         "contract",
+         "legal",
          "2026",
-         "contracts"
+         "april",
+         "nordwind"
         ]
        }
       ],
@@ -730,8 +741,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 64.28,
-     "outputCharacters": 606,
+     "seconds": 23.01,
+     "outputCharacters": 706,
      "error": "",
      "document": {
       "requestId": "bench-organize-single-file",
@@ -750,14 +761,14 @@
          }
         ],
         "fileId": "quarterly-report-q2.pdf",
-        "proposedFolder": "2026-06-30",
-        "proposedName": "quarterly-report-q2.pdf",
-        "reason": "The file contains a title indicating the period ending 2026-06-30, which is the date of the report.",
+        "proposedFolder": "reports/2026",
+        "proposedName": "quarterly-report-q2-2026-06-30.pdf",
+        "reason": "The file content explicitly states it is a 'QUARTERLY REPORT for the period ending 2026-06-30', indicating it should be organized into a reports folder with the date in the filename for clarity.",
         "tags": [
-         "financial",
-         "report",
          "quarterly",
-         "2026-06-30"
+         "report",
+         "finance",
+         "2026"
         ]
        }
       ],
@@ -766,14 +777,15 @@
     },
     {
      "caseId": "organize-duplicates",
-     "correct": true,
+     "correct": false,
      "passed": [
-      "answers-rather-than-refusing",
+      "answers-rather-than-refusing"
+     ],
+     "failed": [
       "at_least"
      ],
-     "failed": [],
-     "seconds": 100.15,
-     "outputCharacters": 953,
+     "seconds": 31.39,
+     "outputCharacters": 826,
      "error": "",
      "document": {
       "requestId": "bench-organize-duplicates",
@@ -789,18 +801,7 @@
            "end": 83
           },
           "textSha256": "c005136cd59a2e65a6c62ebd55f7540143bcf25e18da5d712dbfdd71ed954c18"
-         }
-        ],
-        "fileId": "file-0",
-        "proposedFolder": "2026-06-30",
-        "proposedName": "report-final.pdf",
-        "reason": "Duplicate content span detected in report-final.pdf",
-        "tags": [
-         "duplicate-content"
-        ]
-       },
-       {
-        "evidence": [
+         },
          {
           "page": 1,
           "sourceRef": "case:bench-organize-duplicates:1",
@@ -812,12 +813,14 @@
           "textSha256": "f43dea92de28eb586b8fecdb417dccb2a4e5e559b3ec035bb55baaea56c0971a"
          }
         ],
-        "fileId": "file-1",
-        "proposedFolder": "2026-06-30",
-        "proposedName": "report-final-copy.pdf",
-        "reason": "Duplicate content span detected in report-final-copy.pdf",
+        "fileId": "report-final.pdf",
+        "proposedFolder": "archive",
+        "proposedName": "report-final-2026-06-30.pdf",
+        "reason": "Duplicate content detected: identical quarterly report text spanning 2026-06-30 period.",
         "tags": [
-         "duplicate-content"
+         "quarterly-report",
+         "2026",
+         "duplicate"
         ]
        }
       ],
@@ -833,8 +836,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 192.27,
-     "outputCharacters": 1778,
+     "seconds": 57.89,
+     "outputCharacters": 1672,
      "error": "",
      "document": {
       "requestId": "bench-organize-three-mixed",
@@ -853,14 +856,14 @@
          }
         ],
         "fileId": "cv-marta-oliveira.pdf",
-        "proposedFolder": "Finance",
-        "proposedName": "Curriculum vitae of Marta Oliveira, chief financial officer.",
-        "reason": "The document is a curriculum vitae of Marta Oliveira, who is the chief financial officer. This information is relevant for organizing files related to her role.",
+        "proposedFolder": "HR/Profiles",
+        "proposedName": "Marta_Oliveira_CV.pdf",
+        "reason": "File identified as a curriculum vitae for a chief financial officer, requiring storage in the HR profiles directory.",
         "tags": [
-         "finance",
+         "hr",
          "cv",
-         "chief-financial-officer",
-         "2026"
+         "finance",
+         "staff"
         ]
        },
        {
@@ -877,13 +880,14 @@
          }
         ],
         "fileId": "budget-2026.xlsx",
-        "proposedFolder": "Finance",
-        "proposedName": "Budget spreadsheet for 2026, total 420,000 EUR.",
-        "reason": "The document is a budget spreadsheet for the year 2026, which is relevant for organizing financial records.",
+        "proposedFolder": "Finance/Budgets",
+        "proposedName": "Budget_2026.xlsx",
+        "reason": "File is a budget spreadsheet for the year 2026, necessitating placement in the Finance budgets folder.",
         "tags": [
          "finance",
          "budget",
-         "2026"
+         "2026",
+         "spreadsheet"
         ]
        },
        {
@@ -900,12 +904,13 @@
          }
         ],
         "fileId": "notes.txt",
-        "proposedFolder": "2026",
-        "proposedName": "Meeting notes from 2026-05-04 kick-off.",
-        "reason": "The document contains meeting notes from May 4, 2026, which is relevant for organizing records related to that date.",
+        "proposedFolder": "Admin/MeetingNotes",
+        "proposedName": "Kickoff_2026-05-04.txt",
+        "reason": "File contains meeting notes from a specific kick-off date, requiring organization in the Admin meeting notes folder.",
         "tags": [
-         "2026",
-         "meeting-notes",
+         "admin",
+         "meetingnotes",
+         "kickoff",
          "2026-05-04"
         ]
        }
@@ -921,8 +926,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 138.69,
-     "outputCharacters": 962,
+     "seconds": 43.46,
+     "outputCharacters": 1234,
      "error": "",
      "document": {
       "requestId": "bench-organize-photos",
@@ -941,9 +946,9 @@
          }
         ],
         "fileId": "img-2026-08-01.jpg",
-        "proposedFolder": "office",
-        "proposedName": "img-2026-08-01.jpg",
-        "reason": "The photograph is of the office, taken on 2026-08-01.",
+        "proposedFolder": "2026/08/01",
+        "proposedName": "office.jpg",
+        "reason": "The file content explicitly identifies the subject as 'Photograph of the office' and the date as '2026-08-01', supporting a folder structure organized by date and a name reflecting the subject.",
         "tags": [
          "office",
          "2026-08-01"
@@ -963,9 +968,9 @@
          }
         ],
         "fileId": "img-2026-08-02.jpg",
-        "proposedFolder": "harbour",
-        "proposedName": "img-2026-08-02.jpg",
-        "reason": "The photograph is of the harbour, taken on 2026-08-02.",
+        "proposedFolder": "2026/08/02",
+        "proposedName": "harbour.jpg",
+        "reason": "The file content explicitly identifies the subject as 'Photograph of the harbour' and the date as '2026-08-02', supporting a folder structure organized by date and a name reflecting the subject.",
         "tags": [
          "harbour",
          "2026-08-02"
@@ -984,8 +989,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 127.57,
-     "outputCharacters": 1108,
+     "seconds": 35.61,
+     "outputCharacters": 1096,
      "error": "",
      "document": {
       "requestId": "bench-organize-code-and-docs",
@@ -1004,13 +1009,12 @@
          }
         ],
         "fileId": "readme.md",
-        "proposedFolder": "deployment",
-        "proposedName": "README.md",
-        "reason": "The file contains setup instructions for deployment scripts, indicating it should be placed in a deployment directory.",
+        "proposedFolder": "docs",
+        "proposedName": "deployment-setup.md",
+        "reason": "The file contains set-up instructions for deployment scripts, which is best organized in a dedicated documentation folder.",
         "tags": [
-         "setup",
-         "deployment",
-         "documentation"
+         "documentation",
+         "deployment"
         ]
        },
        {
@@ -1029,11 +1033,10 @@
         "fileId": "deploy.sh",
         "proposedFolder": "scripts",
         "proposedName": "deploy.sh",
-        "reason": "The file is a shell script for installing and reloading a service, suggesting it should be placed in a scripts directory.",
+        "reason": "The file is a shell script that installs the service and reloads the unit, fitting the criteria for a deployment script.",
         "tags": [
-         "shell",
-         "installation",
-         "service"
+         "script",
+         "deployment"
         ]
        }
       ],
@@ -1049,8 +1052,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 141.46,
-     "outputCharacters": 636,
+     "seconds": 23.39,
+     "outputCharacters": 704,
      "error": "",
      "document": {
       "requestId": "bench-organize-keeps-names",
@@ -1069,14 +1072,14 @@
          }
         ],
         "fileId": "acordo-nordwind-2026.pdf",
-        "proposedFolder": "2026",
-        "proposedName": "acordo-nordwind-2026.pdf",
-        "reason": "The document is titled 'Acordo de servico assinado em Lisboa a 2026-04-02' and contains the year 2026 in the filename and content.",
+        "proposedFolder": "Contracts",
+        "proposedName": "Acordo de servico assinado em Lisboa a 2026-04-02",
+        "reason": "The file content explicitly states the document is a service agreement signed in Lisbon on 2026-04-02, warranting organization under Contracts with the full descriptive name preserved.",
         "tags": [
-         "2026",
-         "lisboa",
-         "service-agreement",
-         "2026-04-02"
+         "legal",
+         "signed",
+         "lisbon",
+         "2026"
         ]
        }
       ],
@@ -1085,113 +1088,15 @@
     },
     {
      "caseId": "organize-four-files",
-     "correct": true,
-     "passed": [
-      "answers-rather-than-refusing",
-      "at_least"
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
      ],
-     "failed": [],
-     "seconds": 452.5,
-     "outputCharacters": 1994,
-     "error": "",
-     "document": {
-      "requestId": "bench-organize-four-files",
-      "suggestions": [
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:0",
-          "sourceSha256": "15244aba1c2b60b6f2e1c7e1f8fb7c3ad3339c0a0d2b795d0f3185116f3e0e65",
-          "span": {
-           "start": 0,
-           "end": 55
-          },
-          "textSha256": "15244aba1c2b60b6f2e1c7e1f8fb7c3ad3339c0a0d2b795d0f3185116f3e0e65"
-         }
-        ],
-        "fileId": "invoice-0417.pdf",
-        "proposedFolder": "invoices",
-        "proposedName": "2026-04-17_invoice_4235.00_EUR",
-        "reason": "Identified as an invoice with specific date and total amount",
-        "tags": [
-         "invoice",
-         "finance",
-         "2026-04-17"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:1",
-          "sourceSha256": "3e657f4d073f8406691920cf1093ad4a005d863e501965b18c30399314959433",
-          "span": {
-           "start": 0,
-           "end": 55
-          },
-          "textSha256": "3e657f4d073f8406691920cf1093ad4a005d863e501965b18c30399314959433"
-         }
-        ],
-        "fileId": "invoice-0418.pdf",
-        "proposedFolder": "invoices",
-        "proposedName": "2026-04-18_invoice_1120.00_EUR",
-        "reason": "Identified as an invoice with specific date and total amount",
-        "tags": [
-         "invoice",
-         "finance",
-         "2026-04-18"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:2",
-          "sourceSha256": "4e7aa96404e1b4d4af22b4c4f011d74f452a3dee43b6c8e4053f940b9c5bca5c",
-          "span": {
-           "start": 0,
-           "end": 58
-          },
-          "textSha256": "4e7aa96404e1b4d4af22b4c4f011d74f452a3dee43b6c8e4053f940b9c5bca5c"
-         }
-        ],
-        "fileId": "contract-nordwind.pdf",
-        "proposedFolder": "contracts",
-        "proposedName": "Nordwind_Service_Agreement_Signed_2026-04-02",
-        "reason": "Identified as a service agreement signed on 2026-04-02",
-        "tags": [
-         "contract",
-         "agreement",
-         "2026-04-02"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:3",
-          "sourceSha256": "6699c32c75346bda63bc7ea02fd5aa678ff838be2decfb47e7a6082f72f6bd11",
-          "span": {
-           "start": 0,
-           "end": 48
-          },
-          "textSha256": "6699c32c75346bda63bc7ea02fd5aa678ff838be2decfb47e7a6082f72f6bd11"
-         }
-        ],
-        "fileId": "photo-team.jpg",
-        "proposedFolder": "photos",
-        "proposedName": "Team_Photograph_Taken_2026-06-30",
-        "reason": "Identified as a team photograph taken on 2026-06-30",
-        "tags": [
-         "photo",
-         "team",
-         "2026-06-30"
-        ]
-       }
-      ],
-      "version": 1
-     }
+     "seconds": 74.04,
+     "outputCharacters": 2049,
+     "error": "output was not JSON",
+     "document": null
     },
     {
      "caseId": "organize-ambiguous-name",
@@ -1202,8 +1107,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 106.45,
-     "outputCharacters": 621,
+     "seconds": 25.9,
+     "outputCharacters": 680,
      "error": "",
      "document": {
       "requestId": "bench-organize-ambiguous-name",
@@ -1222,14 +1127,14 @@
          }
         ],
         "fileId": "scan001.pdf",
-        "proposedFolder": "Nordwind Lda",
-        "proposedName": "2026-04-02_Signed_Service_Agreement.pdf",
-        "reason": "The document is a scanned copy of the signed service agreement with Nordwind Lda, dated 2026-04-02.",
+        "proposedFolder": "Contracts/2026",
+        "proposedName": "Service_Agreement_Nordwind_Lda_2026-04-02.pdf",
+        "reason": "The file is a scanned copy of a signed service agreement with Nordwind Lda dated 2026-04-02, requiring organization by contract type, counterparty, and date.",
         "tags": [
-         "agreement",
+         "contract",
          "signed",
-         "nordwind-lda",
-         "2026-04-02"
+         "2026",
+         "nordwind-lda"
         ]
        }
       ],
@@ -1240,22 +1145,20 @@
   },
   {
    "workload": "selected-text-tools",
-   "modelId": "qwen3-4b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.13,
-   "accuracy": 0.9,
-   "ruleScore": 0.9722,
-   "correct": 9,
+   "layersOffloaded": 33,
+   "loadSeconds": 2.57,
+   "accuracy": 1.0,
+   "ruleScore": 1.0,
+   "correct": 10,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 46.33,
-   "charactersPerSecond": 10.2,
-   "failures": {
-    "no_foreign_script": 1
-   },
+   "secondsPerCase": 19.38,
+   "charactersPerSecond": 24.5,
+   "failures": {},
    "outcomes": [
     {
      "caseId": "text-summarize",
@@ -1266,8 +1169,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 47.5,
-     "outputCharacters": 559,
+     "seconds": 21.4,
+     "outputCharacters": 539,
      "error": "",
      "document": {
       "evidence": {
@@ -1281,7 +1184,7 @@
       },
       "operation": "summarize",
       "requestId": "bench-text-summarize",
-      "result": "The migration ran overnight and moved 1.4 million rows. Two tables failed on a unique constraint and were retried by hand at 06:20. Marta Oliveira signed the change off at 08:00, and the rollback plan was never needed.",
+      "result": "The migration moved 1.4 million rows overnight. Two tables failed on a unique constraint and were manually retried at 06:20. Marta Oliveira signed off at 08:00, and the rollback plan was not needed.",
       "tasks": [],
       "version": 1
      }
@@ -1295,8 +1198,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 43.1,
-     "outputCharacters": 504,
+     "seconds": 19.83,
+     "outputCharacters": 497,
      "error": "",
      "document": {
       "evidence": {
@@ -1310,7 +1213,7 @@
       },
       "operation": "summarize",
       "requestId": "bench-text-summarize-keeps-the-name",
-      "result": "Ana Ribeiro approved the budget of 42,000 EUR for the second phase, on condition that the supplier delivers the report by 2026-09-30.",
+      "result": "Ana Ribeiro approved a 42,000 EUR budget for the second phase, contingent on the supplier delivering the report by 2026-09-30.",
       "tasks": [],
       "version": 1
      }
@@ -1324,7 +1227,7 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 37.4,
+     "seconds": 18.15,
      "outputCharacters": 445,
      "error": "",
      "document": {
@@ -1353,8 +1256,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 35.71,
-     "outputCharacters": 407,
+     "seconds": 17.02,
+     "outputCharacters": 442,
      "error": "",
      "document": {
       "evidence": {
@@ -1368,7 +1271,7 @@
       },
       "operation": "rewrite",
       "requestId": "bench-text-rewrite",
-      "result": "we cant do the thing by friday because the guy with the key is out, sorry",
+      "result": "We won't be able to complete the task by Friday because the person with the key is unavailable. I apologize.",
       "tasks": [],
       "version": 1
      }
@@ -1382,7 +1285,7 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 47.35,
+     "seconds": 22.52,
      "outputCharacters": 645,
      "error": "",
      "document": {
@@ -1415,8 +1318,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 36.5,
-     "outputCharacters": 472,
+     "seconds": 17.77,
+     "outputCharacters": 461,
      "error": "",
      "document": {
       "evidence": {
@@ -1430,7 +1333,7 @@
       },
       "operation": "extract-tasks",
       "requestId": "bench-text-extract-single-task",
-      "result": "The only outstanding item is that Ana must approve the revised budget.",
+      "result": "The extracted task is: Ana must approve the revised budget.",
       "tasks": [
        "Ana must approve the revised budget."
       ],
@@ -1448,8 +1351,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 40.45,
-     "outputCharacters": 398,
+     "seconds": 18.69,
+     "outputCharacters": 404,
      "error": "",
      "document": {
       "evidence": {
@@ -1463,25 +1366,24 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew",
-      "result": "הפגישה תתקיים ב-2026-09-03 ב-14:00 ב Lisbon.",
+      "result": "הפגישה תתקיים ב-3 בספטמבר 2026 בשעה 14:00 בליסבון.",
       "tasks": [],
       "version": 1
      }
     },
     {
      "caseId": "text-translate-hebrew-names",
-     "correct": false,
+     "correct": true,
      "passed": [
       "answers-rather-than-refusing",
       "contains",
       "hebrew",
+      "no_foreign_script",
       "operation"
      ],
-     "failed": [
-      "no_foreign_script"
-     ],
-     "seconds": 61.6,
-     "outputCharacters": 425,
+     "failed": [],
+     "seconds": 18.21,
+     "outputCharacters": 424,
      "error": "",
      "document": {
       "evidence": {
@@ -1495,7 +1397,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew-names",
-      "result": "מארטאלוויירא פראודס א בюדזט דע 42,000 אירע פור ה סאינד פאשע",
+      "result": "מארטה אוליביירה אישרה תקציב של 42,000 אירו עבור השלב השני.",
       "tasks": [],
       "version": 1
      }
@@ -1511,8 +1413,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 48.42,
-     "outputCharacters": 476,
+     "seconds": 21.81,
+     "outputCharacters": 479,
      "error": "",
      "document": {
       "evidence": {
@@ -1526,7 +1428,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew-paragraph",
-      "result": "המוכר חייב להגיש את ה báo ב-30 ספטמבר 2026. אם ה báo מאוחר, יתאים 3.5 אחוז לשנה ל סכום ה outstanding.",
+      "result": "הספק חייב להגיש את הדוח עד 30 בספטמבר 2026. אם הדוח יתעכב, יחול ריבית של 3.5 אחוזים לשנה על הסכום החייב.",
       "tasks": [],
       "version": 1
      }
@@ -1540,8 +1442,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 65.27,
-     "outputCharacters": 402,
+     "seconds": 18.42,
+     "outputCharacters": 409,
      "error": "",
      "document": {
       "evidence": {
@@ -1555,7 +1457,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-portuguese",
-      "result": "O encontro ocorrerá no domingo às 14:00.",
+      "result": "A reunião terá lugar na segunda-feira às 14:00.",
       "tasks": [],
       "version": 1
      }
@@ -1564,19 +1466,19 @@
   },
   {
    "workload": "ask-selected-files",
-   "modelId": "qwen3-8b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-deepseek-v4-flash-q4-k-m",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.61,
+   "layersOffloaded": 33,
+   "loadSeconds": 12.53,
    "accuracy": 0.9,
    "ruleScore": 0.9667,
    "correct": 9,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 82.69,
-   "charactersPerSecond": 4.6,
+   "secondsPerCase": 19.68,
+   "charactersPerSecond": 22.1,
    "failures": {
     "no_invented_numbers": 1
    },
@@ -1590,11 +1492,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 79.76,
-     "outputCharacters": 336,
+     "seconds": 16.91,
+     "outputCharacters": 377,
      "error": "",
      "document": {
-      "answer": "4,235.00 EUR",
+      "answer": "The total amount due on this invoice is 4,235.00 EUR.",
       "citations": [
        {
         "page": 1,
@@ -1620,11 +1522,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 96.04,
-     "outputCharacters": 453,
+     "seconds": 20.04,
+     "outputCharacters": 423,
      "error": "",
      "document": {
-      "answer": "The agreement was signed by Marta Oliveira in the role of Chief Financial Officer for the client, and by Nordwind Lda. as the supplier.",
+      "answer": "Marta Oliveira signed as Chief Financial Officer for the client, and Nordwind Lda signed as the supplier.",
       "citations": [
        {
         "page": 1,
@@ -1650,7 +1552,7 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 87.24,
+     "seconds": 18.24,
      "outputCharacters": 354,
      "error": "",
      "document": {
@@ -1680,11 +1582,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 97.76,
-     "outputCharacters": 368,
+     "seconds": 18.37,
+     "outputCharacters": 388,
      "error": "",
      "document": {
-      "answer": "The warranty is 24 months from delivery.",
+      "answer": "The equipment carries a warranty of 24 months from delivery.",
       "citations": [
        {
         "page": 1,
@@ -1710,11 +1612,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 109.33,
-     "outputCharacters": 390,
+     "seconds": 20.48,
+     "outputCharacters": 422,
      "error": "",
      "document": {
-      "answer": "The report ending on 2026-06-30 is more recent, carrying that date.",
+      "answer": "The more recent report is the one with period ending 2026-06-30, which carries the date 2026-06-30.",
       "citations": [
        {
         "page": 1,
@@ -1740,11 +1642,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 81.14,
-     "outputCharacters": 376,
+     "seconds": 17.64,
+     "outputCharacters": 371,
      "error": "",
      "document": {
-      "answer": "The interest rate for late payment is 3.5 percent per year.",
+      "answer": "Late payment accrues interest at 3.5 percent per year.",
       "citations": [
        {
         "page": 1,
@@ -1771,11 +1673,11 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 68.32,
-     "outputCharacters": 356,
+     "seconds": 17.3,
+     "outputCharacters": 355,
      "error": "",
      "document": {
-      "answer": "Ana Ribeiro, programme director.",
+      "answer": "Ana Ribeiro, programme director",
       "citations": [
        {
         "page": 1,
@@ -1801,7 +1703,7 @@
       "cites_supplied_sources"
      ],
      "failed": [],
-     "seconds": 71.02,
+     "seconds": 18.79,
      "outputCharacters": 407,
      "error": "",
      "document": {
@@ -1832,19 +1734,29 @@
      "failed": [
       "no_invented_numbers"
      ],
-     "seconds": 72.11,
-     "outputCharacters": 399,
+     "seconds": 30.23,
+     "outputCharacters": 799,
      "error": "",
      "document": {
-      "answer": "The supplier's VAT identification number is not provided in the given documents.",
+      "answer": "The provided sources do not contain the supplier's VAT identification number. Source 1 asks for the number, and Source 2 provides invoice details including supplier name but no VAT number.",
       "citations": [
+       {
+        "page": 1,
+        "sourceRef": "case:bench-ask-absent-fact:0",
+        "sourceSha256": "59a8410112ca11b48b94f9dba7d3efdbcb9019643ab400d87cee9b8af0cb4b0e",
+        "span": {
+         "end": 49,
+         "start": 0
+        },
+        "textSha256": "59a8410112ca11b48b94f9dba7d3efdbcb9019643ab400d87cee9b8af0cb4b0e"
+       },
        {
         "page": 1,
         "sourceRef": "case:bench-ask-absent-fact:1",
         "sourceSha256": "7b6d523593dfbe552d29498a6a7b0e0900e2882ae89037f4fb7704374aae3b2a",
         "span": {
-         "start": 0,
-         "end": 64
+         "end": 64,
+         "start": 0
         },
         "textSha256": "7b6d523593dfbe552d29498a6a7b0e0900e2882ae89037f4fb7704374aae3b2a"
        }
@@ -1861,11 +1773,11 @@
       "no_invented_names"
      ],
      "failed": [],
-     "seconds": 64.19,
-     "outputCharacters": 369,
+     "seconds": 18.84,
+     "outputCharacters": 458,
      "error": "",
      "document": {
-      "answer": "The signature was witnessed by Marta Oliveira.",
+      "answer": "The signature was witnessed by no one; the document only states it was signed in Lisbon on 2026-04-02 by Marta Oliveira for the client.",
       "citations": [
        {
         "page": 1,
@@ -1886,19 +1798,19 @@
   },
   {
    "workload": "event-extraction",
-   "modelId": "qwen3-8b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-deepseek-v4-flash-q4-k-m",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.61,
+   "layersOffloaded": 33,
+   "loadSeconds": 12.53,
    "accuracy": 0.3,
    "ruleScore": 0.1364,
    "correct": 3,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 36.64,
-   "charactersPerSecond": 7.9,
+   "secondsPerCase": 8.18,
+   "charactersPerSecond": 39.9,
    "failures": {
     "answers-rather-than-refusing": 7,
     "at_least": 7,
@@ -1914,13 +1826,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 34.38,
-     "outputCharacters": 289,
+     "seconds": 8.17,
+     "outputCharacters": 312,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -1937,13 +1849,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 31.9,
-     "outputCharacters": 287,
+     "seconds": 7.9,
+     "outputCharacters": 307,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with an explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -1959,13 +1871,13 @@
       "answers-rather-than-refusing",
       "at_least"
      ],
-     "seconds": 47.05,
-     "outputCharacters": 290,
+     "seconds": 8.14,
+     "outputCharacters": 313,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -1982,13 +1894,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 30.51,
-     "outputCharacters": 284,
+     "seconds": 7.96,
+     "outputCharacters": 307,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2004,13 +1916,13 @@
       "answers-rather-than-refusing",
       "at_least"
      ],
-     "seconds": 64.38,
-     "outputCharacters": 279,
+     "seconds": 8.15,
+     "outputCharacters": 302,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2027,13 +1939,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 31.75,
-     "outputCharacters": 284,
+     "seconds": 8.27,
+     "outputCharacters": 307,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2050,13 +1962,13 @@
       "at_least",
       "event_starts"
      ],
-     "seconds": 30.93,
-     "outputCharacters": 285,
+     "seconds": 8.1,
+     "outputCharacters": 308,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2071,13 +1983,13 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 30.97,
-     "outputCharacters": 289,
+     "seconds": 7.69,
+     "outputCharacters": 314,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with an explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time found in the provided evidence fragment.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2092,8 +2004,8 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 33.38,
-     "outputCharacters": 297,
+     "seconds": 7.72,
+     "outputCharacters": 313,
      "error": "",
      "document": {
       "code": "no-event-supported",
@@ -2113,13 +2025,13 @@
       "refuses"
      ],
      "failed": [],
-     "seconds": 31.13,
-     "outputCharacters": 295,
+     "seconds": 9.7,
+     "outputCharacters": 477,
      "error": "",
      "document": {
       "code": "no-event-supported",
       "confirmationState": "refused",
-      "detail": "No named activity with an explicit date and time found in the provided evidence.",
+      "detail": "No named activity with an explicit date and time was found in the provided evidence. The text 'next Tuesday afternoon' is a relative date without a specific calendar date or time, which does not meet the requirement for an explicit date and time.",
       "duplicatePolicy": "keep-first-title-start-location",
       "events": [],
       "outcome": "refused",
@@ -2131,21 +2043,22 @@
   },
   {
    "workload": "file-organizer",
-   "modelId": "qwen3-8b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-deepseek-v4-flash-q4-k-m",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.61,
+   "layersOffloaded": 33,
+   "loadSeconds": 12.53,
    "accuracy": 0.8,
-   "ruleScore": 0.9259,
+   "ruleScore": 0.9231,
    "correct": 8,
    "cases": 10,
-   "errors": 0,
-   "secondsPerCase": 193.85,
-   "charactersPerSecond": 6.5,
+   "errors": 1,
+   "secondsPerCase": 36.95,
+   "charactersPerSecond": 28.7,
    "failures": {
-    "contains": 2
+    "at_least": 1,
+    "produced-a-usable-document": 1
    },
    "outcomes": [
     {
@@ -2157,8 +2070,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 163.68,
-     "outputCharacters": 1121,
+     "seconds": 39.67,
+     "outputCharacters": 1097,
      "error": "",
      "document": {
       "requestId": "bench-organize-two-invoices",
@@ -2177,14 +2090,13 @@
          }
         ],
         "fileId": "invoice-0417.pdf",
-        "proposedFolder": "Invoices/2026",
-        "proposedName": "2026-0417 - Nordwind Lda - 4235.00 EUR.pdf",
-        "reason": "Invoice date 2026-0417, vendor Nordwind Lda, amount 4235.00 EUR, due 2026-09-30.",
+        "proposedFolder": "invoices/2026-09",
+        "proposedName": "invoice-0417.pdf",
+        "reason": "Invoice from Nordwind Lda with due date 2026-09-30, so it belongs in the September 2026 folder.",
         "tags": [
          "invoice",
-         "2026",
-         "nordwind-lda",
-         "eur"
+         "2026-09",
+         "nordwind-lda"
         ]
        },
        {
@@ -2201,14 +2113,13 @@
          }
         ],
         "fileId": "invoice-0418.pdf",
-        "proposedFolder": "Invoices/2026",
-        "proposedName": "2026-0418 - Nordwind Lda - 1120.00 EUR.pdf",
-        "reason": "Invoice date 2026-0418, vendor Nordwind Lda, amount 1120.00 EUR, due 2026-10-15.",
+        "proposedFolder": "invoices/2026-10",
+        "proposedName": "invoice-0418.pdf",
+        "reason": "Invoice from Nordwind Lda with due date 2026-10-15, so it belongs in the October 2026 folder.",
         "tags": [
          "invoice",
-         "2026",
-         "nordwind-lda",
-         "eur"
+         "2026-10",
+         "nordwind-lda"
         ]
        }
       ],
@@ -2217,16 +2128,15 @@
     },
     {
      "caseId": "organize-mixed-kinds",
-     "correct": false,
+     "correct": true,
      "passed": [
       "answers-rather-than-refusing",
+      "contains",
       "at_least"
      ],
-     "failed": [
-      "contains"
-     ],
-     "seconds": 174.81,
-     "outputCharacters": 1164,
+     "failed": [],
+     "seconds": 36.6,
+     "outputCharacters": 1013,
      "error": "",
      "document": {
       "requestId": "bench-organize-mixed-kinds",
@@ -2244,14 +2154,15 @@
           "textSha256": "be1f3aac7d25bebd7c8c89bc20f104b6be89e2302587c0d3dd3c91e644411b62"
          }
         ],
-        "fileId": "be1f3aac7d25bebd7c8c89bc20f104b6be89e2302587c0d3dd3c91e644411b62",
-        "proposedFolder": "Travel Photos",
-        "proposedName": "Lisbon 2026.jpg",
-        "reason": "Contains metadata indicating the location (Lisbon) and date (August 2026).",
+        "fileId": "holiday-lisbon.jpg",
+        "proposedFolder": "photos/2026/08",
+        "proposedName": "holiday-lisbon.jpg",
+        "reason": "Photograph taken in Lisbon, August 2026.",
         "tags": [
-         "image",
+         "photo",
          "travel",
-         "photography"
+         "lisbon",
+         "2026"
         ]
        },
        {
@@ -2267,14 +2178,15 @@
           "textSha256": "d6351db95460839eba0536e346c5405e7e458e705d3d57eb3eff38dd2d552271"
          }
         ],
-        "fileId": "d6351db95460839eba0536e346c5405e7e458e705d3d57eb3eff38dd2d552271",
-        "proposedFolder": "Contracts",
-        "proposedName": "Nordwind Service Agreement 2026.pdf",
-        "reason": "Contains metadata indicating the document type (Service Agreement) and date (2026-04-02).",
+        "fileId": "contract-nordwind.pdf",
+        "proposedFolder": "contracts/2026/04",
+        "proposedName": "contract-nordwind.pdf",
+        "reason": "SERVICE AGREEMENT with Nordwind Lda signed 2026-04-02.",
         "tags": [
-         "document",
          "contract",
-         "legal"
+         "legal",
+         "nordwind",
+         "2026"
         ]
        }
       ],
@@ -2290,8 +2202,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 89.91,
-     "outputCharacters": 677,
+     "seconds": 21.47,
+     "outputCharacters": 610,
      "error": "",
      "document": {
       "requestId": "bench-organize-single-file",
@@ -2310,13 +2222,14 @@
          }
         ],
         "fileId": "quarterly-report-q2.pdf",
-        "proposedFolder": "Reports",
-        "proposedName": "Q2_2026_Quarterly_Report.pdf",
-        "reason": "The file contains a quarterly report for Q2 2026. The proposed name includes the quarter and year for clarity, and the folder 'Reports' is appropriate for organizing such documents.",
+        "proposedFolder": "reports/2026/Q2",
+        "proposedName": "quarterly-report-q2.pdf",
+        "reason": "The file is a quarterly report for Q2 2026, ending 2026-06-30, so it should be organized under reports/2026/Q2.",
         "tags": [
-         "report",
          "quarterly",
-         "financial"
+         "report",
+         "2026",
+         "q2"
         ]
        }
       ],
@@ -2325,14 +2238,15 @@
     },
     {
      "caseId": "organize-duplicates",
-     "correct": true,
+     "correct": false,
      "passed": [
-      "answers-rather-than-refusing",
+      "answers-rather-than-refusing"
+     ],
+     "failed": [
       "at_least"
      ],
-     "failed": [],
-     "seconds": 159.82,
-     "outputCharacters": 1277,
+     "seconds": 30.71,
+     "outputCharacters": 838,
      "error": "",
      "document": {
       "requestId": "bench-organize-duplicates",
@@ -2348,19 +2262,7 @@
            "end": 83
           },
           "textSha256": "c005136cd59a2e65a6c62ebd55f7540143bcf25e18da5d712dbfdd71ed954c18"
-         }
-        ],
-        "fileId": "c005136cd59a2e65a6c62ebd55f7540143bcf25e18da5d712dbfdd71ed954c18",
-        "proposedFolder": "Quarterly Reports",
-        "proposedName": "Quarterly Report 2026-06-30",
-        "reason": "The file contains a quarterly report for the period ending June 30, 2026, which is a common naming convention for such documents.",
-        "tags": [
-         "report",
-         "quarterly"
-        ]
-       },
-       {
-        "evidence": [
+         },
          {
           "page": 1,
           "sourceRef": "case:bench-organize-duplicates:1",
@@ -2372,14 +2274,14 @@
           "textSha256": "f43dea92de28eb586b8fecdb417dccb2a4e5e559b3ec035bb55baaea56c0971a"
          }
         ],
-        "fileId": "f43dea92de28eb586b8fecdb417dccb2a4e5e559b3ec035bb55baaea56c0971a",
-        "proposedFolder": "Quarterly Reports",
-        "proposedName": "Quarterly Report 2026-06-30 Copy",
-        "reason": "The file appears to be a duplicate of the previous quarterly report, as indicated by the similar content and the 'copy' in the filename.",
+        "fileId": "report-final.pdf",
+        "proposedFolder": "reports/2026-Q2",
+        "proposedName": "report-final.pdf",
+        "reason": "Identical content spans indicate duplicate quarterly reports; consolidate to single canonical file.",
         "tags": [
-         "report",
-         "quarterly",
-         "duplicate"
+         "duplicate",
+         "quarterly-report",
+         "2026-q2"
         ]
        }
       ],
@@ -2395,8 +2297,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 282.76,
-     "outputCharacters": 1965,
+     "seconds": 52.77,
+     "outputCharacters": 1521,
      "error": "",
      "document": {
       "requestId": "bench-organize-three-mixed",
@@ -2414,14 +2316,13 @@
           "textSha256": "118e14600f77022cb27872e0b69892e142f12f8cf1f08b7a23e8375149861a3f"
          }
         ],
-        "fileId": "118e14600f77022cb27872e0b69892e142f12f8cf1f08b7a23e8375149861a3f",
-        "proposedFolder": "Finance",
+        "fileId": "cv-marta-oliveira.pdf",
+        "proposedFolder": "01-personnel",
         "proposedName": "cv-marta-oliveira.pdf",
-        "reason": "The file is a curriculum vitae for Marta Oliveira, who is identified as the Chief Financial Officer. This document is relevant to the finance department and should be organized under the 'Finance' folder.",
+        "reason": "The file is a CV for Marta Oliveira, chief financial officer, which belongs in a personnel folder.",
         "tags": [
-         "finance",
-         "cfo",
-         "curriculum-vitae"
+         "personnel",
+         "cv"
         ]
        },
        {
@@ -2437,12 +2338,11 @@
           "textSha256": "99ed550d0cdc4243576c1505355292b44dfc3d3bd32e905df2213476e1da380b"
          }
         ],
-        "fileId": "99ed550d0cdc4243576c1505355292b44dfc3d3bd32e905df2213476e1da380b",
-        "proposedFolder": "Finance",
+        "fileId": "budget-2026.xlsx",
+        "proposedFolder": "02-budgets",
         "proposedName": "budget-2026.xlsx",
-        "reason": "The file contains a budget spreadsheet for 2026 with a total of 420,000 EUR. This financial document should be placed in the 'Finance' folder.",
+        "reason": "The file is a budget spreadsheet for 2026, which belongs in a budgets folder.",
         "tags": [
-         "finance",
          "budget",
          "2026"
         ]
@@ -2460,14 +2360,13 @@
           "textSha256": "c4bfa0ac0126063172220d4fb280e78450c9ef89c4a4e0da9ac19d5408d111af"
          }
         ],
-        "fileId": "c4bfa0ac0126063172220d4fb280e78450c9ef89c4a4e0da9ac19d5408d111af",
-        "proposedFolder": "Finance",
-        "proposedName": "notes-2026-05-04.txt",
-        "reason": "The file contains meeting notes from the 2026-05-04 kick-off, which is related to the project's financial aspects. These notes should be organized under the 'Finance' folder.",
+        "fileId": "notes.txt",
+        "proposedFolder": "03-meetings",
+        "proposedName": "notes.txt",
+        "reason": "The file contains meeting notes from a 2026-05-04 kick-off, which belongs in a meetings folder.",
         "tags": [
-         "finance",
-         "meeting-notes",
-         "2026-05-04"
+         "meeting",
+         "notes"
         ]
        }
       ],
@@ -2482,8 +2381,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 284.51,
-     "outputCharacters": 1210,
+     "seconds": 40.71,
+     "outputCharacters": 1120,
      "error": "",
      "document": {
       "requestId": "bench-organize-photos",
@@ -2502,11 +2401,10 @@
          }
         ],
         "fileId": "img-2026-08-01.jpg",
-        "proposedFolder": "2026-08",
-        "proposedName": "office-2026-08-01.jpg",
-        "reason": "The content span indicates the photograph was taken on 2026-08-01 and depicts the office, suggesting a folder by date and a name incorporating the location and date.",
+        "proposedFolder": "2026/08/01",
+        "proposedName": "office.jpg",
+        "reason": "The file is a photograph of the office taken on 2026-08-01, so it should be organized into a folder by date and a subfolder by location.",
         "tags": [
-         "photo",
          "office",
          "2026-08-01"
         ]
@@ -2525,11 +2423,10 @@
          }
         ],
         "fileId": "img-2026-08-02.jpg",
-        "proposedFolder": "2026-08",
-        "proposedName": "harbour-2026-08-02.jpg",
-        "reason": "The content span indicates the photograph was taken on 2026-08-02 and depicts the harbour, suggesting a folder by date and a name incorporating the location and date.",
+        "proposedFolder": "2026/08/02",
+        "proposedName": "harbour.jpg",
+        "reason": "The file is a photograph of the harbour taken on 2026-08-02, so it should be organized into a folder by date and a subfolder by location.",
         "tags": [
-         "photo",
          "harbour",
          "2026-08-02"
         ]
@@ -2540,16 +2437,15 @@
     },
     {
      "caseId": "organize-code-and-docs",
-     "correct": false,
+     "correct": true,
      "passed": [
       "answers-rather-than-refusing",
+      "contains",
       "at_least"
      ],
-     "failed": [
-      "contains"
-     ],
-     "seconds": 165.5,
-     "outputCharacters": 1190,
+     "failed": [],
+     "seconds": 32.21,
+     "outputCharacters": 1041,
      "error": "",
      "document": {
       "requestId": "bench-organize-code-and-docs",
@@ -2567,12 +2463,13 @@
           "textSha256": "a17a5634a3507ba9e3e0153e423d4745600a59d0206a35a7ec185b6dc7bc7d4e"
          }
         ],
-        "fileId": "a17a5634a3507ba9e3e0153e423d4745600a59d0206a35a7ec185b6dc7bc7d4e",
-        "proposedFolder": "Documentation",
-        "proposedName": "setup_instructions.md",
-        "reason": "The file contains setup instructions for deployment scripts, which should be organized under a Documentation folder.",
+        "fileId": "readme.md",
+        "proposedFolder": "docs",
+        "proposedName": "readme.md",
+        "reason": "The file contains set-up instructions for deployment scripts, which is documentation content.",
         "tags": [
-         "documentation"
+         "documentation",
+         "deployment"
         ]
        },
        {
@@ -2588,12 +2485,13 @@
           "textSha256": "0a0ef4d5b1147d29715047e579eee6b6d889655cea33848fada06fb930ceb26d"
          }
         ],
-        "fileId": "0a0ef4d5b1147d29715047e579eee6b6d889655cea33848fada06fb930ceb26d",
-        "proposedFolder": "Scripts",
-        "proposedName": "deploy_service.sh",
-        "reason": "The file is a shell script that installs a service and reloads the unit, which should be placed in a Scripts folder.",
+        "fileId": "deploy.sh",
+        "proposedFolder": "scripts",
+        "proposedName": "deploy.sh",
+        "reason": "The file is a shell script that installs the service and reloads the unit, which is a deployment script.",
         "tags": [
-         "scripts"
+         "script",
+         "deployment"
         ]
        }
       ],
@@ -2609,8 +2507,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 159.06,
-     "outputCharacters": 655,
+     "seconds": 22.29,
+     "outputCharacters": 671,
      "error": "",
      "document": {
       "requestId": "bench-organize-keeps-names",
@@ -2629,13 +2527,13 @@
          }
         ],
         "fileId": "acordo-nordwind-2026.pdf",
-        "proposedFolder": "Contracts",
-        "proposedName": "Acordo de Serviço Nordwind - 2026-04-02",
-        "reason": "The document is a service agreement signed in Lisbon on 2026-04-02, which should be categorized under Contracts with the date included in the name.",
+        "proposedFolder": "agreements",
+        "proposedName": "acordo-nordwind-2026.pdf",
+        "reason": "The file is a signed service agreement dated 2026-04-02 in Lisbon, and the filename already reflects the document type and date, so it should be kept as-is in an agreements folder.",
         "tags": [
-         "contract",
          "agreement",
-         "legal"
+         "signed",
+         "2026"
         ]
        }
       ],
@@ -2644,105 +2542,15 @@
     },
     {
      "caseId": "organize-four-files",
-     "correct": true,
-     "passed": [
-      "answers-rather-than-refusing",
-      "at_least"
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
      ],
-     "failed": [],
-     "seconds": 306.72,
-     "outputCharacters": 1933,
-     "error": "",
-     "document": {
-      "requestId": "bench-organize-four-files",
-      "suggestions": [
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:0",
-          "sourceSha256": "15244aba1c2b60b6f2e1c7e1f8fb7c3ad3339c0a0d2b795d0f3185116f3e0e65",
-          "span": {
-           "start": 0,
-           "end": 55
-          },
-          "textSha256": "15244aba1c2b60b6f2e1c7e1f8fb7c3ad3339c0a0d2b795d0f3185116f3e0e65"
-         }
-        ],
-        "fileId": "case:bench-organize-four-files:0",
-        "proposedFolder": "Invoices",
-        "proposedName": "invoice-2026-0417.pdf",
-        "reason": "Contains invoice details for 2026-0417 with total amount specified.",
-        "tags": [
-         "invoice"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:1",
-          "sourceSha256": "3e657f4d073f8406691920cf1093ad4a005d863e501965b18c30399314959433",
-          "span": {
-           "start": 0,
-           "end": 55
-          },
-          "textSha256": "3e657f4d073f8406691920cf1093ad4a005d863e501965b18c30399314959433"
-         }
-        ],
-        "fileId": "case:bench-organize-four-files:1",
-        "proposedFolder": "Invoices",
-        "proposedName": "invoice-2026-0418.pdf",
-        "reason": "Contains invoice details for 2026-0418 with total amount specified.",
-        "tags": [
-         "invoice"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:2",
-          "sourceSha256": "4e7aa96404e1b4d4af22b4c4f011d74f452a3dee43b6c8e4053f940b9c5bca5c",
-          "span": {
-           "start": 0,
-           "end": 58
-          },
-          "textSha256": "4e7aa96404e1b4d4af22b4c4f011d74f452a3dee43b6c8e4053f940b9c5bca5c"
-         }
-        ],
-        "fileId": "case:bench-organize-four-files:2",
-        "proposedFolder": "Contracts",
-        "proposedName": "contract-nordwind-2026-04-02.pdf",
-        "reason": "Contains a service agreement signed on 2026-04-02.",
-        "tags": [
-         "contract"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-four-files:3",
-          "sourceSha256": "6699c32c75346bda63bc7ea02fd5aa678ff838be2decfb47e7a6082f72f6bd11",
-          "span": {
-           "start": 0,
-           "end": 48
-          },
-          "textSha256": "6699c32c75346bda63bc7ea02fd5aa678ff838be2decfb47e7a6082f72f6bd11"
-         }
-        ],
-        "fileId": "case:bench-organize-four-files:3",
-        "proposedFolder": "Photos",
-        "proposedName": "photo-team-2026-06-30.jpg",
-        "reason": "Contains a team photograph taken on 2026-06-30.",
-        "tags": [
-         "photo"
-        ]
-       }
-      ],
-      "version": 1
-     }
+     "seconds": 68.15,
+     "outputCharacters": 1935,
+     "error": "output was not JSON",
+     "document": null
     },
     {
      "caseId": "organize-ambiguous-name",
@@ -2753,8 +2561,8 @@
       "at_least"
      ],
      "failed": [],
-     "seconds": 151.78,
-     "outputCharacters": 1321,
+     "seconds": 24.88,
+     "outputCharacters": 761,
      "error": "",
      "document": {
       "requestId": "bench-organize-ambiguous-name",
@@ -2773,38 +2581,14 @@
          }
         ],
         "fileId": "scan001.pdf",
-        "proposedFolder": "Service Agreements",
-        "proposedName": "Nordwind Lda - 2026-04-02 Service Agreement",
-        "reason": "The file contains a scanned copy of a signed service agreement with Nordwind Lda dated 2026-04-02. The proposed name includes the vendor name, date, and document type for clarity.",
+        "proposedFolder": "contracts/2026-04-02",
+        "proposedName": "Nordwind_Lda_Service_Agreement_2026-04-02.pdf",
+        "reason": "The file is a scanned copy of a signed service agreement with Nordwind Lda, dated 2026-04-02, as stated in the metadata. It should be organized under contracts with the date and counterparty in the filename for easy retrieval.",
         "tags": [
-         "agreement",
-         "service",
+         "contract",
          "signed",
-         "scanned"
-        ]
-       },
-       {
-        "evidence": [
-         {
-          "page": 1,
-          "sourceRef": "case:bench-organize-ambiguous-name:0",
-          "sourceSha256": "f8ec7ef06020f8367227ba6b1e52cbff985186631f365725bbc12b1b8a9c5b94",
-          "span": {
-           "start": 0,
-           "end": 93
-          },
-          "textSha256": "f8ec7ef06020f8367227ba6b1e52cbff985186631f365725bbc12b1b8a9c5b94"
-         }
-        ],
-        "fileId": "scan001.pdf",
-        "proposedFolder": "Scanned Documents",
-        "proposedName": "Service Agreement with Nordwind Lda - 2026-04-02",
-        "reason": "The file is a scanned copy of a service agreement with Nordwind Lda dated 2026-04-02. The proposed name includes the vendor name and date to reflect the content.",
-        "tags": [
-         "scanned",
-         "agreement",
-         "service",
-         "document"
+         "2026-04-02",
+         "nordwind-lda"
         ]
        }
       ],
@@ -2815,22 +2599,20 @@
   },
   {
    "workload": "selected-text-tools",
-   "modelId": "qwen3-8b-q4-k-m",
-   "device": "AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)",
+   "modelId": "qwen3-5-9b-deepseek-v4-flash-q4-k-m",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
    "contextTokens": 32768,
    "cache": "q8_0",
-   "layersOffloaded": 37,
-   "loadSeconds": 1.61,
-   "accuracy": 0.9,
-   "ruleScore": 0.9722,
-   "correct": 9,
+   "layersOffloaded": 33,
+   "loadSeconds": 12.53,
+   "accuracy": 1.0,
+   "ruleScore": 1.0,
+   "correct": 10,
    "cases": 10,
    "errors": 0,
-   "secondsPerCase": 108.21,
-   "charactersPerSecond": 4.4,
-   "failures": {
-    "no_foreign_script": 1
-   },
+   "secondsPerCase": 18.65,
+   "charactersPerSecond": 25.4,
+   "failures": {},
    "outcomes": [
     {
      "caseId": "text-summarize",
@@ -2841,8 +2623,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 139.12,
-     "outputCharacters": 542,
+     "seconds": 20.0,
+     "outputCharacters": 557,
      "error": "",
      "document": {
       "evidence": {
@@ -2856,7 +2638,7 @@
       },
       "operation": "summarize",
       "requestId": "bench-text-summarize",
-      "result": "A migration moved 1.4 million rows overnight, with two tables failing on unique constraints and being manually retried at 06:20. Marta Oliveira approved the change at 08:00, and no rollback was needed.",
+      "result": "The migration ran overnight, moving 1.4 million rows. Two tables failed on a unique constraint and were retried by hand at 06:20. Marta Oliveira signed the change off at 08:00, and the rollback plan was never needed.",
       "tasks": [],
       "version": 1
      }
@@ -2870,8 +2652,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 185.05,
-     "outputCharacters": 505,
+     "seconds": 19.15,
+     "outputCharacters": 497,
      "error": "",
      "document": {
       "evidence": {
@@ -2885,7 +2667,7 @@
       },
       "operation": "summarize",
       "requestId": "bench-text-summarize-keeps-the-name",
-      "result": "Ana Ribeiro approved a 42,000 EUR budget for the second phase, contingent on the supplier delivering the report by September 30, 2026.",
+      "result": "Ana Ribeiro approved a 42,000 EUR budget for the second phase, contingent on the supplier delivering the report by 2026-09-30.",
       "tasks": [],
       "version": 1
      }
@@ -2899,7 +2681,7 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 72.81,
+     "seconds": 17.0,
      "outputCharacters": 445,
      "error": "",
      "document": {
@@ -2928,8 +2710,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 69.36,
-     "outputCharacters": 408,
+     "seconds": 16.57,
+     "outputCharacters": 409,
      "error": "",
      "document": {
       "evidence": {
@@ -2943,7 +2725,7 @@
       },
       "operation": "rewrite",
       "requestId": "bench-text-rewrite",
-      "result": "we can't do the thing by Friday because the guy with the key is out, sorry",
+      "result": "we can't do the thing by Friday because the guy with the key is out. Sorry.",
       "tasks": [],
       "version": 1
      }
@@ -2957,8 +2739,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 100.17,
-     "outputCharacters": 652,
+     "seconds": 21.59,
+     "outputCharacters": 645,
      "error": "",
      "document": {
       "evidence": {
@@ -2972,7 +2754,7 @@
       },
       "operation": "extract-tasks",
       "requestId": "bench-text-extract-tasks",
-      "result": "Tasks: Rui will send the invoice on Monday. Marta has to review the contract before the board meeting. Somebody needs to book the room for 2026-09-03.",
+      "result": "Rui will send the invoice on Monday. Marta has to review the contract before the board meeting. Somebody needs to book the room for 2026-09-03.",
       "tasks": [
        "Rui will send the invoice on Monday.",
        "Marta has to review the contract before the board meeting.",
@@ -2990,7 +2772,7 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 71.42,
+     "seconds": 16.82,
      "outputCharacters": 472,
      "error": "",
      "document": {
@@ -3023,8 +2805,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 116.59,
-     "outputCharacters": 397,
+     "seconds": 18.2,
+     "outputCharacters": 400,
      "error": "",
      "document": {
       "evidence": {
@@ -3038,7 +2820,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew",
-      "result": "המפגש ייערך ב-2026-09-03 בשעה 14:00 בליסון.",
+      "result": "הפגישה תתקיים ב-2026-09-03 בשעה 14:00 בליסבון.",
       "tasks": [],
       "version": 1
      }
@@ -3054,7 +2836,7 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 91.61,
+     "seconds": 18.63,
      "outputCharacters": 424,
      "error": "",
      "document": {
@@ -3069,25 +2851,24 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew-names",
-      "result": "מארטה אוליבריה אישרה התקציב של 42,000 אירופי עבור שלב שני.",
+      "result": "מארטה אוליביירה אישרה תקציב של 42,000 אירו עבור השלב השני.",
       "tasks": [],
       "version": 1
      }
     },
     {
      "caseId": "text-translate-hebrew-paragraph",
-     "correct": false,
+     "correct": true,
      "passed": [
       "answers-rather-than-refusing",
       "contains",
       "hebrew",
+      "no_foreign_script",
       "operation"
      ],
-     "failed": [
-      "no_foreign_script"
-     ],
-     "seconds": 131.53,
-     "outputCharacters": 478,
+     "failed": [],
+     "seconds": 20.7,
+     "outputCharacters": 473,
      "error": "",
      "document": {
       "evidence": {
@@ -3101,7 +2882,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-hebrew-paragraph",
-      "result": "הספקן חייב להגיש את הדוח עד 30 בספטמבר 2026. אם הדוח מتأخر, ריבית של 3.5 אחוז לשנה תחול על הסכום הנותר.",
+      "result": "הספק חייב להגיש את הדוח עד 30 בספטמבר 2026. אם הדוח יאוחר, יחול ריבית של 3.5% בשנה על הסכום החייב.",
       "tasks": [],
       "version": 1
      }
@@ -3115,8 +2896,8 @@
       "operation"
      ],
      "failed": [],
-     "seconds": 104.45,
-     "outputCharacters": 407,
+     "seconds": 17.84,
+     "outputCharacters": 409,
      "error": "",
      "document": {
       "evidence": {
@@ -3130,7 +2911,7 @@
       },
       "operation": "translate",
       "requestId": "bench-text-translate-portuguese",
-      "result": "A reunião ocorrerá na segunda-feira às 14:00.",
+      "result": "A reunião terá lugar na segunda-feira às 14:00.",
       "tasks": [],
       "version": 1
      }
