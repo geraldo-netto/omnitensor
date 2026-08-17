@@ -16,3 +16,12 @@
 [2026-08-17 17:55:49]   event-time-without-date            FAIL   33.2s  failed: answers-rather-than-refusing, at_least, event_starts, event_needs
 [2026-08-17 17:56:44]   event-recurring-weekly             FAIL   54.5s  failed: event_needs
 [2026-08-17 17:58:27]   event-banner-no-year               FAIL  103.5s  output was not JSON  failed: produced-a-usable-document
+[2026-08-17 17:58:59]   event-online-meeting               FAIL   31.9s  failed: answers-rather-than-refusing, contains, at_least, event_starts
+[2026-08-17 17:59:35]   event-cancelled                    FAIL   35.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 18:00:08]   event-with-registration            FAIL   32.8s  failed: contains, event_starts
+[2026-08-17 18:00:43]   event-no-activity-refuses          ok     35.3s
+[2026-08-17 18:02:14]   event-prose-without-event          ok     90.7s
+[2026-08-17 18:02:14] qwen3-5-9b-iq4-xs · event-extraction: 2/16 correct (12%), rules 47%, 39.1s per case
+[2026-08-17 18:02:14]   what failed: {"event_starts": 11, "answers-rather-than-refusing": 5, "at_least": 5, "event_needs": 3, "contains": 2, "produced-a-usable-document": 1}
+[2026-08-17 18:02:14] results written to benchmarks/results/event-v2/benchmark.md
+[2026-08-17 18:02:14] done

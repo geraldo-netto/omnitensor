@@ -399,31 +399,3 @@ def _network_counter_error(counters: object) -> str:
 def _strict_non_negative_integer_error(value: object) -> bool:
     return type(value) is not int or value < 0
 
-
-for _value, _legacy_module in (
-    (RecorderError, "omnitensor.plugins.recorder"),
-    (FeatureRow, "omnitensor.plugins.recorder"),
-    (ForecastError, "omnitensor.plugins.forecasting"),
-    (ForecastQuality, "omnitensor.plugins.forecasting"),
-    (LinearForecaster, "omnitensor.plugins.forecasting"),
-    (SourceStatus, "omnitensor.plugins.triggers"),
-    (BuildOutcome, "omnitensor.plugins.build_ingestion"),
-    (BuildRecord, "omnitensor.plugins.build_ingestion"),
-    (SensorKind, "omnitensor.plugins.hardware_collection"),
-    (SensorHealth, "omnitensor.plugins.hardware_collection"),
-    (HardwareSample, "omnitensor.plugins.hardware_collection"),
-    (NetworkLinkKind, "omnitensor.plugins.network_collection"),
-    (NetworkLinkState, "omnitensor.plugins.network_collection"),
-    (NetworkConnectivity, "omnitensor.plugins.network_collection"),
-    (NetworkCounters, "omnitensor.plugins.network_collection"),
-    (NetworkLinkSample, "omnitensor.plugins.network_collection"),
-    (NetworkSnapshot, "omnitensor.plugins.network_collection"),
-):
-    _value.__module__ = _legacy_module
-
-for _value, _legacy_module in (
-    (build_record_error, "omnitensor.plugins.build_ingestion"),
-    (hardware_sample_error, "omnitensor.plugins.hardware_collection"),
-    (network_snapshot_error, "omnitensor.plugins.network_collection"),
-):
-    _value.__module__ = _legacy_module

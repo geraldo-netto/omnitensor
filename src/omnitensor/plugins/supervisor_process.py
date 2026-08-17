@@ -227,9 +227,6 @@ async def terminate_after_timeout(process: WorkerProcess, timeout: float) -> boo
     return True
 
 
-for _legacy_type in (WorkerSpec, WorkerProcess, WorkerLauncher, AsyncioSubprocessLauncher):
-    _legacy_type.__module__ = "omnitensor.plugins.supervisor"
-
 
 __all__ = [
     "AsyncioSubprocessLauncher",

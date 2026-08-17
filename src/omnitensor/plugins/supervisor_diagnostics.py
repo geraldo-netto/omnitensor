@@ -69,9 +69,6 @@ def record_diagnostic(
     del journal[:-maximum]
 
 
-for _legacy_type in (WorkerState, WorkerDiagnosticCode, WorkerStatus, WorkerDiagnostic):
-    _legacy_type.__module__ = "omnitensor.plugins.supervisor"
-
 
 __all__ = [
     "MAX_WORKER_DIAGNOSTICS",

@@ -215,8 +215,6 @@ async def stop_process(
     return await terminate(slot.process, timeout)
 
 
-PluginWorkerError.__module__ = "omnitensor.plugins.supervisor"
-
 
 __all__ = [
     "PluginWorkerError",

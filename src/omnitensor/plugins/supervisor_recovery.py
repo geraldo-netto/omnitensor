@@ -276,9 +276,6 @@ async def cancel_orphaned_jobs(host, plugin_id: str, detail: str) -> None:
         )
 
 
-for _legacy_type in (WorkerRecoveryPolicy, WorkerFailureObserver):
-    _legacy_type.__module__ = "omnitensor.plugins.supervisor"
-
 
 __all__ = [
     "DEFAULT_MAX_RESTARTS",

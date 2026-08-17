@@ -211,6 +211,3 @@ def evaluate_forecast_predictions(
     )
     return ForecastQuality(len(targets), error / len(targets), baseline / len(targets))
 
-
-for _legacy_value in (fit_forecaster, evaluate_forecast_predictions):
-    _legacy_value.__module__ = "omnitensor.plugins.forecasting"

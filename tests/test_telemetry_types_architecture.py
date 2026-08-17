@@ -95,7 +95,7 @@ def test_neutral_implementations_preserve_legacy_facade_identity():
     )
 
 
-def test_moved_values_keep_legacy_pickle_globals():
+def test_moved_values_pickle_through_the_module_that_defines_them():
     values = (
         types.SourceStatus.READY,
         types.BuildRecord("build", types.BuildOutcome.SUCCEEDED, 1, 2, (), ()),
@@ -109,12 +109,18 @@ def test_moved_values_keep_legacy_pickle_globals():
     for value in values:
         assert pickle.loads(pickle.dumps(value)) == value
 
-    assert types.SourceStatus.__module__ == "omnitensor.plugins.triggers"
-    assert types.BuildRecord.__module__ == "omnitensor.plugins.build_ingestion"
-    assert types.HardwareSample.__module__ == "omnitensor.plugins.hardware_collection"
-    assert types.NetworkSnapshot.__module__ == "omnitensor.plugins.network_collection"
-    assert types.FeatureRow.__module__ == "omnitensor.plugins.recorder"
-    assert types.ForecastQuality.__module__ == "omnitensor.plugins.forecasting"
-    assert types.build_record_error.__module__ == "omnitensor.plugins.build_ingestion"
-    assert types.hardware_sample_error.__module__ == "omnitensor.plugins.hardware_collection"
-    assert types.network_snapshot_error.__module__ == "omnitensor.plugins.network_collection"
+    # Every one of these said it lived in a `plugins.*` module that merely
+    # re-exports it. Nothing read that claim except a traceback, which it
+    # misdirected, and a pickle, which named a file the definition is not in.
+    for value in (
+        types.SourceStatus,
+        types.BuildRecord,
+        types.HardwareSample,
+        types.NetworkSnapshot,
+        types.FeatureRow,
+        types.ForecastQuality,
+        types.build_record_error,
+        types.hardware_sample_error,
+        types.network_snapshot_error,
+    ):
+        assert value.__module__ == "omnitensor.telemetry_types"

@@ -82,7 +82,10 @@ def test_supervisor_exposes_only_what_it_uses_and_keeps_owner_identity():
     for name, owner in owner_pairs.items():
         assert getattr(supervisor, name) is owner
         assert getattr(plugins, name) is owner
-        assert owner.__module__ == "omnitensor.plugins.supervisor"
+        # Each says where it is defined, not where it is re-exported: the
+        # supervisor is a coordinator, and a traceback that names it for a
+        # class defined in a leaf sends the reader to the wrong file.
+        assert owner.__module__.startswith("omnitensor.plugins.supervisor_")
 
     assert loading.PluginWorkerError is session.PluginWorkerError
     assert loading.WorkerState is diagnostics.WorkerState
