@@ -657,13 +657,13 @@ def test_xml_and_relationship_parsing_preserve_exact_safety_contract():
         _assert_media_error(error, "presentation-invalid", "presentation relationship is unsafe")
 
 
-def test_valid_image_selection_requires_membership_suffix_deduplication_and_limit():
+def test_valid_image_selection_requires_membership_suffix_and_deduplication():
     names = ["one.png", "two.jpg", "three.webp", "four.jpeg", "five.png"]
     entries = {name: object() for name in names}
     entries["unsupported.gif"] = object()
     assert presentations._valid_image_entries(
         ["missing.png", "unsupported.gif", *names], entries
-    ) == tuple(names[:4])
+    ) == tuple(names)
     assert presentations._valid_image_entries(["one.png", "one.png"], entries) == ("one.png",)
 
 

@@ -28,7 +28,6 @@ MAX_ARCHIVE_ENTRIES = 4096
 MAX_ARCHIVE_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_SLIDE_XML_BYTES = 4 * 1024 * 1024
 MAX_PRESENTATION_IMAGE_BYTES = 16 * 1024 * 1024
-MAX_IMAGES_PER_SLIDE = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,8 +294,9 @@ def _valid_image_entries(
         suffix = PurePosixPath(normalized).suffix.lower()
         if normalized in entries and suffix in _PRESENTATION_IMAGE_SUFFIXES:
             selected.append(normalized)
-        if len(selected) == MAX_IMAGES_PER_SLIDE:
-            break
+    # Every image on the slide is read. Stopping after four left the diagrams
+    # at the bottom of a dense slide out of its description, with no sign that
+    # anything had been skipped.
     return tuple(dict.fromkeys(selected))
 
 
