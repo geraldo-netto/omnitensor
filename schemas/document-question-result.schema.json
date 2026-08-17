@@ -8,7 +8,7 @@
   "properties": {
     "version": {"const": 1},
     "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
-    "answer": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "answer": {"type": "string", "minLength": 1},
     "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
     "accelerator": {"enum": ["gpu", "npu"]},
     "citations": {

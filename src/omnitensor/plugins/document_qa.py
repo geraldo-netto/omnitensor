@@ -60,10 +60,23 @@ PLUGIN_ID = "ask-selected-files"
 READ_PERMISSION = "files:read-selected"
 MAX_QUESTION_CHARACTERS = 4_096
 MAX_SOURCES = 16
-MAX_SPANS = 512
 MAX_SPAN_CHARACTERS = 2_048
-MAX_RETRIEVED_SPANS = 8
 EMBEDDING_DIMENSIONS = 384
+# What a person selected is read in full. There is no ceiling on how many
+# spans are indexed and none on how many reach the answer: a top-8 cut meant
+# a 32 KiB file answered "not available in the provided text" about a sentence
+# it plainly contained, because the sentence sat in the ninth-ranked span.
+# Size is solved by splitting the work into passes that accumulate, below,
+# never by deciding in advance how much of the document counts.
+#
+# Three characters per token is deliberately pessimistic — real English text
+# runs nearer four — so the arithmetic under-fills the window rather than
+# overrunning it.
+CHARACTERS_PER_TOKEN = 3
+# What the prompt itself costs before a single span is added: the system
+# rules, the instruction template, and a question that may run to its own
+# 4,096-character limit.
+PROMPT_OVERHEAD_TOKENS = 2_048
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _PRIVATE_REFERENCE = re.compile(r"^private:[A-Za-z0-9._:-]{1,220}$")
 
@@ -199,36 +212,73 @@ class DocumentQuestionPlugin(ManagedPlugin):
                 question,
                 question_digest,
             )
-            await self._store.publish(
-                request.job_id,
-                (question_fragment, *(span.fragment() for span in retrieved)),
-            )
+            task = document_question_task()
+            passes = answer_passes(retrieved, task.limits.context_tokens)
             await self._progress(request, progress, "answer", 0.7)
-            generated = await self._router.run(
-                document_question_task(),
-                generation_request(
+            answers: list[str] = []
+            citations: list[dict] = []
+            seen_citations: set[tuple] = set()
+            provider_id = ""
+            accelerator = ""
+            for index, batch in enumerate(passes):
+                cancellation.raise_if_cancelled()
+                await self._store.publish(
                     request.job_id,
-                    PLUGIN_ID,
-                    (question_fragment.reference, *(span.reference for span in retrieved)),
-                ),
-                cancellation,
-                ScaledProgressReporter(
-                    request,
-                    progress,
-                    self._clock_ms,
-                    stage="answer",
-                    offset=0.7,
-                    scale=0.25,
-                    error_type=DocumentQuestionError,
-                ),
-            )
-            output = grounded_answer_document(
-                generated.document,
-                request.job_id,
-                retrieved,
-                provider_id=generated.provider_id,
-                accelerator=generated.accelerator,
-            )
+                    (question_fragment, *(span.fragment() for span in batch)),
+                )
+                generated = await self._router.run(
+                    task,
+                    generation_request(
+                        request.job_id,
+                        PLUGIN_ID,
+                        (question_fragment.reference, *(span.reference for span in batch)),
+                    ),
+                    cancellation,
+                    ScaledProgressReporter(
+                        request,
+                        progress,
+                        self._clock_ms,
+                        stage="answer",
+                        offset=0.7 + (0.25 * index / len(passes)),
+                        scale=0.25 / len(passes),
+                        error_type=DocumentQuestionError,
+                    ),
+                )
+                partial = grounded_answer_document(
+                    generated.document,
+                    request.job_id,
+                    batch,
+                    provider_id=generated.provider_id,
+                    accelerator=generated.accelerator,
+                )
+                provider_id = partial["providerId"]
+                accelerator = partial["accelerator"]
+                answers.append(str(partial["answer"]).strip())
+                for citation in partial["citations"]:
+                    span = citation["span"]
+                    key = (
+                        citation["sourceSha256"],
+                        citation["page"],
+                        span["start"],
+                        span["end"],
+                    )
+                    if key not in seen_citations:
+                        seen_citations.add(key)
+                        citations.append(citation)
+            output = {
+                "version": 1,
+                "requestId": request.job_id,
+                # Every pass, in the order the document was read. Joined rather
+                # than picked between: each pass answered from spans no other
+                # pass saw, so dropping one drops part of the person's file.
+                "answer": "\n\n".join(answer for answer in answers if answer),
+                "providerId": provider_id,
+                "accelerator": accelerator,
+                "citations": citations,
+            }
+            violations = validate_document("document-question-result.schema.json", output)
+            if violations:
+                raise DocumentQuestionError("answer-invalid", violations[0])
             await self._progress(request, progress, "terminal", 1.0)
             return succeeded_result(
                 request,
@@ -306,7 +356,6 @@ class DocumentQuestionPlugin(ManagedPlugin):
                     Path(source.item.path).name,
                     source.item.digest,
                     extraction.pages,
-                    remaining=MAX_SPANS - len(spans),
                 )
             )
             await self._progress(
@@ -347,9 +396,17 @@ def page_spans(
     source_sha256: str,
     pages: Sequence[object],
     *,
-    remaining: int = MAX_SPANS,
+    remaining: int | None = None,
 ) -> tuple[IndexedSpan, ...]:
-    """Create a bounded, versioned in-memory index with exact page offsets."""
+    """Index every page span, with exact page offsets.
+
+    ``remaining`` is how many spans this call may still add, for the one
+    caller that deliberately samples a file rather than reading it — the file
+    organiser, which classifies by the opening of a document. ``None``, the
+    default, reads all of it: a question about a selected file is answered
+    from the whole file, and the ceiling that used to live here stopped at 512
+    spans and returned what it had without telling anybody the rest existed.
+    """
     if (
         not isinstance(request_id, str)
         or not request_id
@@ -362,8 +419,7 @@ def page_spans(
         or "\\" in file_name
         or _DIGEST.fullmatch(source_sha256) is None
         or isinstance(remaining, bool)
-        or not isinstance(remaining, int)
-        or remaining < 0
+        or (remaining is not None and (not isinstance(remaining, int) or remaining < 0))
     ):
         raise DocumentQuestionError("span-invalid", "span source identity is invalid")
     indexed: list[IndexedSpan] = []
@@ -378,7 +434,7 @@ def page_spans(
         ):
             raise DocumentQuestionError("span-invalid", "extracted page is invalid")
         for start in range(0, len(text), MAX_SPAN_CHARACTERS):
-            if len(indexed) >= remaining:
+            if remaining is not None and len(indexed) >= remaining:
                 return tuple(indexed)
             end = min(start + MAX_SPAN_CHARACTERS, len(text))
             content = text[start:end]
@@ -405,6 +461,42 @@ def page_spans(
     return tuple(indexed)
 
 
+def answer_passes(
+    spans: Sequence[IndexedSpan],
+    context_tokens: int,
+) -> tuple[tuple[IndexedSpan, ...], ...]:
+    """Split ranked spans into the fewest passes the context window allows.
+
+    The only bound here is arithmetic: what is left of the window once the
+    prompt and the question are in it. A document that fits is answered in one
+    pass, which is every ordinary selection; one that does not is answered in
+    several that accumulate, because the alternative — telling a person about
+    the part of their file that happened to fit — is a wrong answer that looks
+    like a complete one.
+    """
+    if not spans:
+        return ()
+    usable_tokens = context_tokens - PROMPT_OVERHEAD_TOKENS
+    # Room for the answer as well as the spans it is drawn from. Half the
+    # remaining window, so a long question about a long document can still be
+    # answered at length rather than running out of window mid-object.
+    budget = max(MAX_SPAN_CHARACTERS, (usable_tokens // 2) * CHARACTERS_PER_TOKEN)
+    passes: list[tuple[IndexedSpan, ...]] = []
+    current: list[IndexedSpan] = []
+    used = 0
+    for span in spans:
+        cost = len(span.text)
+        if current and used + cost > budget:
+            passes.append(tuple(current))
+            current = []
+            used = 0
+        current.append(span)
+        used += cost
+    if current:
+        passes.append(tuple(current))
+    return tuple(passes)
+
+
 async def retrieve_spans(
     question: str,
     spans: Sequence[IndexedSpan],
@@ -412,7 +504,7 @@ async def retrieve_spans(
     *,
     cancellation: CancellationToken,
 ) -> tuple[IndexedSpan, ...]:
-    if not isinstance(question, str) or not question or not 1 <= len(spans) <= MAX_SPANS:
+    if not isinstance(question, str) or not question or not spans:
         raise DocumentQuestionError("retrieval-invalid", "question or span index is invalid")
     cancellation.raise_if_cancelled()
     query_vectors = await embedder.embed((question,), query=True, cancellation=cancellation)
@@ -428,7 +520,11 @@ async def retrieve_spans(
         ),
         key=lambda item: (-item[0], item[1]),
     )
-    return tuple(item[2] for item in ranked[:MAX_RETRIEVED_SPANS])
+    # Every span, most relevant first. Ranking decides the order the document
+    # is read in, never which parts of it are read at all — the slice that
+    # used to be here answered from the best eight spans and reported the rest
+    # of the file as though it did not exist.
+    return tuple(item[2] for item in ranked)
 
 
 def _embedding_vector(

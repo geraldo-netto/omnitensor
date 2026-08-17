@@ -11,7 +11,6 @@ from hypothesis import strategies as st
 
 from omnitensor.plugins.document_qa import (
     EMBEDDING_DIMENSIONS,
-    MAX_RETRIEVED_SPANS,
     MAX_SPAN_CHARACTERS,
     DocumentQuestionError,
     DocumentQuestionPlugin,
@@ -348,10 +347,11 @@ async def test_retrieval_ranks_deterministically_and_bounds_context():
     retrieved = await retrieve_spans(
         "mars", spans, Embedder(), cancellation=CancellationController()
     )
-    assert len(retrieved) == MAX_RETRIEVED_SPANS
-    assert [span.reference for span in retrieved] == sorted(
-        span.reference for span in spans if span.text == "mars"
-    )[:MAX_RETRIEVED_SPANS]
+    # Every span comes back, most relevant first: ranking decides the order the
+    # document is read in, never which parts of it are read at all.
+    assert len(retrieved) == len(spans)
+    matching = sorted(span.reference for span in spans if span.text == "mars")
+    assert [span.reference for span in retrieved][: len(matching)] == matching
 
 
 @pytest.mark.parametrize(
