@@ -46,8 +46,20 @@ class VulkanLease:
             self.release(stream)
 
     def acquire(self):
+        """Open the lease and hold it, or leave nothing open.
+
+        `release` closes the stream, and the caller has no stream to release
+        until this returns — so an interrupted `flock` used to leave the file
+        open with nobody able to close it, and the descriptor held until the
+        process exited. The Vulkan runtime carried the same leak and was fixed
+        the same way.
+        """
         stream = self._path.open("a+b")
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        except BaseException:
+            stream.close()
+            raise
         return stream
 
     @staticmethod

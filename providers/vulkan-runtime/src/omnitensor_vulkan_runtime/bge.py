@@ -18,6 +18,12 @@ from omnitensor.document_model_types import QUERY_PREFIX
 from omnitensor.plugins.document_qa import EmbeddingProvider
 from omnitensor.plugins.protocol import CancellationToken
 
+# The device the embedder was measured on. A preference, not a requirement:
+# it used to be matched exactly and anything else refused, so a person whose
+# 6600 XT was busy and who moved the work to the integrated 610M got
+# "qualified BGE Vulkan device is unavailable" and no answer at all. What the
+# receipt records is where the numbers came from; what runs is the person's to
+# choose.
 QUALIFIED_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 
 
@@ -28,9 +34,11 @@ class BgeVulkanEmbedder:
         tokenizer: Path,
         model_sha256: str,
         lease_path: Path,
+        device: str = "",
     ) -> None:
         self._model = model
         self._tokenizer = tokenizer
+        self._device = device
         if not lease_path.is_file():
             raise ValueError("accelerator lease is unavailable")
         self._lease_path = lease_path
@@ -67,10 +75,8 @@ class BgeVulkanEmbedder:
             runner = VulkanBgeRunner(
                 self._model,
                 tokenizer,
-                device_index=_qualified_device_index(),
+                device_index=vulkan_device_index(self._device or QUALIFIED_DEVICE),
             )
-            if runner.device_name != QUALIFIED_DEVICE:
-                raise ValueError("BGE is not qualified on this Vulkan device")
             vectors = []
             for text in texts:
                 if cancellation is not None:
@@ -83,16 +89,26 @@ class BgeVulkanEmbedder:
             return tuple(vectors)
 
 
-def _qualified_device_index() -> int:
+def vulkan_device_index(preferred: str) -> int:
+    """The GPU to embed on: the one asked for, or the only one there is.
+
+    This matched one hardcoded device name and refused everything else, so the
+    embedder ran on exactly one card in the world and `ask-selected-files` was
+    unavailable on any other machine — including the same machine's second GPU.
+    A named preference that is present is honoured; otherwise a sole GPU is the
+    obvious answer. Only an ambiguous choice is refused, and it says what the
+    alternatives were.
+    """
     try:
         import ncnn
     except ImportError as error:  # pragma: no cover - dependency boundary
         raise ValueError("ncnn is unavailable") from error
-    matches = tuple(
-        index
-        for index in range(ncnn.get_gpu_count())
-        if ncnn.get_gpu_info(index).device_name() == QUALIFIED_DEVICE
-    )
-    if len(matches) != 1:
-        raise ValueError("qualified BGE Vulkan device is unavailable")
-    return matches[0]
+    names = [ncnn.get_gpu_info(index).device_name() for index in range(ncnn.get_gpu_count())]
+    if not names:
+        raise ValueError("no Vulkan device is available")
+    matches = [index for index, name in enumerate(names) if name == preferred]
+    if len(matches) == 1:
+        return matches[0]
+    if len(names) == 1:
+        return 0
+    raise ValueError(f"name the Vulkan device to embed on, one of: {', '.join(sorted(set(names)))}")
