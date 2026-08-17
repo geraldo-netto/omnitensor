@@ -84,3 +84,15 @@
 [2026-08-17 02:43:24] qwen3-4b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 16.7s per case
 [2026-08-17 02:43:24]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
 [2026-08-17 02:43:24] qwen3-4b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 02:44:54]   organize-two-invoices              ok     89.8s
+[2026-08-17 02:46:11]   organize-mixed-kinds               ok     77.0s
+[2026-08-17 02:46:54]   organize-single-file               ok     43.7s
+[2026-08-17 02:48:05]   organize-duplicates                ok     70.4s
+[2026-08-17 02:50:09]   organize-three-mixed               ok    124.6s
+[2026-08-17 02:51:32]   organize-photos                    ok     82.7s
+[2026-08-17 02:52:47]   organize-code-and-docs             ok     74.7s
+[2026-08-17 02:53:35]   organize-keeps-names               ok     48.1s
+[2026-08-17 02:56:05]   organize-four-files                ok    149.9s
+[2026-08-17 02:56:52]   organize-ambiguous-name            ok     46.8s
+[2026-08-17 02:56:52] qwen3-4b-q4-k-m · file-organizer: 10/10 correct (100%), rules 100%, 80.8s per case
+[2026-08-17 02:56:52] qwen3-4b-q4-k-m · selected-text-tools: 10 cases

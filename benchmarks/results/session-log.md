@@ -103,6 +103,13 @@ rewritten after each model, so an interrupted run still leaves findings.
   grammar projection, evidence rules) and out of "that provider needs tuning".
   That is the most useful thing this run has produced.
 
+- **The 4B also scored 10/10 on `file-organizer`, at 80.8s per case** against
+  the 8B's 168.5s. Same caveat as above and for the same reason: the 4B was
+  judged on corrected cases, the 8B on broken ones. What can be said now is
+  that the 4B satisfied every rule on two of the four workloads while running
+  roughly twice as fast; whether the 8B does the same is what the re-run
+  answers.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
