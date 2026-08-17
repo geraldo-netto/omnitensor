@@ -421,8 +421,8 @@ def test_receipt_binds_the_operation_specific_hebrew_model_without_replacing_qwe
     )
     qwen = qualification.load_qualification(
         "selected-text-tools",
-        factories.QWEN_ARTIFACT_ID,
-        document["models"][factories.QWEN_ARTIFACT_ID]["sha256"],
+        factories.SHIPPED_ARTIFACT_ID,
+        document["models"][factories.SHIPPED_ARTIFACT_ID]["sha256"],
         selected_text_task(),
     )
     assert qwen.model_layers == 37
@@ -1970,7 +1970,13 @@ def test_each_factory_requires_the_gpu_lease(monkeypatch, factory, plugin_id):
 def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
-    model = BootstrapArtifact("qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m")
+    model = BootstrapArtifact(
+        qualification.default_model("event-extraction"),
+        "1.0.0",
+        "gguf",
+        "a" * 64,
+        tmp_path / "m",
+    )
 
     class Bootstrap:
         model_choice = ""
@@ -2027,7 +2033,7 @@ def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
     model = BootstrapArtifact(
-        factories.QWEN_ARTIFACT_ID,
+        qualification.default_model("selected-text-tools"),
         "1.0.0",
         "gguf",
         QWEN_MODEL_SHA256,
@@ -2106,11 +2112,16 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
         assert descriptor.provenance.license_spdx == "Apache-2.0"
         assert receipt == _qualification()
 
+    # Each workload asks for its own receipt's default, so this cannot go stale
+    # the way a constant in the factory did when the default moved to the 9B.
     assert requested == [
-        factories.QWEN_ARTIFACT_ID,
-        factories.QWEN_ARTIFACT_ID,
-        factories.QWEN_ARTIFACT_ID,
-        factories.QWEN_ARTIFACT_ID,
+        qualification.default_model(plugin_id)
+        for plugin_id in (
+            "ask-selected-files",
+            "event-extraction",
+            "file-organizer",
+            "selected-text-tools",
+        )
     ]
     assert qualified == [
         (
@@ -2138,7 +2149,11 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
     state = tmp_path / "state"
     state.mkdir()
     qwen = BootstrapArtifact(
-        factories.QWEN_ARTIFACT_ID, "1.0.0", "gguf", "a" * 64, tmp_path / "qwen.gguf"
+        qualification.default_model("event-extraction"),
+        "1.0.0",
+        "gguf",
+        "a" * 64,
+        tmp_path / "model.gguf",
     )
     hebrew_model = BootstrapArtifact(
         factories.HEBREW_ARTIFACT_ID,

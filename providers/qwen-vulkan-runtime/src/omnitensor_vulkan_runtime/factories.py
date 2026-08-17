@@ -42,13 +42,17 @@ from .bge import BgeVulkanEmbedder
 from .hebrew import HebrewTranslationRuntime
 from .qualification import (
     Qualification,
+    default_model,
     load_model_qualification,
     load_qualification,
     verify_native_runtime,
 )
 from .runtime import LlamaVulkanRuntime
 
-QWEN_ARTIFACT_ID = "qwen3-8b-q4-k-m"
+# The model this provider shipped with. It is no longer the default —
+# `default_model()` reads that from the receipt — and remains only because
+# the installer pins this exact file.
+SHIPPED_ARTIFACT_ID = "qwen3-8b-q4-k-m"
 BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
 HEBREW_ARTIFACT_ID = "dictalm2-hebrew-q4-k-m"
 QWEN_SOURCE = (
@@ -191,10 +195,13 @@ def _generation(plugin_id: str):
     bootstrap = current_plugin_bootstrap(plugin_id)
     if bootstrap.accelerator_lease_path is None:
         raise RuntimeError("GPU accelerator grant is unavailable")
-    # The model a person chose, or this provider's default. Its receipt is
-    # verified for *this* workload below, so an unqualified pair refuses to
-    # start rather than quietly answering with something nobody measured.
-    model = bootstrap.chosen_or(QWEN_ARTIFACT_ID)
+    # The model a person chose, or this workload's default. The default is read
+    # from the receipt rather than kept as a constant here: a second copy of it
+    # went stale the day the default moved to the 9B, and nothing would have
+    # said so. Its receipt is verified for *this* workload below, so an
+    # unqualified pair refuses to start rather than quietly answering with
+    # something nobody measured.
+    model = bootstrap.chosen_or(default_model(plugin_id))
     qualification = load_qualification(
         plugin_id,
         model.id,
