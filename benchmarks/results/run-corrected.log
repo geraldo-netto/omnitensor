@@ -1,0 +1,7 @@
+[2026-08-17 03:04:00] models: qwen3-8b-q4-k-m, qwen3-4b-q4-k-m
+[2026-08-17 03:04:00] workloads: ask-selected-files, file-organizer
+[2026-08-17 03:04:01] qwen3-8b-q4-k-m: 4.68 GiB weights + 2.39 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 03:04:01] loading qwen3-8b-q4-k-m from model.gguf on Vulkan device 0
+[2026-08-17 03:04:02] loaded in 1.7s — 37/37 layers on Vulkan
+[2026-08-17 03:04:02] qwen3-8b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 03:05:08]   ask-invoice-total                  ok     65.7s

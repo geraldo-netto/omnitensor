@@ -83,6 +83,20 @@ def _case(workload: str, entry: object, index: int) -> Case:
     expect = entry.get("expect", {})
     if not isinstance(expect, dict):
         raise CaseError(f"{workload} case {index} states no checkable expectation")
+    # A rule this code does not have is silently *not applied* by the judge,
+    # which scores an answer as if the case had never asked. That is exactly
+    # what happened on 2026-08-17: a long-running process held an older module,
+    # a Hebrew translation containing Cyrillic passed a rule forbidding Cyrillic,
+    # and the run reported 10/10. Refusing here turns a silent wrong score into
+    # a loud failure to start.
+    from .scoring import RULES  # noqa: PLC0415 - avoids a circular import
+
+    unknown = set(expect) - set(RULES) - {"refuses"}
+    if unknown:
+        raise CaseError(
+            f"{workload} case {index} names rules this build does not have: "
+            f"{', '.join(sorted(unknown))}"
+        )
     return Case(
         id=str(entry.get("id") or f"{workload}-{index}"),
         workload=workload,

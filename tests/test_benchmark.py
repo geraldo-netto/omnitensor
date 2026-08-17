@@ -590,3 +590,42 @@ class TestScriptLeaks:
             assert FOREIGN_SCRIPT.search(character)
         for character in ("א", "A", "1", "€"):
             assert not FOREIGN_SCRIPT.search(character)
+
+
+class TestARuleThatDoesNotExist:
+    """A case naming a rule the code lacks must stop the run, not be skipped.
+
+    The judge applies the rules it has; an expectation with no rule behind it
+    was simply not checked, and the answer scored as though the case had never
+    asked. That is not hypothetical — a benchmark process holding an older
+    module scored a Hebrew translation containing Cyrillic as 10/10 against a
+    case that forbade exactly that.
+    """
+
+    def test_a_case_naming_an_unknown_rule_is_refused_at_load(self, tmp_path):
+        (tmp_path / "made-up.json").write_text(
+            json.dumps(
+                {"cases": [{"id": "x", "sources": ["text"], "expect": {"vibes": True}}]}
+            )
+        )
+
+        with pytest.raises(CaseError, match="does not have"):
+            case_files.load("made-up", tmp_path)
+
+    def test_the_refusal_names_the_rule_so_it_can_be_fixed(self, tmp_path):
+        (tmp_path / "made-up.json").write_text(
+            json.dumps(
+                {"cases": [{"id": "x", "sources": ["t"], "expect": {"no_foreign_scrpt": True}}]}
+            )
+        )
+
+        with pytest.raises(CaseError, match="no_foreign_scrpt"):
+            case_files.load("made-up", tmp_path)
+
+    def test_refuses_is_allowed_although_it_is_not_in_the_rule_table(self, tmp_path):
+        """It is answered before the rules run, so it has no entry there."""
+        (tmp_path / "fine.json").write_text(
+            json.dumps({"cases": [{"id": "x", "sources": ["t"], "expect": {"refuses": True}}]})
+        )
+
+        assert case_files.load("fine", tmp_path)

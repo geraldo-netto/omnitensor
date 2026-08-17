@@ -96,3 +96,16 @@
 [2026-08-17 02:56:52]   organize-ambiguous-name            ok     46.8s
 [2026-08-17 02:56:52] qwen3-4b-q4-k-m · file-organizer: 10/10 correct (100%), rules 100%, 80.8s per case
 [2026-08-17 02:56:52] qwen3-4b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 02:57:36]   text-summarize                     ok     44.8s
+[2026-08-17 02:58:21]   text-summarize-keeps-the-name      ok     44.3s
+[2026-08-17 02:58:59]   text-explain                       ok     38.2s
+[2026-08-17 02:59:36]   text-rewrite                       ok     36.7s
+[2026-08-17 03:00:24]   text-extract-tasks                 ok     48.7s
+[2026-08-17 03:01:02]   text-extract-single-task           ok     37.6s
+[2026-08-17 03:01:43]   text-translate-hebrew              ok     40.5s
+[2026-08-17 03:02:25]   text-translate-hebrew-names        ok     42.2s
+[2026-08-17 03:03:08]   text-translate-hebrew-paragraph    ok     43.5s
+[2026-08-17 03:03:48]   text-translate-portuguese          ok     39.6s
+[2026-08-17 03:03:48] qwen3-4b-q4-k-m · selected-text-tools: 10/10 correct (100%), rules 100%, 41.6s per case
+[2026-08-17 03:03:48] results written to /backups/disk2/projects/cinnamon/omnitensor/benchmarks/results/benchmark.md
+[2026-08-17 03:03:48] done

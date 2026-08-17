@@ -110,6 +110,25 @@ rewritten after each model, so an interrupted run still leaves findings.
   roughly twice as fast; whether the 8B does the same is what the re-run
   answers.
 
+- **Both `selected-text-tools` 10/10 scores are void.** The rule forbidding
+  foreign script was added while the benchmark was already running, and a
+  long-lived process holds the module it imported at start — so the judge
+  applied the rules it had, and an expectation with no rule behind it was
+  simply *not checked*. The 4B's "perfect" Hebrew includes
+  `בюдзט` — Cyrillic inside a Hebrew word — and it scored 10/10 against a case
+  forbidding exactly that.
+
+  Loading a case now refuses outright when it names a rule the build lacks, so
+  a stale process fails to start instead of reporting a wrong score. The
+  `selected-text-tools` rows are being re-measured for all three models.
+
+- **What the Hebrew actually looks like**, read rather than scored. The 8B:
+  `בליסון` for Lisbon, `42,000 אירופי` for euros, and the Arabic `متأخر`. The
+  4B is worse — `מארטאלוויירא פראודס א בюдзט דע 42,000 אירע` is not Hebrew so
+  much as English transliterated into Hebrew letters, with Cyrillic in it, and
+  its third answer contains the Vietnamese `báo`. Neither is usable. That is
+  the case for DictaLM stated properly, and the comparison runs last.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
@@ -119,7 +138,7 @@ rewritten after each model, so an interrupted run still leaves findings.
 3. `ask-selected-files` and `file-organizer`, both models, with the corrected
    cases, into `benchmarks/results/corrected/`. Those rows supersede the ones
    in the first table.
-4. `selected-text-tools` on DictaLM against the 8B, into
+4. `selected-text-tools` on DictaLM against the 8B and the 4B, into
    `benchmarks/results/hebrew/` — the comparison the Hebrew work exists for,
    now that the 8B has been seen to produce Hebrew with Arabic in it.
 
