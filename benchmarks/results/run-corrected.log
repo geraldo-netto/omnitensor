@@ -5,3 +5,58 @@
 [2026-08-17 03:04:02] loaded in 1.7s — 37/37 layers on Vulkan
 [2026-08-17 03:04:02] qwen3-8b-q4-k-m · ask-selected-files: 10 cases
 [2026-08-17 03:05:08]   ask-invoice-total                  ok     65.7s
+[2026-08-17 03:06:20]   ask-who-signed                     ok     71.5s
+[2026-08-17 03:07:29]   ask-deadline                       ok     69.0s
+[2026-08-17 03:08:36]   ask-warranty-length                ok     67.0s
+[2026-08-17 03:09:52]   ask-two-documents                  ok     75.9s
+[2026-08-17 03:10:59]   ask-percentage                     ok     67.3s
+[2026-08-17 03:12:04]   ask-role-and-name                  ok     65.6s
+[2026-08-17 03:13:11]   ask-language-portuguese            ok     67.0s
+[2026-08-17 03:14:20]   ask-absent-fact                    FAIL   68.1s  failed: no_invented_numbers
+[2026-08-17 03:15:23]   ask-absent-person                  ok     63.7s
+[2026-08-17 03:15:23] qwen3-8b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 68.1s per case
+[2026-08-17 03:15:23]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 03:15:23] qwen3-8b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 03:18:13]   organize-two-invoices              ok    169.9s
+[2026-08-17 03:21:01]   organize-mixed-kinds               FAIL  168.1s  failed: contains
+[2026-08-17 03:22:20]   organize-single-file               ok     78.6s
+[2026-08-17 03:25:07]   organize-duplicates                ok    167.2s
+[2026-08-17 03:29:35]   organize-three-mixed               ok    268.1s
+[2026-08-17 03:32:18]   organize-photos                    ok    163.2s
+[2026-08-17 03:34:59]   organize-code-and-docs             FAIL  161.0s  failed: contains
+[2026-08-17 03:36:23]   organize-keeps-names               ok     83.8s
+[2026-08-17 03:40:57]   organize-four-files                ok    273.9s
+[2026-08-17 03:43:29]   organize-ambiguous-name            ok    152.0s
+[2026-08-17 03:43:29] qwen3-8b-q4-k-m · file-organizer: 8/10 correct (80%), rules 93%, 168.6s per case
+[2026-08-17 03:43:29]   what failed: {"contains": 2}
+[2026-08-17 03:43:29] results written to benchmarks/results/corrected/benchmark.md
+[2026-08-17 03:43:29] qwen3-4b-q4-k-m: 2.33 GiB weights + 2.39 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 03:43:29] loading qwen3-4b-q4-k-m from model.gguf on Vulkan device 0
+[2026-08-17 03:43:30] loaded in 0.8s — 37/37 layers on Vulkan
+[2026-08-17 03:43:30] qwen3-4b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 03:44:07]   ask-invoice-total                  ok     37.2s
+[2026-08-17 03:44:43]   ask-who-signed                     ok     35.8s
+[2026-08-17 03:45:21]   ask-deadline                       ok     37.5s
+[2026-08-17 03:45:58]   ask-warranty-length                ok     37.0s
+[2026-08-17 03:46:39]   ask-two-documents                  ok     41.2s
+[2026-08-17 03:47:15]   ask-percentage                     ok     36.5s
+[2026-08-17 03:47:51]   ask-role-and-name                  ok     35.3s
+[2026-08-17 03:48:27]   ask-language-portuguese            ok     36.5s
+[2026-08-17 03:49:04]   ask-absent-fact                    FAIL   37.2s  failed: no_invented_numbers
+[2026-08-17 03:49:41]   ask-absent-person                  ok     36.7s
+[2026-08-17 03:49:41] qwen3-4b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 37.1s per case
+[2026-08-17 03:49:41]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 03:49:41] qwen3-4b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 03:51:11]   organize-two-invoices              ok     89.9s
+[2026-08-17 03:52:28]   organize-mixed-kinds               ok     77.1s
+[2026-08-17 03:53:12]   organize-single-file               ok     43.9s
+[2026-08-17 03:54:23]   organize-duplicates                ok     70.6s
+[2026-08-17 03:56:27]   organize-three-mixed               ok    125.0s
+[2026-08-17 03:57:50]   organize-photos                    ok     82.6s
+[2026-08-17 03:59:05]   organize-code-and-docs             ok     75.0s
+[2026-08-17 03:59:53]   organize-keeps-names               ok     48.2s
+[2026-08-17 04:02:22]   organize-four-files                ok    149.0s
+[2026-08-17 04:03:08]   organize-ambiguous-name            ok     46.2s
+[2026-08-17 04:03:08] qwen3-4b-q4-k-m · file-organizer: 10/10 correct (100%), rules 100%, 80.7s per case
+[2026-08-17 04:03:08] results written to benchmarks/results/corrected/benchmark.md
+[2026-08-17 04:03:08] done

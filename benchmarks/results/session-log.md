@@ -129,6 +129,51 @@ rewritten after each model, so an interrupted run still leaves findings.
   its third answer contains the Vietnamese `báo`. Neither is usable. That is
   the case for DictaLM stated properly, and the comparison runs last.
 
+## Results, like for like
+
+Both models on the corrected cases, same card, same context, nothing capped
+(`benchmarks/results/corrected/`):
+
+| workload | model | correct | rules | s/case |
+| --- | --- | --- | --- | --- |
+| ask-selected-files | qwen3-4b-q4-k-m | 9/10 | 97% | 37.1 |
+| ask-selected-files | qwen3-8b-q4-k-m | 9/10 | 97% | 68.1 |
+| file-organizer | qwen3-4b-q4-k-m | 10/10 | 100% | 80.7 |
+| file-organizer | qwen3-8b-q4-k-m | 8/10 | 93% | 168.6 |
+| selected-text-tools | qwen3-8b-q4-k-m | 9/10 | 97% | 81.4 |
+
+**The 4B is not a downgrade on this evidence.** It matched the 8B on
+`ask-selected-files` at 1.8× the speed, and beat it on `file-organizer` — 10/10
+against 8/10 — at half the time per case. Both models failed the same single
+invention case, so that one is a workload property rather than a model
+difference. Forty cases is a small set and none of this is a qualification;
+it is the tradeoff you asked to see before deciding anything.
+
+The 8B's remaining `selected-text-tools` failure is the foreign-script rule —
+the Arabic word in its Hebrew, now caught rather than passed.
+
+## Two measurements that are not measurements
+
+- **The 610M was never measured.** `GGML_VK_VISIBLE_DEVICES=1` is not honoured
+  by this llama.cpp build: while the "integrated" run was going, renderD128
+  sat at 7.3 GiB used and 82% busy and the 610M at 0%. The run was on the
+  discrete card wearing the wrong label, so I stopped it. OMNI-0364 needs real
+  device selection — `main_gpu` with an explicit split mode, plumbed through
+  the runtime — and remains open and unmeasured.
+- **DictaLM could not be compared this way.** All ten cases failed in 1.2
+  seconds with `generation-failed`, which is not a verdict on the model: the
+  shipped Hebrew path uses `HebrewTranslationRuntime`, with its own prompt and
+  no JSON grammar, and my harness drove the generic runtime instead. The
+  comparison needs the harness to use the same runtime the workload uses.
+
+## Also worth distrusting
+
+The same 8B on the same card took 87.1s per case in the first run and 68.1s in
+the corrected one, and 10.2s in the mislabelled one. Something else was using
+the GPU during at least one of those, most likely the service's own watching
+workloads. Accuracy columns are unaffected; **treat the seconds as indicative
+rather than as measurements** until a run happens with the service stopped.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.

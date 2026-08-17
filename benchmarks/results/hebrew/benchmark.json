@@ -1,0 +1,470 @@
+{
+ "version": 1,
+ "runs": [
+  {
+   "workload": "selected-text-tools",
+   "modelId": "dictalm2-hebrew-q4-k-m",
+   "device": "vulkan-0",
+   "contextTokens": 32768,
+   "cache": "q8_0",
+   "layersOffloaded": 33,
+   "loadSeconds": 1.4,
+   "accuracy": 0.0,
+   "ruleScore": 0.0,
+   "correct": 0,
+   "cases": 10,
+   "errors": 10,
+   "secondsPerCase": 1.23,
+   "charactersPerSecond": 0.0,
+   "failures": {
+    "produced-a-usable-document": 10
+   },
+   "outcomes": [
+    {
+     "caseId": "text-summarize",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 0.08,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-summarize-keeps-the-name",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.34,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-explain",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.37,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-rewrite",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.35,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-extract-tasks",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.35,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-extract-single-task",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.36,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-translate-hebrew",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.35,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-translate-hebrew-names",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.36,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-translate-hebrew-paragraph",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.37,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    },
+    {
+     "caseId": "text-translate-portuguese",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 1.35,
+     "outputCharacters": 0,
+     "error": "ProviderGenerationError: generation-failed: native generation failed",
+     "document": null
+    }
+   ]
+  },
+  {
+   "workload": "selected-text-tools",
+   "modelId": "qwen3-8b-q4-k-m",
+   "device": "vulkan-0",
+   "contextTokens": 32768,
+   "cache": "q8_0",
+   "layersOffloaded": 37,
+   "loadSeconds": 1.55,
+   "accuracy": 0.9,
+   "ruleScore": 0.9722,
+   "correct": 9,
+   "cases": 10,
+   "errors": 0,
+   "secondsPerCase": 81.44,
+   "charactersPerSecond": 5.8,
+   "failures": {
+    "no_foreign_script": 1
+   },
+   "outcomes": [
+    {
+     "caseId": "text-summarize",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 85.92,
+     "outputCharacters": 542,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-summarize:1",
+       "sourceSha256": "10a64b31d32d8006ea073bc7e76f4e3caea5886a78a1a8e2964c69f2ead1d359",
+       "span": {
+        "start": 0,
+        "end": 218
+       },
+       "textSha256": "10a64b31d32d8006ea073bc7e76f4e3caea5886a78a1a8e2964c69f2ead1d359"
+      },
+      "operation": "summarize",
+      "requestId": "bench-text-summarize",
+      "result": "A migration moved 1.4 million rows overnight, with two tables failing on unique constraints and being manually retried at 06:20. Marta Oliveira approved the change at 08:00, and no rollback was needed.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-summarize-keeps-the-name",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 86.69,
+     "outputCharacters": 505,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-summarize-keeps-the-name:1",
+       "sourceSha256": "a698fba2e2fe8efee401b3a8869f1e0bd4d564b2a4f682b82da763e8771e73a4",
+       "span": {
+        "start": 0,
+        "end": 133
+       },
+       "textSha256": "a698fba2e2fe8efee401b3a8869f1e0bd4d564b2a4f682b82da763e8771e73a4"
+      },
+      "operation": "summarize",
+      "requestId": "bench-text-summarize-keeps-the-name",
+      "result": "Ana Ribeiro approved a 42,000 EUR budget for the second phase, contingent on the supplier delivering the report by September 30, 2026.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-explain",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 75.55,
+     "outputCharacters": 445,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-explain:1",
+       "sourceSha256": "9525e5444e0119cc20f74c711e2c2cd9b5dbb1ad2c1c61874eec3c2c2c116085",
+       "span": {
+        "start": 0,
+        "end": 110
+       },
+       "textSha256": "9525e5444e0119cc20f74c711e2c2cd9b5dbb1ad2c1c61874eec3c2c2c116085"
+      },
+      "operation": "explain",
+      "requestId": "bench-text-explain",
+      "result": "The socket read timed out after 30 seconds because the worker holding the accelerator lease never released it.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-rewrite",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 71.97,
+     "outputCharacters": 408,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-rewrite:1",
+       "sourceSha256": "d62bfbce61a6925540fb7fc46e9fed59e3abad5ea002d6f6be49274836c2d747",
+       "span": {
+        "start": 0,
+        "end": 73
+       },
+       "textSha256": "d62bfbce61a6925540fb7fc46e9fed59e3abad5ea002d6f6be49274836c2d747"
+      },
+      "operation": "rewrite",
+      "requestId": "bench-text-rewrite",
+      "result": "we can't do the thing by Friday because the guy with the key is out, sorry",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-extract-tasks",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 95.91,
+     "outputCharacters": 652,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-extract-tasks:1",
+       "sourceSha256": "7575b431339b05d633f74b4684b2e86fe21a304d8cddbfefd2e04ebe12b78f58",
+       "span": {
+        "start": 0,
+        "end": 143
+       },
+       "textSha256": "7575b431339b05d633f74b4684b2e86fe21a304d8cddbfefd2e04ebe12b78f58"
+      },
+      "operation": "extract-tasks",
+      "requestId": "bench-text-extract-tasks",
+      "result": "Tasks: Rui will send the invoice on Monday. Marta has to review the contract before the board meeting. Somebody needs to book the room for 2026-09-03.",
+      "tasks": [
+       "Rui will send the invoice on Monday.",
+       "Marta has to review the contract before the board meeting.",
+       "Somebody needs to book the room for 2026-09-03."
+      ],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-extract-single-task",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 73.27,
+     "outputCharacters": 472,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-extract-single-task:1",
+       "sourceSha256": "7f1ae852d0a636d6fe221ff6cb10392bfcae2985220e07b10ddeecfc87ed14ee",
+       "span": {
+        "start": 0,
+        "end": 70
+       },
+       "textSha256": "7f1ae852d0a636d6fe221ff6cb10392bfcae2985220e07b10ddeecfc87ed14ee"
+      },
+      "operation": "extract-tasks",
+      "requestId": "bench-text-extract-single-task",
+      "result": "The only outstanding item is that Ana must approve the revised budget.",
+      "tasks": [
+       "Ana must approve the revised budget."
+      ],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-translate-hebrew",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "hebrew",
+      "no_foreign_script",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 80.45,
+     "outputCharacters": 397,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-translate-hebrew:1",
+       "sourceSha256": "b64fd217af14b79608f92d9030b98bf51f59deed409bdd770743cd13b09a591f",
+       "span": {
+        "start": 0,
+        "end": 61
+       },
+       "textSha256": "b64fd217af14b79608f92d9030b98bf51f59deed409bdd770743cd13b09a591f"
+      },
+      "operation": "translate",
+      "requestId": "bench-text-translate-hebrew",
+      "result": "המפגש ייערך ב-2026-09-03 בשעה 14:00 בליסון.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-translate-hebrew-names",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "hebrew",
+      "no_foreign_script",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 79.66,
+     "outputCharacters": 424,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-translate-hebrew-names:1",
+       "sourceSha256": "3f05675b304fa9859c509bb3ab27dfb5b4d86a2a77f50b6bad841501dca30ffb",
+       "span": {
+        "start": 0,
+        "end": 68
+       },
+       "textSha256": "3f05675b304fa9859c509bb3ab27dfb5b4d86a2a77f50b6bad841501dca30ffb"
+      },
+      "operation": "translate",
+      "requestId": "bench-text-translate-hebrew-names",
+      "result": "מארטה אוליבריה אישרה התקציב של 42,000 אירופי עבור שלב שני.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-translate-hebrew-paragraph",
+     "correct": false,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "hebrew",
+      "operation"
+     ],
+     "failed": [
+      "no_foreign_script"
+     ],
+     "seconds": 86.8,
+     "outputCharacters": 478,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-translate-hebrew-paragraph:1",
+       "sourceSha256": "81f0d88ae0763275c1a31adfab258c1a19c6bb54ea6cb9785e77ee7d2e55e527",
+       "span": {
+        "start": 0,
+        "end": 149
+       },
+       "textSha256": "81f0d88ae0763275c1a31adfab258c1a19c6bb54ea6cb9785e77ee7d2e55e527"
+      },
+      "operation": "translate",
+      "requestId": "bench-text-translate-hebrew-paragraph",
+      "result": "הספקן חייב להגיש את הדוח עד 30 בספטמבר 2026. אם הדוח מتأخر, ריבית של 3.5 אחוז לשנה תחול על הסכום הנותר.",
+      "tasks": [],
+      "version": 1
+     }
+    },
+    {
+     "caseId": "text-translate-portuguese",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "hebrew",
+      "operation"
+     ],
+     "failed": [],
+     "seconds": 78.19,
+     "outputCharacters": 407,
+     "error": "",
+     "document": {
+      "evidence": {
+       "sourceRef": "case:bench-text-translate-portuguese:1",
+       "sourceSha256": "974c3732a6d821a32bb33ec8f761924f396b3cb94942b9cf121ba67e214eb763",
+       "span": {
+        "start": 0,
+        "end": 47
+       },
+       "textSha256": "974c3732a6d821a32bb33ec8f761924f396b3cb94942b9cf121ba67e214eb763"
+      },
+      "operation": "translate",
+      "requestId": "bench-text-translate-portuguese",
+      "result": "A reunião ocorrerá na segunda-feira às 14:00.",
+      "tasks": [],
+      "version": 1
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,37 @@
+[2026-08-17 04:03:44] models: dictalm2-hebrew-q4-k-m, qwen3-8b-q4-k-m
+[2026-08-17 04:03:44] workloads: selected-text-tools
+[2026-08-17 04:03:44] dictalm2-hebrew-q4-k-m: 4.07 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 04:03:45] loading dictalm2-hebrew-q4-k-m from model.gguf on Vulkan device 0
+[2026-08-17 04:03:46] loaded in 1.4s — 33/33 layers on Vulkan
+[2026-08-17 04:03:46] dictalm2-hebrew-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 04:03:46]   text-summarize                     FAIL    0.1s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:47]   text-summarize-keeps-the-name      FAIL    1.3s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:49]   text-explain                       FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:50]   text-rewrite                       FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:51]   text-extract-tasks                 FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:53]   text-extract-single-task           FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:54]   text-translate-hebrew              FAIL    1.3s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:55]   text-translate-hebrew-names        FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:57]   text-translate-hebrew-paragraph    FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:58]   text-translate-portuguese          FAIL    1.4s  ProviderGenerationError: generation-failed: native generation failed  failed: produced-a-usable-document
+[2026-08-17 04:03:58] dictalm2-hebrew-q4-k-m · selected-text-tools: 0/10 correct (0%), rules 0%, 1.2s per case
+[2026-08-17 04:03:58]   what failed: {"produced-a-usable-document": 10}
+[2026-08-17 04:03:58] results written to benchmarks/results/hebrew/benchmark.md
+[2026-08-17 04:03:58] qwen3-8b-q4-k-m: 4.68 GiB weights + 2.39 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 04:03:59] loading qwen3-8b-q4-k-m from model.gguf on Vulkan device 0
+[2026-08-17 04:04:00] loaded in 1.5s — 37/37 layers on Vulkan
+[2026-08-17 04:04:00] qwen3-8b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 04:05:26]   text-summarize                     ok     85.9s
+[2026-08-17 04:06:53]   text-summarize-keeps-the-name      ok     86.7s
+[2026-08-17 04:08:08]   text-explain                       ok     75.6s
+[2026-08-17 04:09:20]   text-rewrite                       ok     72.0s
+[2026-08-17 04:10:56]   text-extract-tasks                 ok     95.9s
+[2026-08-17 04:12:09]   text-extract-single-task           ok     73.3s
+[2026-08-17 04:13:30]   text-translate-hebrew              ok     80.5s
+[2026-08-17 04:14:50]   text-translate-hebrew-names        ok     79.7s
+[2026-08-17 04:16:16]   text-translate-hebrew-paragraph    FAIL   86.8s  failed: no_foreign_script
+[2026-08-17 04:17:35]   text-translate-portuguese          ok     78.2s
+[2026-08-17 04:17:35] qwen3-8b-q4-k-m · selected-text-tools: 9/10 correct (90%), rules 97%, 81.4s per case
+[2026-08-17 04:17:35]   what failed: {"no_foreign_script": 1}
+[2026-08-17 04:17:35] results written to benchmarks/results/hebrew/benchmark.md
+[2026-08-17 04:17:35] done

@@ -1,0 +1,24 @@
+[2026-08-17 04:17:48] models: qwen3-8b-q4-k-m, qwen3-4b-q4-k-m
+[2026-08-17 04:17:48] workloads: ask-selected-files, event-extraction, file-organizer, selected-text-tools
+[2026-08-17 04:17:48] qwen3-8b-q4-k-m: 4.68 GiB weights + 2.39 GiB cache at 32,768 tokens against 44.84 GiB free on gpu-renderD129 — expected to fit
+[2026-08-17 04:17:48] loading qwen3-8b-q4-k-m from model.gguf on Vulkan device 1
+[2026-08-17 04:17:51] loaded in 2.3s — 37/37 layers on Vulkan
+[2026-08-17 04:17:51] qwen3-8b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 04:17:59]   ask-invoice-total                  ok      8.5s
+[2026-08-17 04:18:10]   ask-who-signed                     ok     10.9s
+[2026-08-17 04:18:21]   ask-deadline                       ok     10.4s
+[2026-08-17 04:18:31]   ask-warranty-length                ok     10.4s
+[2026-08-17 04:18:42]   ask-two-documents                  ok     11.0s
+[2026-08-17 04:18:52]   ask-percentage                     ok     10.3s
+[2026-08-17 04:19:03]   ask-role-and-name                  ok     10.1s
+[2026-08-17 04:19:13]   ask-language-portuguese            ok     10.3s
+[2026-08-17 04:19:23]   ask-absent-fact                    FAIL   10.4s  failed: no_invented_numbers
+[2026-08-17 04:19:33]   ask-absent-person                  ok      9.8s
+[2026-08-17 04:19:33] qwen3-8b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 10.2s per case
+[2026-08-17 04:19:33]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 04:19:33] qwen3-8b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 04:19:38]   event-explicit-date-time           FAIL    5.1s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 04:19:43]   event-written-month                FAIL    5.1s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 04:19:48]   event-two-in-one-document          FAIL    5.2s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 04:19:53]   event-with-location                FAIL    5.1s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 04:19:59]   event-ics-like                     FAIL    5.2s  failed: answers-rather-than-refusing, at_least
