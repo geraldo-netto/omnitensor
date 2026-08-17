@@ -276,7 +276,6 @@ async def cancel_orphaned_jobs(host, plugin_id: str, detail: str) -> None:
         )
 
 
-
 __all__ = [
     "DEFAULT_MAX_RESTARTS",
     "DEFAULT_RESTART_BACKOFF_MULTIPLIER",

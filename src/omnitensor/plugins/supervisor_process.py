@@ -227,7 +227,6 @@ async def terminate_after_timeout(process: WorkerProcess, timeout: float) -> boo
     return True
 
 
-
 __all__ = [
     "AsyncioSubprocessLauncher",
     "DEFAULT_CANCEL_TIMEOUT_SECONDS",

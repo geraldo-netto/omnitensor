@@ -105,7 +105,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # event-workload grew by the eight serializers version 2 needed and by the
     # pass planner that makes an uncapped answer deliverable over many sources.
     assert [len(shard.selectors) for shard in manifest.shards] == [
-        42,
+        44,
         3,
         43,
         21,
@@ -116,7 +116,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 178
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 180
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

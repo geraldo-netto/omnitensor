@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -116,6 +117,35 @@ def require_match(
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
         raise error_type(code, detail)
     return value
+
+
+# What a digest and an identifier are does not vary by workload, and both
+# acceptance modules had defined these identically. A second copy of a regular
+# expression is a second place for it to drift.
+DIGEST = re.compile(r"^[a-f0-9]{64}$")
+IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def require_digest(
+    value: object,
+    *,
+    error_type: AcceptanceError,
+    code: str,
+    detail: str,
+) -> str:
+    """A lower-case SHA-256, which is the only form a digest is written in here."""
+    return require_match(value, DIGEST, error_type=error_type, code=code, detail=detail)
+
+
+def require_identifier(
+    value: object,
+    *,
+    error_type: AcceptanceError,
+    code: str,
+    detail: str,
+) -> str:
+    """A lower-case, hyphen-separated name: a workload id, a case id, a model id."""
+    return require_match(value, IDENTIFIER, error_type=error_type, code=code, detail=detail)
 
 
 def require_integer(
@@ -313,6 +343,8 @@ __all__ = [
     "require_boolean",
     "require_integer",
     "require_mapping",
+    "require_digest",
+    "require_identifier",
     "require_match",
     "require_sequence",
     "require_text",

@@ -69,7 +69,6 @@ def record_diagnostic(
     del journal[:-maximum]
 
 
-
 __all__ = [
     "MAX_WORKER_DIAGNOSTICS",
     "WorkerDiagnostic",

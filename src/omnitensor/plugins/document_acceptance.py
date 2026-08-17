@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import math
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,9 +25,10 @@ from .acceptance_kit import (
     discover_resource,
     read_bounded_json,
     require_boolean,
+    require_digest,
+    require_identifier,
     require_integer,
     require_mapping,
-    require_match,
     require_sequence,
     require_text,
     run_acceptance_cli,
@@ -42,8 +42,6 @@ MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
 QWEN_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
 QWEN_MODEL_ID = "qwen3-8b-q4-k-m"
-_DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class DocumentAcceptanceError(ValueError):
@@ -693,9 +691,8 @@ def _bounded_text(value: object, label: str, limit: int, code: str) -> str:
 
 def _identifier(value: object, label: str, code: str) -> str:
     text = _bounded_text(value, label, 120, code)
-    return require_match(
+    return require_identifier(
         text,
-        _IDENTIFIER,
         error_type=DocumentAcceptanceError,
         code=code,
         detail=f"{label} must be a kebab-case identifier",
@@ -703,9 +700,8 @@ def _identifier(value: object, label: str, code: str) -> str:
 
 
 def _digest(value: object, label: str) -> str:
-    return require_match(
+    return require_digest(
         value,
-        _DIGEST,
         error_type=DocumentAcceptanceError,
         code="evidence-invalid",
         detail=f"{label} must be lowercase SHA-256",

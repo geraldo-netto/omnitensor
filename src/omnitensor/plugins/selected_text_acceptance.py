@@ -21,9 +21,10 @@ from .acceptance_kit import (
     parse_native_load_report,
     read_bounded_json,
     require_boolean,
+    require_digest,
+    require_identifier,
     require_integer,
     require_mapping,
-    require_match,
     require_sequence,
     require_text,
     run_acceptance_cli,
@@ -45,8 +46,6 @@ SELECTED_TEXT_RUNTIME_VERSION = "llama-cpp-python-0.3.34"
 SELECTED_TEXT_GPU_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 _HEBREW = re.compile(r"[\u0590-\u05ff]")
 _DISALLOWED_SCRIPT = re.compile(r"[\u0400-\u052f\u0600-\u06ff]")
-_DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class SelectedTextAcceptanceError(ValueError):
@@ -609,9 +608,8 @@ def _text(value: object, label: str, maximum: int, code: str) -> str:
 
 
 def _identifier(value: object, label: str, code: str) -> str:
-    return require_match(
+    return require_identifier(
         value,
-        _IDENTIFIER,
         error_type=SelectedTextAcceptanceError,
         code=code,
         detail=f"{label} must be a kebab-case identifier",
@@ -619,9 +617,8 @@ def _identifier(value: object, label: str, code: str) -> str:
 
 
 def _digest(value: object, label: str, code: str = "evidence-invalid") -> str:
-    return require_match(
+    return require_digest(
         value,
-        _DIGEST,
         error_type=SelectedTextAcceptanceError,
         code=code,
         detail=f"{label} is invalid",

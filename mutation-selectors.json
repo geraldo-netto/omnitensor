@@ -34,6 +34,8 @@
         "omnitensor.plugins.acceptance_kit.x_parse_native_load_report",
         "omnitensor.plugins.acceptance_kit.x_read_bounded_json",
         "omnitensor.plugins.acceptance_kit.x_require_boolean",
+        "omnitensor.plugins.acceptance_kit.x_require_digest",
+        "omnitensor.plugins.acceptance_kit.x_require_identifier",
         "omnitensor.plugins.acceptance_kit.x_require_integer",
         "omnitensor.plugins.acceptance_kit.x_require_mapping",
         "omnitensor.plugins.acceptance_kit.x_require_match",

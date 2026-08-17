@@ -215,7 +215,6 @@ async def stop_process(
     return await terminate(slot.process, timeout)
 
 
-
 __all__ = [
     "PluginWorkerError",
     "WorkerSlot",
