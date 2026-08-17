@@ -12,9 +12,8 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, runtime_checkable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from omnitensor.registry import validate_document
@@ -248,11 +247,6 @@ class SourceFragment:
     text_sha256: str
 
 
-@runtime_checkable
-class CalendarSink(Protocol):
-    """A side-effect port implemented by an explicitly invoked client."""
-
-    def write(self, event: EventCandidate) -> None: ...
 
 
 def parse_grounded_event_result(document: object) -> GroundedEventResult:
@@ -295,51 +289,10 @@ def parse_grounded_event_result(document: object) -> GroundedEventResult:
     )
 
 
-def confirm_event_candidates(
-    result: GroundedEventResult,
-    confirmed_ids: Sequence[str],
-    *,
-    rejected_ids: Sequence[str] = (),
-) -> GroundedEventResult:
-    """Apply one explicit human decision to every pending candidate."""
-    if not isinstance(result, GroundedEventResult) or result.outcome == "refused":
-        raise EventResultError("confirmation-invalid", "result cannot be confirmed")
-    confirmed = _decision_ids(confirmed_ids, "confirmed ids")
-    rejected = _decision_ids(rejected_ids, "rejected ids")
-    if confirmed & rejected:
-        raise EventResultError("confirmation-invalid", "an event cannot be confirmed and rejected")
-    known = {event.candidate_id for event in result.events}
-    if confirmed | rejected != known:
-        raise EventResultError(
-            "confirmation-invalid", "every candidate needs exactly one human decision"
-        )
-    events = tuple(
-        replace(
-            event,
-            confirmation="confirmed" if event.candidate_id in confirmed else "rejected",
-        )
-        for event in result.events
-    )
-    return replace(result, events=events)
 
 
-def write_confirmed_events(result: GroundedEventResult, sink: CalendarSink) -> int:
-    """Write confirmed candidates only; pending model output never reaches a sink."""
-    if not isinstance(sink, CalendarSink):
-        raise EventResultError("calendar-invalid", "sink does not implement the calendar port")
-    confirmed = _confirmed_events(result)
-    for event in confirmed:
-        sink.write(event)
-    return len(confirmed)
 
 
-def render_confirmed_ics(result: GroundedEventResult) -> str:
-    """Render confirmed candidates as a bounded RFC 5545 calendar document."""
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OmniTensor//Events 1//EN"]
-    for event in _confirmed_events(result):
-        lines.extend(_ics_event(event))
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
 
 
 def source_fragments(
@@ -641,153 +594,27 @@ def _duplicate_key(event: EventCandidate) -> tuple:
     return label, event.when.date, event.when.time, place
 
 
-def _decision_ids(values: Sequence[str], label: str) -> set[str]:
-    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
-        raise EventResultError("confirmation-invalid", f"{label} must be a sequence")
-    parsed = set(values)
-    if len(parsed) != len(values) or any(
-        not isinstance(value, str) or _REQUEST_ID.fullmatch(value) is None for value in parsed
-    ):
-        raise EventResultError("confirmation-invalid", f"{label} are invalid")
-    return parsed
 
 
-def _confirmed_events(result: GroundedEventResult) -> tuple[EventCandidate, ...]:
-    if not isinstance(result, GroundedEventResult):
-        raise EventResultError("confirmation-required", "event result is invalid")
-    if any(event.confirmation == "pending" for event in result.events):
-        raise EventResultError("confirmation-required", "every candidate needs a human decision")
-    confirmed = tuple(event for event in result.events if event.confirmation == "confirmed")
-    if not confirmed:
-        raise EventResultError("confirmation-required", "no candidate was confirmed")
-    # A named timezone used to be required here, which is the same rigidity
-    # that made the workload refuse every ordinary invitation, one layer down:
-    # floating time is what RFC 5545 provides for "the source did not say", and
-    # the calendar the person imports into resolves it.
-    return confirmed
 
 
-def _ics_event(event: EventCandidate) -> tuple[str, ...]:
-    """One calendar component, in whichever form the event can honestly take.
-
-    RFC 5545 already has a container for every case, so nothing has to be
-    invented and nothing has to be withheld:
-
-    - a date and a time with a zone becomes a zoned ``DTSTART``;
-    - a date and a time with no zone becomes a *floating* ``DTSTART``, which
-      every client reads as local — exactly "the source did not say, so use
-      mine", and the reason an event from a Brazilian invitation does not
-      arrive three hours out;
-    - a date with no time becomes an all-day ``DTSTART;VALUE=DATE``;
-    - no date at all cannot be a ``VEVENT``, because ``DTSTART`` is required
-      without a ``METHOD``, so it becomes a ``VTODO`` with no ``DUE`` — a task
-      that says decide when, kept off the calendar grid until somebody does.
-    """
-    identity = hashlib.sha256(
-        f"{event.candidate_id}\0{event.when.date or ''}\0{event.when.time or ''}".encode()
-    ).hexdigest()
-    if not event.when.placeable:
-        lines = [
-            "BEGIN:VTODO",
-            f"UID:{identity}@omnitensor",
-            f"SUMMARY:{_ics_text(event.label.text)}",
-        ]
-        lines.extend(_ics_common(event))
-        lines.append("END:VTODO")
-        return tuple(lines)
-
-    lines = ["BEGIN:VEVENT", f"UID:{identity}@omnitensor"]
-    lines.append(_ics_moment("DTSTART", event.when.date, event.when.time, event.when.timezone))
-    end_date = event.when.end_date or (event.when.date if event.when.end_time else None)
-    if end_date is not None:
-        lines.append(_ics_moment("DTEND", end_date, event.when.end_time, event.when.timezone))
-    lines.append(f"SUMMARY:{_ics_text(event.label.text)}")
-    if event.repeats is not None:
-        lines.append(f"RRULE:{_ics_rrule(event.repeats)}")
-        for excluded in event.repeats.exceptions:
-            lines.append(f"EXDATE;VALUE=DATE:{excluded.replace('-', '')}")
-    lines.extend(_ics_common(event))
-    lines.append("END:VEVENT")
-    return tuple(lines)
 
 
-def _ics_common(event: EventCandidate) -> tuple[str, ...]:
-    """The parts a task and an event describe the same way."""
-    lines = []
-    if event.what is not None:
-        lines.append(f"DESCRIPTION:{_ics_text(event.what.text)}")
-    if event.where is not None:
-        place = event.where
-        stated = place.address.full if place.address else place.venue
-        if stated is not None:
-            lines.append(f"LOCATION:{_ics_text(stated)}")
-        if place.url is not None:
-            lines.append(f"URL:{_ics_text(place.url)}")
-    if event.people is not None and event.people.organiser is not None:
-        organiser = event.people.organiser
-        address = f";MAILTO:{organiser.email}" if organiser.email else ""
-        lines.append(f"ORGANIZER;CN={_ics_text(organiser.name)}{address}")
-    for participant in () if event.people is None else event.people.participants:
-        address = f":MAILTO:{participant.email}" if participant.email else ":"
-        lines.append(f"ATTENDEE;CN={_ics_text(participant.name)}{address}")
-    if event.status != "scheduled":
-        # RFC 5545 has three: a postponed event is tentative until it is
-        # rescheduled, which is what the source actually told us.
-        mapped = {"cancelled": "CANCELLED", "tentative": "TENTATIVE", "postponed": "TENTATIVE"}
-        lines.append(f"STATUS:{mapped[event.status]}")
-    return tuple(lines)
 
 
-def _ics_moment(name: str, date: str, time: str | None, timezone: EventTimezone | None) -> str:
-    stamp = date.replace("-", "")
-    if time is None:
-        return f"{name};VALUE=DATE:{stamp}"
-    clock = time.replace(":", "")
-    if len(clock) == 4:
-        clock = f"{clock}00"
-    if timezone is None or timezone.name == "floating":
-        # Floating: no zone, no Z. Local to whoever opens it.
-        return f"{name}:{stamp}T{clock}"
-    if timezone.name == "UTC":
-        return f"{name}:{stamp}T{clock}Z"
-    return f"{name};TZID={timezone.name}:{stamp}T{clock}"
 
 
-def _ics_rrule(repeats: Recurrence) -> str:
-    parts = [f"FREQ={repeats.freq}"]
-    if repeats.interval != 1:
-        parts.append(f"INTERVAL={repeats.interval}")
-    for name, values in (
-        ("BYDAY", repeats.by_day),
-        ("BYMONTHDAY", repeats.by_month_day),
-        ("BYMONTH", repeats.by_month),
-        ("BYSETPOS", repeats.by_set_pos),
-    ):
-        if values:
-            parts.append(f"{name}={','.join(str(value) for value in values)}")
-    if repeats.count is not None:
-        parts.append(f"COUNT={repeats.count}")
-    if repeats.until is not None:
-        parts.append(f"UNTIL={repeats.until.replace('-', '')}")
-    return ";".join(parts)
 
 
-def _ics_text(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
-    return escaped.replace("\r", "").replace("\n", "\\n")
 
 
 __all__ = [
-    "CalendarSink",
     "DUPLICATE_POLICY",
     "EventCandidate",
     "EventResultError",
     "GroundedEventResult",
     "SourceEvidence",
     "SourceFragment",
-    "confirm_event_candidates",
     "parse_grounded_event_result",
-    "render_confirmed_ics",
     "source_fragments",
-    "write_confirmed_events",
 ]

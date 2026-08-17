@@ -6,14 +6,16 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor.plugins.event_confirmation import (
+    confirm_event_candidates,
+    render_confirmed_ics,
+    write_confirmed_events,
+)
 from omnitensor.plugins.events import (
     DUPLICATE_POLICY,
     EventResultError,
-    confirm_event_candidates,
     parse_grounded_event_result,
-    render_confirmed_ics,
     source_fragments,
-    write_confirmed_events,
 )
 from omnitensor.plugins.extraction import (
     ExtractionOutcome,

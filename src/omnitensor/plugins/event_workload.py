@@ -32,14 +32,13 @@ from ..sdk import (
     succeeded_result,
 )
 from ..storelock import store_lock
+from .event_confirmation import confirm_event_candidates, render_confirmed_ics
 from .event_passes import merge, plan_passes
 from .events import (
     EventResultError,
     GroundedEventResult,
     SourceFragment,
-    confirm_event_candidates,
     parse_grounded_event_result,
-    render_confirmed_ics,
     source_fragments,
 )
 from .extraction import (

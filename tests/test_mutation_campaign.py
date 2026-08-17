@@ -102,12 +102,12 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "snapshot-forecast",
         "tensor-output",
     )
-    # event-workload grew by the eight serializers version 2 needed and by the
-    # pass planner that makes an uncapped answer deliverable over many sources.
+    # event-workload grew by version 2's serializers, the pass planner, and the
+    # confirmation gate and calendar renderer split out of `events`.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         44,
         3,
-        43,
+        53,
         21,
         16,
         2,
@@ -116,7 +116,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 180
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 190
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
@@ -130,6 +130,8 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.plugins.acceptance_kit",
         "omnitensor.plugins.document_acceptance",
         "omnitensor.plugins.document_qa",
+        "omnitensor.plugins.event_calendar",
+        "omnitensor.plugins.event_confirmation",
         "omnitensor.plugins.event_passes",
         "omnitensor.plugins.event_workload",
         "omnitensor.scheduler",
@@ -155,6 +157,8 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         },
         "document-binding": {"omnitensor.training.binding"},
         "event-workload": {
+            "omnitensor.plugins.event_calendar",
+            "omnitensor.plugins.event_confirmation",
             "omnitensor.plugins.event_passes",
             "omnitensor.plugins.event_workload",
         },
