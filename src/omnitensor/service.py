@@ -33,6 +33,7 @@ from pathlib import Path
 from . import artifact_readiness as artifacts
 from . import dispatch_routing as routing
 from . import telemetry_observation as observation
+from .artifact_readiness import ArtifactResolver
 from .callers import CallerIdentityResolver
 from .composition import (
     DEFAULT_ARTIFACT_ROOT as DEFAULT_ARTIFACT_ROOT,
@@ -59,6 +60,7 @@ from .contract import (
     RUNTIME_METHODS as RUNTIME_METHODS,
 )
 from .control import ControlService
+from .device_lanes import DeviceLanes
 from .discovery import DiscoveryPaths
 from .execution import build_executors as build_executors
 from .host import FileSnapshotPublisher as FileSnapshotPublisher
@@ -188,9 +190,12 @@ class OmniTensorService:
         # constructed, so `active_permissions` came from a deny-all stub: every
         # declared permission read as ungranted and nothing could change that.
         self._grants = grants if grants is not None else GrantLedger(grants_path)
-        self._artifact_root_path = artifact_root
-        self._resolutions: dict[str, tuple] = {}
-        self._artifact_store = ArtifactInstaller(artifact_root) if artifact_root else None
+        self._artifacts = ArtifactResolver(
+            artifact_root,
+            ArtifactInstaller(artifact_root) if artifact_root else None,
+            workloads_of=lambda: self._workloads,
+            plugins_of=lambda: self._plugin_runtime.snapshot.catalog.plugins,
+        )
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
@@ -227,6 +232,7 @@ class OmniTensorService:
         )
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
+        self._lanes = DeviceLanes(lambda: self._executors, self._gpu_device_choice)
         self._scheduler = Scheduler(
             self._executors.scheduler_executors(),
             self._weight_of,
@@ -307,9 +313,8 @@ class OmniTensorService:
         return routing.policy_weight(self.control.state, workload_id)
 
     def _admits(self, workload_id: str) -> bool:
-        return (
-            workload_id not in self._pending_device_profiles
-            and routing.policy_admits(self.control.state, workload_id)
+        return workload_id not in self._pending_device_profiles and routing.policy_admits(
+            self.control.state, workload_id
         )
 
     def _job_authorized(self, action: str, workload_id: str) -> bool:
@@ -371,9 +376,7 @@ class OmniTensorService:
             else frozenset()
         )
 
-    def _schedule_plugin_reload(
-        self, profile_ids: set[str] | frozenset[str] | None = None
-    ) -> None:
+    def _schedule_plugin_reload(self, profile_ids: set[str] | frozenset[str] | None = None) -> None:
         if not isinstance(self._plugin_runtime, AcceleratorReloadableRuntime):
             return
         affected = self._plugin_ids() if profile_ids is None else frozenset(profile_ids)
@@ -418,44 +421,22 @@ class OmniTensorService:
         return tuple(declared(profile_id)) if callable(declared) else ()
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
-        return tuple(
-            device.id for device in self._devices if device.backend == "gpu"
-        )
+        return tuple(device.id for device in self._devices if device.backend == "gpu")
 
     def _gpu_device_choice(self, profile_id: str) -> str | None:
         return self.control.state.device_choices.get(profile_id)
 
     def _executor_view(self, profile_id: str) -> dict:
-        selector = getattr(self._executors, "for_device", None)
-        return (
-            selector(self._gpu_device_choice(profile_id))
-            if callable(selector)
-            else dict(self._executors)
-        )
+        return self._lanes.executors_for(profile_id)
 
     def _scheduler_lane(self, profile_id: str, backend: str) -> str:
-        selector = getattr(self._executors, "lane_key", None)
-        return (
-            selector(backend, self._gpu_device_choice(profile_id))
-            if callable(selector)
-            else backend
-        )
+        return self._lanes.lane(profile_id, backend)
 
     def _device_identity(self, profile_id: str, backend: str) -> str | None:
-        selector = getattr(self._executors, "device_id", None)
-        return (
-            selector(backend, self._gpu_device_choice(profile_id))
-            if callable(selector)
-            else backend
-        )
+        return self._lanes.identity(profile_id, backend)
 
     def _executor_for_device(self, backend: str, device_id: str):
-        selector = getattr(self._executors, "executor_for_device", None)
-        return (
-            selector(backend, device_id)
-            if callable(selector)
-            else self._executors.get(backend)
-        )
+        return self._lanes.executor_for(backend, device_id)
 
     def _default_dispatcher(self) -> JobDispatcher:
         return routing.default_dispatcher(
@@ -565,23 +546,24 @@ class OmniTensorService:
         )
         return artifacts.selected_backend(workload, executors)
 
+    @property
+    def _artifact_store(self):
+        return self._artifacts.store
+
+    @_artifact_store.setter
+    def _artifact_store(self, store) -> None:
+        self._artifacts.store = store
+
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
-        return artifacts.resolve_artifact(
-            artifact_id,
-            self._artifact_store,
-            self._declared_reference,
-            self._cached_resolution,
-        )
+        return self._artifacts.resolve(artifact_id)
 
     def _resolve_plugin_artifact(
         self,
         reference: ArtifactReference,
     ) -> ArtifactResolution:
-        return artifacts.resolve_plugin_artifact(reference, self._artifact_store)
+        return self._artifacts.resolve_plugin(reference)
 
-    def _plugin_accelerator_devices(
-        self, profile_id: str | None = None
-    ) -> dict[str, Path]:
+    def _plugin_accelerator_devices(self, profile_id: str | None = None) -> dict[str, Path]:
         return artifacts.plugin_accelerator_devices(
             self._devices,
             self._gpu_device_choice(profile_id) if profile_id is not None else None,
@@ -592,31 +574,17 @@ class OmniTensorService:
         artifact_id: str,
         reference: ArtifactReference,
     ) -> ArtifactResolution:
-        return artifacts.cached_resolution(
-            artifact_id,
-            reference,
-            self._artifact_store,
-            self._resolutions,
-            self._artifact_stamp,
-        )
+        return self._artifacts.cached(artifact_id, reference)
 
     def _artifact_stamp(
         self,
         artifact_id: str,
         reference: ArtifactReference,
     ) -> tuple | None:
-        return artifacts.artifact_stamp(
-            self._artifact_root_path,
-            artifact_id,
-            reference,
-        )
+        return self._artifacts.stamp(artifact_id, reference)
 
     def _declared_reference(self, artifact_id: str) -> ArtifactReference | None:
-        return artifacts.declared_reference(
-            artifact_id,
-            self._workloads,
-            lambda: self._plugin_runtime.snapshot.catalog.plugins,
-        )
+        return self._artifacts.declared_reference(artifact_id)
 
     def _build_runtime_snapshot(self) -> dict:
         return observation.runtime_snapshot(
@@ -655,9 +623,7 @@ class OmniTensorService:
             workloads, executors, scheduler, policy, artifact_ready, permissions_missing
         )
         statuses.update(
-            plugin_profile_statuses(
-                self._plugin_ids(), self._plugin_queue.profile_stats(), policy
-            )
+            plugin_profile_statuses(self._plugin_ids(), self._plugin_queue.profile_stats(), policy)
         )
         return statuses
 
@@ -721,9 +687,7 @@ class OmniTensorService:
                     previous_executors=self._executors,
                 )
                 self._devices = devices
-                self._scheduler.update_executors(
-                    self._executors.scheduler_executors()
-                )
+                self._scheduler.update_executors(self._executors.scheduler_executors())
                 if devices_changed:
                     self._schedule_plugin_reload()
 
@@ -840,9 +804,7 @@ class OmniTensorService:
             self._plugin_reload_requested = False
             try:
                 async with self._plugin_lifecycle_lock:
-                    plugin_snapshot = (
-                        await self._plugin_runtime.reload_accelerator_devices()
-                    )
+                    plugin_snapshot = await self._plugin_runtime.reload_accelerator_devices()
             except Exception:  # noqa: BLE001 - plugin adapters are external
                 LOGGER.exception("Could not reload plugin accelerator leases")
                 return

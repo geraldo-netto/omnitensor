@@ -146,7 +146,65 @@ def plugin_accelerator_devices(
     return paths
 
 
+class ArtifactResolver:
+    """Answer "where are this artifact's weights", and remember the answer.
+
+    The cache is why this holds state: resolving means hashing a file that is
+    usually several gigabytes, and a profile asks on every readiness pass. The
+    stamp — reference, size, mtime — is what makes remembering safe; a weights
+    file replaced underneath the service changes it and the answer is taken
+    again.
+
+    Workloads and the plugin catalog arrive as callables because both are
+    built after the resolver they hand to their collaborators.
+    """
+
+    __slots__ = ("_plugins_of", "_resolutions", "_root", "_store", "_workloads_of")
+
+    def __init__(
+        self,
+        artifact_root: Path | str | None,
+        store,
+        *,
+        workloads_of: Callable[[], Mapping[str, Workload]],
+        plugins_of: Callable[[], Sequence[object]],
+    ) -> None:
+        self._root = artifact_root
+        self._store = store
+        self._workloads_of = workloads_of
+        self._plugins_of = plugins_of
+        self._resolutions: dict[str, tuple] = {}
+
+    @property
+    def store(self):
+        """The installer, or None when this service has no artifact root."""
+        return self._store
+
+    @store.setter
+    def store(self, store) -> None:
+        # Remembered answers describe the store that gave them, so a different
+        # store starts with no answers rather than with somebody else's.
+        self._store = store
+        self._resolutions.clear()
+
+    def resolve(self, artifact_id: str) -> ArtifactResolution:
+        return resolve_artifact(artifact_id, self._store, self.declared_reference, self.cached)
+
+    def resolve_plugin(self, reference: ArtifactReference) -> ArtifactResolution:
+        return resolve_plugin_artifact(reference, self._store)
+
+    def cached(self, artifact_id: str, reference: ArtifactReference) -> ArtifactResolution:
+        return cached_resolution(artifact_id, reference, self._store, self._resolutions, self.stamp)
+
+    def stamp(self, artifact_id: str, reference: ArtifactReference) -> tuple | None:
+        return artifact_stamp(self._root, artifact_id, reference)
+
+    def declared_reference(self, artifact_id: str) -> ArtifactReference | None:
+        return declared_reference(artifact_id, self._workloads_of(), self._plugins_of)
+
+
 __all__ = [
+    "ArtifactResolver",
     "artifact_stamp",
     "cached_resolution",
     "declared_reference",

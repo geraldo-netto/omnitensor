@@ -282,7 +282,9 @@ def test_service_builders_forward_live_runtime_owners(monkeypatch):
     subject._workloads = object()
     subject._scheduler = object()
     subject._executors = {"gpu": object()}
-    subject._artifact_store = object()
+    subject._artifacts = artifact_readiness.ArtifactResolver(
+        None, object(), workloads_of=dict, plugins_of=tuple
+    )
     subject._input_roots = object()
     subject._job_dispatcher = object()
     subject._cancellations = object()
