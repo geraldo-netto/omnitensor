@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from omnitensor.plugins.event_workload import EventWorkloadError, MemoryFragmentStore
+from omnitensor.plugins.fragments import FragmentStoreError, PrivateFragmentStore
 from omnitensor.plugins.generation import GenerationRequest, GenerationTask
 
 _SPAN_REFERENCE = re.compile(r":span:(\d+)-(\d+)$")
@@ -18,7 +18,7 @@ def bind_grounding_metadata(
     raw: str,
     task: GenerationTask,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> str:
     """Bind trusted metadata only after the model selects an exact private source."""
     evidence_groups = _model_evidence(task, request)
@@ -195,7 +195,7 @@ def _normalize_organizer_tags(document: object) -> None:
 def _normalize_organizer_name_extensions(
     document: object,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> None:
     """Complete a safe extensionless suggestion from trusted file metadata."""
     suggestions = document.get("suggestions") if isinstance(document, dict) else None
@@ -212,7 +212,7 @@ def _normalize_organizer_name_extensions(
 
 
 def _organizer_suffixes(
-    request: GenerationRequest, store: MemoryFragmentStore
+    request: GenerationRequest, store: PrivateFragmentStore
 ) -> dict[str, str] | None:
     suffixes: dict[str, str] = {}
     for reference in request.content_references:
@@ -220,7 +220,7 @@ def _organizer_suffixes(
             continue
         try:
             metadata = json.loads(store.resolve(request.request_id, reference).text)
-        except (EventWorkloadError, UnicodeError, json.JSONDecodeError):
+        except (FragmentStoreError, UnicodeError, json.JSONDecodeError):
             return None
         if not isinstance(metadata, dict) or set(metadata) != {"fileId", "fileName"}:
             return None
@@ -265,7 +265,7 @@ def _bind_evidence(
     task_id: str,
     request_id: str,
     allowed: set[str],
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> bool:
     if not isinstance(evidence, dict):
         return False
@@ -288,7 +288,7 @@ def bind_selected_text_digests(
     raw: str,
     task: GenerationTask,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> str:
     """Compatibility wrapper for the original selected-text binder."""
     return bind_grounding_metadata(raw, task, request, store)

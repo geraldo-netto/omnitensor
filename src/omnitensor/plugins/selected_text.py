@@ -22,7 +22,7 @@ from ..sdk import (
     succeeded_result,
 )
 from .event_workload import EventWorkloadError, MemoryFragmentStore
-from .events import SourceFragment
+from .fragments import SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,

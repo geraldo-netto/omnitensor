@@ -378,7 +378,7 @@ def private_document(operation="summarize", **overrides):
 
 
 def source_fragment():
-    from omnitensor.plugins.events import SourceFragment
+    from omnitensor.plugins.fragments import SourceFragment
 
     digest = hashlib.sha256(b"text").hexdigest()
     return SourceFragment("private:job-1:selection", digest, 1, "text", digest)
@@ -523,7 +523,7 @@ async def test_health_does_not_claim_unqualified_operation_quality():
 @given(st.text(min_size=1, max_size=128).filter(str.strip))
 def test_public_evidence_digest_and_span_round_trip_any_explicit_unicode(selection):
     digest = hashlib.sha256(selection.encode()).hexdigest()
-    from omnitensor.plugins.events import SourceFragment
+    from omnitensor.plugins.fragments import SourceFragment
 
     source = SourceFragment("private:job-1:selection", digest, 1, selection, digest)
     document = private_document()

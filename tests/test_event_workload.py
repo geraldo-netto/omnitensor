@@ -22,7 +22,8 @@ from omnitensor.plugins.event_workload import (
     select_sources,
     validate_event_grounding,
 )
-from omnitensor.plugins.events import EventResultError, SourceFragment
+from omnitensor.plugins.events import EventResultError
+from omnitensor.plugins.fragments import SourceFragment
 from omnitensor.plugins.generation import (
     ArtifactProvenance,
     GenerationError,
@@ -361,26 +362,6 @@ def test_text_selection_property_preserves_digest_and_never_content_in_reference
         assert selected.item.digest == hashlib.sha256(value.encode()).hexdigest()
         assert selected.reference == "private:property-job:source:1"
         assert str(source) not in selected.reference
-
-
-def test_memory_store_rejects_invalid_ids_and_missing_fragments():
-    store = MemoryFragmentStore()
-    with pytest.raises(EventWorkloadError, match="request id"):
-        asyncio.run(store.discard("bad/id"))
-    with pytest.raises(EventWorkloadError) as empty:
-        asyncio.run(store.publish("job", ()))
-    assert empty.value.code == "source-empty"
-
-    fragment = SourceFragment("private:job:page:1", "a" * 64, 1, "text", "b" * 64)
-    asyncio.run(store.publish("job", (fragment,)))
-    assert store.resolve("job", fragment.reference) == fragment
-    with pytest.raises(EventWorkloadError) as duplicate:
-        asyncio.run(store.publish("job", (fragment,)))
-    assert str(duplicate.value) == "source-invalid: private fragment reference repeats"
-    with pytest.raises(EventWorkloadError) as invalid:
-        asyncio.run(store.publish("other", (object(),)))
-    assert invalid.value.detail == "private fragment has invalid type"
-    asyncio.run(store.discard("job"))
 
 
 def test_adapter_mapping_and_journal_stage_are_strict(tmp_path):

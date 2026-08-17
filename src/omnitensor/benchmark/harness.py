@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..plugins.event_workload import MemoryFragmentStore
-from ..plugins.events import SourceFragment
+from ..plugins.fragments import SourceFragment
 from ..plugins.generation import GenerationRequest
 from .cases import Case
 from .scoring import Judgement, Tally, judge

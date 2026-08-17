@@ -13,7 +13,10 @@ from typing import BinaryIO
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from omnitensor.plugins.acceptance_kit import NativeLoadReport
-from omnitensor.plugins.event_workload import EventWorkloadError, MemoryFragmentStore
+from omnitensor.plugins.fragments import (
+    FragmentStoreError,
+    PrivateFragmentStore,
+)
 from omnitensor.plugins.generation import (
     GenerationRequest,
     GenerationTask,
@@ -83,9 +86,9 @@ _MONTHS = {
 class LlamaVulkanRuntime:
     """Load Qwen only while holding the host's cross-worker GPU lease."""
 
-    def __init__(self, store: MemoryFragmentStore, lease_path: Path) -> None:
-        if not isinstance(store, MemoryFragmentStore):
-            raise TypeError("store must be MemoryFragmentStore")
+    def __init__(self, store: PrivateFragmentStore, lease_path: Path) -> None:
+        if not isinstance(store, PrivateFragmentStore):
+            raise TypeError("store must satisfy PrivateFragmentStore")
         if not isinstance(lease_path, Path) or not lease_path.is_file():
             raise ValueError("accelerator lease is unavailable")
         self._store = store
@@ -315,7 +318,7 @@ def _is_grounded_event_refusal(raw: str) -> bool:
 def _grounding_hint(
     task: GenerationTask,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> str:
     hints: list[str] = []
     citable = _citable_references(task.task_id, request.content_references)
@@ -343,13 +346,13 @@ def _citable_references(task_id: str, references: tuple[str, ...]) -> tuple[str,
 def _selected_operation_hint(
     task: GenerationTask,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> str:
     if task.task_id != "selected-text-tools" or len(request.content_references) != 2:
         return ""
     try:
         control = json.loads(store.resolve(request.request_id, request.content_references[0]).text)
-    except (EventWorkloadError, UnicodeError, json.JSONDecodeError):
+    except (FragmentStoreError, UnicodeError, json.JSONDecodeError):
         return ""
     if not isinstance(control, dict) or set(control) != {"language", "operation"}:
         return ""
@@ -384,7 +387,7 @@ def _selected_operation_hint(
 def _event_grounding_hint(
     task: GenerationTask,
     request: GenerationRequest,
-    store: MemoryFragmentStore,
+    store: PrivateFragmentStore,
 ) -> str:
     if task.task_id != "event-extraction":
         return ""
@@ -425,7 +428,7 @@ def _has_named_timezone(text: str) -> bool:
     return False
 
 
-def _private_content(store: MemoryFragmentStore, request: GenerationRequest) -> str:
+def _private_content(store: PrivateFragmentStore, request: GenerationRequest) -> str:
     fragments = []
     for reference in request.content_references:
         fragment = store.resolve(request.request_id, reference)

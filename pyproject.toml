@@ -116,6 +116,7 @@ only_mutate = [
     "src/omnitensor/plugins/event_confirmation.py",
     "src/omnitensor/plugins/event_passes.py",
     "src/omnitensor/plugins/event_workload.py",
+    "src/omnitensor/plugins/fragments.py",
     "src/omnitensor/scheduler.py",
     "src/omnitensor/snapshot.py",
     "src/omnitensor/tensorcontract.py",

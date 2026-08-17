@@ -11,9 +11,9 @@ from omnitensor.plugins.document_qa import DocumentQuestionPlugin, document_ques
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
     EventRecoveryJournal,
-    MemoryFragmentStore,
     event_generation_task,
 )
+from omnitensor.plugins.fragments import MemoryFragmentStore
 from omnitensor.plugins.file_organizer import FileOrganizerPlugin, file_organizer_task
 from omnitensor.plugins.generation import (
     ArtifactProvenance,

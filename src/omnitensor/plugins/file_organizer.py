@@ -36,7 +36,7 @@ from .event_workload import (
     PyMuPdfAdapter,
     SelectedSource,
 )
-from .events import SourceFragment
+from .fragments import SourceFragment
 from .extraction import DocumentExtractor, ExtractionAdapter, ExtractionOutcome
 from .generation import (
     GenerationError,

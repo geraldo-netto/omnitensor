@@ -103,11 +103,13 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "tensor-output",
     )
     # event-workload grew by version 2's serializers, the pass planner, and the
-    # confirmation gate and calendar renderer split out of `events`.
+    # confirmation gate and calendar renderer split out of `events`. The private
+    # fragment store moved to `fragments`, which no workload owns, and its
+    # selectors moved with it — the shard is a batch, not an owner.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         44,
         3,
-        53,
+        54,
         21,
         16,
         2,
@@ -116,7 +118,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 190
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 191
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
@@ -134,6 +136,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.plugins.event_confirmation",
         "omnitensor.plugins.event_passes",
         "omnitensor.plugins.event_workload",
+        "omnitensor.plugins.fragments",
         "omnitensor.scheduler",
         "omnitensor.snapshot",
         "omnitensor.tensorcontract",
@@ -161,6 +164,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
             "omnitensor.plugins.event_confirmation",
             "omnitensor.plugins.event_passes",
             "omnitensor.plugins.event_workload",
+            "omnitensor.plugins.fragments",
         },
         "grounded-answer": {"omnitensor.plugins.document_qa"},
         "mutation-launcher": {"omnitensor.mutation_engine"},

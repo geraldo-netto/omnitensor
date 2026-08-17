@@ -34,7 +34,7 @@ from omnitensor.plugins.event_workload import (
     MemoryFragmentStore,
     event_generation_task,
 )
-from omnitensor.plugins.events import SourceFragment
+from omnitensor.plugins.fragments import SourceFragment
 from omnitensor.plugins.file_organizer import file_organizer_task
 from omnitensor.plugins.generation import (
     GenerationLimits,
@@ -741,7 +741,7 @@ def test_runtime_constructor_and_load_fail_closed_at_gpu_model_boundary(tmp_path
     lease.touch()
     with pytest.raises(TypeError) as invalid_store:
         runtime.LlamaVulkanRuntime(object(), lease)
-    assert str(invalid_store.value) == "store must be MemoryFragmentStore"
+    assert str(invalid_store.value) == "store must satisfy PrivateFragmentStore"
     with pytest.raises(ValueError) as invalid_lease:
         runtime.LlamaVulkanRuntime(MemoryFragmentStore(), tmp_path / "missing")
     assert str(invalid_lease.value) == "accelerator lease is unavailable"

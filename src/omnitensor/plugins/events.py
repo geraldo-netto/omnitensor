@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from omnitensor.registry import validate_document
 
 from .extraction import ExtractionOutcome, ExtractionResult
+from .fragments import SourceFragment
 
 DUPLICATE_POLICY = "keep-first-label-date-time-place"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
@@ -234,17 +235,6 @@ class GroundedEventResult:
         `when` is missing a date.
         """
         return tuple(event for event in self.events if not event.when.placeable)
-
-
-@dataclass(frozen=True, slots=True)
-class SourceFragment:
-    """Private prompt material retained inside the isolated worker."""
-
-    reference: str
-    source_sha256: str
-    page: int
-    text: str
-    text_sha256: str
 
 
 

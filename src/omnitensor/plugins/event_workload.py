@@ -37,9 +37,14 @@ from .event_passes import merge, plan_passes
 from .events import (
     EventResultError,
     GroundedEventResult,
-    SourceFragment,
     parse_grounded_event_result,
     source_fragments,
+)
+from .fragments import (
+    FragmentStoreError,
+    MemoryFragmentStore,
+    PrivateFragmentStore,
+    SourceFragment,
 )
 from .extraction import (
     AdapterKind,
@@ -74,56 +79,8 @@ SUPPORTED_SUFFIXES = frozenset({".ics", ".jpeg", ".jpg", ".md", ".pdf", ".png", 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 
 
-class EventWorkloadError(ValueError):
+class EventWorkloadError(FragmentStoreError):
     """Stable refusal with no private content in its detail."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
-
-
-@runtime_checkable
-class PrivateFragmentStore(Protocol):
-    """Worker-local prompt material shared with the native generation port."""
-
-    async def publish(self, request_id: str, fragments: Sequence[SourceFragment]) -> None: ...
-
-    async def discard(self, request_id: str) -> None: ...
-
-
-class MemoryFragmentStore:
-    """Bounded process-local store suitable for native runtime adapters."""
-
-    def __init__(self) -> None:
-        self._requests: dict[str, dict[str, SourceFragment]] = {}
-
-    async def publish(self, request_id: str, fragments: Sequence[SourceFragment]) -> None:
-        _valid_request_id(request_id)
-        if not fragments:
-            raise EventWorkloadError("source-empty", "source produced no private fragments")
-        current = dict(self._requests.get(request_id, {}))
-        for fragment in fragments:
-            if not isinstance(fragment, SourceFragment):
-                raise EventWorkloadError("source-invalid", "private fragment has invalid type")
-            if fragment.reference in current:
-                raise EventWorkloadError("source-invalid", "private fragment reference repeats")
-            current[fragment.reference] = fragment
-        self._requests[request_id] = current
-
-    async def discard(self, request_id: str) -> None:
-        _valid_request_id(request_id)
-        self._requests.pop(request_id, None)
-
-    def resolve(self, request_id: str, reference: str) -> SourceFragment:
-        """Resolve only inside the worker; callers never receive the mapping."""
-        _valid_request_id(request_id)
-        try:
-            return self._requests[request_id][reference]
-        except KeyError as error:
-            raise EventWorkloadError(
-                "source-unavailable", "private fragment is unavailable"
-            ) from error
 
 
 class PlainTextAdapter:
