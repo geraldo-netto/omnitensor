@@ -197,9 +197,7 @@ def resolve_plugin_compatibility(
                     f"{decision.code}: {decision.detail}",
                 )
             )
-    rejected.sort(
-        key=lambda item: (item.entry_point_name, item.distribution_name or "", item.code)
-    )
+    rejected.sort(key=lambda item: (item.entry_point_name, item.distribution_name or "", item.code))
     return PluginCatalog(tuple(accepted), tuple(rejected))
 
 

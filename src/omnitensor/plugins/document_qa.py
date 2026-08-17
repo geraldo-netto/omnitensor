@@ -155,9 +155,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
             suffix: PlainTextAdapter() for suffix in (".txt", ".md")
         }
         media = PyMuPdfAdapter()
-        defaults.update(
-            {suffix: media for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")}
-        )
+        defaults.update({suffix: media for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")})
         for suffix, adapter in (adapters or {}).items():
             if suffix not in defaults or not isinstance(adapter, ExtractionAdapter):
                 raise DocumentQuestionError("adapter-invalid", "source adapter mapping is invalid")
@@ -328,17 +326,13 @@ class DocumentQuestionPlugin(ManagedPlugin):
         stage: str,
         fraction: float,
     ) -> None:
-        await progress.report(
-            PluginProgress(request.job_id, stage, fraction, "", self._clock_ms())
-        )
+        await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
 
 
 def select_question_sources(request_id: str, value: object) -> tuple[SelectedSource, ...]:
     selected = select_sources(request_id, value)
     if len(selected) > MAX_SOURCES:
-        raise DocumentQuestionError(
-            "sources-invalid", f"select 1-{MAX_SOURCES} source files"
-        )
+        raise DocumentQuestionError("sources-invalid", f"select 1-{MAX_SOURCES} source files")
     if any(source.item.suffix == ".ics" for source in selected):
         raise DocumentQuestionError(
             "source-unsupported", "calendar sources are not document question inputs"
@@ -391,8 +385,7 @@ def page_spans(
             if not content.strip():
                 continue
             reference = (
-                f"private:{request_id}:source:{source_number}:"
-                f"page:{page_number}:span:{start}-{end}"
+                f"private:{request_id}:source:{source_number}:page:{page_number}:span:{start}-{end}"
             )
             if _PRIVATE_REFERENCE.fullmatch(reference) is None:
                 raise DocumentQuestionError("span-invalid", "private span reference is invalid")
@@ -548,8 +541,7 @@ FAILURE_DETAILS = {
         "roots are not visible to it."
     ),
     "embedder-unqualified": (
-        "The embedding model this workload needs is not installed or not "
-        "qualified on this machine."
+        "The embedding model this workload needs is not installed or not qualified on this machine."
     ),
 }
 
@@ -597,9 +589,7 @@ def document_question_task():
     )
 
 
-def _validate_embedding_provider(
-    descriptor: object, *, require_qualified: bool = False
-) -> None:
+def _validate_embedding_provider(descriptor: object, *, require_qualified: bool = False) -> None:
     if (
         not isinstance(descriptor, EmbeddingProvider)
         or descriptor.accelerator not in {"gpu", "npu", "tpu"}

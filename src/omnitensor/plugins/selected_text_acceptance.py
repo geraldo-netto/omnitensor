@@ -352,9 +352,7 @@ def _enforce_metrics(
         raise SelectedTextAcceptanceError("quality-failed", "operation latency exceeds gate")
 
 
-def _enforce_safety(
-    safety: SelectedTextSafetyEvidence, policy: SelectedTextPolicy
-) -> None:
+def _enforce_safety(safety: SelectedTextSafetyEvidence, policy: SelectedTextPolicy) -> None:
     if not safety.private_fragments_discarded or not safety.default_route_preserved:
         raise SelectedTextAcceptanceError("safety-failed", "route or privacy evidence failed")
     if safety.cancellation_latency_ms > policy.maximum_cancellation_latency_ms:
@@ -429,10 +427,7 @@ def _validate_selected_text_models(
             validate_gpu_load(model.load)
         except ProviderGenerationError as error:
             raise SelectedTextAcceptanceError("device-unqualified", error.detail) from error
-        if (
-            model.load.total_model_layers != layers
-            or model.device_name != SELECTED_TEXT_GPU_DEVICE
-        ):
+        if model.load.total_model_layers != layers or model.device_name != SELECTED_TEXT_GPU_DEVICE:
             raise SelectedTextAcceptanceError("device-unqualified", "named GPU load differs")
 
 
@@ -550,9 +545,7 @@ def _model_evidence_document(evidence: ModelEvidence) -> dict[str, object]:
 def _fold(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return "".join(
-        character
-        for character in normalized
-        if character.isalnum() or character.isspace()
+        character for character in normalized if character.isalnum() or character.isspace()
     )
 
 

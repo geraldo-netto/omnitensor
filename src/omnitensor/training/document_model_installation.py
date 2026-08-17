@@ -8,6 +8,18 @@ from pathlib import Path
 from omnitensor.preparation import file_digest, install_prepared, prepare_artifact
 
 from ..atomicio import write_json_atomic
+from ..document_model_runners import BgeTokenizer, VulkanBgeRunner
+from ..document_model_types import (
+    MAX_NATIVE_ABSOLUTE_ERROR,
+    MIN_NATIVE_COSINE,
+    MIN_RETRIEVAL_OVERLAP,
+    PROFILE_ID,
+    RECIPE_ID,
+    DocumentModelError,
+    DocumentModelEvidence,
+    InstalledDocumentModel,
+    native_tensor_contract,
+)
 from ..registry import (
     bundled_workloads_path,
     load_workloads,
@@ -22,18 +34,6 @@ from .document_model_gate import (
     maximum_embedding_error,
     report_document,
     write_document_model_report,
-)
-from .document_model_runners import BgeTokenizer, VulkanBgeRunner
-from .document_model_types import (
-    MAX_NATIVE_ABSOLUTE_ERROR,
-    MIN_NATIVE_COSINE,
-    MIN_RETRIEVAL_OVERLAP,
-    PROFILE_ID,
-    RECIPE_ID,
-    DocumentModelError,
-    DocumentModelEvidence,
-    InstalledDocumentModel,
-    native_tensor_contract,
 )
 from .embedding_production import SentenceEmbeddingOnnxExporter, evaluate_embedding_gate
 

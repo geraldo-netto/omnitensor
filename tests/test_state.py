@@ -32,8 +32,7 @@ def test_load_missing_file_returns_defaults(tmp_path):
 
 @pytest.mark.parametrize(
     "document",
-    ["{nope", '"scalar"', "[]", "17", "null",
-     '{"profiles": 3, "paused": "yes", "revision": -4}'],
+    ["{nope", '"scalar"', "[]", "17", "null", '{"profiles": 3, "paused": "yes", "revision": -4}'],
 )
 def test_load_sanitizes_malformed_documents(tmp_path, document):
     (tmp_path / "policy.json").write_text(document)
@@ -52,15 +51,19 @@ def test_load_rejects_non_integer_revisions(tmp_path, revision):
 
 
 def test_load_keeps_valid_revision_and_clamps_weights(tmp_path):
-    (tmp_path / "policy.json").write_text(json.dumps({
-        "revision": 12,
-        "paused": True,
-        "profiles": {
-            "hardware-health": {"enabled": False, "weight": 99},
-            "visual-library": {"enabled": "maybe", "weight": True},
-            "unknown-profile": {"enabled": True, "weight": 4},
-        },
-    }))
+    (tmp_path / "policy.json").write_text(
+        json.dumps(
+            {
+                "revision": 12,
+                "paused": True,
+                "profiles": {
+                    "hardware-health": {"enabled": False, "weight": 99},
+                    "visual-library": {"enabled": "maybe", "weight": True},
+                    "unknown-profile": {"enabled": True, "weight": 4},
+                },
+            }
+        )
+    )
     state = store(tmp_path).load()
     assert state.revision == 12
     assert state.paused is True
@@ -99,9 +102,7 @@ def test_device_choices_round_trip_and_invalid_entries_are_dropped(tmp_path):
         "": "gpu-renderD128",
         "x" * 81: "gpu-renderD128",
     }
-    (tmp_path / "policy.json").write_text(
-        json.dumps({"deviceChoices": choices}), encoding="utf-8"
-    )
+    (tmp_path / "policy.json").write_text(json.dumps({"deviceChoices": choices}), encoding="utf-8")
 
     state = store(tmp_path).load()
 
@@ -121,9 +122,7 @@ def test_device_choice_load_is_bounded_deterministically(tmp_path):
         f"profile-{index:03d}": f"gpu-renderD{128 + index}"
         for index in range(MAX_DEVICE_CHOICES + 5)
     }
-    (tmp_path / "policy.json").write_text(
-        json.dumps({"deviceChoices": choices}), encoding="utf-8"
-    )
+    (tmp_path / "policy.json").write_text(json.dumps({"deviceChoices": choices}), encoding="utf-8")
 
     loaded = store(tmp_path).load().device_choices
 
@@ -134,12 +133,14 @@ def test_device_choice_load_is_bounded_deterministically(tmp_path):
 def test_policy_for_a_profile_the_defaults_never_knew_survives_a_reload(tmp_path):
     """Plugins are discovered after the store is built; their policy is still theirs."""
     (tmp_path / "policy.json").write_text(
-        json.dumps({
-            "profiles": {
-                "hardware-health": {"enabled": False, "weight": 1},
-                "file-organizer": {"enabled": False, "weight": 4},
+        json.dumps(
+            {
+                "profiles": {
+                    "hardware-health": {"enabled": False, "weight": 1},
+                    "file-organizer": {"enabled": False, "weight": 4},
+                }
             }
-        }),
+        ),
         encoding="utf-8",
     )
 
@@ -171,10 +172,7 @@ def test_a_stored_profile_id_the_contract_could_not_publish_is_ignored(tmp_path)
 
 def test_stored_policy_is_kept_for_every_profile_however_many_there_are(tmp_path):
     """The 128-profile ceiling is gone from the contract and from here."""
-    stored = {
-        f"plugin-{index:03d}": {"enabled": True, "weight": 1}
-        for index in range(200)
-    }
+    stored = {f"plugin-{index:03d}": {"enabled": True, "weight": 1} for index in range(200)}
     (tmp_path / "policy.json").write_text(json.dumps({"profiles": stored}), encoding="utf-8")
 
     assert MAX_PROFILES is None

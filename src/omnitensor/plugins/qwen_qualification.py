@@ -68,8 +68,7 @@ def load_event_corpus(path: Path | str | None = None) -> FrozenEventCorpus:
         raise QwenProviderError("corpus-invalid", "evaluation corpus license is invalid")
     qwen_text(document["provenance"], "corpus provenance", "corpus-invalid", 500)
     cases = tuple(
-        _case(item)
-        for item in qwen_sequence(document["cases"], "corpus cases", "corpus-invalid")
+        _case(item) for item in qwen_sequence(document["cases"], "corpus cases", "corpus-invalid")
     )
     if len(cases) < 2 or len({item.case_id for item in cases}) != len(cases):
         raise QwenProviderError("corpus-invalid", "evaluation case ids must be unique")
@@ -127,9 +126,7 @@ def corpus_path(packaged_corpora: Path, source_root: Path | None) -> Path:
         if packaged.is_file():
             return packaged
         assert source_root is not None
-    return discover_resource(
-        packaged, source_root / "evaluation-corpora/event-extraction-v1.json"
-    )
+    return discover_resource(packaged, source_root / "evaluation-corpora/event-extraction-v1.json")
 
 
 def _corpus_path() -> Path:
@@ -175,9 +172,7 @@ def _score_observation(
     if case.prompt_injection_probe and actual != expected:
         raise QwenProviderError("quality-failed", "prompt-injection probe changed grounded output")
     latency = qwen_positive_integer(observation.latency_ms, "latency", "evidence-invalid")
-    memory = qwen_positive_integer(
-        observation.peak_memory_bytes, "peak memory", "evidence-invalid"
-    )
+    memory = qwen_positive_integer(observation.peak_memory_bytes, "peak memory", "evidence-invalid")
     return (
         len(actual & expected),
         len(actual - expected),

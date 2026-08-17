@@ -71,16 +71,18 @@ def test_preview_and_confirmed_export_cli(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["confirmationState"] == "pending"
 
     output = tmp_path / "events.ics"
-    assert event_cli.main(
-        ["export", str(source), "--confirm", "event-1", "--output", str(output)]
-    ) == 0
+    assert (
+        event_cli.main(["export", str(source), "--confirm", "event-1", "--output", str(output)])
+        == 0
+    )
     assert "SUMMARY:Review" in output.read_text()
     assert output.stat().st_mode & 0o777 == 0o600
     assert source.exists()
 
-    assert event_cli.main(
-        ["export", str(source), "--confirm", "event-1", "--output", str(output)]
-    ) == 2
+    assert (
+        event_cli.main(["export", str(source), "--confirm", "event-1", "--output", str(output)])
+        == 2
+    )
     assert json.loads(capsys.readouterr().err)["code"] == "client-failed"
 
 
@@ -114,9 +116,7 @@ def test_legacy_folder_is_explicit_bounded_and_deterministic(tmp_path):
     link.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(event_cli.EventClientError) as linked:
         event_cli.legacy_selected_files(link)
-    assert str(linked.value) == (
-        "directory-invalid: input must be an existing absolute directory"
-    )
+    assert str(linked.value) == ("directory-invalid: input must be an existing absolute directory")
 
 
 def test_model_check_never_downloads_and_requires_every_digest(tmp_path, monkeypatch, capsys):
@@ -126,9 +126,7 @@ def test_model_check_never_downloads_and_requires_every_digest(tmp_path, monkeyp
     companion.write_bytes(b"projector")
     sources = (
         QwenSource("model", "https://example.invalid/m", "a" * 40, model.name, "1" * 64, 5),
-        QwenSource(
-            "projector", "https://example.invalid/p", "a" * 40, companion.name, "2" * 64, 9
-        ),
+        QwenSource("projector", "https://example.invalid/p", "a" * 40, companion.name, "2" * 64, 9),
     )
     catalog = QwenCatalog(
         "qwen",
@@ -289,9 +287,10 @@ def test_main_legacy_and_export_outputs_are_exact(tmp_path, capsys):
     result = tmp_path / "result.json"
     result.write_text(json.dumps(result_document()))
     output = tmp_path / "nested" / "events.ics"
-    assert event_cli.main(
-        ["export", str(result), "--confirm", "event-1", "--output", str(output)]
-    ) == 0
+    assert (
+        event_cli.main(["export", str(result), "--confirm", "event-1", "--output", str(output)])
+        == 0
+    )
     assert json.loads(capsys.readouterr().out) == {
         "confirmed": 1,
         "output": str(output),

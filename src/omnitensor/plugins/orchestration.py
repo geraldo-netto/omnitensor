@@ -99,9 +99,7 @@ class RunnerSet:
     def get(self, profile_id: str) -> PipelineRunner | None:
         return self.runners.get(profile_id)
 
-    async def submit(
-        self, profile_id: str, job_id: str, payload: Mapping[str, object]
-    ) -> object:
+    async def submit(self, profile_id: str, job_id: str, payload: Mapping[str, object]) -> object:
         """Run one job on its profile's runner, binding the job's identity.
 
         This is the entry point rather than the runner itself, because binding
@@ -184,9 +182,7 @@ def inference_stages(
         PipelineStage.COLLECT: _collect_stage(),
         PipelineStage.PREPROCESS: _preprocess_stage(workload),
         PipelineStage.RESOLVE: _resolve_stage(workload, resolve_artifact, prepare_lane),
-        PipelineStage.INFER: _infer_stage(
-            workload, dispatch_prepared, encode_result
-        ),
+        PipelineStage.INFER: _infer_stage(workload, dispatch_prepared, encode_result),
         PipelineStage.POSTPROCESS: _postprocess_stage(
             workload,
             _label_reader(model, resolve_artifact),

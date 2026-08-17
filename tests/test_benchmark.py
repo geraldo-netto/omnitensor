@@ -177,9 +177,7 @@ class TestTheOtherRules:
     def test_hebrew_is_checked_by_script_rather_than_by_claim(self):
         """A model that answers "this is Hebrew" in English has not
         translated anything."""
-        hebrew = judge(
-            case(expect={"hebrew": True}), {"result": "הפגישה תתקיים בליסבון"}, SOURCES
-        )
+        hebrew = judge(case(expect={"hebrew": True}), {"result": "הפגישה תתקיים בליסבון"}, SOURCES)
         english = judge(
             case(expect={"hebrew": True}), {"result": "The meeting is in Lisbon"}, SOURCES
         )
@@ -222,8 +220,10 @@ class TestTheOtherRules:
         short = judge(wanted, {"answer": "4,235.00 EUR"}, SOURCES)
         long = judge(
             wanted,
-            {"answer": "The invoice from Nordwind Lda states a total due of 4,235.00 EUR, "
-                       "made up of a 3,500.00 EUR subtotal and 735.00 EUR of VAT."},
+            {
+                "answer": "The invoice from Nordwind Lda states a total due of 4,235.00 EUR, "
+                "made up of a 3,500.00 EUR subtotal and 735.00 EUR of VAT."
+            },
             SOURCES,
         )
 
@@ -461,8 +461,10 @@ class TestCatchingAnInvention:
         fail every well-formed answer."""
         judgement = judge(
             case(expect={"no_invented_names": True}),
-            {"answer": "Nothing in the document names a witness. The agreement "
-                       "records only the signatory."},
+            {
+                "answer": "Nothing in the document names a witness. The agreement "
+                "records only the signatory."
+            },
             ["case:x:0"],
             ("SERVICE AGREEMENT signed in Lisbon by Marta Oliveira.",),
         )
@@ -515,8 +517,7 @@ class TestAskingForWhatTheModelActuallyEmits:
         named = self.collections_named_by(workload)
 
         assert named <= keys, (
-            f"{workload} cases count {named - keys}, "
-            "which the task's answer schema does not hold"
+            f"{workload} cases count {named - keys}, which the task's answer schema does not hold"
         )
 
     def test_the_answer_shapes_here_are_the_ones_the_schemas_declare(self):
@@ -604,9 +605,7 @@ class TestARuleThatDoesNotExist:
 
     def test_a_case_naming_an_unknown_rule_is_refused_at_load(self, tmp_path):
         (tmp_path / "made-up.json").write_text(
-            json.dumps(
-                {"cases": [{"id": "x", "sources": ["text"], "expect": {"vibes": True}}]}
-            )
+            json.dumps({"cases": [{"id": "x", "sources": ["text"], "expect": {"vibes": True}}]})
         )
 
         with pytest.raises(CaseError, match="does not have"):

@@ -541,9 +541,7 @@ def _validate_offer(offer: HandshakeOffer) -> None:
             "protocol range must be positive and ordered",
         )
     if len(offer.capabilities) > _MAX_CAPABILITIES or any(
-        not isinstance(capability, str)
-        or not capability
-        or len(capability) > _MAX_CAPABILITY_CHARS
+        not isinstance(capability, str) or not capability or len(capability) > _MAX_CAPABILITY_CHARS
         for capability in offer.capabilities
     ):
         raise IPCProtocolError(

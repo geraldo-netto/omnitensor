@@ -138,9 +138,7 @@ class CancellationRegistry(CancellationJournal, Protocol):
 
     def track(self, job_id: str, profile_id: str = "") -> JobCancellationToken: ...
 
-    def cancel(
-        self, job_id: str, reason: CancellationReason, detail: str = ""
-    ) -> bool: ...
+    def cancel(self, job_id: str, reason: CancellationReason, detail: str = "") -> bool: ...
 
     def release(self, job_id: str) -> None: ...
 
@@ -193,9 +191,7 @@ class JobCancellationRegistry:
     def get(self, job_id: str) -> JobCancellationToken | None:
         return self._tokens.get(job_id)
 
-    def cancel(
-        self, job_id: str, reason: CancellationReason, detail: str = ""
-    ) -> bool:
+    def cancel(self, job_id: str, reason: CancellationReason, detail: str = "") -> bool:
         token = self._tokens.get(job_id)
         return bool(token and token.cancel(reason, detail))
 
@@ -263,9 +259,7 @@ class JobCancellationRegistry:
         if not isinstance(jobs, dict):
             return {}
         return {
-            str(job_id): str(profile)
-            for job_id, profile in jobs.items()
-            if isinstance(job_id, str)
+            str(job_id): str(profile) for job_id, profile in jobs.items() if isinstance(job_id, str)
         }
 
     def _clear_journal(self) -> None:

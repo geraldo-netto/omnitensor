@@ -103,9 +103,7 @@ async def _cancellation_latency(call, timeout: float) -> int:
 
 def _require_ready(inventory):
     matches = [
-        item
-        for item in inventory.get("plugins", [])
-        if item.get("id") == "selected-text-tools"
+        item for item in inventory.get("plugins", []) if item.get("id") == "selected-text-tools"
     ]
     if len(matches) != 1:
         raise RuntimeError("installed selected-text worker identity is missing")
@@ -128,9 +126,7 @@ async def _collect(arguments):
     corpus = load_selected_text_corpus(arguments.corpus)
     observations = []
     for index, case in enumerate(corpus.cases):
-        observations.append(
-            await _run_case(call_control, case, index, arguments.timeout_seconds)
-        )
+        observations.append(await _run_case(call_control, case, index, arguments.timeout_seconds))
     cancellation = await _cancellation_latency(call_control, arguments.timeout_seconds)
     public = json.dumps(observations, ensure_ascii=False)
     route_preserved = all(

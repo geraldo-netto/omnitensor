@@ -24,9 +24,7 @@ NETWORK_LOCALHOST = "localhost"
 NETWORK_OUTBOUND = "outbound"
 _NETWORK_SCOPES = frozenset({NETWORK_LOCALHOST, NETWORK_OUTBOUND})
 SELECTED_FILES_PERMISSION = "files:read-selected"
-_DEVICE_PATH = re.compile(
-    r"^/dev/(?:apex_[0-9]+|accel/accel[0-9]+|dri/renderD[0-9]+)$"
-)
+_DEVICE_PATH = re.compile(r"^/dev/(?:apex_[0-9]+|accel/accel[0-9]+|dri/renderD[0-9]+)$")
 _FORBIDDEN_FILESYSTEM_ROOTS = (
     "/proc",
     "/dev",
@@ -76,36 +74,24 @@ class FilesystemSandbox:
         granted_set = frozenset(granted)
         undeclared = granted_set - declared_set
         if undeclared:
-            raise SandboxPolicyError(
-                f"sandbox grant is undeclared: {min(undeclared)}"
-            )
+            raise SandboxPolicyError(f"sandbox grant is undeclared: {min(undeclared)}")
         filesystem = _filesystem_paths(granted_set)
         if len(filesystem) > MAX_SANDBOX_PATHS:
-            raise SandboxPolicyError(
-                f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
-            )
+            raise SandboxPolicyError(f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths")
         writes = {value for action, value in filesystem if action == "write"}
-        reads = {
-            value
-            for action, value in filesystem
-            if action == "read" and value not in writes
-        }
+        reads = {value for action, value in filesystem if action == "read" and value not in writes}
         devices = {value for action, value in filesystem if action == "device"}
         selected_root = _selected_files_path(granted_set, selected_files_root)
         if selected_root is not None:
             reads.add(selected_root)
         if len(reads) + len(writes) + len(devices) > MAX_SANDBOX_PATHS:
-            raise SandboxPolicyError(
-                f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
-            )
+            raise SandboxPolicyError(f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths")
         trusted = tuple(sorted({_runtime_path(path) for path in runtime_paths}))
         links = _trusted_symlinks(trusted_symlinks, trusted)
         writes.update(_runtime_path(path) for path in trusted_write_paths)
         devices.update(_device_path(path) for path in accelerator_devices)
         if len(reads) + len(writes) + len(devices) > MAX_SANDBOX_PATHS:
-            raise SandboxPolicyError(
-                f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths"
-            )
+            raise SandboxPolicyError(f"sandbox allows at most {MAX_SANDBOX_PATHS} filesystem paths")
         trusted_python = _trusted_python_path(python_path, trusted)
         return cls(
             tuple(sorted(reads)),
@@ -158,9 +144,7 @@ class FilesystemSandbox:
         # namespace, so a plugin cannot reach a socket, a name server, or the
         # local bus regardless of what its code attempts.
         command.append("--share-net" if self.network else "--unshare-net")
-        runtime_roots = [
-            path for path in _SYSTEM_RUNTIME_ROOTS if Path(path).exists()
-        ]
+        runtime_roots = [path for path in _SYSTEM_RUNTIME_ROOTS if Path(path).exists()]
         runtime_roots.extend(executable_roots)
         runtime_roots.extend(self.runtime_paths)
         runtime_roots = list(_minimal_runtime_roots(runtime_roots))
@@ -200,15 +184,11 @@ def _filesystem_paths(granted: frozenset[str]) -> list[tuple[str, str]]:
     return filesystem
 
 
-def _selected_files_path(
-    granted: Collection[str], root: str | Path | None
-) -> str | None:
+def _selected_files_path(granted: Collection[str], root: str | Path | None) -> str | None:
     if SELECTED_FILES_PERMISSION not in granted:
         return None
     if root is None:
-        raise SandboxPolicyError(
-            "selected-file permission requires a brokered input root"
-        )
+        raise SandboxPolicyError("selected-file permission requires a brokered input root")
     return _runtime_path(root)
 
 
@@ -227,9 +207,7 @@ def _network_granted(granted: Collection[str]) -> bool:
         if action != NETWORK_ACTION:
             continue
         if not separator or value not in _NETWORK_SCOPES:
-            raise SandboxPolicyError(
-                f"network permission scope is not recognised: {permission}"
-            )
+            raise SandboxPolicyError(f"network permission scope is not recognised: {permission}")
         enabled = enabled or value == NETWORK_OUTBOUND
     return enabled
 
@@ -300,9 +278,8 @@ def _trusted_symlinks(
     links: dict[str, str] = {}
     for source, destination_value in values:
         destination = str(destination_value)
-        if (
-            not re.fullmatch(r"/sys/dev/char/[0-9]+:[0-9]+", destination)
-            or not re.fullmatch(r"(?:\.\./)+devices(?:/[A-Za-z0-9_.:-]+)+", source)
+        if not re.fullmatch(r"/sys/dev/char/[0-9]+:[0-9]+", destination) or not re.fullmatch(
+            r"(?:\.\./)+devices(?:/[A-Za-z0-9_.:-]+)+", source
         ):
             raise SandboxPolicyError("trusted sysfs symlink is invalid")
         resolved = PurePosixPath(
@@ -334,8 +311,7 @@ def _minimal_runtime_roots(paths: Sequence[str]) -> tuple[str, ...]:
     kept = []
     for path in sorted(set(paths), key=lambda item: (item.count("/"), item)):
         if any(
-            Path(parent).is_dir() and PurePosixPath(path).is_relative_to(parent)
-            for parent in kept
+            Path(parent).is_dir() and PurePosixPath(path).is_relative_to(parent) for parent in kept
         ):
             continue
         kept.append(path)
@@ -348,9 +324,7 @@ def _target_directories(paths: Sequence[str]) -> tuple[str, ...]:
         path = PurePosixPath(value)
         parent = path if Path(value).is_dir() else path.parent
         directories.update(
-            str(candidate)
-            for candidate in (parent, *parent.parents)
-            if str(candidate) != "/"
+            str(candidate) for candidate in (parent, *parent.parents) if str(candidate) != "/"
         )
     return tuple(sorted(directories, key=lambda item: (item.count("/"), item)))
 
@@ -360,8 +334,6 @@ def _symlink_directories(links: Sequence[tuple[str, str]]) -> tuple[str, ...]:
     for _source, destination in links:
         parent = PurePosixPath(destination).parent
         directories.update(
-            str(candidate)
-            for candidate in (parent, *parent.parents)
-            if str(candidate) != "/"
+            str(candidate) for candidate in (parent, *parent.parents) if str(candidate) != "/"
         )
     return tuple(sorted(directories, key=lambda item: (item.count("/"), item)))

@@ -234,9 +234,7 @@ def test_revoked_reports_every_missing_permission_in_stable_order(tmp_path):
     assert guard.revoked({READ_SENSOR}) == ()
 
 
-@pytest.mark.parametrize(
-    "poll_seconds", [0, -1, True, MAX_REVOCATION_POLL_SECONDS + 1, "1"]
-)
+@pytest.mark.parametrize("poll_seconds", [0, -1, True, MAX_REVOCATION_POLL_SECONDS + 1, "1"])
 def test_the_poll_interval_is_bounded(tmp_path, poll_seconds):
     with pytest.raises(ValueError, match="poll_seconds"):
         ConsentGuard(view(tmp_path / "grants.json"), poll_seconds=poll_seconds)

@@ -288,10 +288,14 @@ def test_service_and_worker_complete_the_same_handshake_over_streams():
             perform_worker_handshake(worker_reader, worker_writer, worker_offer),
         )
 
-        assert service_result == worker_result == HandshakeAgreement(
-            "echo-plugin",
-            3,
-            frozenset({"cancel", "progress"}),
+        assert (
+            service_result
+            == worker_result
+            == HandshakeAgreement(
+                "echo-plugin",
+                3,
+                frozenset({"cancel", "progress"}),
+            )
         )
         assert service_writer.drains == worker_writer.drains == 1
         assert len(service_writer.writes) == len(worker_writer.writes) == 1
@@ -485,9 +489,7 @@ def test_result_frame_rejects_invalid_boundaries(result, detail):
 
 @pytest.mark.parametrize("job_id", ["j", "j" * 128])
 def test_result_frame_accepts_exact_boundaries(job_id):
-    result = PluginResult(
-        job_id, PluginResultStatus.SUCCEEDED, {}, "x" * 2048, 1
-    )
+    result = PluginResult(job_id, PluginResultStatus.SUCCEEDED, {}, "x" * 2048, 1)
     assert parse_result(result_frame(result)) == result
 
 
@@ -533,8 +535,9 @@ json_scalars = (
 )
 json_values = st.recursive(
     json_scalars,
-    lambda children: st.lists(children, max_size=4)
-    | st.dictionaries(st.text(max_size=20), children, max_size=4),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=20), children, max_size=4)
+    ),
     max_leaves=12,
 )
 

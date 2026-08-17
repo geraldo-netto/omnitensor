@@ -72,9 +72,7 @@ def runner(*, policy=None, flow=None, cancellations=None, stage_map=None, record
             PLUGIN,
             built,
             policy=policy
-            or PipelinePolicyGate(
-                PLUGIN, is_paused=lambda: False, is_enabled=lambda _p: True
-            ),
+            or PipelinePolicyGate(PLUGIN, is_paused=lambda: False, is_enabled=lambda _p: True),
             flow=flow if flow is not None else PluginFlowController(PLUGIN, max_in_flight=4),
             cancellations=(
                 cancellations if cancellations is not None else JobCancellationRegistry()
@@ -102,18 +100,14 @@ def test_every_stage_must_be_supplied():
         PipelineRunner(
             PLUGIN,
             partial,
-            policy=PipelinePolicyGate(
-                PLUGIN, is_paused=lambda: False, is_enabled=lambda _p: True
-            ),
+            policy=PipelinePolicyGate(PLUGIN, is_paused=lambda: False, is_enabled=lambda _p: True),
             flow=PluginFlowController(PLUGIN),
             cancellations=JobCancellationRegistry(),
         )
 
 
 def test_a_paused_runtime_stops_the_job_before_any_stage_runs():
-    paused = PipelinePolicyGate(
-        PLUGIN, is_paused=lambda: True, is_enabled=lambda _p: True
-    )
+    paused = PipelinePolicyGate(PLUGIN, is_paused=lambda: True, is_enabled=lambda _p: True)
     subject, record = runner(policy=paused)
 
     result = run(subject.run("job-1", {}))
@@ -126,9 +120,7 @@ def test_a_paused_runtime_stops_the_job_before_any_stage_runs():
 def test_policy_withdrawn_mid_flight_stops_the_next_stage():
     """The answer legitimately changes while a job is running."""
     paused = [False]
-    policy = PipelinePolicyGate(
-        PLUGIN, is_paused=lambda: paused[0], is_enabled=lambda _p: True
-    )
+    policy = PipelinePolicyGate(PLUGIN, is_paused=lambda: paused[0], is_enabled=lambda _p: True)
     record = []
     built, record = stages(record)
     original = built[PipelineStage.PREPROCESS]

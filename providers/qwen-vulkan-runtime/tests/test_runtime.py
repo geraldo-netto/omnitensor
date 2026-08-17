@@ -142,18 +142,30 @@ def test_grounding_dispatch_enforces_workload_reference_cardinality():
     selected = selected_text_task()
     question = document_question_task()
 
-    assert grounding._model_evidence(
-        selected, GenerationRequest("job", selected.task_id, ("selection",))
-    ) is None
-    assert grounding._model_evidence(
-        selected, GenerationRequest("job", selected.task_id, ("selection", "span"))
-    ) is grounding._selected_evidence
-    assert grounding._model_evidence(
-        question, GenerationRequest("job", question.task_id, ("metadata",))
-    ) is None
-    assert grounding._model_evidence(
-        question, GenerationRequest("job", question.task_id, ("metadata", "span"))
-    ) is grounding._citation_evidence
+    assert (
+        grounding._model_evidence(
+            selected, GenerationRequest("job", selected.task_id, ("selection",))
+        )
+        is None
+    )
+    assert (
+        grounding._model_evidence(
+            selected, GenerationRequest("job", selected.task_id, ("selection", "span"))
+        )
+        is grounding._selected_evidence
+    )
+    assert (
+        grounding._model_evidence(
+            question, GenerationRequest("job", question.task_id, ("metadata",))
+        )
+        is None
+    )
+    assert (
+        grounding._model_evidence(
+            question, GenerationRequest("job", question.task_id, ("metadata", "span"))
+        )
+        is grounding._citation_evidence
+    )
 
 
 def test_selected_text_task_normalization_preserves_extraction_results():
@@ -395,9 +407,7 @@ def test_receipt_binds_the_operation_specific_hebrew_model_without_replacing_qwe
     _load_receipt(monkeypatch, tmp_path, document)
     model = document["models"][factories.HEBREW_ARTIFACT_ID]
 
-    receipt = qualification.load_model_qualification(
-        factories.HEBREW_ARTIFACT_ID, model["sha256"]
-    )
+    receipt = qualification.load_model_qualification(factories.HEBREW_ARTIFACT_ID, model["sha256"])
 
     assert receipt == qualification.Qualification(
         document["device"],
@@ -505,9 +515,7 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
             "Qwen workload failure has no reason",
         ),
         (
-            lambda value: value["workloads"]["event-extraction"].update(
-                default="qwen3-4b-q4-k-m"
-            ),
+            lambda value: value["workloads"]["event-extraction"].update(default="qwen3-4b-q4-k-m"),
             "Qwen workload default is not a passing model",
         ),
         (
@@ -1043,12 +1051,8 @@ def test_sync_generation_streams_only_text_and_binds_private_prompt(tmp_path):
 
 def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_path):
     adapter = _runtime(tmp_path)
-    source = SourceFragment(
-        "private:job-1:selection", "a" * 64, 1, "alpha", "b" * 64
-    )
-    control = SourceFragment(
-        "private:job-1:control", "c" * 64, 1, "{}", "d" * 64
-    )
+    source = SourceFragment("private:job-1:selection", "a" * 64, 1, "alpha", "b" * 64)
+    control = SourceFragment("private:job-1:control", "c" * 64, 1, "{}", "d" * 64)
     asyncio.run(adapter._store.publish("job-1", (control, source)))
     reply = {
         "operation": "translate",
@@ -1058,7 +1062,7 @@ def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_pat
             "sourceSha256": "wrong",
             "span": {"start": 0, "end": 5},
             "textSha256": "alpha",
-        }
+        },
     }
     adapter._llama = SimpleNamespace(
         create_chat_completion=lambda **_kwargs: iter(
@@ -1080,16 +1084,14 @@ def test_sync_generation_binds_selected_text_digests_to_the_exact_source(tmp_pat
             "sourceSha256": "a" * 64,
             "span": {"start": 0, "end": 5},
             "textSha256": "b" * 64,
-        }
+        },
     }
 
 
 def test_hebrew_runtime_uses_one_user_message_and_builds_closed_grounded_json(tmp_path):
     adapter = _hebrew_runtime(tmp_path)
     control_text = json.dumps({"language": "hEbReW", "operation": "translate"})
-    control = SourceFragment(
-        "private:job-1:control", "a" * 64, 1, control_text, "b" * 64
-    )
+    control = SourceFragment("private:job-1:control", "a" * 64, 1, control_text, "b" * 64)
     source = SourceFragment(
         "private:job-1:selection",
         "c" * 64,
@@ -1254,15 +1256,11 @@ def test_hebrew_output_validation_accepts_bounded_hebrew_with_neutral_punctuatio
         ('{"evidence":{}}', "selected-text-tools", ("private:selection",)),
     ],
 )
-def test_selected_text_digest_binding_leaves_unbindable_output_unchanged(
-    raw, task_id, references
-):
+def test_selected_text_digest_binding_leaves_unbindable_output_unchanged(raw, task_id, references):
     task = replace(_task(), task_id=task_id)
     request = GenerationRequest("job-1", task_id, references)
 
-    assert grounding.bind_selected_text_digests(
-        raw, task, request, MemoryFragmentStore()
-    ) == raw
+    assert grounding.bind_selected_text_digests(raw, task, request, MemoryFragmentStore()) == raw
 
 
 @pytest.mark.parametrize(
@@ -1278,14 +1276,17 @@ def test_selected_text_digest_binding_refuses_wrong_model_citations(evidence):
     asyncio.run(store.publish("job-1", (source,)))
     raw = json.dumps({"evidence": evidence})
 
-    assert grounding.bind_selected_text_digests(
-        raw,
-        _task(),
-        GenerationRequest(
-            "job-1", "selected-text-tools", ("private:control", source.reference)
-        ),
-        store,
-    ) == raw
+    assert (
+        grounding.bind_selected_text_digests(
+            raw,
+            _task(),
+            GenerationRequest(
+                "job-1", "selected-text-tools", ("private:control", source.reference)
+            ),
+            store,
+        )
+        == raw
+    )
 
 
 def test_document_citations_bind_exact_retrieved_span_metadata_without_source_text():
@@ -1372,12 +1373,8 @@ def test_document_citations_bind_exact_retrieved_span_metadata_without_source_te
 def test_document_citation_binding_collapses_only_repeated_exact_sources():
     store = MemoryFragmentStore()
     question = SourceFragment("private:question", "a" * 64, 1, "Who?", "b" * 64)
-    first = SourceFragment(
-        "private:first:span:0-5", "c" * 64, 1, "alpha", "d" * 64
-    )
-    second = SourceFragment(
-        "private:second:span:0-4", "e" * 64, 1, "beta", "f" * 64
-    )
+    first = SourceFragment("private:first:span:0-5", "c" * 64, 1, "alpha", "d" * 64)
+    second = SourceFragment("private:second:span:0-4", "e" * 64, 1, "beta", "f" * 64)
     asyncio.run(store.publish("job-1", (question, first, second)))
     reply = {
         "citations": [
@@ -1427,9 +1424,7 @@ def test_document_citation_binding_collapses_only_repeated_exact_sources():
         ("unknown", ("private:item",), ()),
     ],
 )
-def test_grounding_hint_lists_only_task_citable_opaque_references(
-    task_id, references, expected
-):
+def test_grounding_hint_lists_only_task_citable_opaque_references(task_id, references, expected):
     request = GenerationRequest("job-1", task_id, references)
 
     hint = runtime._grounding_hint(
@@ -1449,9 +1444,7 @@ def test_grounding_hint_contains_no_private_source_text():
     question = SourceFragment("private:question", "a" * 64, 1, "secret question", "b" * 64)
     span = SourceFragment("private:span:0-6", "c" * 64, 1, "secret answer", "d" * 64)
     asyncio.run(store.publish("job-1", (question, span)))
-    request = GenerationRequest(
-        "job-1", "ask-selected-files", (question.reference, span.reference)
-    )
+    request = GenerationRequest("job-1", "ask-selected-files", (question.reference, span.reference))
 
     hint = runtime._grounding_hint(document_question_task(), request, store)
 
@@ -1471,17 +1464,11 @@ def test_grounding_hint_contains_no_private_source_text():
         ("extract-tasks", None, "tasks must not be empty"),
     ],
 )
-def test_selected_operation_hint_is_explicit_without_selection_text(
-    operation, language, required
-):
+def test_selected_operation_hint_is_explicit_without_selection_text(operation, language, required):
     store = MemoryFragmentStore()
-    control_text = json.dumps(
-        {"language": language, "operation": operation}, separators=(",", ":")
-    )
+    control_text = json.dumps({"language": language, "operation": operation}, separators=(",", ":"))
     control = SourceFragment("private:control", "a" * 64, 1, control_text, "b" * 64)
-    selection = SourceFragment(
-        "private:selection", "c" * 64, 1, "private selection", "d" * 64
-    )
+    selection = SourceFragment("private:selection", "c" * 64, 1, "private selection", "d" * 64)
     asyncio.run(store.publish("job-1", (control, selection)))
     request = GenerationRequest(
         "job-1", "selected-text-tools", (control.reference, selection.reference)
@@ -1525,20 +1512,19 @@ def test_document_citation_binding_preserves_untrusted_or_question_reference_for
 ):
     store = MemoryFragmentStore()
     question = SourceFragment("private:job-1:question", "a" * 64, 1, "Where?", "b" * 64)
-    span = SourceFragment(
-        "private:job-1:source:1:page:1:span:0-5", "c" * 64, 1, "alpha", "d" * 64
-    )
+    span = SourceFragment("private:job-1:source:1:page:1:span:0-5", "c" * 64, 1, "alpha", "d" * 64)
     asyncio.run(store.publish("job-1", (question, span)))
     raw = json.dumps({"citations": [{"sourceRef": source_ref}]})
 
-    assert grounding.bind_grounding_metadata(
-        raw,
-        document_question_task(),
-        GenerationRequest(
-            "job-1", "ask-selected-files", (question.reference, span.reference)
-        ),
-        store,
-    ) == raw
+    assert (
+        grounding.bind_grounding_metadata(
+            raw,
+            document_question_task(),
+            GenerationRequest("job-1", "ask-selected-files", (question.reference, span.reference)),
+            store,
+        )
+        == raw
+    )
 
 
 def test_event_evidence_binding_uses_model_selected_fragment_only():
@@ -1550,9 +1536,7 @@ def test_event_evidence_binding_uses_model_selected_fragment_only():
         "Release planning on 12 August 2026 at 10:00 Europe/Rome.",
         "b" * 64,
     )
-    unused = SourceFragment(
-        "private:job-1:source:2:page:4", "c" * 64, 4, "unrelated", "d" * 64
-    )
+    unused = SourceFragment("private:job-1:source:2:page:4", "c" * 64, 4, "unrelated", "d" * 64)
     asyncio.run(store.publish("job-1", (selected, unused)))
     reply = {
         "events": [
@@ -1574,9 +1558,7 @@ def test_event_evidence_binding_uses_model_selected_fragment_only():
         grounding.bind_grounding_metadata(
             json.dumps(reply),
             event_generation_task(),
-            GenerationRequest(
-                "job-1", "event-extraction", (selected.reference, unused.reference)
-            ),
+            GenerationRequest("job-1", "event-extraction", (selected.reference, unused.reference)),
             store,
         )
     )
@@ -1622,18 +1604,14 @@ def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
                         "span": {"start": 0, "end": 1},
                         "textSha256": "model-placeholder",
                     }
-                ]
+                ],
             }
         ]
     }
-    request = GenerationRequest(
-        "job-1", "file-organizer", (metadata.reference, selected.reference)
-    )
+    request = GenerationRequest("job-1", "file-organizer", (metadata.reference, selected.reference))
 
     bound = json.loads(
-        grounding.bind_grounding_metadata(
-            json.dumps(reply), file_organizer_task(), request, store
-        )
+        grounding.bind_grounding_metadata(json.dumps(reply), file_organizer_task(), request, store)
     )
 
     assert bound["suggestions"][0]["evidence"] == [
@@ -1648,9 +1626,7 @@ def test_organizer_evidence_binding_uses_content_spans_and_excludes_metadata():
     assert bound["suggestions"][0]["tags"] == ["project-notes", "mars"]
     reply["suggestions"][0]["evidence"][0]["sourceRef"] = metadata.reference
     raw = json.dumps(reply)
-    assert grounding.bind_grounding_metadata(
-        raw, file_organizer_task(), request, store
-    ) == raw
+    assert grounding.bind_grounding_metadata(raw, file_organizer_task(), request, store) == raw
 
 
 def test_organizer_binding_completes_only_safe_extensionless_names():
@@ -1662,13 +1638,9 @@ def test_organizer_binding_completes_only_safe_extensionless_names():
         '{"fileId":"selected-file-1","fileName":"notes.md"}',
         "b" * 64,
     )
-    selected = SourceFragment(
-        "private:job-1:source:1:span:0-5", "c" * 64, 1, "notes", "d" * 64
-    )
+    selected = SourceFragment("private:job-1:source:1:span:0-5", "c" * 64, 1, "notes", "d" * 64)
     asyncio.run(store.publish("job-1", (metadata, selected)))
-    request = GenerationRequest(
-        "job-1", "file-organizer", (metadata.reference, selected.reference)
-    )
+    request = GenerationRequest("job-1", "file-organizer", (metadata.reference, selected.reference))
 
     def bind(name):
         return json.loads(
@@ -1705,9 +1677,7 @@ def test_organizer_binding_completes_only_safe_extensionless_names():
 )
 def test_organizer_extension_binding_fails_closed_on_untrusted_metadata(metadata_text):
     store = MemoryFragmentStore()
-    metadata = SourceFragment(
-        "private:job-1:metadata:1", "a" * 64, 1, metadata_text, "b" * 64
-    )
+    metadata = SourceFragment("private:job-1:metadata:1", "a" * 64, 1, metadata_text, "b" * 64)
     asyncio.run(store.publish("job-1", (metadata,)))
     request = GenerationRequest("job-1", "file-organizer", (metadata.reference,))
     document = {"suggestions": [{"fileId": "selected-file-1", "proposedName": "Notes"}]}
@@ -1833,35 +1803,33 @@ def test_deterministic_event_fallback_refuses_unsafe_or_ambiguous_text(content):
 
 def test_deterministic_event_fallback_refuses_multiple_matching_fragments():
     store = MemoryFragmentStore()
-    content = (
-        "Release planning is in Room 2 on 12 August 2026 "
-        "from 10:00 to 11:00 Europe/Rome."
-    )
+    content = "Release planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 Europe/Rome."
     fragments = (
         SourceFragment("private:job-1:source:1", "a" * 64, 1, content, "b" * 64),
         SourceFragment("private:job-1:source:2", "c" * 64, 1, content, "d" * 64),
     )
     asyncio.run(store.publish("job-1", fragments))
 
-    assert runtime._deterministic_event_result(
-        GenerationRequest(
-            "job-1", "event-extraction", tuple(item.reference for item in fragments)
-        ),
-        store,
-    ) is None
+    assert (
+        runtime._deterministic_event_result(
+            GenerationRequest(
+                "job-1", "event-extraction", tuple(item.reference for item in fragments)
+            ),
+            store,
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
         (
-            "Release planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 "
-            "Europe/Rome.",
+            "Release planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 Europe/Rome.",
             runtime._EVENT_GROUNDING_HINT,
         ),
         (
-            "Revisão trimestral em 18 de agosto de 2026, das 14:00 às 15:30, "
-            "Europe/Lisbon.",
+            "Revisão trimestral em 18 de agosto de 2026, das 14:00 às 15:30, Europe/Lisbon.",
             runtime._EVENT_GROUNDING_HINT,
         ),
         ("Release planning on 2026-08-12 at 10:00 UTC.", runtime._EVENT_GROUNDING_HINT),
@@ -1877,11 +1845,14 @@ def test_event_grounding_hint_requires_explicit_date_time_and_real_named_zone(co
     fragment = SourceFragment("private:job-1:source:1", "a" * 64, 1, content, "b" * 64)
     asyncio.run(store.publish("job-1", (fragment,)))
 
-    assert runtime._event_grounding_hint(
-        event_generation_task(),
-        GenerationRequest("job-1", "event-extraction", (fragment.reference,)),
-        store,
-    ) == expected
+    assert (
+        runtime._event_grounding_hint(
+            event_generation_task(),
+            GenerationRequest("job-1", "event-extraction", (fragment.reference,)),
+            store,
+        )
+        == expected
+    )
 
 
 @given(value=st.dates(min_value=date(2000, 1, 1), max_value=date(2099, 12, 31)))
@@ -2363,9 +2334,7 @@ def test_qualified_workload_refuses_incomplete_receipt_configuration():
         )
 
 
-def test_selected_workload_publishes_measured_receipt_only_after_both_loads(
-    tmp_path, monkeypatch
-):
+def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_path, monkeypatch):
     calls = []
 
     class Plugin:
@@ -2386,9 +2355,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(
 
         async def load(self, paths, accelerator):
             calls.append(("load", self.layers, paths, accelerator))
-            return NativeLoadReport(
-                "llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False
-            )
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False)
 
         async def terminate(self, request_id):
             calls.append(("terminate", self.layers, request_id))
@@ -2420,9 +2387,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(
         qwen,
         Path("qwen.gguf"),
         _qualification(layers=37),
-        additional_runtimes=(
-            (hebrew_runtime, Path("hebrew.gguf"), _qualification(layers=33)),
-        ),
+        additional_runtimes=((hebrew_runtime, Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", QWEN_MODEL_SHA256),
@@ -2531,9 +2496,7 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
         ),
     )
 
-    with pytest.raises(
-        (RuntimeError, ProviderGenerationError, SelectedTextAcceptanceError)
-    ):
+    with pytest.raises((RuntimeError, ProviderGenerationError, SelectedTextAcceptanceError)):
         asyncio.run(wrapper.start(PluginContext("selected-text-tools", 1, {}, frozenset())))
 
     assert not receipt_path.exists()
@@ -2541,9 +2504,7 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
     assert calls[-1] == "stop"
 
 
-def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(
-    tmp_path, monkeypatch
-):
+def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(tmp_path, monkeypatch):
     calls = []
 
     class Plugin:
@@ -2562,9 +2523,7 @@ def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(
             self.layers = layers
 
         async def load(self, _paths, _accelerator):
-            return NativeLoadReport(
-                "llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False
-            )
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False)
 
         async def terminate(self, request_id):
             calls.append((self.layers, request_id))
@@ -2653,9 +2612,7 @@ def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
         FailingNative(),
         Path("qwen.gguf"),
         _qualification(layers=37),
-        additional_runtimes=(
-            (HebrewNative(), Path("hebrew.gguf"), _qualification(layers=33)),
-        ),
+        additional_runtimes=((HebrewNative(), Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", QWEN_MODEL_SHA256),
@@ -2678,9 +2635,7 @@ def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
     assert not receipt_path.exists()
 
 
-def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(
-    tmp_path, monkeypatch
-):
+def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(tmp_path, monkeypatch):
     calls = []
 
     class Plugin:
@@ -2711,9 +2666,7 @@ def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(
         Native(37, fail=True),
         Path("qwen.gguf"),
         _qualification(layers=37),
-        additional_runtimes=(
-            (Native(33), Path("hebrew.gguf"), _qualification(layers=33)),
-        ),
+        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", QWEN_MODEL_SHA256),

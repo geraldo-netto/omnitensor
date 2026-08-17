@@ -630,9 +630,11 @@ def test_decode_audio_sync_uses_exact_resampler_flush_and_concatenation(monkeypa
             return _AudioFrame(np.array([[value]], dtype=np.float32))
 
     fake_av = SimpleNamespace(
-        open=lambda selected, mode: _Context(Container())
-        if (selected, mode) == (str(tmp_path / "voice.wav"), "r")
-        else None,
+        open=lambda selected, mode: (
+            _Context(Container())
+            if (selected, mode) == (str(tmp_path / "voice.wav"), "r")
+            else None
+        ),
         AudioResampler=Resampler,
     )
     monkeypatch.setitem(sys.modules, "av", fake_av)
@@ -702,10 +704,11 @@ def test_sample_video_sync_seeks_and_writes_each_exact_frame(monkeypatch, tmp_pa
     monkeypatch.setattr(
         formats,
         "_frame_at_or_after",
-        lambda decoded, selected_stream, timestamp: Frame(timestamp)
-        if list(decoded) == [] and selected_stream is stream
-        else None,
+        lambda decoded, selected_stream, timestamp: (
+            Frame(timestamp) if list(decoded) == [] and selected_stream is stream else None
+        ),
     )
+
     def open_av(selected, *, mode):
         calls.append(("open", selected, mode))
         return _Context(Container())

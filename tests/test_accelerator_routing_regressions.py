@@ -108,8 +108,7 @@ def test_refusal_order_actionability_and_tie_breaks_are_stable():
 
     assert select_backend(workload, executors) == BackendChoice(
         None,
-        "tpu: No Coral device; npu: OpenVINO has no NPU plugin; "
-        "gpu: ONNX Runtime is not installed",
+        "tpu: No Coral device; npu: OpenVINO has no NPU plugin; gpu: ONNX Runtime is not installed",
         RUNTIME_MISSING,
     )
 
@@ -122,9 +121,7 @@ def test_refusal_order_actionability_and_tie_breaks_are_stable():
 
 
 def test_mixed_gpu_availability_is_scoped_to_the_declared_model_format():
-    ncnn = _Lane(
-        "gpu", {"ncnn"}, Availability(False, "ncnn is not installed", RUNTIME_MISSING)
-    )
+    ncnn = _Lane("gpu", {"ncnn"}, Availability(False, "ncnn is not installed", RUNTIME_MISSING))
     unrelated_onnx = _Lane("gpu", {"onnx"}, Availability(True))
     gpu = CompositeGpuExecutor([ncnn, unrelated_onnx])
     npu = _Lane("npu", {"openvino"}, Availability(True))

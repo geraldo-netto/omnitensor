@@ -240,9 +240,7 @@ def test_nothing_to_recover_without_a_journal(tmp_path):
         json.dumps(["not", "an", "object"]),
     ],
 )
-def test_an_unusable_journal_starts_clean_rather_than_refusing_to_start(
-    tmp_path, content
-):
+def test_an_unusable_journal_starts_clean_rather_than_refusing_to_start(tmp_path, content):
     journal = tmp_path / "in-flight.json"
     journal.write_text(content, encoding="utf-8")
     assert JobCancellationRegistry(journal).recover() == ()

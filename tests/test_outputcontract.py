@@ -34,9 +34,7 @@ def test_the_top_k_bound_is_enforced_without_clamping():
     for invalid in (0, -1, MAX_TOP_K + 1):
         with pytest.raises(ValueError) as raised:
             declared_output(model(topK=invalid))
-        assert str(raised.value) == (
-            f"output contract topK must be in [1, {MAX_TOP_K}]"
-        )
+        assert str(raised.value) == (f"output contract topK must be in [1, {MAX_TOP_K}]")
 
 
 def test_the_top_k_bound_matches_the_canonical_schema():
@@ -77,9 +75,7 @@ def test_direct_output_specs_obey_the_same_top_k_bound():
     for invalid in (False, True, "5", 0, MAX_TOP_K + 1):
         with pytest.raises(ValueError) as raised:
             reduce_output(OutputSpec("classification", invalid), [scores])
-        assert str(raised.value) == (
-            f"output contract topK must be in [1, {MAX_TOP_K}]"
-        )
+        assert str(raised.value) == (f"output contract topK must be in [1, {MAX_TOP_K}]")
 
     with pytest.raises(ValueError):
         reduce_output(OutputSpec("classification", MAX_TOP_K + 1), [])

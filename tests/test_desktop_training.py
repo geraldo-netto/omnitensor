@@ -334,19 +334,16 @@ def test_training_configuration_classes_and_splits_are_bounded(tmp_path):
     assert error_code(lambda: _time_split(one)) == "insufficient-history"
     pair = one + (_example_from_document(document(1)),)
     assert tuple(map(len, _time_split(pair))) == (1, 1)
-    assert error_code(
-        lambda: trainer(FakeExporter()).train(
-            DesktopDataset(pair, "a" * 64), tmp_path
-        )
-    ) == "class-imbalance"
+    assert (
+        error_code(lambda: trainer(FakeExporter()).train(DesktopDataset(pair, "a" * 64), tmp_path))
+        == "class-imbalance"
+    )
     assert error_code(lambda: _require_suggestions(pair, ("tile-left",), 2, "holdout")) == (
         "class-imbalance"
     )
     two_left = pair + (_example_from_document(document(2)),)
     _require_suggestions(two_left, ("tile-left",), 2, "training")
-    class_error = training_error(
-        lambda: _require_suggestions(pair, ("tile-left",), 2, "holdout")
-    )
+    class_error = training_error(lambda: _require_suggestions(pair, ("tile-left",), 2, "holdout"))
     assert class_error.detail == "holdout needs at least 2 confirmations for tile-left"
 
 
@@ -384,9 +381,7 @@ def test_quality_boundaries_and_empty_export(tmp_path, monkeypatch):
     monkeypatch.setattr("omnitensor.training.desktop._quality", lambda *_args: quality)
     report = trainer(FakeExporter()).train(dataset, tmp_path / "boundary")
     assert report["quality"] == quality
-    error = training_error(
-        lambda: trainer(FakeExporter(b"")).train(dataset, tmp_path / "empty")
-    )
+    error = training_error(lambda: trainer(FakeExporter(b"")).train(dataset, tmp_path / "empty"))
     assert (error.code, error.detail) == (
         "export-failed",
         "exporter produced no portable model",
@@ -486,9 +481,10 @@ def test_revocation_is_explicit_idempotent_locked_and_symlink_safe(tmp_path):
     assert target.read_text() == "private"
     directory = tmp_path / "directory"
     directory.mkdir()
-    assert error_code(
-        lambda: revoke_desktop_history(directory, DESKTOP_REVOCATION_CONFIRMATION)
-    ) == "history-invalid"
+    assert (
+        error_code(lambda: revoke_desktop_history(directory, DESKTOP_REVOCATION_CONFIRMATION))
+        == "history-invalid"
+    )
 
 
 def test_revocation_rechecks_the_file_after_locking(tmp_path, monkeypatch):
@@ -504,9 +500,7 @@ def test_revocation_rechecks_the_file_after_locking(tmp_path, monkeypatch):
         yield
 
     monkeypatch.setattr("omnitensor.training.desktop.store_lock", replace_during_lock)
-    error = training_error(
-        lambda: revoke_desktop_history(history, DESKTOP_REVOCATION_CONFIRMATION)
-    )
+    error = training_error(lambda: revoke_desktop_history(history, DESKTOP_REVOCATION_CONFIRMATION))
     assert (error.code, error.detail) == (
         "history-invalid",
         "desktop history changed during revocation",
@@ -519,9 +513,7 @@ def test_desktop_clis_wire_exact_arguments_and_errors(tmp_path, capsys, monkeypa
         desktop_train_main(["--help"])
     train_help = capsys.readouterr().out
     assert train_help_exit.value.code == 0
-    assert train_help.startswith(
-        "usage: omnitensor-train-desktop-model [-h] --history HISTORY\n"
-    )
+    assert train_help.startswith("usage: omnitensor-train-desktop-model [-h] --history HISTORY\n")
     assert "Fit content-free personalized desktop suggestion scores" in train_help
     assert "--minimum-macro-recall MINIMUM_MACRO_RECALL" in train_help
 
@@ -552,20 +544,23 @@ def test_desktop_clis_wire_exact_arguments_and_errors(tmp_path, capsys, monkeypa
     monkeypatch.setattr("omnitensor.training.cli.load_desktop_history", fake_load)
     monkeypatch.setattr("omnitensor.training.cli.DesktopSuggestionTrainer", CapturingTrainer)
     output = tmp_path / "fit"
-    assert desktop_train_main(
-        [
-            "--history",
-            str(tmp_path / "history"),
-            "--output-dir",
-            str(output),
-            "--minimum-class-examples",
-            str(DEFAULT_MIN_CLASS_EXAMPLES),
-            "--minimum-accuracy",
-            str(DEFAULT_MIN_ACCURACY),
-            "--minimum-macro-recall",
-            str(DEFAULT_MIN_MACRO_RECALL),
-        ]
-    ) == 0
+    assert (
+        desktop_train_main(
+            [
+                "--history",
+                str(tmp_path / "history"),
+                "--output-dir",
+                str(output),
+                "--minimum-class-examples",
+                str(DEFAULT_MIN_CLASS_EXAMPLES),
+                "--minimum-accuracy",
+                str(DEFAULT_MIN_ACCURACY),
+                "--minimum-macro-recall",
+                str(DEFAULT_MIN_MACRO_RECALL),
+            ]
+        )
+        == 0
+    )
     assert captured == {
         "load": tmp_path / "history",
         "trainer": {
@@ -592,22 +587,28 @@ def test_desktop_clis_wire_exact_arguments_and_errors(tmp_path, capsys, monkeypa
     assert capsys.readouterr().err == "desktop training failed: bad: history\n"
 
     monkeypatch.setattr("omnitensor.training.cli.revoke_desktop_history", lambda *_args: True)
-    assert desktop_revoke_main(
-        [
-            "--history",
-            "history.jsonl",
-            "--confirm-delete",
-            DESKTOP_REVOCATION_CONFIRMATION,
-        ]
-    ) == 0
+    assert (
+        desktop_revoke_main(
+            [
+                "--history",
+                "history.jsonl",
+                "--confirm-delete",
+                DESKTOP_REVOCATION_CONFIRMATION,
+            ]
+        )
+        == 0
+    )
     assert capsys.readouterr().out == '{\n  "removed": true\n}\n'
     monkeypatch.setattr(
         "omnitensor.training.cli.revoke_desktop_history",
         lambda *_args: (_item for _item in ()).throw(TrainingError("bad", "revoke")),
     )
-    assert desktop_revoke_main(
-        ["--history", "bad", "--confirm-delete", DESKTOP_REVOCATION_CONFIRMATION]
-    ) == 1
+    assert (
+        desktop_revoke_main(
+            ["--history", "bad", "--confirm-delete", DESKTOP_REVOCATION_CONFIRMATION]
+        )
+        == 1
+    )
     assert capsys.readouterr().err == "desktop history revocation failed: bad: revoke\n"
 
 

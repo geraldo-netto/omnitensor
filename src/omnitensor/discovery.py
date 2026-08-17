@@ -183,9 +183,7 @@ def detect_gpus(paths: DiscoveryPaths) -> tuple[Device, ...]:
     """Every DRM render node, with a Vulkan-matchable hardware identity."""
     candidates = []
     occurrences: dict[tuple[str, str], int] = {}
-    for node_number, node in _numbered_nodes(
-        paths.dev / "dri", _RENDER_NODE, MAX_RENDER_DEVICES
-    ):
+    for node_number, node in _numbered_nodes(paths.dev / "dri", _RENDER_NODE, MAX_RENDER_DEVICES):
         vendor_file = paths.sys / f"class/drm/renderD{node_number}/device/vendor"
         hardware_file = paths.sys / f"class/drm/renderD{node_number}/device/device"
         vendor = _read_trimmed(vendor_file)

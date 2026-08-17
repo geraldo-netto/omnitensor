@@ -119,6 +119,7 @@ def test_executor_snapshot_resolves_static_and_live_sources():
     current[0] = replacement
     assert _executor_snapshot(lambda: current[0]) == replacement
 
+
 def dispatcher(
     workloads,
     executors=None,
@@ -151,9 +152,7 @@ def test_a_workload_without_a_model_cannot_run_inference():
     assert excinfo.value.code == "workload-has-no-model"
 
 
-@pytest.mark.parametrize(
-    "payload", [None, [], {"tensor": 1}, {"inputs": "not-a-list"}, "text"]
-)
+@pytest.mark.parametrize("payload", [None, [], {"tensor": 1}, {"inputs": "not-a-list"}, "text"])
 def test_a_payload_without_an_inputs_array_is_refused(payload):
     with pytest.raises(JobDispatchError) as excinfo:
         dispatcher([workload(model=MODEL)]).dispatch("job-1", "sample-workload", payload)
@@ -183,9 +182,9 @@ def test_an_incompatible_format_leaves_no_backend_and_never_falls_back_to_cpu():
     incompatible["gpu"].model_formats = frozenset({"onnx"})
 
     with pytest.raises(JobDispatchError) as excinfo:
-        dispatcher(
-            [workload(model=MODEL)], executors=incompatible
-        ).dispatch("job-1", "sample-workload", {"inputs": []})
+        dispatcher([workload(model=MODEL)], executors=incompatible).dispatch(
+            "job-1", "sample-workload", {"inputs": []}
+        )
 
     assert excinfo.value.code == "no-backend-available"
     assert "model format not supported" in excinfo.value.message
@@ -266,8 +265,7 @@ def test_dispatch_submits_to_the_profile_selected_gpu_lane():
         FakeArtifacts(),
         executor_view=lambda profile_id: selected,
         scheduler_lane=lambda profile_id, backend: (
-            "gpu-renderD129" if (profile_id, backend) == ("sample-workload", "gpu")
-            else backend
+            "gpu-renderD129" if (profile_id, backend) == ("sample-workload", "gpu") else backend
         ),
     )
 
@@ -290,9 +288,7 @@ def test_dispatch_submits_to_the_profile_selected_gpu_lane():
     device_id=st.text(min_size=1, max_size=120),
 )
 def test_prepared_lane_is_an_immutable_bounded_value(backend, device_id):
-    reference = ArtifactReference(
-        "sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS
-    )
+    reference = ArtifactReference("sample-model", "1.2.3", "ncnn", "f" * 64, COMPANIONS)
     prepared = PreparedDispatchLane(backend, device_id, reference)
 
     assert prepared.scheduler_lane == (device_id if backend == "gpu" else backend)
@@ -337,9 +333,7 @@ def test_prepared_lane_refuses_an_invalid_model_reference():
 
 
 def test_an_unresolvable_artifact_is_refused_before_queueing():
-    artifacts = FakeArtifacts(
-        ArtifactResolution(False, None, "artifact has no active version", 0)
-    )
+    artifacts = FakeArtifacts(ArtifactResolution(False, None, "artifact has no active version", 0))
     with pytest.raises(JobDispatchError) as excinfo:
         dispatcher([workload(model=MODEL)], artifacts=artifacts).dispatch(
             "job-1", "sample-workload", {"inputs": []}
@@ -445,7 +439,9 @@ def test_a_dispatched_job_reaches_the_executor_and_returns_its_outcome():
     ],
 )
 def test_dispatch_routes_composite_gpu_by_the_manifest_format(
-    model_format, resolved_path, expected_lane,
+    model_format,
+    resolved_path,
+    expected_lane,
 ):
     ncnn = FakeExecutor(outputs=[["ncnn"]], model_formats=("ncnn",))
     onnx = FakeExecutor(outputs=[["onnx"]], model_formats=("onnx",))
@@ -460,9 +456,7 @@ def test_dispatch_routes_composite_gpu_by_the_manifest_format(
             artifacts=artifacts,
         )
         subject._scheduler.start()
-        result = await subject.dispatch(
-            "job-1", "sample-workload", {"inputs": [[3]]}
-        )
+        result = await subject.dispatch("job-1", "sample-workload", {"inputs": [[3]]})
         await subject._scheduler.stop()
         return result
 
@@ -475,9 +469,7 @@ def test_dispatch_routes_composite_gpu_by_the_manifest_format(
 
 def test_a_full_backend_queue_is_a_stable_refusal():
     async def scenario():
-        scheduler = Scheduler(
-            {"gpu": FakeExecutor()}, lambda _p: 1, max_backend_queue_depth=1
-        )
+        scheduler = Scheduler({"gpu": FakeExecutor()}, lambda _p: 1, max_backend_queue_depth=1)
         dispatch = dispatcher([workload(model=MODEL)], scheduler=scheduler)
         dispatch.dispatch("job-1", "sample-workload", {"inputs": []})
         with pytest.raises(JobDispatchError) as excinfo:
@@ -625,9 +617,7 @@ def test_a_well_formed_nested_tensor_is_accepted():
         dispatch = dispatcher([workload(model=MODEL)], executors={"gpu": executor})
         dispatch._scheduler.start()
         await asyncio.wait_for(
-            dispatch.dispatch(
-                "job-1", "sample-workload", {"inputs": [[[1.0, 2.0], [3.0, 4.0]]]}
-            ),
+            dispatch.dispatch("job-1", "sample-workload", {"inputs": [[[1.0, 2.0], [3.0, 4.0]]]}),
             timeout=5,
         )
         await dispatch._scheduler.stop()
@@ -656,9 +646,7 @@ def test_a_v1_manifest_may_declare_its_model_digest():
 def test_a_declared_artifact_entry_still_wins_over_the_model_digest():
     """The plugin allowlist is the stronger statement, so it is preferred."""
     digested = dict(MODEL, sha256="e" * 64)
-    declared = [
-        {"id": "sample-model", "version": "1.2.3", "format": "ncnn", "sha256": "f" * 64}
-    ]
+    declared = [{"id": "sample-model", "version": "1.2.3", "format": "ncnn", "sha256": "f" * 64}]
     target = workload(model=digested, artifacts=declared)
 
     assert declared_artifact_reference(target, digested).sha256 == "f" * 64
@@ -668,9 +656,7 @@ def test_a_digested_v1_model_is_resolved_by_reference_not_by_id():
     artifacts = FakeArtifacts()
 
     async def scenario():
-        dispatch = dispatcher(
-            [workload(model=dict(MODEL, sha256="e" * 64))], artifacts=artifacts
-        )
+        dispatch = dispatcher([workload(model=dict(MODEL, sha256="e" * 64))], artifacts=artifacts)
         dispatch._scheduler.start()
         await asyncio.wait_for(
             dispatch.dispatch("job-1", "sample-workload", {"inputs": [[1]]}), timeout=5
@@ -705,9 +691,7 @@ def test_a_referenced_input_is_dispatched_like_an_inline_one(tmp_path):
     reference = buffer_reference(tmp_path, [1.0, 2.0, 3.0, 4.0], (2, 2))
 
     async def scenario():
-        dispatch = dispatcher(
-            [workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path])
-        )
+        dispatch = dispatcher([workload(model=MODEL)], input_roots=OptedInInputRoots([tmp_path]))
         dispatch._scheduler.start()
         future = dispatch.dispatch("job-1", "sample-workload", {"inputRefs": [reference]})
         await asyncio.wait_for(future, timeout=5)
@@ -841,8 +825,6 @@ def test_admission_answers_with_the_same_codes_dispatch_would(workload_id, paylo
     assert dispatched.value.code == expected
 
 
-
-
 def test_admission_leaves_routing_and_resolution_to_dispatch():
     """A backend that is busy or an artifact that is briefly unresolvable is a
     condition of the runtime, not a reason to refuse the caller's submission."""
@@ -896,10 +878,19 @@ def test_a_referenced_input_is_checked_against_the_contract_before_it_is_read(tm
     absent = tmp_path / "never-opened.f32"
 
     with pytest.raises(JobDispatchError) as excinfo:
-        dispatch.admit("sample-workload", {"inputRefs": [{
-            "path": str(absent), "shape": [1, 3, 8, 8],
-            "dtype": "float32", "sha256": "0" * 64,
-        }]})
+        dispatch.admit(
+            "sample-workload",
+            {
+                "inputRefs": [
+                    {
+                        "path": str(absent),
+                        "shape": [1, 3, 8, 8],
+                        "dtype": "float32",
+                        "sha256": "0" * 64,
+                    }
+                ]
+            },
+        )
 
     assert excinfo.value.code == "input-contract-mismatch"
     assert absent.exists() is False
@@ -909,10 +900,19 @@ def test_a_referenced_dtype_the_model_does_not_take_is_refused(tmp_path):
     dispatch = dispatcher([workload(model=CONTRACT)], input_roots=OptedInInputRoots([tmp_path]))
 
     with pytest.raises(JobDispatchError) as excinfo:
-        dispatch.admit("sample-workload", {"inputRefs": [{
-            "path": str(tmp_path / "x.bin"), "shape": [1, 2, 2],
-            "dtype": "int32", "sha256": "0" * 64,
-        }]})
+        dispatch.admit(
+            "sample-workload",
+            {
+                "inputRefs": [
+                    {
+                        "path": str(tmp_path / "x.bin"),
+                        "shape": [1, 2, 2],
+                        "dtype": "int32",
+                        "sha256": "0" * 64,
+                    }
+                ]
+            },
+        )
 
     assert excinfo.value.code == "input-contract-mismatch"
     assert "int32" in str(excinfo.value)
@@ -933,6 +933,7 @@ def test_an_unpinned_model_is_refused_before_the_store_is_touched():
     that is simply missing a field, sending somebody to look for a file that is
     installed and fine.
     """
+
     class ExplodingArtifacts:
         def resolve(self, reference):  # pragma: no cover - never reached
             raise AssertionError("the store is not consulted for an unpinned model")
@@ -956,6 +957,7 @@ def test_a_format_that_hides_its_weights_must_vouch_for_them():
     companion it was given, so a file substituted before installation is
     recorded and then faithfully re-verified for ever.
     """
+
     class ExplodingArtifacts:
         def resolve(self, reference):  # pragma: no cover - never reached
             raise AssertionError("an unvouched companion never reaches the store")
@@ -1070,9 +1072,7 @@ def test_scheduler_executes_the_prepared_physical_lane_after_selection_changes()
         ("gpu", "gpu-renderD128"): gpu_a,
         ("gpu", "gpu-renderD129"): gpu_b,
     }
-    scheduler = Scheduler(
-        {"gpu-renderD128": gpu_a, "gpu-renderD129": gpu_b}, lambda _profile: 1
-    )
+    scheduler = Scheduler({"gpu-renderD128": gpu_a, "gpu-renderD129": gpu_b}, lambda _profile: 1)
     subject = InferenceJobDispatcher(
         {target.id: target},
         scheduler,
@@ -1159,9 +1159,7 @@ def test_preparation_refuses_a_queue_that_does_not_match_the_physical_lane():
         subject.prepare_lane(target.id)
 
     assert failure.value.code == "prepared-lane-unavailable"
-    assert failure.value.message.endswith(
-        "gpu queue does not match its stable device identity"
-    )
+    assert failure.value.message.endswith("gpu queue does not match its stable device identity")
 
 
 def test_prepared_dispatch_rechecks_exact_executor_availability():
@@ -1273,8 +1271,10 @@ def test_the_lane_is_chosen_first_and_the_artifact_follows_it():
     async def scenario():
         dispatch = dispatcher(
             [multi_workload()],
-            executors={"npu": FakeExecutor(model_formats=("openvino",)),
-                       "gpu": FakeExecutor(model_formats=("ncnn",))},
+            executors={
+                "npu": FakeExecutor(model_formats=("openvino",)),
+                "gpu": FakeExecutor(model_formats=("ncnn",)),
+            },
             artifacts=RecordingArtifacts(),
         )
         dispatch._scheduler.start()
@@ -1386,9 +1386,7 @@ def test_model_path_refuses_a_reference_changed_after_preparation():
     target = workload(model=MODEL)
     artifacts = FakeArtifacts()
     subject = dispatcher([target], artifacts=artifacts)
-    foreign = ArtifactReference(
-        "sample-model", "1.2.3", "ncnn", "a" * 64, COMPANIONS
-    )
+    foreign = ArtifactReference("sample-model", "1.2.3", "ncnn", "a" * 64, COMPANIONS)
 
     with pytest.raises(JobDispatchError) as failure:
         subject._model_path(target, MODEL, foreign)

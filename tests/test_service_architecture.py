@@ -71,9 +71,7 @@ def _top_level_service_owners(source: str) -> set[str]:
         for node in tree.body
     )
     if mutmut_instrumented:
-        owners = {
-            name for name in owners if not name.startswith(MUTMUT_MAIN_WRAPPER_PREFIX)
-        }
+        owners = {name for name in owners if not name.startswith(MUTMUT_MAIN_WRAPPER_PREFIX)}
     return owners
 
 
@@ -107,9 +105,7 @@ def test_service_drops_only_private_compatibility_owners():
     ):
         assert not hasattr(service, name)
 
-    owned = _top_level_service_owners(
-        Path(service.__file__).read_text(encoding="utf-8")
-    )
+    owned = _top_level_service_owners(Path(service.__file__).read_text(encoding="utf-8"))
     assert owned == {"OmniTensorService", "main"}
 
 
@@ -150,8 +146,7 @@ def test_extracted_service_owners_have_no_static_service_backedge():
     for owner in owners:
         tree = ast.parse(Path(owner.__file__).read_text(encoding="utf-8"))
         assert not any(
-            isinstance(node, ast.ImportFrom)
-            and node.module in {"service", "omnitensor.service"}
+            isinstance(node, ast.ImportFrom) and node.module in {"service", "omnitensor.service"}
             for node in ast.walk(tree)
         )
 
@@ -172,6 +167,7 @@ def test_artifact_resolution_cache_preserves_the_primary_stamp_contract(tmp_path
             return expected
 
     store = Store()
+
     def call():
         return artifact_readiness.cached_resolution(
             "model", reference, store, resolutions, lambda *_args: next(stamps)
@@ -466,9 +462,7 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
     monkeypatch.setattr(
         artifact_readiness,
         "selected_backend",
-        lambda actual_workload, executors: (
-            calls.append((actual_workload, executors)) or "gpu"
-        ),
+        lambda actual_workload, executors: calls.append((actual_workload, executors)) or "gpu",
     )
 
     assert service.OmniTensorService._selected_backend(owner, workload) == "gpu"
@@ -623,18 +617,14 @@ def test_sysfs_adapter_delegates_exact_host_state(monkeypatch, tmp_path):
     monkeypatch.setattr(
         host_module,
         "detect_devices",
-        lambda actual_paths, actual_selected: calls.append(
-            (actual_paths, actual_selected)
-        )
-        or [device],
+        lambda actual_paths, actual_selected: (
+            calls.append((actual_paths, actual_selected)) or [device]
+        ),
     )
     monkeypatch.setattr(
         host_module,
         "device_utilization",
-        lambda actual_paths, actual_device: calls.append(
-            (actual_paths, actual_device)
-        )
-        or 37.5,
+        lambda actual_paths, actual_device: calls.append((actual_paths, actual_device)) or 37.5,
     )
     adapter = SysfsDeviceDiscovery(paths, selected)
 
@@ -707,9 +697,7 @@ def test_environment_composition_uses_the_public_service_by_default(tmp_path):
     assert isinstance(built, service.OmniTensorService)
 
 
-def test_environment_helpers_honour_defaults_and_all_device_bindings(
-    monkeypatch, tmp_path
-):
+def test_environment_helpers_honour_defaults_and_all_device_bindings(monkeypatch, tmp_path):
     fallback = str(tmp_path / "fallback")
     explicit = str(tmp_path / "explicit")
     assert _env_path("PATH_SETTING", fallback, {}) == tmp_path / "fallback"
@@ -758,26 +746,20 @@ def test_executor_composition_reuses_only_complete_unchanged_history():
     old = Device("tpu-old", "tpu", "old", "pcie")
     first = build_executors([old])
 
-    same = build_executors(
-        [old], previous_devices=[old], previous_executors=first
-    )
+    same = build_executors([old], previous_devices=[old], previous_executors=first)
     assert all(same[backend] is first[backend] for backend in ("tpu", "npu", "gpu"))
 
     incomplete_devices = build_executors([old], previous_executors=first)
     incomplete_executors = build_executors([old], previous_devices=[old])
     assert all(
-        incomplete_devices[backend] is not first[backend]
-        for backend in ("tpu", "npu", "gpu")
+        incomplete_devices[backend] is not first[backend] for backend in ("tpu", "npu", "gpu")
     )
     assert all(
-        incomplete_executors[backend] is not first[backend]
-        for backend in ("tpu", "npu", "gpu")
+        incomplete_executors[backend] is not first[backend] for backend in ("tpu", "npu", "gpu")
     )
 
     replacement = Device("tpu-new", "tpu", "new", "usb")
-    changed = build_executors(
-        [replacement], previous_devices=[old], previous_executors=same
-    )
+    changed = build_executors([replacement], previous_devices=[old], previous_executors=same)
     assert changed["tpu"] is not same["tpu"]
     assert changed["npu"] is same["npu"]
     assert changed["gpu"] is same["gpu"]
@@ -805,15 +787,17 @@ def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():
     executors = build_executors([first_gpu, second_gpu])
 
     assert executors["gpu"] is executors.device_executors["gpu-renderD128"]
-    assert executors.for_device("gpu-renderD129")["gpu"] is (
-        executors.device_executors["gpu-renderD129"]
+    assert (
+        executors.for_device("gpu-renderD129")["gpu"]
+        is (executors.device_executors["gpu-renderD129"])
     )
     assert executors.lane_key("gpu", "gpu-renderD129") == "gpu-renderD129"
     assert executors.lane_key("tpu", "gpu-renderD129") == "tpu"
     assert executors.device_id("gpu", "gpu-renderD129") == "gpu-renderD129"
     assert executors.device_id("tpu", None) is None
-    assert executors.executor_for_device("gpu", "gpu-renderD129") is (
-        executors.device_executors["gpu-renderD129"]
+    assert (
+        executors.executor_for_device("gpu", "gpu-renderD129")
+        is (executors.device_executors["gpu-renderD129"])
     )
     assert executors.executor_for_device("gpu", "gpu-renderD999") is None
     assert executors.executor_for_device("tpu", "tpu-absent") is None
@@ -823,9 +807,10 @@ def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():
         "gpu-renderD128",
         "gpu-renderD129",
     )
-    assert executors.device_executors["gpu-renderD128"]._executors[
-        0
-    ]._requested_device.vendor_id == 0x1002
+    assert (
+        executors.device_executors["gpu-renderD128"]._executors[0]._requested_device.vendor_id
+        == 0x1002
+    )
     missing = executors.for_device("gpu-renderD999")["gpu"].availability()
     assert (missing.available, missing.code, missing.reason) == (
         False,
@@ -852,6 +837,7 @@ def test_executor_composition_matches_non_gpu_devices_by_stable_identity():
     assert executors.executor_for_device("npu", npu.id) is executors["npu"]
     assert executors.executor_for_device("tpu", npu.id) is None
     assert executors.executor_for_device("npu", tpu.id) is None
+
 
 def test_an_unmatchable_render_identity_is_fail_closed():
     gpu = Device("gpu-renderD128", "gpu", "GPU", "dri")

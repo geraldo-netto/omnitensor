@@ -174,12 +174,8 @@ def test_vulkan_selector_binds_sysfs_identity_and_identical_gpu_occurrence():
         runtime._device_types[index], *identities[index]
     )
 
-    assert select_vulkan_device(
-        runtime, VulkanDeviceRequest(0x1002, 0x73FF, 1)
-    ).index == 1
-    assert select_vulkan_device(
-        runtime, VulkanDeviceRequest(0x8086, 0x46A6)
-    ).index == 2
+    assert select_vulkan_device(runtime, VulkanDeviceRequest(0x1002, 0x73FF, 1)).index == 1
+    assert select_vulkan_device(runtime, VulkanDeviceRequest(0x8086, 0x46A6)).index == 2
     with pytest.raises(VulkanSelectionError, match="absent from"):
         select_vulkan_device(runtime, VulkanDeviceRequest(0x10DE, 0x9999))
 

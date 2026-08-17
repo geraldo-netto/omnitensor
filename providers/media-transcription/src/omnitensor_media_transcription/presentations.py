@@ -30,11 +30,13 @@ MAX_SLIDE_XML_BYTES = 4 * 1024 * 1024
 MAX_PRESENTATION_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_IMAGES_PER_SLIDE = 4
 
+
 @dataclass(frozen=True, slots=True)
 class PresentationSlide:
     number: int
     text: str
     images: tuple[Path, ...]
+
 
 class PresentationArchiveTranscriber(PresentationTranscriber):
     """Transcribe bounded PPTX/ODP slide text and qualified embedded images."""
@@ -323,7 +325,6 @@ def _slide_description(text: str, descriptions: Sequence[str]) -> str:
             "presentation-invalid", "presentation image descriptions exceed their limit"
         )
     return "Presentation slide containing text." if text else "Blank presentation slide."
-
 
 
 __all__ = ["PresentationArchiveTranscriber"]

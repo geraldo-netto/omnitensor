@@ -66,8 +66,10 @@ def _source_files(root: Path) -> tuple[Path, ...]:
 def _instrumentable_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     if not node.decorator_list:
         return True
-    return len(node.decorator_list) == 1 and isinstance(node.decorator_list[0], ast.Name) and (
-        node.decorator_list[0].id in {"classmethod", "staticmethod"}
+    return (
+        len(node.decorator_list) == 1
+        and isinstance(node.decorator_list[0], ast.Name)
+        and (node.decorator_list[0].id in {"classmethod", "staticmethod"})
     )
 
 
@@ -183,8 +185,7 @@ def _mutation_scope(raw: object) -> MutationScope:
     expected = {"status", "blockedBy", "onlyMutate", "expansionPriority"}
     if not isinstance(raw, dict) or set(raw) != expected:
         raise ValueError(
-            "mutation scope must contain only status, blockedBy, onlyMutate, "
-            "and expansionPriority"
+            "mutation scope must contain only status, blockedBy, onlyMutate, and expansionPriority"
         )
     if raw["status"] != "partial":
         raise ValueError("mutation scope status must be partial")

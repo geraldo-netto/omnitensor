@@ -43,6 +43,7 @@ MAX_FEATURES = 128
 MAX_NAME_LENGTH = 64
 MAX_PROFILE_LENGTH = 64
 
+
 def validated_features(features: object) -> dict[str, float]:
     """Bound a feature mapping to finite numbers, refusing anything else."""
     if not isinstance(features, Mapping):

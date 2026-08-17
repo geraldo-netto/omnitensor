@@ -67,9 +67,7 @@ def test_template_build_metadata_manifest_and_identity_agree():
 
     assert project["project"]["name"] == "omnitensor-plugin-template"
     assert project["project"]["version"] == manifest["version"]
-    assert entry_points == {
-        "template-workload": "omnitensor_template.plugin:TemplatePlugin"
-    }
+    assert entry_points == {"template-workload": "omnitensor_template.plugin:TemplatePlugin"}
     assert manifest["manifestVersion"] == 2
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == "template-workload"
     assert validate_document("workload-manifest.schema.json", manifest) == []
@@ -177,14 +175,10 @@ def test_template_pipeline_and_consumer_enforce_typed_bounds(template_module):
     async def scenario():
         cancellation = CancellationController()
         pipeline = template_module.TemplatePipeline(2)
-        preprocessed = await pipeline.preprocess(
-            CollectedOutput({"values": [-2, 2]}), cancellation
-        )
+        preprocessed = await pipeline.preprocess(CollectedOutput({"values": [-2, 2]}), cancellation)
         assert preprocessed.tensors == {"mean": 0.0}
         assert preprocessed.metadata == {"count": 2}
-        postprocessed = await pipeline.postprocess(
-            InferenceOutput({"score": 0.75}), cancellation
-        )
+        postprocessed = await pipeline.postprocess(InferenceOutput({"score": 0.75}), cancellation)
         delivered = await template_module.TemplateResultConsumer().deliver(
             postprocessed, cancellation
         )
@@ -201,9 +195,7 @@ def test_template_pipeline_and_consumer_enforce_typed_bounds(template_module):
         with pytest.raises(asyncio.CancelledError):
             await pipeline.postprocess(InferenceOutput({"score": 0.5}), cancellation)
         with pytest.raises(asyncio.CancelledError):
-            await template_module.TemplateResultConsumer().deliver(
-                postprocessed, cancellation
-            )
+            await template_module.TemplateResultConsumer().deliver(postprocessed, cancellation)
 
     asyncio.run(scenario())
 

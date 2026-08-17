@@ -81,9 +81,7 @@ class ArtifactReference:
     def unpinned_companions(self) -> tuple[str, ...]:
         """Required companions of this format the manifest does not name."""
         declared = self.declared_companions
-        return tuple(
-            name for name in companion_filenames(self.format) if name not in declared
-        )
+        return tuple(name for name in companion_filenames(self.format) if name not in declared)
 
 
 @dataclass(frozen=True, slots=True)

@@ -124,8 +124,7 @@ def pool_sentence_embedding(
         if count == 0:
             raise ValueError("mean pooling requires at least one unmasked token")
         pooled = tuple(
-            sum(row[column] * mask for row, mask in zip(rows, attention_mask, strict=True))
-            / count
+            sum(row[column] * mask for row, mask in zip(rows, attention_mask, strict=True)) / count
             for column in range(len(rows[0]))
         )
     else:
@@ -156,9 +155,7 @@ def evaluate_embedding_gate(
         portable_vectors[query_count:],
     )
     overlaps = []
-    for source_query, portable_query in zip(
-        source_queries, portable_queries, strict=True
-    ):
+    for source_query, portable_query in zip(source_queries, portable_queries, strict=True):
         source_top = set(_top_k(source_query, source_documents, 10))
         portable_top = set(_top_k(portable_query, portable_documents, 10))
         overlaps.append(len(source_top & portable_top) / 10)
@@ -193,9 +190,7 @@ class SentenceEmbeddingOnnxExporter:
         model = onnx.load(source.root / recipe.model_source.filename, load_external_data=False)
         default_opsets = [item.version for item in model.opset_import if not item.domain]
         minimum_opset = (
-            13
-            if recipe.producer["postprocessing"] == "attention-mask-mean-pool-l2"
-            else 11
+            13 if recipe.producer["postprocessing"] == "attention-mask-mean-pool-l2" else 11
         )
         if not default_opsets or default_opsets[0] < minimum_opset:
             raise ModelRecipeError(
@@ -312,12 +307,9 @@ def _append_embedding_wrapper(
     source_name = producer["sourceOutputName"]
     if source_name not in {value.name for value in graph.output}:
         raise ModelRecipeError("producer-incompatible", "ONNX encoder output disagrees with recipe")
-    occupied = {
-        name
-        for node in graph.node
-        for name in (*node.input, *node.output)
-        if name
-    } | {item.name for item in graph.initializer}
+    occupied = {name for node in graph.node for name in (*node.input, *node.output) if name} | {
+        item.name for item in graph.initializer
+    }
     prefix = "omnitensor_embedding_"
     if any(name.startswith(prefix) for name in occupied):
         raise ModelRecipeError("producer-incompatible", "ONNX graph collides with wrapper names")

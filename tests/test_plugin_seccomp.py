@@ -1,5 +1,3 @@
-
-
 def test_the_supported_architectures_are_the_ones_with_a_table():
     """Stated so an operator on another machine learns it from the error and
     the packaging metadata rather than from every worker failing to start."""

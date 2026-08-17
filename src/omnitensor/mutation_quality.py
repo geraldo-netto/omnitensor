@@ -40,8 +40,7 @@ def mutation_failures(
         raise ValueError("mutation selectors must be a collection")
     selected = tuple(selectors)
     if not selected or any(
-        not selector or any(wildcard in selector for wildcard in "*?[")
-        for selector in selected
+        not selector or any(wildcard in selector for wildcard in "*?[") for selector in selected
     ):
         raise ValueError("mutation selectors must name exact callables without wildcards")
     if len(set(selected)) != len(selected):
@@ -80,10 +79,14 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("--shard is required with --selector-file")
             from .mutation_manifest import load_mutation_manifest  # noqa: PLC0415
 
-            selectors = load_mutation_manifest(
-                arguments.selector_file,
-                source_root=arguments.source_root,
-            ).shard(arguments.shard).selectors
+            selectors = (
+                load_mutation_manifest(
+                    arguments.selector_file,
+                    source_root=arguments.source_root,
+                )
+                .shard(arguments.shard)
+                .selectors
+            )
         elif arguments.shard is not None:
             raise ValueError("--shard requires --selector-file")
         failures = mutation_failures(

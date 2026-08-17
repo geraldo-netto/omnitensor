@@ -124,10 +124,7 @@ class SecretRedactor:
         if depth > MAX_REDACTION_DEPTH or nodes[0] > MAX_REDACTION_NODES:
             return REDACTION_LIMIT
         if isinstance(value, Mapping):
-            return {
-                str(key): self._redact(item, depth + 1, nodes)
-                for key, item in value.items()
-            }
+            return {str(key): self._redact(item, depth + 1, nodes) for key, item in value.items()}
         if isinstance(value, list):
             return [self._redact(item, depth + 1, nodes) for item in value]
         if isinstance(value, tuple):
@@ -201,25 +198,19 @@ def parse_secret_reference(document: object) -> SecretReference:
         or not 1 <= len(provider) <= MAX_SECRET_PROVIDER_CHARS
         or _PROVIDER.fullmatch(provider) is None
     ):
-        raise SecretConfigurationError(
-            "invalid-secret-reference", "secret provider is invalid"
-        )
+        raise SecretConfigurationError("invalid-secret-reference", "secret provider is invalid")
     if (
         not isinstance(key, str)
         or not 1 <= len(key) <= MAX_SECRET_KEY_CHARS
         or _KEY.fullmatch(key) is None
     ):
-        raise SecretConfigurationError(
-            "invalid-secret-reference", "secret key is invalid"
-        )
+        raise SecretConfigurationError("invalid-secret-reference", "secret key is invalid")
     if version is not None and (
         not isinstance(version, str)
         or not 1 <= len(version) <= MAX_SECRET_KEY_CHARS
         or _KEY.fullmatch(version) is None
     ):
-        raise SecretConfigurationError(
-            "invalid-secret-reference", "secret version is invalid"
-        )
+        raise SecretConfigurationError("invalid-secret-reference", "secret version is invalid")
     return SecretReference(provider, key, version)
 
 
@@ -229,9 +220,7 @@ def resolve_configuration(
     provider: SecretProvider,
 ) -> ResolvedConfiguration:
     if not isinstance(configuration, Mapping):
-        raise SecretConfigurationError(
-            "invalid-configuration", "configuration must be an object"
-        )
+        raise SecretConfigurationError("invalid-configuration", "configuration must be an object")
     paths = validate_secret_references(schema, configuration)
     resolved = copy.deepcopy(dict(configuration))
     values: list[str] = []
@@ -341,9 +330,7 @@ def _secret_text(value: object) -> str:
     elif isinstance(value, str):
         text = value
     else:
-        raise SecretResolutionError(
-            "secret-invalid", "secret provider returned a non-text value"
-        )
+        raise SecretResolutionError("secret-invalid", "secret provider returned a non-text value")
     size = len(text.encode("utf-8"))
     if not text or size > MAX_SECRET_VALUE_BYTES:
         raise SecretResolutionError(

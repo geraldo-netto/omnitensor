@@ -49,9 +49,7 @@ def test_job_components_own_their_responsibilities_without_a_facade_cycle():
     assert job_lifecycle.JobSubmissionService.__module__ == "omnitensor.job_lifecycle"
     assert job_ports.JobDispatchError.__module__ == "omnitensor.job_ports"
     assert "omnitensor.jobs" not in {
-        value.__name__
-        for value in vars(job_ports).values()
-        if isinstance(value, type(json))
+        value.__name__ for value in vars(job_ports).values() if isinstance(value, type(json))
     }
 
 
@@ -96,9 +94,7 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         JobRecord(
             "job-1",
             None,
-            PluginResult(
-                "job-1", PluginResultStatus.FAILED, {}, "Accelerator lost", 100
-            ),
+            PluginResult("job-1", PluginResultStatus.FAILED, {}, "Accelerator lost", 100),
             100.0,
         ),
         123,
@@ -150,9 +146,10 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         '"state":"cancelled","code":"job-cancelled","message":"Job finished",'
         '"timestamp":123,"progress":null,"output":{}}'
     )
-    assert validate_document(
-        "runtime-job-acknowledgement.schema.json", json.loads(acknowledgement)
-    ) == []
+    assert (
+        validate_document("runtime-job-acknowledgement.schema.json", json.loads(acknowledgement))
+        == []
+    )
     for reply in (
         unknown,
         running_without_progress,
@@ -161,9 +158,7 @@ def test_extracted_codec_preserves_exact_wire_shapes():
         failed,
         cancelled,
     ):
-        assert validate_document(
-            "runtime-job-result.schema.json", json.loads(reply)
-        ) == []
+        assert validate_document("runtime-job-result.schema.json", json.loads(reply)) == []
 
 
 def test_result_serializers_refuse_non_finite_numbers():
@@ -372,9 +367,7 @@ def test_submit_accepts_authorized_bounded_job_and_removes_completed_task():
             "timestamp": 123,
         }
         assert service.active_job_ids() == ("job-1",)
-        assert dispatcher.calls == [
-            ("job-1", "visual-library", {"tensor": [1, 2]})
-        ]
+        assert dispatcher.calls == [("job-1", "visual-library", {"tensor": [1, 2]})]
         request["payload"]["tensor"].append(3)
         assert dispatcher.calls[0][2] == {"tensor": [1, 2]}
         dispatcher.release.set()
@@ -396,9 +389,7 @@ def test_cancel_authorized_active_job_and_not_found_are_stable():
         await service.submit_job_text(json.dumps(submit_document()))
         await asyncio.sleep(0)
 
-        cancelled = decode(
-            await service.cancel_job_text(json.dumps(cancel_document("job-cancel")))
-        )
+        cancelled = decode(await service.cancel_job_text(json.dumps(cancel_document("job-cancel"))))
         missing = decode(
             await service.cancel_job_text(json.dumps(cancel_document("job-cancel", "again")))
         )
@@ -422,15 +413,11 @@ def test_default_policy_denies_submission_before_dispatch():
         dispatcher = BlockingDispatcher()
         service = JobSubmissionService(dispatcher, clock_ms=lambda: 0)
 
-        reply = decode(
-            await service.submit_job_text(json.dumps(submit_document()))
-        )
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
 
         assert reply["status"] == "rejected"
         assert reply["code"] == "not-authorized"
-        assert reply["message"] == (
-            "Job submission is not authorized for this workload"
-        )
+        assert reply["message"] == ("Job submission is not authorized for this workload")
         assert reply["timestamp"] == 1
         assert dispatcher.calls == []
 
@@ -453,15 +440,11 @@ def test_cancel_authorization_is_evaluated_against_active_workload():
         )
         await service.submit_job_text(json.dumps(submit_document()))
 
-        reply = decode(
-            await service.cancel_job_text(json.dumps(cancel_document("owned-job")))
-        )
+        reply = decode(await service.cancel_job_text(json.dumps(cancel_document("owned-job"))))
 
         assert reply["code"] == "not-authorized"
         assert reply["jobId"] == "owned-job"
-        assert reply["message"] == (
-            "Job cancellation is not authorized for this workload"
-        )
+        assert reply["message"] == ("Job cancellation is not authorized for this workload")
         assert actions == [
             ("submit", "visual-library"),
             ("cancel", "visual-library"),
@@ -486,9 +469,7 @@ def test_capacity_is_fail_fast_and_recovers_after_completion():
         )
         first = decode(await service.submit_job_text(json.dumps(submit_document())))
         full = decode(
-            await service.submit_job_text(
-                json.dumps(submit_document(request_id="request-2"))
-            )
+            await service.submit_job_text(json.dumps(submit_document(request_id="request-2")))
         )
         assert first["status"] == "accepted"
         assert full["code"] == "capacity-exceeded"
@@ -499,9 +480,7 @@ def test_capacity_is_fail_fast_and_recovers_after_completion():
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         second = decode(
-            await service.submit_job_text(
-                json.dumps(submit_document(request_id="request-3"))
-            )
+            await service.submit_job_text(json.dumps(submit_document(request_id="request-3")))
         )
         assert second["jobId"] == "second-job"
         await asyncio.sleep(0)
@@ -518,9 +497,7 @@ def test_dispatch_admission_error_is_versioned_and_preserves_request_id():
     async def scenario():
         service = JobSubmissionService(RejectingDispatcher(), allows_all())
         reply = decode(
-            await service.submit_job_text(
-                json.dumps(submit_document(request_id="admission-1"))
-            )
+            await service.submit_job_text(json.dumps(submit_document(request_id="admission-1")))
         )
 
         assert reply["requestId"] == "admission-1"
@@ -556,9 +533,7 @@ def test_invalid_submit_requests_return_stable_contract(text, code, request_id):
 
 def test_request_byte_bound_precedes_json_parsing():
     async def scenario():
-        service = JobSubmissionService(
-            ImmediateDispatcher(), allows_all(), max_request_bytes=16
-        )
+        service = JobSubmissionService(ImmediateDispatcher(), allows_all(), max_request_bytes=16)
         reply = decode(await service.submit_job_text("{" + "x" * 16))
         assert reply["code"] == "request-too-large"
         assert reply["message"] == "Request exceeds 16 bytes"
@@ -606,15 +581,11 @@ def test_cancellation_deadline_is_bounded_and_job_remains_accounted():
         )
         await service.submit_job_text(json.dumps(submit_document()))
 
-        reply = decode(
-            await service.cancel_job_text(json.dumps(cancel_document("stubborn-job")))
-        )
+        reply = decode(await service.cancel_job_text(json.dumps(cancel_document("stubborn-job"))))
 
         assert reply["code"] == "cancel-timeout"
         assert reply["jobId"] == "stubborn-job"
-        assert reply["message"] == (
-            "Job did not stop within the cancellation deadline"
-        )
+        assert reply["message"] == ("Job did not stop within the cancellation deadline")
         assert service.active_job_ids() == ("stubborn-job",)
         dispatcher.future.set_result(None)
         await asyncio.sleep(0)
@@ -700,20 +671,14 @@ def test_generated_job_id_failure_and_collision_are_redacted():
         invalid = JobSubmissionService(
             ImmediateDispatcher(), allows_all(), id_factory=lambda: "bad id"
         )
-        invalid_reply = decode(
-            await invalid.submit_job_text(json.dumps(submit_document()))
-        )
+        invalid_reply = decode(await invalid.submit_job_text(json.dumps(submit_document())))
         assert invalid_reply["code"] == "internal-error"
 
         dispatcher = BlockingDispatcher()
-        collision = JobSubmissionService(
-            dispatcher, allows_all(), id_factory=lambda: "same-job"
-        )
+        collision = JobSubmissionService(dispatcher, allows_all(), id_factory=lambda: "same-job")
         await collision.submit_job_text(json.dumps(submit_document()))
         collision_reply = decode(
-            await collision.submit_job_text(
-                json.dumps(submit_document(request_id="second"))
-            )
+            await collision.submit_job_text(json.dumps(submit_document(request_id="second")))
         )
         assert collision_reply["requestId"] == "second"
         assert collision_reply["code"] == "internal-error"
@@ -848,9 +813,7 @@ def test_another_caller_cannot_cancel_a_job_it_did_not_submit():
         )
         job_id = accepted["jobId"]
         stranger = decode(
-            await service.cancel_job_text(
-                json.dumps(cancel_document(job_id)), owner="uid:1001"
-            )
+            await service.cancel_job_text(json.dumps(cancel_document(job_id)), owner="uid:1001")
         )
         absent = decode(
             await service.cancel_job_text(
@@ -881,9 +844,7 @@ def test_an_unowned_job_is_cancellable_by_an_unidentified_caller():
         service = JobSubmissionService(dispatcher, allows_all())
         accepted = decode(await service.submit_job_text(json.dumps(submit_document())))
         dispatcher.release.set()
-        return decode(
-            await service.cancel_job_text(json.dumps(cancel_document(accepted["jobId"])))
-        )
+        return decode(await service.cancel_job_text(json.dumps(cancel_document(accepted["jobId"]))))
 
     assert run_scenario(scenario())["status"] != "not-found"
 
@@ -1094,9 +1055,7 @@ def test_running_result_progress_and_truncation_boundaries(fraction, detail_leng
     service = JobSubmissionService(results=store, clock_ms=lambda: 123)
 
     reply = run_scenario(
-        service.job_result_text(
-            json.dumps(result_document("job-progress")), owner="uid:1000"
-        )
+        service.job_result_text(json.dumps(result_document("job-progress")), owner="uid:1000")
     )
 
     document = decode_result(reply)
@@ -1126,9 +1085,7 @@ def test_every_terminal_result_state_is_schema_valid(status):
 
     document = decode_result(
         run_scenario(
-            service.job_result_text(
-                json.dumps(result_document("job-terminal")), owner="uid:1000"
-            )
+            service.job_result_text(json.dumps(result_document("job-terminal")), owner="uid:1000")
         )
     )
 
@@ -1155,9 +1112,7 @@ def test_terminal_result_message_truncation_boundary(detail_length):
 
     document = decode_result(
         run_scenario(
-            service.job_result_text(
-                json.dumps(result_document("job-detail")), owner="uid:1000"
-            )
+            service.job_result_text(json.dumps(result_document("job-detail")), owner="uid:1000")
         )
     )
 
@@ -1175,9 +1130,7 @@ def test_invalid_stored_state_returns_a_contract_valid_rejection():
 
     document = decode_result(
         run_scenario(
-            service.job_result_text(
-                json.dumps(result_document("job-invalid")), owner="uid:1000"
-            )
+            service.job_result_text(json.dumps(result_document("job-invalid")), owner="uid:1000")
         )
     )
 
@@ -1221,9 +1174,7 @@ def test_job_result_timestamp_is_clamped_to_the_schema_minimum():
 
     document = decode_result(
         run_scenario(
-            service.job_result_text(
-                json.dumps(result_document("job-unknown")), owner="uid:1000"
-            )
+            service.job_result_text(json.dumps(result_document("job-unknown")), owner="uid:1000")
         )
     )
 
@@ -1290,6 +1241,7 @@ class AcceptingAdmission:
 
 def test_an_admission_refusal_answers_the_submission_and_queues_nothing():
     """The caller learns why in the reply, instead of polling for a failure."""
+
     async def scenario():
         dispatcher = BlockingDispatcher()
         admission = RefusingAdmission()
@@ -1311,9 +1263,7 @@ def test_an_admission_refusal_answers_the_submission_and_queues_nothing():
 def test_admission_sees_the_payload_the_dispatcher_would_have_seen():
     async def scenario():
         admission = AcceptingAdmission()
-        service = JobSubmissionService(
-            ImmediateDispatcher(), allows_all(), admission=admission
-        )
+        service = JobSubmissionService(ImmediateDispatcher(), allows_all(), admission=admission)
         await service.submit_job_text(
             json.dumps(submit_document(payload={"inputRefs": [{"path": "/tmp/x"}]}))
         )
@@ -1326,6 +1276,7 @@ def test_admission_sees_the_payload_the_dispatcher_would_have_seen():
 
 def test_an_unauthorized_job_is_never_offered_to_admission():
     """Authorization is the cheaper question and answers first."""
+
     async def scenario():
         admission = RefusingAdmission()
         service = JobSubmissionService(

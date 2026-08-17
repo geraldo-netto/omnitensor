@@ -342,9 +342,7 @@ def test_changed_path_rejections_have_stable_details(paths, detail):
     ],
 )
 def test_check_names_are_unique_bounded_identifiers(checks):
-    assert error_code(lambda: _validate_checks(tuple(checks), "executed")) == (
-        "record-invalid"
-    )
+    assert error_code(lambda: _validate_checks(tuple(checks), "executed")) == ("record-invalid")
 
 
 def test_check_name_and_count_boundaries_are_accepted():
@@ -363,32 +361,42 @@ def test_failed_checks_must_have_executed():
 
 def test_provenance_file_and_line_boundaries(tmp_path, monkeypatch):
     path = tmp_path / "history.jsonl"
-    provenance_error = training_error(
-        lambda: load_build_history(path, accept_provenance="wrong")
-    )
+    provenance_error = training_error(lambda: load_build_history(path, accept_provenance="wrong"))
     assert (provenance_error.code, provenance_error.detail) == (
         "provenance-not-confirmed",
         f"review the export and pass exactly {BUILD_PROVENANCE_CONFIRMATION}",
     )
-    assert error_code(
-        lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
-    ) == "history-invalid"
+    assert (
+        error_code(
+            lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
+        )
+        == "history-invalid"
+    )
     path.mkdir()
-    assert error_code(
-        lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
-    ) == "history-invalid"
+    assert (
+        error_code(
+            lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
+        )
+        == "history-invalid"
+    )
     path.rmdir()
     write_history(path, 2)
     alias = tmp_path / "alias"
     alias.symlink_to(path)
-    assert error_code(
-        lambda: load_build_history(alias, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
-    ) == "history-invalid"
+    assert (
+        error_code(
+            lambda: load_build_history(alias, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
+        )
+        == "history-invalid"
+    )
 
     monkeypatch.setattr("omnitensor.training.build.MAX_HISTORY_BYTES", path.stat().st_size - 1)
-    assert error_code(
-        lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
-    ) == "history-too-large"
+    assert (
+        error_code(
+            lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
+        )
+        == "history-too-large"
+    )
 
 
 @pytest.mark.parametrize("raw", [b"\n", b"not-json\n", b"\xff\n"])
@@ -410,9 +418,12 @@ def test_history_line_exact_limit_and_context(monkeypatch):
 def test_empty_and_record_count_limits(tmp_path, monkeypatch):
     path = tmp_path / "history.jsonl"
     path.write_bytes(b"")
-    assert error_code(
-        lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
-    ) == "insufficient-history"
+    assert (
+        error_code(
+            lambda: load_build_history(path, accept_provenance=BUILD_PROVENANCE_CONFIRMATION)
+        )
+        == "insufficient-history"
+    )
 
     write_history(path, 2)
     monkeypatch.setattr("omnitensor.training.build.DEFAULT_MAX_BUILD_RECORDS", 1)
@@ -521,16 +532,19 @@ def test_build_examples_refuse_catalog_and_order_drift_and_skip_ambiguous_outcom
     dataset = load_fixture(tmp_path / "history.jsonl", 8)
     records = list(dataset.records)
     unknown = BuildTrainingRecord(records[0].record, (*records[0].executed_checks, "unknown"))
-    assert error_code(
-        lambda: _build_examples((unknown,), MANDATORY, OPTIONAL)
-    ) == "check-catalog-mismatch"
+    assert (
+        error_code(lambda: _build_examples((unknown,), MANDATORY, OPTIONAL))
+        == "check-catalog-mismatch"
+    )
     missing = BuildTrainingRecord(records[0].record, OPTIONAL)
-    assert error_code(
-        lambda: _build_examples((missing,), MANDATORY, OPTIONAL)
-    ) == "mandatory-check-missing"
-    assert error_code(
-        lambda: _build_examples((records[1], records[0]), MANDATORY, OPTIONAL)
-    ) == "observations-unordered"
+    assert (
+        error_code(lambda: _build_examples((missing,), MANDATORY, OPTIONAL))
+        == "mandatory-check-missing"
+    )
+    assert (
+        error_code(lambda: _build_examples((records[1], records[0]), MANDATORY, OPTIONAL))
+        == "observations-unordered"
+    )
     duplicate_time = BuildRecord(
         records[1].record.build_id,
         records[1].record.outcome,
@@ -618,17 +632,17 @@ def test_time_split_and_class_gates_are_exact():
         "class-imbalance"
     )
     _require_check_classes(examples, "lint", 5)
-    assert error_code(lambda: _require_check_classes(examples, "lint", 6)) == (
-        "class-imbalance"
-    )
+    assert error_code(lambda: _require_check_classes(examples, "lint", 6)) == ("class-imbalance")
     positive_short = examples[:1] + tuple(item for item in examples if not item.build_failed)
     negative_short = examples[1:2] + tuple(item for item in examples if item.build_failed)
-    assert error_code(
-        lambda: _require_binary_classes(positive_short, 2, "positive-short")
-    ) == "class-imbalance"
-    assert error_code(
-        lambda: _require_binary_classes(negative_short, 2, "negative-short")
-    ) == "class-imbalance"
+    assert (
+        error_code(lambda: _require_binary_classes(positive_short, 2, "positive-short"))
+        == "class-imbalance"
+    )
+    assert (
+        error_code(lambda: _require_binary_classes(negative_short, 2, "negative-short"))
+        == "class-imbalance"
+    )
     lint_short = tuple(
         BuildExample(item.started_at_ms, item.features, item.build_failed, OPTIONAL, ())
         for item in examples
@@ -637,12 +651,11 @@ def test_time_split_and_class_gates_are_exact():
         BuildExample(item.started_at_ms, item.features, item.build_failed, OPTIONAL, ("lint",))
         for item in examples
     )
-    assert error_code(lambda: _require_check_classes(lint_short, "lint", 1)) == (
-        "class-imbalance"
+    assert error_code(lambda: _require_check_classes(lint_short, "lint", 1)) == ("class-imbalance")
+    assert (
+        error_code(lambda: _require_check_classes(lint_negative_short, "lint", 1))
+        == "class-imbalance"
     )
-    assert error_code(
-        lambda: _require_check_classes(lint_negative_short, "lint", 1)
-    ) == "class-imbalance"
 
 
 def test_fit_prediction_auc_and_ranking_contract():
@@ -693,8 +706,7 @@ def test_fit_output_numeric_regression_is_deterministic():
     examples = tuple(
         BuildExample(
             index,
-            (float(index % 2),)
-            + tuple(float((index + column) % 3) for column in range(11)),
+            (float(index % 2),) + tuple(float((index + column) % 3) for column in range(11)),
             index % 2,
             OPTIONAL,
             (("lint",) if index % 2 else ("integration",)),
@@ -742,16 +754,12 @@ def test_feature_and_numeric_helpers_reject_invalid_values():
         "features-invalid",
         "build features must be numbers",
     )
-    finite_error = training_error(
-        lambda: _normalized_features((math.inf,) * 12, means, scales)
-    )
+    finite_error = training_error(lambda: _normalized_features((math.inf,) * 12, means, scales))
     assert (finite_error.code, finite_error.detail) == (
         "features-invalid",
         "build features must be finite",
     )
-    assert _normalized_features((3.0,) * 12, (1.0,) * 12, (4.0,) * 12) == (
-        0.5,
-    ) * 12
+    assert _normalized_features((3.0,) * 12, (1.0,) * 12, (4.0,) * 12) == (0.5,) * 12
     for value in (True, 0, 1.5):
         with pytest.raises(ValueError):
             _positive_integer(value, "bound")
@@ -788,20 +796,17 @@ def test_quality_gates_ranking_measurement_and_empty_export(tmp_path):
             item = BuildTrainingRecord(changed, item.executed_checks)
         inverted_holdout.append(item)
     bad_risk = BuildDataset(tuple(inverted_holdout), dataset.history_sha256)
-    assert error_code(
-        lambda: trainer(FakeExporter(), minimum_risk_auc=0.5).train(
-            bad_risk, tmp_path / "auc"
+    assert (
+        error_code(
+            lambda: trainer(FakeExporter(), minimum_risk_auc=0.5).train(bad_risk, tmp_path / "auc")
         )
-    ) == "model-not-useful"
+        == "model-not-useful"
+    )
 
     inverted_ranking = []
     for index, item in enumerate(dataset.records):
         if index >= 80 and item.record.failed_checks:
-            failed = (
-                ("integration",)
-                if item.record.failed_checks == ("lint",)
-                else ("lint",)
-            )
+            failed = ("integration",) if item.record.failed_checks == ("lint",) else ("lint",)
             changed = BuildRecord(
                 item.record.build_id,
                 item.record.outcome,
@@ -813,11 +818,14 @@ def test_quality_gates_ranking_measurement_and_empty_export(tmp_path):
             item = BuildTrainingRecord(changed, item.executed_checks)
         inverted_ranking.append(item)
     bad_ranking = BuildDataset(tuple(inverted_ranking), dataset.history_sha256)
-    assert error_code(
-        lambda: trainer(FakeExporter(), minimum_ranking_mrr=0.75).train(
-            bad_ranking, tmp_path / "mrr"
+    assert (
+        error_code(
+            lambda: trainer(FakeExporter(), minimum_ranking_mrr=0.75).train(
+                bad_ranking, tmp_path / "mrr"
+            )
         )
-    ) == "model-not-useful"
+        == "model-not-useful"
+    )
 
     records = tuple(
         BuildTrainingRecord(
@@ -840,9 +848,10 @@ def test_quality_gates_ranking_measurement_and_empty_export(tmp_path):
             item = BuildTrainingRecord(no_fail, item.executed_checks)
         no_holdout_optional_failure.append(item)
     unranked = BuildDataset(tuple(no_holdout_optional_failure), "a" * 64)
-    assert error_code(
-        lambda: trainer(FakeExporter()).train(unranked, tmp_path / "unranked")
-    ) == "ranking-unmeasured"
+    assert (
+        error_code(lambda: trainer(FakeExporter()).train(unranked, tmp_path / "unranked"))
+        == "ranking-unmeasured"
+    )
 
     empty = trainer(FakeExporter(b""), minimum_risk_auc=0, minimum_ranking_mrr=0)
     assert error_code(lambda: empty.train(dataset, tmp_path / "empty")) == "export-failed"

@@ -367,9 +367,7 @@ def test_invalid_snapshot_does_not_replace_last_successful_churn_state():
 def test_invalid_output_does_not_replace_last_successful_churn_state():
     second = snapshot(link("link-b"), observed_at_ms=20)
     collector = NetworkMetadataCollector(
-        ReplayNetworkMetadataSource(
-            [snapshot(link("link-a")), second, second]
-        ),
+        ReplayNetworkMetadataSource([snapshot(link("link-a")), second, second]),
         permission_view("link-a", "link-b"),
         ("link-a", "link-b"),
     )
@@ -500,9 +498,7 @@ def test_readiness_contains_source_failures_and_redacts_adapter_detail(behavior,
         async def snapshot(self):
             return snapshot()
 
-    collector = NetworkMetadataCollector(
-        Source(), permission_view(), (), clock_ms=lambda: 88
-    )
+    collector = NetworkMetadataCollector(Source(), permission_view(), (), clock_ms=lambda: 88)
     assert asyncio.run(collector.readiness()) == expected
 
 
@@ -751,9 +747,7 @@ def test_arbitrary_network_metadata_never_raises_unexpected_errors(
 )
 def test_arbitrary_allowlist_and_grant_intersections_never_leak(allowed, granted):
     collector = NetworkMetadataCollector(
-        ReplayNetworkMetadataSource(
-            [snapshot(link("link-a"), link("link-b"), link("link-c"))]
-        ),
+        ReplayNetworkMetadataSource([snapshot(link("link-a"), link("link-b"), link("link-c"))]),
         permission_view(*granted),
         tuple(allowed),
     )

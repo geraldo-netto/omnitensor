@@ -67,9 +67,7 @@ def test_health_and_artifact_readiness_are_typed_and_replace_snapshots():
     initial = registry.register("health-plugin")
 
     healthy = registry.set_health("health-plugin", PluginTelemetryHealth.HEALTHY)
-    ready = registry.set_artifact_readiness(
-        "health-plugin", ArtifactReadiness.READY
-    )
+    ready = registry.set_artifact_readiness("health-plugin", ArtifactReadiness.READY)
 
     assert initial.health is PluginTelemetryHealth.INITIALIZING
     assert healthy.health is PluginTelemetryHealth.HEALTHY
@@ -129,9 +127,7 @@ def test_success_lifecycle_tracks_stage_queue_deadline_retry_and_last_success():
     queued = registry.queue_job("pipeline-plugin")
     started = registry.start_job("pipeline-plugin")
     inferred = registry.advance("pipeline-plugin", PipelineStage.INFER)
-    deadline = registry.deadline(
-        "pipeline-plugin", "inference exceeded budget", observed_at_ms=10
-    )
+    deadline = registry.deadline("pipeline-plugin", "inference exceeded budget", observed_at_ms=10)
     retried = registry.retry("pipeline-plugin")
     succeeded = registry.succeed("pipeline-plugin", completed_at_ms=20)
 
@@ -302,9 +298,7 @@ def test_concurrent_queue_updates_do_not_lose_counts():
     registry.register("threaded-plugin")
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        snapshots = list(
-            pool.map(lambda _index: registry.queue_job("threaded-plugin"), range(200))
-        )
+        snapshots = list(pool.map(lambda _index: registry.queue_job("threaded-plugin"), range(200)))
 
     assert len(snapshots) == 200
     assert registry.snapshot("threaded-plugin").queued_jobs == 200

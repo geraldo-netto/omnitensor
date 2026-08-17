@@ -73,9 +73,8 @@ def external_worker_specs(
                 model_choice=str(chosen_models.get(plugin.plugin_id, "")),
             )
         except ValueError as error:
-            if (
-                plugin.plugin_id in per_plugin
-                and str(error).startswith("granted accelerator device is unavailable:")
+            if plugin.plugin_id in per_plugin and str(error).startswith(
+                "granted accelerator device is unavailable:"
             ):
                 # A saved per-profile choice remains saved when the GPU is
                 # unplugged, but no worker may be built on another GPU.

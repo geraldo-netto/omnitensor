@@ -192,9 +192,7 @@ def verify_reference(
     and dispatch still re-reads what it will actually execute.
     """
     _permitted(reference, policy, max_tensor_bytes)
-    _payload, digest = _read_reference(
-        reference, max_tensor_bytes, retain_bytes=False
-    )
+    _payload, digest = _read_reference(reference, max_tensor_bytes, retain_bytes=False)
     if digest != reference.sha256:
         raise TensorReferenceError(
             "input-ref-mismatch", "the file does not match the declared sha256"
@@ -265,9 +263,7 @@ def load_referenced_tensor(
     return _reshape(_unpack(payload, reference), reference.shape)
 
 
-def _permitted(
-    reference: TensorReference, policy: InputRootPolicy, max_tensor_bytes: int
-) -> None:
+def _permitted(reference: TensorReference, policy: InputRootPolicy, max_tensor_bytes: int) -> None:
     """The rules that hold before a single byte is read."""
     if not policy.permits(reference.path):
         # Identical answer whether the path is outside the roots or does not
@@ -325,8 +321,7 @@ def _reshape(flat: list, shape: tuple[int, ...]) -> list:
         return flat
     stride = math.prod(shape[1:])
     return [
-        _reshape(flat[index : index + stride], shape[1:])
-        for index in range(0, len(flat), stride)
+        _reshape(flat[index : index + stride], shape[1:]) for index in range(0, len(flat), stride)
     ]
 
 

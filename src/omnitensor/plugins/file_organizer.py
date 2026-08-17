@@ -94,9 +94,7 @@ class FileOrganizerPlugin(ManagedPlugin):
             suffix: PlainTextAdapter() for suffix in (".txt", ".md")
         }
         media = PyMuPdfAdapter()
-        defaults.update(
-            {suffix: media for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")}
-        )
+        defaults.update({suffix: media for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")})
         for suffix, adapter in (adapters or {}).items():
             if suffix not in defaults or not isinstance(adapter, ExtractionAdapter):
                 raise FileOrganizerError("adapter-invalid", "source adapter mapping is invalid")
@@ -247,9 +245,7 @@ class FileOrganizerPlugin(ManagedPlugin):
         stage: str,
         fraction: float,
     ) -> None:
-        await progress.report(
-            PluginProgress(request.job_id, stage, fraction, "", self._clock_ms())
-        )
+        await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
 
 
 def review_only_plan(
@@ -271,18 +267,17 @@ def review_only_plan(
     suggestions = document["suggestions"]
     assert isinstance(suggestions, Sequence)
     expected_ids = tuple(f"selected-file-{index + 1}" for index in range(len(selected)))
-    if len(suggestions) != len(selected) or tuple(
-        suggestion["fileId"] for suggestion in suggestions
-    ) != expected_ids:
+    if (
+        len(suggestions) != len(selected)
+        or tuple(suggestion["fileId"] for suggestion in suggestions) != expected_ids
+    ):
         raise FileOrganizerError(
             "plan-invalid", "plan must cover every selected file exactly once and in order"
         )
     by_reference = {span.reference: span for span in spans}
     duplicate_groups = _duplicate_groups(selected)
     plan: list[dict] = []
-    for index, (source, suggestion) in enumerate(
-        zip(selected, suggestions, strict=True), start=1
-    ):
+    for index, (source, suggestion) in enumerate(zip(selected, suggestions, strict=True), start=1):
         assert isinstance(suggestion, Mapping)
         file_id = f"selected-file-{index}"
         file_name = Path(source.item.path).name
@@ -423,9 +418,7 @@ def _metadata_fragments(
         )
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         fragments.append(
-            SourceFragment(
-                f"private:{request_id}:metadata:{index}", digest, 1, text, digest
-            )
+            SourceFragment(f"private:{request_id}:metadata:{index}", digest, 1, text, digest)
         )
     return tuple(fragments)
 

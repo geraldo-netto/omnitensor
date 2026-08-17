@@ -88,9 +88,7 @@ def test_an_actionable_reason_is_reported_before_readiness():
     "stage", [PipelineStage.QUEUED, PipelineStage.RESOLVE, PipelineStage.INFER]
 )
 def test_readiness_is_required_by_the_stages_that_need_the_model(stage):
-    decision = gate(artifact_ready=lambda _profile: (False, "no active version")).evaluate(
-        stage
-    )
+    decision = gate(artifact_ready=lambda _profile: (False, "no active version")).evaluate(stage)
     assert decision.refusal is PolicyRefusal.ARTIFACT_NOT_READY
     assert decision.detail == "no active version"
 
@@ -122,9 +120,7 @@ def test_every_required_permission_is_checked_in_stable_order():
         asked.append((profile_id, permission))
         return False
 
-    decision = gate(
-        required_permissions=("z:last", "a:first"), allows_permission=allows
-    ).evaluate()
+    decision = gate(required_permissions=("z:last", "a:first"), allows_permission=allows).evaluate()
 
     assert asked == [(PROFILE, "a:first")], "asked of this profile, not of the catalogue"
     assert "a:first" in decision.detail

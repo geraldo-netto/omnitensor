@@ -8,9 +8,15 @@ import math
 from collections.abc import Sequence
 from pathlib import Path
 
+# The tokenizer and the Vulkan runner are inference, not production: they run
+# on every question a person asks. They used to live in `omnitensor.training`
+# because that is where the model was built, which made this provider — part
+# of the serving path — unable to start on a machine that installed the
+# service without the trainers.
+from omnitensor.document_model_runners import BgeTokenizer, VulkanBgeRunner
+from omnitensor.document_model_types import QUERY_PREFIX
 from omnitensor.plugins.document_qa import EmbeddingProvider
 from omnitensor.plugins.protocol import CancellationToken
-from omnitensor.training.document_model import QUERY_PREFIX, BgeTokenizer, VulkanBgeRunner
 
 QUALIFIED_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 

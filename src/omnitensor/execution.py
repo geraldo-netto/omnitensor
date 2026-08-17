@@ -43,9 +43,7 @@ class ExecutorSet(dict):
             return selected
         executor = self.device_executors.get(gpu_device_id)
         selected["gpu"] = (
-            executor
-            if executor is not None
-            else _UnavailableSelectedGpuExecutor(gpu_device_id)
+            executor if executor is not None else _UnavailableSelectedGpuExecutor(gpu_device_id)
         )
         return selected
 
@@ -53,8 +51,7 @@ class ExecutorSet(dict):
         lanes = {backend: self[backend] for backend in ("tpu", "npu")}
         if self._gpu_ids:
             lanes.update(
-                (device_id, self.device_executors[device_id])
-                for device_id in self._gpu_ids
+                (device_id, self.device_executors[device_id]) for device_id in self._gpu_ids
             )
         else:
             lanes["gpu"] = self["gpu"]
@@ -101,15 +98,17 @@ def _build_executor(backend: str, device_present: bool, device=None):
         return TpuExecutor(device_present)
     if backend == "npu":
         return NpuExecutor(device_present)
-    return CompositeGpuExecutor([
-        # Vulkan first so any Mesa driver serves GPU work; ONNX Runtime with a
-        # CUDA/ROCm provider remains the optional second lane.
-        VulkanGpuExecutor(
-            device_present,
-            requested_device=_vulkan_request(device) if device is not None else None,
-        ),
-        GpuExecutor(device_present),
-    ])
+    return CompositeGpuExecutor(
+        [
+            # Vulkan first so any Mesa driver serves GPU work; ONNX Runtime with a
+            # CUDA/ROCm provider remains the optional second lane.
+            VulkanGpuExecutor(
+                device_present,
+                requested_device=_vulkan_request(device) if device is not None else None,
+            ),
+            GpuExecutor(device_present),
+        ]
+    )
 
 
 def build_executors(
@@ -139,13 +138,9 @@ def build_executors(
         for backend in BACKENDS
     }
     previous_by_id = (
-        previous_executors.device_executors
-        if isinstance(previous_executors, ExecutorSet)
-        else {}
+        previous_executors.device_executors if isinstance(previous_executors, ExecutorSet) else {}
     )
-    previous_devices_by_id = {
-        device.id: device for device in previous_devices or []
-    }
+    previous_devices_by_id = {device.id: device for device in previous_devices or []}
     device_executors = {}
     for device in current_devices:
         if device.backend != "gpu":

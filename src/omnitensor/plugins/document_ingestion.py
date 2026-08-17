@@ -117,13 +117,9 @@ class DocumentIngestor:
                 candidates.append(candidate)
             elif refusal is not None:
                 refused.append(refusal)
-        return DocumentScan(
-            tuple(candidates), tuple(refused), base.rejected, base.truncated
-        )
+        return DocumentScan(tuple(candidates), tuple(refused), base.rejected, base.truncated)
 
-    def _judge(
-        self, item: IngestedFile
-    ) -> tuple[DocumentCandidate | None, RefusedDocument | None]:
+    def _judge(self, item: IngestedFile) -> tuple[DocumentCandidate | None, RefusedDocument | None]:
         try:
             with Path(item.path).open("rb") as stream:
                 header = stream.read(MAX_MAGIC_BYTES)

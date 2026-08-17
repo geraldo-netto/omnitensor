@@ -80,9 +80,7 @@ def load_external_plugin(
         factory = matches[0].load()
         plugin = factory()
     except Exception as error:
-        raise ExternalPluginLoadError(
-            f"entry-point load failed: {type(error).__name__}"
-        ) from error
+        raise ExternalPluginLoadError(f"entry-point load failed: {type(error).__name__}") from error
     # WorkloadPlugin does not declare plugin_id, so isinstance() admits an
     # object without it; reading the attribute directly would surface a raw
     # AttributeError instead of the load error callers handle.
@@ -116,9 +114,7 @@ def serve_worker(
     agreement = negotiate_handshake(service, offer)
     _write_frame(writer, handshake_frame(offer))
     asyncio.run(
-        plugin.start(
-            PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions)
-        )
+        plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
     )
     _write_frame(writer, ready_frame(plugin.plugin_id))
     try:
@@ -459,9 +455,7 @@ def _bootstrap(arguments) -> PluginBootstrap:
     if state_path is not None and (not state_path.is_absolute() or not state_path.is_dir()):
         raise SystemExit("plugin state bootstrap path is invalid")
     lease_path = (
-        Path(arguments.accelerator_lease_path)
-        if arguments.accelerator_lease_path
-        else None
+        Path(arguments.accelerator_lease_path) if arguments.accelerator_lease_path else None
     )
     if lease_path is not None and (not lease_path.is_absolute() or not lease_path.is_file()):
         raise SystemExit("plugin accelerator lease bootstrap path is invalid")

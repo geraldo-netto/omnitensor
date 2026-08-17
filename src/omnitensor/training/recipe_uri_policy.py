@@ -9,9 +9,7 @@ from .recipe_model import ModelRecipeError
 
 _GOOGLE_DRIVE_FILE_ID = re.compile(r"^[A-Za-z0-9_-]{20,100}$")
 _PINNED_REVISION = re.compile(r"^[0-9a-f]{40}$")
-_HUGGING_FACE_CDN = re.compile(
-    r"^(?:(?:[a-z0-9-]+\.)*cdn\.hf\.co|cas-bridge\.xethub\.hf\.co)$"
-)
+_HUGGING_FACE_CDN = re.compile(r"^(?:(?:[a-z0-9-]+\.)*cdn\.hf\.co|cas-bridge\.xethub\.hf\.co)$")
 
 
 def validate_https_uri(uri: str, label: str) -> None:
@@ -81,8 +79,7 @@ def is_pinned_hugging_face_redirect(declared_uri: str, response_uri: str) -> boo
         and not response.fragment
     )
     signed_cdn = (
-        response.hostname is not None
-        and _HUGGING_FACE_CDN.fullmatch(response.hostname) is not None
+        response.hostname is not None and _HUGGING_FACE_CDN.fullmatch(response.hostname) is not None
     )
     exact_cache = (
         response.hostname == "huggingface.co"

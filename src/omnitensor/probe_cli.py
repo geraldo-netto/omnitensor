@@ -71,9 +71,7 @@ def rows(
     """One row per model and card, widest card first."""
     built = []
     for artifact_id, shape in models:
-        estimated = estimate(
-            shape, context_tokens, cache=cache, overhead_bytes=overhead_bytes
-        )
+        estimated = estimate(shape, context_tokens, cache=cache, overhead_bytes=overhead_bytes)
         for device in devices:
             answer = verdict(estimated, device)
             built.append(
@@ -101,8 +99,7 @@ HEADINGS = ("artifact", "card", "weights", "cache", "total", "free", "fits", "he
 
 def table(built: Sequence[Sequence[str]], headings: Sequence[str] = HEADINGS) -> str:
     widths = [
-        max(len(str(row[column])) for row in (headings, *built))
-        for column in range(len(headings))
+        max(len(str(row[column])) for row in (headings, *built)) for column in range(len(headings))
     ]
     lines = [_line(headings, widths), _line(["-" * width for width in widths], widths)]
     lines.extend(_line(row, widths) for row in built)

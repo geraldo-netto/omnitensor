@@ -61,7 +61,10 @@ class FormatAwareExecutor(Protocol):
     """Optional executor capability for routing by a declared model format."""
 
     def run_for_format(
-        self, model_format: str, model_path: str, inputs: list,
+        self,
+        model_format: str,
+        model_path: str,
+        inputs: list,
     ) -> InferenceResult:
         """Execute ``model_path`` using the lane for ``model_format``."""
 
@@ -135,9 +138,7 @@ class ModelCache:
         if type(max_entries) is not int or max_entries < 1:
             raise ValueError("max_entries must be a positive integer")
         self._max_entries = max_entries
-        self._entries: OrderedDict[
-            str, tuple[tuple[tuple[int, int], ...], object]
-        ] = OrderedDict()
+        self._entries: OrderedDict[str, tuple[tuple[tuple[int, int], ...], object]] = OrderedDict()
 
     def get_or_build(
         self,

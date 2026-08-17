@@ -60,15 +60,17 @@ def collector(*snapshots, allowed=(UNIT,), granted=(UNIT,), **changes):
 
 class KernelSource:
     def read(self):
-        return parse_aggregate({
-            "version": 1,
-            "collectedAtMs": 11,
-            "histograms": [
-                {"name": "runq_latency_us", "unit": "us", "buckets": [1, 3]},
-                {"name": "block_latency_us", "unit": "us", "buckets": [2]},
-            ],
-            "counters": [],
-        })
+        return parse_aggregate(
+            {
+                "version": 1,
+                "collectedAtMs": 11,
+                "histograms": [
+                    {"name": "runq_latency_us", "unit": "us", "buckets": [1, 3]},
+                    {"name": "block_latency_us", "unit": "us", "buckets": [2]},
+                ],
+                "counters": [],
+            }
+        )
 
 
 def trigger(plugin_id=RESOURCE_PLUGIN_ID):

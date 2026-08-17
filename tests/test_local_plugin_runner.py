@@ -47,18 +47,14 @@ def runner_fixture(tmp_path, *, pipeline=None, executor_outputs=None, grants=Non
     clock = sdk.FakeClock(100)
     triggers = sdk.FakeTriggerFactory("fixture-plugin", clock)
     trigger = triggers.manual({"input": "sample"})
-    collector = sdk.FakeCollector(
-        {trigger.trigger_id: sdk.CollectedOutput({"value": [1, 2, 3]})}
-    )
+    collector = sdk.FakeCollector({trigger.trigger_id: sdk.CollectedOutput({"value": [1, 2, 3]})})
     artifact = artifact_reference()
     artifact_path = tmp_path / "model.tflite"
     artifact_path.write_bytes(b"fixture-model")
     artifacts = sdk.FakeArtifactProvider(
         [(artifact, sdk.ArtifactResolution(True, artifact_path, "", 13))]
     )
-    executor = sdk.FakeExecutor(
-        executor_outputs or [sdk.InferenceOutput({"score": 0.9})]
-    )
+    executor = sdk.FakeExecutor(executor_outputs or [sdk.InferenceOutput({"score": 0.9})])
     permissions = sdk.FakePermissions(
         frozenset({"read:/fixture"}),
         frozenset({"read:/fixture"}) if grants is None else grants,
@@ -130,9 +126,7 @@ def test_local_runner_executes_complete_pipeline_without_accelerator(tmp_path):
         assert fixture["results"].items == [run.result]
         assert fixture["collector"].calls == [fixture["trigger"]]
         assert fixture["artifacts"].calls == [fixture["artifact"]]
-        assert fixture["executor"].calls == [
-            (fixture["artifact_path"], {"input": [1, 2, 3]})
-        ]
+        assert fixture["executor"].calls == [(fixture["artifact_path"], {"input": [1, 2, 3]})]
 
     asyncio.run(scenario())
 
@@ -224,9 +218,7 @@ def test_runner_validates_deadline_and_boundary_contracts(tmp_path):
 
     async def invalid_deadline():
         with pytest.raises(ValueError, match="deadline_ms must be a positive integer"):
-            await fixture["runner"].run(
-                fixture["trigger"], fixture["artifact"], deadline_ms=0
-            )
+            await fixture["runner"].run(fixture["trigger"], fixture["artifact"], deadline_ms=0)
 
     asyncio.run(invalid_deadline())
 
@@ -299,9 +291,7 @@ def test_fake_artifacts_and_executor_replay_in_order(tmp_path):
     async def scenario():
         artifact = artifact_reference()
         path = tmp_path / "model"
-        provider = sdk.FakeArtifactProvider(
-            [(artifact, sdk.ArtifactResolution(True, path, "", 1))]
-        )
+        provider = sdk.FakeArtifactProvider([(artifact, sdk.ArtifactResolution(True, path, "", 1))])
         assert provider.resolve(artifact).path == path
         missing = sdk.ArtifactReference("missing", "1.0.0", "tflite", "0" * 64)
         assert not provider.resolve(missing).ready
@@ -313,9 +303,7 @@ def test_fake_artifacts_and_executor_replay_in_order(tmp_path):
                 ]
             )
 
-        executor = sdk.FakeExecutor(
-            [sdk.InferenceOutput({"a": 1}), RuntimeError("fixture")]
-        )
+        executor = sdk.FakeExecutor([sdk.InferenceOutput({"a": 1}), RuntimeError("fixture")])
         cancellation = sdk.CancellationController()
         assert await executor.infer(path, {"input": 1}, cancellation) == sdk.InferenceOutput(
             {"a": 1}
@@ -344,9 +332,7 @@ def test_recording_sinks_enforce_type_and_cardinality():
     async def scenario():
         results = sdk.RecordingResultSink(limit=1)
         progress = sdk.RecordingProgressSink(limit=1)
-        result = sdk.PluginResult(
-            "job", sdk.PluginResultStatus.SUCCEEDED, {}, "", 0
-        )
+        result = sdk.PluginResult("job", sdk.PluginResultStatus.SUCCEEDED, {}, "", 0)
         update = sdk.PluginProgress("job", "collect", 0.0, "", 0)
         await results.publish(result)
         await progress.publish(update)

@@ -50,9 +50,7 @@ def collected_document(source: str, items_key: str, truncated_key: str) -> dict:
         ("usb-bluetooth-health-metadata", "devices", "truncatedDevices"),
     ],
 )
-def test_canonical_schema_accepts_every_collector_family(
-    source, items_key, truncated_key
-):
+def test_canonical_schema_accepts_every_collector_family(source, items_key, truncated_key):
     document = collected_document(source, items_key, truncated_key)
 
     assert validate_document(COLLECTED_OUTPUT_SCHEMA, document) == []
@@ -77,9 +75,7 @@ def test_canonical_schema_accepts_every_collector_family(
     ],
 )
 def test_canonical_schema_rejects_wrong_family_and_extension_shapes(mutation):
-    document = collected_document(
-        "network-manager-link-metadata", "links", "truncatedLinks"
-    )
+    document = collected_document("network-manager-link-metadata", "links", "truncatedLinks")
     changed = copy.deepcopy(document)
     mutation(changed)
 

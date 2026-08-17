@@ -93,9 +93,7 @@ def _scores(tensor: object) -> list[float] | None:
     if not isinstance(current, list) or not current:
         return None
     numeric = (int, float)
-    if not all(
-        isinstance(value, numeric) and not isinstance(value, bool) for value in current
-    ):
+    if not all(isinstance(value, numeric) and not isinstance(value, bool) for value in current):
         return None
     return [float(value) for value in current]
 
@@ -125,7 +123,7 @@ def reduce_output(
     if scores is None:
         return None
     ranked = sorted(range(len(scores)), key=lambda index: (-scores[index], index))
-    top = [index for index in ranked[:spec.top_k] if math.isfinite(scores[index])]
+    top = [index for index in ranked[: spec.top_k] if math.isfinite(scores[index])]
     return {
         "kind": spec.kind,
         "top": [_entry(index, scores[index], labels) for index in top],

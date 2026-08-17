@@ -406,13 +406,16 @@ def test_native_load_report_codec_round_trips_and_injects_family_errors():
         "acceleratorLayers": 37,
         "cpuFallback": False,
     }
-    assert parse_native_load_report(
-        document,
-        error_type=KitError,
-        code="load-invalid",
-        object_detail="load must be object",
-        fields_detail="load fields differ",
-    ) == report
+    assert (
+        parse_native_load_report(
+            document,
+            error_type=KitError,
+            code="load-invalid",
+            object_detail="load must be object",
+            fields_detail="load fields differ",
+        )
+        == report
+    )
     with pytest.raises(TypeError, match="report must be NativeLoadReport"):
         native_load_report_document(object())
     with pytest.raises(KitError, match="load must be object"):

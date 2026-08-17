@@ -27,6 +27,8 @@ DEFAULT_MAX_PERIPHERAL_DEVICES = 32
 MAX_PERIPHERAL_DEVICES = 64
 MAX_PERIPHERAL_SOURCE_DEVICES = 256
 MAX_PERIPHERAL_ERROR_COUNT = 2**31 - 1
+
+
 class PeripheralBus(StrEnum):
     USB = "usb"
     BLUETOOTH = "bluetooth"
@@ -169,9 +171,7 @@ class PeripheralMetadataCollector(BoundedCollector[PeripheralSample]):
     def document_of(self, item: PeripheralSample) -> dict[str, object]:
         return _device_document(item)
 
-    def changed_fields(
-        self, previous: PeripheralSample, current: PeripheralSample
-    ) -> list[str]:
+    def changed_fields(self, previous: PeripheralSample, current: PeripheralSample) -> list[str]:
         return _changed_fields(previous, current)
 
     def _snapshot_items(self, snapshot: object) -> Sequence[PeripheralSample]:

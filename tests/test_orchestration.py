@@ -336,9 +336,7 @@ def test_a_job_can_be_cancelled_through_its_runner(tmp_path):
     runner = built.get("visual-library")
 
     async def scenario():
-        task = asyncio.create_task(
-            runner.run("job-1", JobSubmission("job-1", {"inputs": [[1]]}))
-        )
+        task = asyncio.create_task(runner.run("job-1", JobSubmission("job-1", {"inputs": [[1]]})))
         await asyncio.sleep(0)
         cancelled = runner.cancel("job-1", "user asked")
         return cancelled, await task
@@ -518,9 +516,7 @@ def test_resolve_stage_carries_the_selected_model_lane(index):
         encode_result=dict,
     )
 
-    resolved = asyncio.run(
-        stages[PipelineStage.RESOLVE](PreprocessedOutput({}, {}))
-    )
+    resolved = asyncio.run(stages[PipelineStage.RESOLVE](PreprocessedOutput({}, {})))
 
     assert resolved.artifact.id == selected["id"]
     assert resolved.path == Path(f"/models/{selected['id']}")
@@ -568,9 +564,7 @@ def test_preferred_lane_owns_resolution_and_labels_end_to_end(tmp_path):
 
     result = run(built)
 
-    assert result.output["reading"]["top"] == [
-        {"index": 1, "score": 0.9, "label": "npu-high"}
-    ]
+    assert result.output["reading"]["top"] == [{"index": 1, "score": 0.9, "label": "npu-high"}]
     assert resolved == ["npu-model", "npu-model"]
 
 
@@ -767,6 +761,7 @@ def test_the_router_reports_what_it_wraps(tmp_path):
 def test_each_stage_announces_itself_as_it_starts(tmp_path):
     """An update that lands only on completion says nothing about a stuck stage."""
     reported = []
+
     def note(job_id, stage, fraction, detail):
         reported.append((stage, fraction))
 

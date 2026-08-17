@@ -59,9 +59,7 @@ def _env_accelerator_device_ids(
         "tpu": "OMNITENSOR_TPU_DEVICE",
     }
     return {
-        backend: value
-        for backend, name in names.items()
-        if (value := source.get(name, "").strip())
+        backend: value for backend, name in names.items() if (value := source.get(name, "").strip())
     }
 
 

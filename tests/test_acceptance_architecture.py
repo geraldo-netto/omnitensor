@@ -137,7 +137,7 @@ def test_backend_and_executor_private_seams_are_live(monkeypatch):
         "_runtime_verdict",
         lambda module: calls.append(module) or None,
     )
-    assert checks.check_backends((('gpu', 'json', 'unused'),)).ok is True
+    assert checks.check_backends((("gpu", "json", "unused"),)).ok is True
     assert calls == ["json"]
 
     available = SimpleNamespace(available=False, code="runtime-unusable", reason="broken")
@@ -207,7 +207,9 @@ def test_socket_probe_exhaustion_preserves_last_error_and_cancellation_is_not_re
 
 
 def test_cli_builder_seam_preserves_arguments_and_exact_output(
-    monkeypatch, capsys, tmp_path,
+    monkeypatch,
+    capsys,
+    tmp_path,
 ):
     captured = []
     report = facade.InstallationReport((facade.Check("service", True, "active"),))
@@ -227,7 +229,9 @@ def test_cli_builder_seam_preserves_arguments_and_exact_output(
 
 
 def test_cli_preserves_environment_default_help_and_parse_errors(
-    monkeypatch, capsys, tmp_path,
+    monkeypatch,
+    capsys,
+    tmp_path,
 ):
     captured = []
     report = facade.InstallationReport(())

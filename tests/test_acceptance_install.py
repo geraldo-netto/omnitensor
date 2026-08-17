@@ -133,9 +133,7 @@ def test_the_systemd_probe_reads_is_active():
     assert calls == [["systemctl", "--user", "is-active", "omnitensor.service"]]
 
 
-@pytest.mark.parametrize(
-    ("code", "output"), [(3, "inactive\n"), (0, "activating\n"), (1, "")]
-)
+@pytest.mark.parametrize(("code", "output"), [(3, "inactive\n"), (0, "activating\n"), (1, "")])
 def test_the_systemd_probe_reports_anything_but_active_as_down(code, output):
     probe = SystemdUserServiceProbe(runner=lambda _argv: (code, output))
     running, _detail = probe.unit_state()
@@ -479,9 +477,7 @@ def test_a_snapshot_read_a_moment_after_it_was_written_is_not_negative(tmp_path,
     assert "-100 ms" not in check.detail
 
 
-def test_a_snapshot_stamped_in_the_future_fails_rather_than_reading_as_fresh(
-    tmp_path, fake_nodes
-):
+def test_a_snapshot_stamped_in_the_future_fails_rather_than_reading_as_fresh(tmp_path, fake_nodes):
     """A future timestamp would otherwise pass the staleness check forever."""
     path = snapshot_file(tmp_path, fake_nodes, generated_at_ms=2_000_000)
 
@@ -675,14 +671,16 @@ def _helper_applet(root: Path, state_path: str) -> Path:
 
 def _published(snapshot: Path) -> Path:
     snapshot.write_text(
-        json.dumps({
-            "version": 1,
-            "generatedAt": 1_700_000_000_000,
-            "devices": [],
-            "metrics": {"queueDepth": 0, "runningProfiles": 0},
-            "profiles": {},
-            "alerts": [],
-        }),
+        json.dumps(
+            {
+                "version": 1,
+                "generatedAt": 1_700_000_000_000,
+                "devices": [],
+                "metrics": {"queueDepth": 0, "runningProfiles": 0},
+                "profiles": {},
+                "alerts": [],
+            }
+        ),
         encoding="utf-8",
     )
     return snapshot

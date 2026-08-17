@@ -143,9 +143,7 @@ class TestWhichMemoryCounts:
 
 class TestTheVerdict:
     def card(self, free_bytes):
-        return DeviceMemory(
-            "gpu-renderD128", free_bytes, 0, memory_vendor="samsung"
-        )
+        return DeviceMemory("gpu-renderD128", free_bytes, 0, memory_vendor="samsung")
 
     def test_the_model_this_desk_runs_fits_the_card_it_runs_on(self):
         answer = verdict(estimate(shape(), 32_768), self.card(8 * GIB))
@@ -254,10 +252,12 @@ class TestReadingAModelsOwnHeader:
     def test_a_file_that_states_its_own_widths_is_believed(self, tmp_path):
         read = self.written(
             tmp_path,
-            self.qwen(**{
-                "qwen3.attention.key_length": (4, 192),
-                "qwen3.attention.value_length": (4, 64),
-            }),
+            self.qwen(
+                **{
+                    "qwen3.attention.key_length": (4, 192),
+                    "qwen3.attention.value_length": (4, 64),
+                }
+            ),
         )
 
         assert (read.key_length, read.value_length) == (192, 64)
@@ -296,9 +296,7 @@ class TestReadingAModelsOwnHeader:
 
     def test_a_length_that_claims_more_than_the_file_holds_is_refused(self, tmp_path):
         path = tmp_path / "hostile.gguf"
-        path.write_bytes(
-            gguf.MAGIC + struct.pack("<IQQ", 3, 0, 1) + struct.pack("<Q", 2**40)
-        )
+        path.write_bytes(gguf.MAGIC + struct.pack("<IQQ", 3, 0, 1) + struct.pack("<Q", 2**40))
 
         with pytest.raises(GgufError):
             gguf.read_shape(path)
@@ -321,9 +319,7 @@ class TestTheTable:
         )
 
     def test_one_row_per_model_and_card(self):
-        built = probe_cli.rows(
-            self.models(), self.cards(), context_tokens=32_768, cache="q8_0"
-        )
+        built = probe_cli.rows(self.models(), self.cards(), context_tokens=32_768, cache="q8_0")
 
         assert len(built) == 2
         assert [row[1] for row in built] == ["gpu-renderD128", "gpu-renderD129"]
@@ -331,9 +327,7 @@ class TestTheTable:
     def test_the_row_says_where_the_memory_went(self):
         """Weights and cache separately: "it does not fit" teaches nothing,
         "the cache is 2.39 GiB of it" teaches what to change."""
-        built = probe_cli.rows(
-            self.models(), self.cards()[:1], context_tokens=32_768, cache="q8_0"
-        )
+        built = probe_cli.rows(self.models(), self.cards()[:1], context_tokens=32_768, cache="q8_0")
 
         assert built[0][2] == "4.68 GiB"
         assert built[0][3] == "2.39 GiB"
@@ -341,9 +335,7 @@ class TestTheTable:
 
     def test_a_mapped_pool_is_labelled_as_mapped(self):
         """So nobody reads 45 GiB on an integrated GPU as 45 GiB of GDDR6."""
-        built = probe_cli.rows(
-            self.models(), self.cards()[1:], context_tokens=32_768, cache="q8_0"
-        )
+        built = probe_cli.rows(self.models(), self.cards()[1:], context_tokens=32_768, cache="q8_0")
 
         assert "(mapped)" in built[0][5]
 
@@ -375,16 +367,10 @@ class TestTheTable:
 
         assert probe_cli.artifacts(tmp_path) == ()
 
-    def test_the_artifact_id_is_the_directory_the_service_installed_it_as(
-        self, tmp_path
-    ):
+    def test_the_artifact_id_is_the_directory_the_service_installed_it_as(self, tmp_path):
         """Because that is the id a receipt, a manifest and a policy all use."""
         model = tmp_path / "qwen3-8b-q4-k-m/model.gguf"
         model.parent.mkdir(parents=True)
-        model.write_bytes(
-            TestReadingAModelsOwnHeader().build(TestReadingAModelsOwnHeader().qwen())
-        )
+        model.write_bytes(TestReadingAModelsOwnHeader().build(TestReadingAModelsOwnHeader().qwen()))
 
-        assert [name for name, _shape in probe_cli.artifacts(tmp_path)] == [
-            "qwen3-8b-q4-k-m"
-        ]
+        assert [name for name, _shape in probe_cli.artifacts(tmp_path)] == ["qwen3-8b-q4-k-m"]

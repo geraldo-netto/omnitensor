@@ -84,9 +84,17 @@ def test_a_document_carrying_text_cannot_even_be_indexed(tmp_path):
     from omnitensor.plugins.index import IndexStoreError
 
     with pytest.raises(IndexStoreError, match="must not carry document text"):
-        index(tmp_path, [document_entry(ingested("a.pdf", "a" * 64), (1.0, 0, 0, 0), (), {
-            "snippet": "Account 1234 balance 900"
-        })])
+        index(
+            tmp_path,
+            [
+                document_entry(
+                    ingested("a.pdf", "a" * 64),
+                    (1.0, 0, 0, 0),
+                    (),
+                    {"snippet": "Account 1234 balance 900"},
+                )
+            ],
+        )
 
 
 def test_documents_can_be_listed_by_classification(tmp_path):

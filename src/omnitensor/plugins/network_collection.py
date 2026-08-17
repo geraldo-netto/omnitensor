@@ -128,9 +128,7 @@ class NetworkMetadataCollector(BoundedCollector[NetworkLinkSample]):
     def document_of(self, item: NetworkLinkSample) -> dict[str, object]:
         return _link_document(item)
 
-    def changed_fields(
-        self, previous: NetworkLinkSample, current: NetworkLinkSample
-    ) -> list[str]:
+    def changed_fields(self, previous: NetworkLinkSample, current: NetworkLinkSample) -> list[str]:
         fields = (
             ("kind", previous.kind, current.kind),
             ("state", previous.state, current.state),

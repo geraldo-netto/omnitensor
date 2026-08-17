@@ -50,7 +50,7 @@ class _ClipRunner:
     def embed_image(self, image_ref):
         index = int(image_ref.rsplit("-", 1)[1])
         if index == 0:
-            a, b = ((0.999, 1.001) if self._drift else (1.001, 0.999))
+            a, b = (0.999, 1.001) if self._drift else (1.001, 0.999)
             return (a, b) + (0.0,) * (CLIP_EMBEDDING_WIDTH - 2)
         return _basis(index % 2)
 
@@ -329,9 +329,7 @@ def test_produce_clip_source_emits_private_safe_report(tmp_path, monkeypatch):
     report = json.loads(produced.report_path.read_text())
     assert produced.evidence.accepted
     assert produced.model_path.read_bytes() == b"portable-clip"
-    assert produced.report_path.read_bytes() == json.dumps(
-        report, separators=(",", ":")
-    ).encode()
+    assert produced.report_path.read_bytes() == json.dumps(report, separators=(",", ":")).encode()
     assert tuple(report) == (
         "reportVersion",
         "kind",
@@ -366,10 +364,7 @@ def test_produce_clip_source_emits_private_safe_report(tmp_path, monkeypatch):
         "accepted",
     )
     assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
-    assert all(
-        tuple(claim) == ("status", "reason")
-        for claim in report["nativeTargets"].values()
-    )
+    assert all(tuple(claim) == ("status", "reason") for claim in report["nativeTargets"].values())
     assert open_calls == [("recipe", "source")]
     assert source_calls == [fetched]
     assert portable_calls == [produced.model_path]

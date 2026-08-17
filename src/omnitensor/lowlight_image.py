@@ -203,12 +203,16 @@ def _rgb_nchw(image) -> list:
     resized = image.resize((MODEL_IMAGE_SIZE, MODEL_IMAGE_SIZE), Image.Resampling.BICUBIC)
     array = numpy.asarray(resized, dtype=numpy.float32) / numpy.float32(255.0)
     tensor = numpy.transpose(array, (2, 0, 1))[None, ...]
-    if tensor.shape != (
-        1,
-        3,
-        MODEL_IMAGE_SIZE,
-        MODEL_IMAGE_SIZE,
-    ) or not numpy.isfinite(tensor).all():
+    if (
+        tensor.shape
+        != (
+            1,
+            3,
+            MODEL_IMAGE_SIZE,
+            MODEL_IMAGE_SIZE,
+        )
+        or not numpy.isfinite(tensor).all()
+    ):
         raise LowLightWorkspaceError("input-invalid", "normalized image tensor is invalid")
     minimum = float(tensor.min())
     maximum = float(tensor.max())

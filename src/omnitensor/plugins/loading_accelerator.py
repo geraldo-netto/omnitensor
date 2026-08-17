@@ -6,9 +6,7 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-ACCELERATOR_PERMISSIONS = frozenset(
-    {"accelerator:gpu", "accelerator:npu", "accelerator:tpu"}
-)
+ACCELERATOR_PERMISSIONS = frozenset({"accelerator:gpu", "accelerator:npu", "accelerator:tpu"})
 VULKAN_METADATA_ROOTS = (
     Path("/usr/share/vulkan"),
     Path("/etc/vulkan"),
@@ -45,9 +43,7 @@ def accelerator_paths(
         accelerator = permission.partition(":")[2]
         path = devices.get(accelerator)
         if path is None or not path.exists():
-            raise ValueError(
-                f"granted accelerator device is unavailable: {accelerator}"
-            )
+            raise ValueError(f"granted accelerator device is unavailable: {accelerator}")
         paths.append(path)
     return tuple(paths)
 

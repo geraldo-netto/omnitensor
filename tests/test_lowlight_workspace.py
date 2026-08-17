@@ -40,9 +40,7 @@ def _workspace(tmp_path: Path) -> tuple[LowLightWorkspace, Path]:
 
 
 def test_lowlight_facade_preserves_the_extracted_settings_contract():
-    assert lowlight.LOW_LIGHT_CONFIGURATION_SPEC is (
-        lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC
-    )
+    assert lowlight.LOW_LIGHT_CONFIGURATION_SPEC is (lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC)
     assert lowlight.LOW_LIGHT_CONFIGURATION_VERSION == (
         lowlight_settings.LOW_LIGHT_CONFIGURATION_VERSION
     )
@@ -59,9 +57,7 @@ def test_lowlight_facade_preserves_the_extracted_settings_contract():
 def test_settings_specification_is_owned_by_the_extracted_module():
     migration = lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.migrations[0]
 
-    assert lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.plugin_id == (
-        "low-light-enhancement"
-    )
+    assert lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.plugin_id == ("low-light-enhancement")
     assert lowlight_settings.LOW_LIGHT_CONFIGURATION_SPEC.plugin_version == "0.2.0"
     assert migration.source_version == "0.1.0"
     assert migration.target_version == "0.2.0"
@@ -91,9 +87,10 @@ def test_configuration_spec_uses_the_canonical_schema_without_semantic_drift(tmp
         "inputFolder": None,
         "outputFolder": None,
     }
-    assert PluginSettingsStore(tmp_path).load(
-        LOW_LIGHT_CONFIGURATION_SPEC
-    ).configuration == LOW_LIGHT_CONFIGURATION_SPEC.defaults
+    assert (
+        PluginSettingsStore(tmp_path).load(LOW_LIGHT_CONFIGURATION_SPEC).configuration
+        == LOW_LIGHT_CONFIGURATION_SPEC.defaults
+    )
 
 
 @pytest.mark.parametrize(
@@ -434,9 +431,7 @@ def test_output_size_and_name_limits_are_inclusive(tmp_path):
     assert published.read_bytes() == b"exact"
 
 
-def test_staging_and_link_options_keep_atomic_publish_inside_output_root(
-    tmp_path, monkeypatch
-):
+def test_staging_and_link_options_keep_atomic_publish_inside_output_root(tmp_path, monkeypatch):
     workspace, source = _workspace(tmp_path)
     real_write = lowlight._write_bytes_atomic
     calls = []
@@ -496,9 +491,7 @@ def test_publish_failure_cleans_only_its_stage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         lowlight,
         "_write_bytes_atomic",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            OSError("filesystem refused link")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("filesystem refused link")),
     )
 
     with pytest.raises(LowLightWorkspaceError) as excinfo:
@@ -538,16 +531,19 @@ def test_cli_configuration_integrates_with_store_and_publisher(tmp_path, capsys)
     image = source / "night.png"
     image.write_bytes(b"original")
 
-    assert configure_main(
-        [
-            "--input-folder",
-            str(source),
-            "--output-folder",
-            str(output),
-            "--settings-root",
-            str(settings),
-        ]
-    ) == 0
+    assert (
+        configure_main(
+            [
+                "--input-folder",
+                str(source),
+                "--output-folder",
+                str(output),
+                "--settings-root",
+                str(settings),
+            ]
+        )
+        == 0
+    )
     expected_response = {
         "workloadId": "low-light-enhancement",
         "revision": 1,
@@ -562,28 +558,34 @@ def test_cli_configuration_integrates_with_store_and_publisher(tmp_path, capsys)
     assert response == expected_response
     configured = load_low_light_workspace(PluginSettingsStore(settings))
     assert configured is not None
-    assert publish_low_light_output(
-        configured.workspace,
-        image,
-        b"enhanced",
-        output_name="night-enhanced.png",
-    ).read_bytes() == b"enhanced"
+    assert (
+        publish_low_light_output(
+            configured.workspace,
+            image,
+            b"enhanced",
+            output_name="night-enhanced.png",
+        ).read_bytes()
+        == b"enhanced"
+    )
     assert image.read_bytes() == b"original"
 
 
 def test_cli_reports_configuration_refusal_without_traceback(tmp_path, capsys):
     folder = tmp_path / "same"
     folder.mkdir()
-    assert configure_main(
-        [
-            "--input-folder",
-            str(folder),
-            "--output-folder",
-            str(folder),
-            "--settings-root",
-            str(tmp_path / "settings"),
-        ]
-    ) == 1
+    assert (
+        configure_main(
+            [
+                "--input-folder",
+                str(folder),
+                "--output-folder",
+                str(folder),
+                "--settings-root",
+                str(tmp_path / "settings"),
+            ]
+        )
+        == 1
+    )
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("low-light configuration failed: folders-overlap:")
@@ -629,9 +631,7 @@ def test_cli_uses_the_documented_default_settings_root(tmp_path, monkeypatch, ca
         str(settings),
     )
 
-    assert configure_main(
-        ["--input-folder", str(source), "--output-folder", str(output)]
-    ) == 0
+    assert configure_main(["--input-folder", str(source), "--output-folder", str(output)]) == 0
     capsys.readouterr()
     assert load_low_light_workspace(PluginSettingsStore(settings)) is not None
 
@@ -666,8 +666,7 @@ def test_manifest_and_guide_freeze_non_destructive_folder_contract():
     )
     responsibilities = manifest["pipeline"]["hostResponsibilities"]
     assert any(
-        "configured input folder" in item and "originals" in item
-        for item in responsibilities
+        "configured input folder" in item and "originals" in item for item in responsibilities
     )
     assert any("disjoint configured output folder" in item for item in responsibilities)
     guide = " ".join((root / "docs/use-cases.md").read_text(encoding="utf-8").split())

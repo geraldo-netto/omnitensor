@@ -110,9 +110,7 @@ def test_forecast_evaluation_refuses_ambiguous_or_nonfinite_rows(
     prediction_offset=st.floats(
         min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False
     ),
-    baseline_offset=st.floats(
-        min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False
-    ),
+    baseline_offset=st.floats(min_value=-1e3, max_value=1e3, allow_nan=False, allow_infinity=False),
 )
 def test_forecast_evaluation_preserves_mean_absolute_error(
     targets, prediction_offset, baseline_offset
@@ -131,10 +129,7 @@ def test_forecast_evaluation_preserves_mean_absolute_error(
         / len(targets)
     )
     assert quality.baseline_error == pytest.approx(
-        sum(
-            abs(baseline - target)
-            for baseline, target in zip(baselines, targets, strict=True)
-        )
+        sum(abs(baseline - target) for baseline, target in zip(baselines, targets, strict=True))
         / len(targets)
     )
 
@@ -210,8 +205,13 @@ def test_the_fit_parameters_are_validated(changes):
     inputs, targets = ramp()
     options = {"feature_names": ("cpu",), "window": 3, **changes}
     with pytest.raises(ForecastError):
-        fit_forecaster(inputs, targets, options["feature_names"], options["window"],
-                       **{k: v for k, v in changes.items() if k in ("ridge", "holdout")})
+        fit_forecaster(
+            inputs,
+            targets,
+            options["feature_names"],
+            options["window"],
+            **{k: v for k, v in changes.items() if k in ("ridge", "holdout")},
+        )
 
 
 @pytest.mark.parametrize("ridge", [float("nan"), float("inf"), 10**1000])

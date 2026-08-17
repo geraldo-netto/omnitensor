@@ -133,8 +133,7 @@ def test_pipeline_rejects_a_wrong_output_without_changing_state(
 
     assert excinfo.value.code == "stage-output-mismatch"
     assert str(excinfo.value) == (
-        f"stage-output-mismatch: {stage} requires {required}; "
-        f"received {type(wrong).__name__}"
+        f"stage-output-mismatch: {stage} requires {required}; received {type(wrong).__name__}"
     )
     assert machine.snapshot == before
 

@@ -212,8 +212,7 @@ class GrantLedger:
     ) -> frozenset[str]:
         """Return only active declarations for sandbox construction."""
         return frozenset(
-            grant.permission
-            for grant in self.snapshot(plugin_id, declared_permissions).active
+            grant.permission for grant in self.snapshot(plugin_id, declared_permissions).active
         )
 
     @contextlib.contextmanager
@@ -225,10 +224,13 @@ class GrantLedger:
         another process persisted in the meantime, resurrecting a permission
         the user has already withdrawn.
         """
-        with self._state_lock, store_lock(
-            self._path.parent,
-            f".{self._path.name}.lock",
-            timeout_seconds=timeout_seconds,
+        with (
+            self._state_lock,
+            store_lock(
+                self._path.parent,
+                f".{self._path.name}.lock",
+                timeout_seconds=timeout_seconds,
+            ),
         ):
             self._revision = 0
             self._grants = {}

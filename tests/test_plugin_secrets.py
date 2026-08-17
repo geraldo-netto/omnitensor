@@ -74,11 +74,13 @@ class MappingProvider:
         self.calls.append(secret_reference)
         if self.error is not None:
             raise self.error
-        return self.values[(
-            secret_reference.provider,
-            secret_reference.key,
-            secret_reference.version,
-        )]
+        return self.values[
+            (
+                secret_reference.provider,
+                secret_reference.key,
+                secret_reference.version,
+            )
+        ]
 
 
 def test_secret_paths_are_explicit_nested_and_stable():
@@ -237,9 +239,7 @@ def test_redactor_removes_arbitrary_registered_material(number, text):
 
 
 def test_resolution_uses_injected_provider_and_context_close_scrubs_configuration():
-    provider = MappingProvider(
-        {("secret-service", "plugins/echo/token", "v1"): "top-secret-token"}
-    )
+    provider = MappingProvider({("secret-service", "plugins/echo/token", "v1"): "top-secret-token"})
 
     resolved = resolve_configuration(
         SECRET_SCHEMA,
@@ -247,9 +247,7 @@ def test_resolution_uses_injected_provider_and_context_close_scrubs_configuratio
         provider,
     )
 
-    assert provider.calls == [
-        SecretReference("secret-service", "plugins/echo/token", "v1")
-    ]
+    assert provider.calls == [SecretReference("secret-service", "plugins/echo/token", "v1")]
     assert resolved.configuration == {
         "endpoint": "local",
         "credentials": {"token": "top-secret-token"},
@@ -280,16 +278,16 @@ def test_bytes_secret_is_decoded_and_duplicate_values_redact_longest_first():
         "short": SecretReference("keyring", "short").document(),
         "long": SecretReference("keyring", "long").document(),
     }
-    provider = MappingProvider({
-        ("keyring", "short", None): b"secret",
-        ("keyring", "long", None): b"secret-value",
-    })
+    provider = MappingProvider(
+        {
+            ("keyring", "short", None): b"secret",
+            ("keyring", "long", None): b"secret-value",
+        }
+    )
 
     resolved = resolve_configuration(schema, configuration, provider)
 
-    assert resolved.redactor.redact_text("secret-value secret") == (
-        "[REDACTED] [REDACTED]"
-    )
+    assert resolved.redactor.redact_text("secret-value secret") == ("[REDACTED] [REDACTED]")
 
 
 @pytest.mark.parametrize(
@@ -316,16 +314,14 @@ def test_bytes_secret_is_decoded_and_duplicate_values_redact_longest_first():
             "secret value is empty or exceeds the byte limit",
         ),
         (
-            MappingProvider({
-                ("secret-service", "plugins/echo/token", "v1"): "x" * (MAX_SECRET_VALUE_BYTES + 1)
-            }),
+            MappingProvider(
+                {("secret-service", "plugins/echo/token", "v1"): "x" * (MAX_SECRET_VALUE_BYTES + 1)}
+            ),
             "secret-invalid",
             "secret value is empty or exceeds the byte limit",
         ),
         (
-            MappingProvider({
-                ("secret-service", "plugins/echo/token", "v1"): "short"
-            }),
+            MappingProvider({("secret-service", "plugins/echo/token", "v1"): "short"}),
             "resolved-configuration-invalid",
             "resolved configuration does not match schema at $.credentials.token",
         ),
@@ -343,14 +339,16 @@ def test_resolution_failures_are_stable_and_never_echo_material(provider, code, 
 def test_redactor_handles_logs_snapshots_results_exceptions_and_unknown_objects():
     redactor = SecretRedactor(["secret-token", b"binary-secret", "secret-token"])
     error = RuntimeError("request used secret-token")
-    public = redactor.redact({
-        "log": "bearer secret-token",
-        "snapshot": [b"binary-secret", {"result": "secret-token suffix"}],
-        "tuple": ("safe", "secret-token"),
-        "error": error,
-        "count": 2,
-        "unknown": object(),
-    })
+    public = redactor.redact(
+        {
+            "log": "bearer secret-token",
+            "snapshot": [b"binary-secret", {"result": "secret-token suffix"}],
+            "tuple": ("safe", "secret-token"),
+            "error": error,
+            "count": 2,
+            "unknown": object(),
+        }
+    )
 
     assert public == {
         "log": "bearer [REDACTED]",
@@ -390,27 +388,21 @@ def test_settings_store_persists_only_references_and_resolves_ephemerally(tmp_pa
     store = PluginSettingsStore(tmp_path)
     configuration = persisted_configuration()
 
-    saved = store.update(
-        plugin_spec(), expected_revision=0, configuration=configuration
-    )
+    saved = store.update(plugin_spec(), expected_revision=0, configuration=configuration)
 
     path = tmp_path / "secret-plugin.json"
     persisted = path.read_text()
     assert "top-secret-token" not in persisted
     assert json.loads(persisted)["configuration"] == configuration
     assert store.load(plugin_spec()) == saved
-    provider = MappingProvider(
-        {("secret-service", "plugins/echo/token", "v1"): "top-secret-token"}
-    )
+    provider = MappingProvider({("secret-service", "plugins/echo/token", "v1"): "top-secret-token"})
     resolved = resolve_configuration(SECRET_SCHEMA, saved.configuration, provider)
     assert resolved.configuration["credentials"]["token"] == "top-secret-token"
 
 
 def test_settings_reject_raw_secret_before_write_and_preserve_prior_revision(tmp_path):
     store = PluginSettingsStore(tmp_path)
-    store.update(
-        plugin_spec(), expected_revision=0, configuration=persisted_configuration()
-    )
+    store.update(plugin_spec(), expected_revision=0, configuration=persisted_configuration())
     path = tmp_path / "secret-plugin.json"
     before = path.read_bytes()
     raw = persisted_configuration()
@@ -429,15 +421,11 @@ def test_settings_reject_raw_secret_before_write_and_preserve_prior_revision(tmp
     [
         {
             "type": "object",
-            "properties": {
-                "token": {"type": "number", SECRET_SCHEMA_MARKER: True}
-            },
+            "properties": {"token": {"type": "number", SECRET_SCHEMA_MARKER: True}},
         },
         {
             "type": "object",
-            "properties": {
-                "token": {"type": "string", SECRET_SCHEMA_MARKER: "true"}
-            },
+            "properties": {"token": {"type": "string", SECRET_SCHEMA_MARKER: "true"}},
         },
     ],
 )

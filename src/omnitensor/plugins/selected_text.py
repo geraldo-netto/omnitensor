@@ -205,9 +205,7 @@ class SelectedTextPlugin(ManagedPlugin):
         if operation == "translate":
             language = _validated_language(language)
         elif language is not None:
-            raise SelectedTextError(
-                "language-invalid", "language is accepted only for translation"
-            )
+            raise SelectedTextError("language-invalid", "language is accepted only for translation")
         return selection, str(operation), language
 
     def _route(self, operation: str, language: str | None) -> GenerationRouter:
@@ -236,9 +234,7 @@ def _validated_translation_routes(
     if value is None:
         return {}
     if not isinstance(value, Mapping):
-        raise SelectedTextError(
-            "provider-invalid", "translation routes must be a language mapping"
-        )
+        raise SelectedTextError("provider-invalid", "translation routes must be a language mapping")
     routes: dict[str, GenerationRouter] = {}
     for language, router in value.items():
         try:
@@ -273,9 +269,7 @@ def grounded_selected_text_result(
     if document["requestId"] != request_id or document["operation"] != operation:
         raise SelectedTextError("result-invalid", "result identity does not match request")
     if operation != "extract-tasks" and document["tasks"]:
-        raise SelectedTextError(
-            "result-invalid", "tasks are accepted only for task extraction"
-        )
+        raise SelectedTextError("result-invalid", "tasks are accepted only for task extraction")
     if (
         evidence["sourceRef"] != source.reference
         or evidence["sourceSha256"] != source.source_sha256

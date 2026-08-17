@@ -88,9 +88,7 @@ class ConsentGuard:
             or not isinstance(poll_seconds, (int, float))
             or not 0 < poll_seconds <= MAX_REVOCATION_POLL_SECONDS
         ):
-            raise ValueError(
-                f"poll_seconds must be a number in (0, {MAX_REVOCATION_POLL_SECONDS}]"
-            )
+            raise ValueError(f"poll_seconds must be a number in (0, {MAX_REVOCATION_POLL_SECONDS}]")
         self._view = view
         self._poll_seconds = poll_seconds
 

@@ -60,8 +60,9 @@ json_values = st.recursive(
     | st.integers(min_value=-(10**9), max_value=10**9)
     | st.floats(allow_nan=False, allow_infinity=False)
     | st.text(max_size=40),
-    lambda children: st.lists(children, max_size=4)
-    | st.dictionaries(st.text(max_size=8), children, max_size=4),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=8), children, max_size=4)
+    ),
     max_leaves=25,
 )
 
@@ -78,10 +79,11 @@ def test_worker_restart_attempts_decay_only_after_the_stable_window(attempts, up
 
 @given(count=st.integers(min_value=0, max_value=MAX_INPUTS + 2))
 def test_declared_tensor_inputs_are_whole_or_refused(count):
-    model = {"tensorContract": {"inputs": [
-        {"shape": [1, index + 1], "dtype": "float32"}
-        for index in range(count)
-    ]}}
+    model = {
+        "tensorContract": {
+            "inputs": [{"shape": [1, index + 1], "dtype": "float32"} for index in range(count)]
+        }
+    }
     if count == 0:
         assert declared_inputs(model) is None
     elif count <= MAX_INPUTS:
@@ -106,6 +108,7 @@ def test_output_top_k_is_reduced_whole_or_refused(top_k):
             declared_output(model)
         with pytest.raises(ValueError):
             reduce_output(OutputSpec("classification", top_k), [scores])
+
 
 command_like = st.dictionaries(
     st.sampled_from(
@@ -259,9 +262,7 @@ def test_job_boundaries_never_raise_and_always_return_versioned_contracts(text):
 
     for reply in asyncio.run(scenario()):
         acknowledgement = json.loads(reply)
-        assert validate_document(
-            "runtime-job-acknowledgement.schema.json", acknowledgement
-        ) == []
+        assert validate_document("runtime-job-acknowledgement.schema.json", acknowledgement) == []
 
 
 @given(document=json_values)
@@ -270,7 +271,8 @@ def test_policy_load_never_raises_on_arbitrary_json_documents(document):
         path = Path(root) / "policy.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         state = PolicyStore(
-            path, {"sample-workload": ProfilePolicy(enabled=True, weight=2)},
+            path,
+            {"sample-workload": ProfilePolicy(enabled=True, weight=2)},
         ).load()
     assert isinstance(state.paused, bool)
     assert isinstance(state.revision, int) and not isinstance(state.revision, bool)
@@ -306,9 +308,7 @@ profile_plan = st.dictionaries(
 
 @given(plan=profile_plan, data=st.data())
 def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
-    submissions = [
-        profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)
-    ]
+    submissions = [profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)]
     order = data.draw(st.permutations(submissions))
     queue = _BackendQueue()
     for index, profile_id in enumerate(order):
@@ -348,7 +348,11 @@ def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
     b_jobs=st.integers(min_value=1, max_value=15),
 )
 def test_stride_late_joiner_gets_no_catchup_burst(
-    weight_a, weight_b, pre_served, a_jobs, b_jobs,
+    weight_a,
+    weight_b,
+    pre_served,
+    a_jobs,
+    b_jobs,
 ):
     weights = {"a": weight_a, "b": weight_b}
     queue = _BackendQueue()
@@ -379,9 +383,7 @@ def test_stride_scheduling_serves_only_admitted_profiles_and_holds_the_rest(plan
         st.sets(st.sampled_from(sorted(plan)), min_size=0, max_size=len(plan)),
     )
     queue = _BackendQueue()
-    submissions = [
-        profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)
-    ]
+    submissions = [profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)]
     for index, profile_id in enumerate(data.draw(st.permutations(submissions))):
         queue.push(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
 
@@ -484,9 +486,13 @@ def test_executor_reconciliation_reuses_exactly_unchanged_device_states(states):
     previous_devices = None
     previous_executors = None
     for device_id in states:
-        devices = [] if device_id is None else [
-            Device(id=device_id, backend="tpu", name=device_id, kind="pcie"),
-        ]
+        devices = (
+            []
+            if device_id is None
+            else [
+                Device(id=device_id, backend="tpu", name=device_id, kind="pcie"),
+            ]
+        )
         executors = build_executors(
             devices,
             previous_devices=previous_devices,
@@ -507,7 +513,9 @@ def test_executor_reconciliation_reuses_exactly_unchanged_device_states(states):
     requested=st.sampled_from(["ncnn", "onnx", "openvino"]),
 )
 def test_composite_gpu_availability_matches_requested_runtime_lane(
-    ncnn_available, onnx_available, requested,
+    ncnn_available,
+    onnx_available,
+    requested,
 ):
     ncnn = FormatLane("ncnn", ncnn_available)
     onnx = FormatLane("onnx", onnx_available)
@@ -571,7 +579,11 @@ def test_build_snapshot_is_schema_valid_or_value_error(devices, metrics, profile
     busy=st.binary(max_size=64),
 )
 def test_discovery_never_raises_on_arbitrary_file_contents(
-    id_vendor, id_product, npu_vendor, gpu_vendor, busy,
+    id_vendor,
+    id_product,
+    npu_vendor,
+    gpu_vendor,
+    busy,
 ):
     with tempfile.TemporaryDirectory() as root:
         paths = DiscoveryPaths(dev=Path(root) / "dev", sys=Path(root) / "sys")

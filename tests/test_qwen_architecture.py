@@ -147,9 +147,7 @@ def test_facade_keeps_exact_exports_and_live_compatibility_aliases():
 
 
 def test_facade_validator_and_policy_monkeypatches_dispatch_at_call_time(monkeypatch):
-    gpu_report = acceptance_kit.NativeLoadReport(
-        "llama.cpp-vulkan", "Vulkan", 1, 1, False
-    )
+    gpu_report = acceptance_kit.NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False)
     npu_report = acceptance_kit.NativeLoadReport("openvino-genai", "NPU", 1, 1, False)
     calls = []
 
@@ -230,13 +228,14 @@ def test_qwen_leaves_are_independent_of_the_legacy_facade():
         assert "qwen" not in imports
         assert "omnitensor.plugins.qwen" not in imports
 
-    facade_tree = ast.parse(
-        (ROOT / "src/omnitensor/plugins/qwen.py").read_text(encoding="utf-8")
-    )
+    facade_tree = ast.parse((ROOT / "src/omnitensor/plugins/qwen.py").read_text(encoding="utf-8"))
     assert not any(isinstance(node, ast.ClassDef) for node in facade_tree.body)
-    assert {
-        node.name for node in facade_tree.body if isinstance(node, ast.FunctionDef)
-    } == {"load_qwen_catalog", "load_event_corpus", "_catalog_path", "_corpus_path"}
+    assert {node.name for node in facade_tree.body if isinstance(node, ast.FunctionDef)} == {
+        "load_qwen_catalog",
+        "load_event_corpus",
+        "_catalog_path",
+        "_corpus_path",
+    }
 
 
 def test_qwen_leaves_import_before_the_facade_in_a_fresh_interpreter():

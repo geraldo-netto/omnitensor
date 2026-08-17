@@ -9,13 +9,17 @@ from pathlib import Path
 import pytest
 
 import omnitensor.training.document_model as facade
+
+# The tokenizer, the Vulkan runner and their types serve questions rather than
+# produce models, so they live in the service package; only the producers that
+# use them stayed behind in `training`.
+from omnitensor import document_model_runners as runners
+from omnitensor import document_model_types as types
 from omnitensor.training import document_model_contracts as contracts
 from omnitensor.training import document_model_cpu_reference as cpu_reference
 from omnitensor.training import document_model_export as exporter
 from omnitensor.training import document_model_gate as gate
 from omnitensor.training import document_model_installation as installation
-from omnitensor.training import document_model_runners as runners
-from omnitensor.training import document_model_types as types
 
 ROOT = Path(__file__).parents[1]
 LEGACY_MODULE = "omnitensor.training.document_model"
@@ -64,16 +68,12 @@ def test_document_model_facade_maps_direct_leaf_owners_and_contains_no_classes()
     assert not any(isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef)) for node in tree.body)
 
 
-def test_document_model_private_facade_factories_resolve_live_legacy_seams(
-    monkeypatch, tmp_path
-):
+def test_document_model_private_facade_factories_resolve_live_legacy_seams(monkeypatch, tmp_path):
     fixed = object()
     monkeypatch.setattr(facade, "fixed_bge_model", lambda torch, encoder: (torch, encoder))
     assert facade._fixed_bge_model("torch", "encoder") == ("torch", "encoder")
 
-    monkeypatch.setattr(
-        facade, "_canonical_cpu_reference_factory", lambda model, tokenizer: fixed
-    )
+    monkeypatch.setattr(facade, "_canonical_cpu_reference_factory", lambda model, tokenizer: fixed)
     assert facade._portable_reference_factory(tmp_path / "model", object()) is fixed
 
     alternate = object()
@@ -82,10 +82,9 @@ def test_document_model_private_facade_factories_resolve_live_legacy_seams(
 
 
 def test_document_model_leaves_import_before_facade_and_never_import_it():
+    served = ("document_model_types", "document_model_runners")
     modules = (
-        "document_model_types",
         "document_model_contracts",
-        "document_model_runners",
         "document_model_cpu_reference",
         "document_model_export",
         "document_model_gate",
@@ -95,6 +94,7 @@ def test_document_model_leaves_import_before_facade_and_never_import_it():
     script = "\n".join(
         [
             "import importlib, sys",
+            *(f"importlib.import_module('omnitensor.{name}')" for name in served),
             *(f"importlib.import_module('omnitensor.training.{name}')" for name in modules),
             "assert 'omnitensor.training.document_model' not in sys.modules",
         ]
@@ -129,7 +129,12 @@ def test_cpu_reference_owner_is_absent_from_runtime_and_native_modules():
     provider = (
         ROOT / "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/bge.py"
     ).read_text(encoding="utf-8")
-    assert "document_model import QUERY_PREFIX, BgeTokenizer, VulkanBgeRunner" in provider
+    # The provider reaches the runner and its prefix in the service package, not
+    # through the trainers: it is part of the serving path and must import on a
+    # machine that never installed `omnitensor-training`.
+    assert "from omnitensor.document_model_runners import BgeTokenizer, VulkanBgeRunner" in provider
+    assert "from omnitensor.document_model_types import QUERY_PREFIX" in provider
+    assert "omnitensor.training" not in provider.replace("`omnitensor.training`", "")
     assert "document_model_cpu_reference" not in provider
 
 

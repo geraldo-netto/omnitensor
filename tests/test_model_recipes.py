@@ -56,9 +56,7 @@ def recipe_document(payload: bytes = b"portable-model") -> dict:
             "commercialUseAllowed": True,
             "attribution": "Example Authors, Apache-2.0",
         },
-        "tensorContract": {
-            "inputs": [{"shape": [1, 32], "dtype": "int64", "layout": "NC"}]
-        },
+        "tensorContract": {"inputs": [{"shape": [1, 32], "dtype": "int64", "layout": "NC"}]},
         "outputContract": {"kind": "embedding"},
         "preprocessing": {
             "kind": "text",
@@ -163,9 +161,7 @@ def test_bundled_catalog_pins_sources_semantics_and_target_truth():
         assert recipe.producer["outputShape"][0] == 1
         assert set(recipe.targets) == {"tpu", "npu", "gpu"}
         expected_statuses = (
-            {"planned", "convertible"}
-            if recipe.id == "bge-small-en-v1-5"
-            else {"planned"}
+            {"planned", "convertible"} if recipe.id == "bge-small-en-v1-5" else {"planned"}
         )
         assert {claim.status for claim in recipe.targets.values()} == expected_statuses
         assert not any(claim.fully_quantized for claim in recipe.targets.values())
@@ -313,9 +309,7 @@ def test_bundled_recipe_root_prefers_installed_then_uses_source_layout(tmp_path,
     assert bundled_model_recipe_root() == source
 
 
-def test_bundled_catalog_rejects_empty_oversize_symlink_and_misnamed_entry(
-    tmp_path, monkeypatch
-):
+def test_bundled_catalog_rejects_empty_oversize_symlink_and_misnamed_entry(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog"
     catalog.mkdir()
     monkeypatch.setattr("omnitensor.training.recipes.bundled_model_recipe_root", lambda: catalog)
@@ -427,9 +421,7 @@ def test_sentence_embedding_producer_semantics_fail_closed(tmp_path, change, det
             "CLIP image embedding source must be TorchScript with image input",
         ),
         (
-            lambda item: item["tensorContract"]["inputs"][0].update(
-                shape=[1, 3, 256, 256]
-            ),
+            lambda item: item["tensorContract"]["inputs"][0].update(shape=[1, 3, 256, 256]),
             "CLIP image embedding input must be fixed NCHW 224x224",
         ),
         (
@@ -457,12 +449,8 @@ def test_clip_image_producer_semantics_fail_closed(tmp_path, change, detail):
     assert invalid.value.detail == detail
 
 
-@pytest.mark.parametrize(
-    "identifier", ["bge-small-en-v1-5", "clip-vit-b-32-image"]
-)
-def test_every_embedding_producer_requires_its_declared_output_contract(
-    tmp_path, identifier
-):
+@pytest.mark.parametrize("identifier", ["bge-small-en-v1-5", "clip-vit-b-32-image"])
+def test_every_embedding_producer_requires_its_declared_output_contract(tmp_path, identifier):
     document = bundled_document(identifier)
     document["outputContract"] = {"kind": "raw"}
 
@@ -473,12 +461,8 @@ def test_every_embedding_producer_requires_its_declared_output_contract(
     assert invalid.value.detail == "embedding producers require an embedding output contract"
 
 
-@pytest.mark.parametrize(
-    "identifier", ["ibm-granite-ttm-r2", "amazon-chronos-bolt-tiny"]
-)
-def test_every_time_series_producer_requires_the_forecast_contract(
-    tmp_path, identifier
-):
+@pytest.mark.parametrize("identifier", ["ibm-granite-ttm-r2", "amazon-chronos-bolt-tiny"])
+def test_every_time_series_producer_requires_the_forecast_contract(tmp_path, identifier):
     document = bundled_document(identifier)
     document["family"] = "ranking"
 
@@ -534,9 +518,7 @@ def test_every_time_series_producer_requires_the_forecast_contract(
         ),
         (
             "ibm-granite-ttm-r2",
-            lambda item: item["producer"].update(
-                postprocessing="first-horizon-median-quantile"
-            ),
+            lambda item: item["producer"].update(postprocessing="first-horizon-median-quantile"),
             "time-series source output or scalar selection disagrees",
         ),
         (
@@ -556,9 +538,7 @@ def test_every_time_series_producer_requires_the_forecast_contract(
         ),
     ],
 )
-def test_time_series_producer_semantics_fail_closed(
-    tmp_path, identifier, change, detail
-):
+def test_time_series_producer_semantics_fail_closed(tmp_path, identifier, change, detail):
     document = bundled_document(identifier)
     change(document)
 
@@ -588,9 +568,7 @@ def test_time_series_producer_semantics_fail_closed(
             lambda item: (
                 item.update(
                     sources=[
-                        source
-                        for source in item["sources"]
-                        if source["role"] != "architecture"
+                        source for source in item["sources"] if source["role"] != "architecture"
                     ]
                 ),
                 item["preprocessing"].update(artifacts=["config"]),
@@ -602,9 +580,7 @@ def test_time_series_producer_semantics_fail_closed(
             "Retinexformer input must be fixed RGB NCHW 256x256",
         ),
         (
-            lambda item: item["tensorContract"]["inputs"][0].update(
-                shape=[1, 3, 224, 224]
-            ),
+            lambda item: item["tensorContract"]["inputs"][0].update(shape=[1, 3, 224, 224]),
             "Retinexformer input must be fixed RGB NCHW 256x256",
         ),
         (
@@ -736,9 +712,7 @@ def test_recipe_rejects_unshareable_unbounded_or_ambiguous_documents(tmp_path, c
             "exactly one model source is required",
         ),
         (
-            lambda item: item["sources"].append(
-                {**item["sources"][0], "role": "labels"}
-            ),
+            lambda item: item["sources"].append({**item["sources"][0], "role": "labels"}),
             "source filenames must be unique",
         ),
         (
@@ -855,9 +829,7 @@ def test_fetch_requires_exact_license_then_publishes_verified_atomic_receipt(tmp
     transport = FakeTransport({uri: (b"portable-", b"model")})
 
     with pytest.raises(ModelRecipeError) as unaccepted:
-        fetch_model_sources(
-            path, tmp_path / "sources", accepted_license="MIT", transport=transport
-        )
+        fetch_model_sources(path, tmp_path / "sources", accepted_license="MIT", transport=transport)
     assert unaccepted.value.code == "license-not-accepted"
     assert transport.calls == []
 
@@ -951,9 +923,7 @@ def test_concurrent_source_publish_rechecks_the_winner(tmp_path, monkeypatch, ma
         "omnitensor.training.recipes.os.rename",
         lambda *_args: (_ for _ in ()).throw(FileExistsError()),
     )
-    monkeypatch.setattr(
-        "omnitensor.training.recipes._installed_source_matches", already_published
-    )
+    monkeypatch.setattr("omnitensor.training.recipes._installed_source_matches", already_published)
 
     if matching:
         fetched = fetch_model_sources(
@@ -975,12 +945,9 @@ def test_concurrent_source_publish_rechecks_the_winner(tmp_path, monkeypatch, ma
             )
         assert conflict.value.code == "source-conflict"
         assert conflict.value.detail == (
-            "source version appeared concurrently: "
-            f"{tmp_path / 'sources/example-embedding/1.2.3'}"
+            f"source version appeared concurrently: {tmp_path / 'sources/example-embedding/1.2.3'}"
         )
-    assert checked == [
-        (tmp_path / "sources/example-embedding/1.2.3", "example-embedding")
-    ]
+    assert checked == [(tmp_path / "sources/example-embedding/1.2.3", "example-embedding")]
     assert not list((tmp_path / "sources/example-embedding").glob(".model-source-*"))
 
 
@@ -1218,8 +1185,7 @@ def test_https_transport_maps_only_an_immutable_google_drive_file(monkeypatch):
     file_id = "1xDwQtTCj3tlAVCTJgYrzonBGVwqeOhKu"
     share_uri = f"https://drive.google.com/file/d/{file_id}/view"
     download_uri = (
-        "https://drive.usercontent.google.com/download?"
-        f"id={file_id}&export=download&confirm=t"
+        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
     )
     called = []
 
@@ -1256,9 +1222,7 @@ def test_google_drive_adapter_never_weakens_other_redirect_validation():
     _validate_download_response_uri(ordinary, ordinary)
 
     with pytest.raises(ModelRecipeError) as invalid:
-        _validate_download_response_uri(
-            ordinary, "https://models.example/model.onnx?token=secret"
-        )
+        _validate_download_response_uri(ordinary, "https://models.example/model.onnx?token=secret")
     assert invalid.value.code == "recipe-invalid"
     assert invalid.value.detail == (
         "redirected source URI must be an HTTPS URL without credentials, query, or fragment"
@@ -1356,15 +1320,18 @@ def test_fetch_cli_reports_success_and_failure_without_traceback(tmp_path, monke
         return fetched
 
     monkeypatch.setattr("omnitensor.training.recipe_cli.fetch_model_sources", fetch)
-    assert fetch_main(
-        [
-            str(tmp_path / "recipe.json"),
-            "--accept-license",
-            "MIT",
-            "--source-root",
-            str(tmp_path / "sources"),
-        ]
-    ) == 0
+    assert (
+        fetch_main(
+            [
+                str(tmp_path / "recipe.json"),
+                "--accept-license",
+                "MIT",
+                "--source-root",
+                str(tmp_path / "sources"),
+            ]
+        )
+        == 0
+    )
     assert calls == [
         (
             (tmp_path / "recipe.json", tmp_path / "sources"),

@@ -75,9 +75,7 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
     dispatcher.admit("profile", {"value": 1})
     assert plugins.admissions == [("events", {"sources": ["selected"]})]
     assert inference.admissions == [("profile", {"value": 1})]
-    assert dispatcher.dispatch("event-job", "events", {"sources": []}) == {
-        "events": []
-    }
+    assert dispatcher.dispatch("event-job", "events", {"sources": []}) == {"events": []}
     assert plugins.dispatches == [("event-job", "events", {"sources": []})]
 
     assert dispatcher.dispatch("job", "profile", {"value": 1}) == (
@@ -86,9 +84,7 @@ def test_plugin_dispatcher_routes_profiles_and_refuses_an_incomplete_plugin_runt
         {"value": 1},
     )
     assert inference.dispatches == [("job", "profile", {"value": 1})]
-    incomplete_plugins = type(
-        "Plugins", (), {"plugin_ids": lambda _self: {"events"}}
-    )()
+    incomplete_plugins = type("Plugins", (), {"plugin_ids": lambda _self: {"events"}})()
     incomplete = PluginAwareDispatcher(inference, incomplete_plugins)
     with pytest.raises(RuntimeError) as missing_admission:
         incomplete.admit("events", {})
@@ -254,8 +250,9 @@ def test_service_resolves_prepared_devices_by_exact_physical_identity(tmp_path):
 
     assert service._device_identity("profile", "gpu") == gpu_b.id
     assert service._device_identity("profile", "tpu") == tpu.id
-    assert service._executor_for_device("gpu", gpu_b.id) is (
-        service._executors.device_executors[gpu_b.id]
+    assert (
+        service._executor_for_device("gpu", gpu_b.id)
+        is (service._executors.device_executors[gpu_b.id])
     )
     assert service._executor_for_device("gpu", "gpu-renderD999") is None
     assert service._executor_for_device("tpu", tpu.id) is service._executors["tpu"]
@@ -421,9 +418,7 @@ def test_run_registers_external_worker_identity_before_serving(tmp_path):
 
     assert plugins.started == plugins.stopped == 1
     assert transport.started == transport.stopped == 1
-    assert "external-worker" in {
-        item["id"] for item in service.plugin_telemetry.documents()
-    }
+    assert "external-worker" in {item["id"] for item in service.plugin_telemetry.documents()}
 
 
 def test_rediscovery_hands_the_scheduler_the_current_executors(tmp_path):
@@ -746,9 +741,7 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
     warnings = [
         r.getMessage() for r in caplog.records if "No accelerator devices present" in r.message
     ]
-    resumes = [
-        r.getMessage() for r in caplog.records if "devices returned" in r.message
-    ]
+    resumes = [r.getMessage() for r in caplog.records if "devices returned" in r.message]
     assert warnings == [
         "No accelerator devices present; retracted the runtime snapshot"
         " so readers observe absence instead of stale data",
@@ -994,15 +987,23 @@ def test_service_control_round_trip_through_injected_ports(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    acknowledgement = json.loads(asyncio.run(service.control.apply_command_text(json.dumps({
-        "version": CONTROL_VERSION,
-        "id": "cmd-1",
-        "issuedAt": 1,
-        "expectedRevision": 0,
-        "operation": "set-profile-weight",
-        "profileId": "sample-workload",
-        "value": 5,
-    }))))
+    acknowledgement = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                json.dumps(
+                    {
+                        "version": CONTROL_VERSION,
+                        "id": "cmd-1",
+                        "issuedAt": 1,
+                        "expectedRevision": 0,
+                        "operation": "set-profile-weight",
+                        "profileId": "sample-workload",
+                        "value": 5,
+                    }
+                )
+            )
+        )
+    )
     assert acknowledgement["status"] == "applied"
     assert service._weight_of("sample-workload") == 5
 
@@ -1033,14 +1034,16 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
                 return {}
             return {"sample-workload": {"queued": self._queued, "running": self._running}}
 
-    manifest = sample_manifest(model={
-        "id": "sample-model",
-        "version": "1.0.0",
-        "format": "tflite-edgetpu",
-        "fullyQuantized": True,
-        "minimumCompilerVersion": "1",
-        "minimumRuntimeVersion": "1",
-    })
+    manifest = sample_manifest(
+        model={
+            "id": "sample-model",
+            "version": "1.0.0",
+            "format": "tflite-edgetpu",
+            "fullyQuantized": True,
+            "minimumCompilerVersion": "1",
+            "minimumRuntimeVersion": "1",
+        }
+    )
     workloads = {manifest["id"]: Workload(id=manifest["id"], manifest=manifest)}
     executors = {"tpu": ReadyExecutor()}
 
@@ -1070,15 +1073,17 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
 
 
 def policy_command(operation, value, revision, profile_id=None):
-    return json.dumps({
-        "version": CONTROL_VERSION,
-        "id": f"cmd-{operation}-{revision}",
-        "issuedAt": 1,
-        "expectedRevision": revision,
-        "operation": operation,
-        "profileId": profile_id,
-        "value": value,
-    })
+    return json.dumps(
+        {
+            "version": CONTROL_VERSION,
+            "id": f"cmd-{operation}-{revision}",
+            "issuedAt": 1,
+            "expectedRevision": revision,
+            "operation": operation,
+            "profileId": profile_id,
+            "value": value,
+        }
+    )
 
 
 def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
@@ -1089,9 +1094,13 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    disabled = json.loads(asyncio.run(service.control.apply_command_text(
-        policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
-    )))
+    disabled = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
+            )
+        )
+    )
     assert disabled["status"] == "applied"
     snapshot = service.publish_once()
     assert snapshot["profiles"]["sample-workload"] == {
@@ -1101,9 +1110,13 @@ def test_paused_and_disabled_policy_surface_in_the_snapshot(tmp_path):
         "reason": "profile-disabled",
     }
 
-    paused = json.loads(asyncio.run(service.control.apply_command_text(
-        policy_command("set-paused", True, 1),
-    )))
+    paused = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                policy_command("set-paused", True, 1),
+            )
+        )
+    )
     assert paused["status"] == "applied"
     snapshot = service.publish_once()
     assert snapshot["profiles"]["sample-workload"] == {
@@ -1144,9 +1157,11 @@ def test_pause_holds_dispatch_and_resume_command_drains(tmp_path):
         service._scheduler.update_executors(service._executors)
         service._scheduler.start()
 
-        paused = json.loads(await service.control.apply_command_text(
-            policy_command("set-paused", True, 0),
-        ))
+        paused = json.loads(
+            await service.control.apply_command_text(
+                policy_command("set-paused", True, 0),
+            )
+        )
         assert paused["status"] == "applied"
         assert service._admits("sample-workload") is False
         future = service._scheduler.submit("tpu", "sample-workload", "held-job", [])
@@ -1155,9 +1170,11 @@ def test_pause_holds_dispatch_and_resume_command_drains(tmp_path):
         assert executor.served == []
 
         # The resume command itself must wake the workers (on_applied -> kick).
-        resumed = json.loads(await service.control.apply_command_text(
-            policy_command("set-paused", False, 1),
-        ))
+        resumed = json.loads(
+            await service.control.apply_command_text(
+                policy_command("set-paused", False, 1),
+            )
+        )
         assert resumed["status"] == "applied"
         await asyncio.wait_for(future, timeout=2)
         assert executor.served == ["held-job"]
@@ -1176,9 +1193,13 @@ def test_admits_reflects_profile_enablement_and_unknown_profiles(tmp_path):
     )
     assert service._admits("unknown-profile") is True
     assert service._admits("sample-workload") is True
-    disabled = json.loads(asyncio.run(service.control.apply_command_text(
-        policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
-    )))
+    disabled = json.loads(
+        asyncio.run(
+            service.control.apply_command_text(
+                policy_command("set-profile-enabled", False, 0, profile_id="sample-workload"),
+            )
+        )
+    )
     assert disabled["status"] == "applied"
     # A disabled profile is held even though the runtime is not paused.
     assert service._admits("sample-workload") is False
@@ -1219,7 +1240,10 @@ def test_profile_statuses_do_not_leak_running_state_across_profiles():
         workloads[workload_id] = Workload(id=workload_id, manifest=manifest)
 
     statuses = profile_statuses(
-        workloads, {"tpu": ReadyExecutor()}, OneBusyScheduler(), PolicyState(),
+        workloads,
+        {"tpu": ReadyExecutor()},
+        OneBusyScheduler(),
+        PolicyState(),
     )
     # Regression (OMNI-0019): the global running count used to mark every
     # profile "running"; state is now strictly per profile.
@@ -1266,9 +1290,7 @@ def test_without_an_artifact_store_inference_stays_fail_closed(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    assert isinstance(
-        service.jobs._dispatcher.fallback._inference, UnavailableJobDispatcher
-    )
+    assert isinstance(service.jobs._dispatcher.fallback._inference, UnavailableJobDispatcher)
 
 
 def test_an_artifact_store_enables_real_inference_dispatch(tmp_path):
@@ -1314,9 +1336,7 @@ def test_the_artifact_root_defaults_to_the_user_share_directory(monkeypatch, tmp
     assert DEFAULT_ARTIFACT_ROOT.endswith("omnitensor/artifacts")
 
 
-def test_accelerator_device_ids_are_configurable_from_the_environment(
-    monkeypatch, tmp_path
-):
+def test_accelerator_device_ids_are_configurable_from_the_environment(monkeypatch, tmp_path):
     from omnitensor.service import SysfsDeviceDiscovery, build_service_from_env
 
     monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "state.json"))
@@ -1541,7 +1561,11 @@ def test_the_control_surface_exposes_a_way_to_learn_a_job_outcome(tmp_path):
 
     assert "get-job-result" in RUNTIME_METHODS
     assert {
-        "apply-command", "submit-job", "cancel-job", "describe-plugins", "describe-contract",
+        "apply-command",
+        "submit-job",
+        "cancel-job",
+        "describe-plugins",
+        "describe-contract",
     } <= set(RUNTIME_METHODS)
 
 
@@ -1605,9 +1629,7 @@ def test_the_inventory_reports_the_grants_a_worker_actually_runs_with(tmp_path):
 
 
 def gpu_model_manifest(workload_id="referenced-workload"):
-    manifest = sample_manifest(
-        workload_id, accelerator="gpu", acceleratorPreference=["gpu"]
-    )
+    manifest = sample_manifest(workload_id, accelerator="gpu", acceleratorPreference=["gpu"])
     manifest["requirements"]["model"] = {
         "id": "sample-model",
         "version": "1.2.3",
@@ -1761,9 +1783,7 @@ def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):
 
     document = json.loads(service.runtime_api.describe_plugins_text())
     declaring = {
-        plugin["id"]: plugin["artifacts"]
-        for plugin in document["plugins"]
-        if plugin["artifacts"]
+        plugin["id"]: plugin["artifacts"] for plugin in document["plugins"] if plugin["artifacts"]
     }
 
     assert validate_document("plugin-inventory.schema.json", document) == []
@@ -1880,13 +1900,20 @@ def test_a_readable_result_becomes_something_the_desktop_can_see(tmp_path):
         transport=FakeTransport(),
     )
 
-    service._deliver_job_output("job-1", {
-        "profileId": "visual-library",
-        "outputs": [[0.1, 0.9]],
-        "reading": {"kind": "classification", "top": [
-            {"index": 1, "score": 0.9}, {"index": 0, "score": 0.1},
-        ]},
-    })
+    service._deliver_job_output(
+        "job-1",
+        {
+            "profileId": "visual-library",
+            "outputs": [[0.1, 0.9]],
+            "reading": {
+                "kind": "classification",
+                "top": [
+                    {"index": 1, "score": 0.9},
+                    {"index": 0, "score": 0.1},
+                ],
+            },
+        },
+    )
 
     alerts = service.result_summaries.documents()
     assert len(alerts) == 1
@@ -1904,12 +1931,18 @@ def test_a_label_is_preferred_over_an_index_when_the_model_supplies_one(tmp_path
         transport=FakeTransport(),
     )
 
-    service._deliver_job_output("job-2", {
-        "profileId": "visual-library",
-        "reading": {"kind": "classification", "top": [
-            {"index": 7, "score": 0.5, "label": "golden retriever"},
-        ]},
-    })
+    service._deliver_job_output(
+        "job-2",
+        {
+            "profileId": "visual-library",
+            "reading": {
+                "kind": "classification",
+                "top": [
+                    {"index": 7, "score": 0.5, "label": "golden retriever"},
+                ],
+            },
+        },
+    )
 
     assert service.result_summaries.documents()[0]["title"] == "golden retriever"
 
@@ -2059,10 +2092,13 @@ def test_the_published_snapshot_carries_the_summary(tmp_path):
         publisher=FakePublisher(),
         transport=FakeTransport(),
     )
-    service._deliver_job_output("job-6", {
-        "profileId": "visual-library",
-        "reading": {"kind": "classification", "top": [{"index": 3, "score": 0.42}]},
-    })
+    service._deliver_job_output(
+        "job-6",
+        {
+            "profileId": "visual-library",
+            "reading": {"kind": "classification", "top": [{"index": 3, "score": 0.42}]},
+        },
+    )
 
     snapshot = service.publish_once()
 

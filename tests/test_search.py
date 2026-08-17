@@ -57,9 +57,7 @@ def entry(name, digest, vector, tags=(), modified=1_000):
 
 
 def service(tmp_path, entries=(), *, roots=(ROOT,), **changes):
-    return VisualLibraryResults(
-        index(tmp_path, entries), permissions(**changes), roots=roots
-    )
+    return VisualLibraryResults(index(tmp_path, entries), permissions(**changes), roots=roots)
 
 
 def test_results_are_ranked_by_similarity(tmp_path):

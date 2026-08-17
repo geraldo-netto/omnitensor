@@ -13,6 +13,7 @@ from .errors import QualifiedMediaError
 QUALIFICATION_EVIDENCE = "media-transcription-rx6600xt-report.json"
 MAX_QUALIFICATION_EVIDENCE_BYTES = 256 * 1024
 
+
 def load_qualification() -> dict:
     resource = importlib.resources.files("omnitensor_media_transcription").joinpath(
         "qualification.json"
@@ -67,12 +68,10 @@ def _validate_qualification_evidence(document: Mapping[str, object]) -> None:
         raw = evidence.read_bytes()
     except OSError as error:
         raise QualifiedMediaError("media qualification evidence is unreadable") from error
-    if (
-        not 0 < len(raw) <= MAX_QUALIFICATION_EVIDENCE_BYTES
-        or hashlib.sha256(raw).hexdigest() != document.get("evidenceSha256")
-    ):
+    if not 0 < len(raw) <= MAX_QUALIFICATION_EVIDENCE_BYTES or hashlib.sha256(
+        raw
+    ).hexdigest() != document.get("evidenceSha256"):
         raise QualifiedMediaError("media qualification evidence differs from receipt")
-
 
 
 __all__ = ["QUALIFICATION_EVIDENCE", "load_qualification"]

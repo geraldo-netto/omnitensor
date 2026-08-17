@@ -11,9 +11,7 @@ from typing import Protocol, TypeVar
 
 from .recipe_model import FetchedModelSource, ModelRecipeError
 
-_GENERIC_NATIVE_REASON = (
-    "no target compiler, native parity, or named-device evidence was run"
-)
+_GENERIC_NATIVE_REASON = "no target compiler, native parity, or named-device evidence was run"
 
 Evidence = TypeVar("Evidence")
 Result = TypeVar("Result")
@@ -137,9 +135,7 @@ def validate_onnx_io(
     if len(outputs) != 1 or outputs[0].name != output_name:
         raise ModelRecipeError("producer-invalid", output_detail)
     actual_input = [dimension.dim_value for dimension in inputs[0].type.tensor_type.shape.dim]
-    actual_output = [
-        dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim
-    ]
+    actual_output = [dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim]
     if actual_input != list(input_shape) or actual_output != list(output_shape):
         raise ModelRecipeError("producer-invalid", shape_detail)
 

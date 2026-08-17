@@ -369,9 +369,7 @@ def test_produce_foundation_forecast_emits_private_safe_report(tmp_path, monkeyp
     )
     report = json.loads(produced.report_path.read_text())
     assert produced.model_path.read_bytes() == b"portable-forecast"
-    assert produced.report_path.read_bytes() == json.dumps(
-        report, separators=(",", ":")
-    ).encode()
+    assert produced.report_path.read_bytes() == json.dumps(report, separators=(",", ":")).encode()
     assert tuple(report) == (
         "reportVersion",
         "kind",
@@ -404,13 +402,8 @@ def test_produce_foundation_forecast_emits_private_safe_report(tmp_path, monkeyp
         "accepted",
     )
     assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
-    assert all(
-        tuple(claim) == ("status", "reason")
-        for claim in report["nativeTargets"].values()
-    )
-    assert produced.evidence == FoundationForecastEvidence(
-        0.0, 0.0, 1.0, 0.5, 1.0, 0.0, 32, True
-    )
+    assert all(tuple(claim) == ("status", "reason") for claim in report["nativeTargets"].values())
+    assert produced.evidence == FoundationForecastEvidence(0.0, 0.0, 1.0, 0.5, 1.0, 0.0, 32, True)
     native_claim = {
         "status": "unqualified",
         "reason": "no target compiler, native parity, or named-device evidence was run",

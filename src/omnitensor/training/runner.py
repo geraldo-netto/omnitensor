@@ -201,8 +201,7 @@ class TrustedForecastRunner:
                 "runtime-contract-mismatch", "runtime lacks forecast job methods"
             )
         if any(
-            contract["schemas"].get(name) != version
-            for name, version in required_schemas.items()
+            contract["schemas"].get(name) != version for name, version in required_schemas.items()
         ):
             raise ForecastRunError(
                 "runtime-contract-mismatch", "runtime job schema versions differ"

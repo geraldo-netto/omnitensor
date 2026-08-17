@@ -182,12 +182,8 @@ def test_shared_receipt_and_cli_have_direct_stable_contracts(tmp_path, capsys):
         (("tokenizer.json", "b" * 64),),
     )
     path = tmp_path / "model.gguf"
-    with_companions = installed_artifact_document(
-        reference, path, include_companions=True
-    )
-    without_companions = installed_artifact_document(
-        reference, path, include_companions=False
-    )
+    with_companions = installed_artifact_document(reference, path, include_companions=True)
+    without_companions = installed_artifact_document(reference, path, include_companions=False)
     assert list(with_companions) == [
         "id",
         "version",

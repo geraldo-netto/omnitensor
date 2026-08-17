@@ -36,6 +36,7 @@ def hardware_sensor_permission(stable_id: str) -> str:
         raise ValueError("hardware sensor identity is invalid")
     return f"{HARDWARE_SENSOR_PERMISSION_PREFIX}{stable_id}"
 
+
 class HardwareHealthCollector(BoundedCollector[HardwareSample]):
     """Emit only allowlisted, granted sensors with stable units."""
 

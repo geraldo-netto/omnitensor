@@ -180,9 +180,7 @@ def test_l2_normalize_rejects_invalid_vectors(value, message):
 
 def test_pool_sentence_embedding_matches_both_recipe_methods():
     hidden = ((3.0, 4.0), (0.0, 5.0), (100.0, 100.0))
-    assert pool_sentence_embedding(hidden, (1, 1, 0), "cls-token-l2") == pytest.approx(
-        (0.6, 0.8)
-    )
+    assert pool_sentence_embedding(hidden, (1, 1, 0), "cls-token-l2") == pytest.approx((0.6, 0.8))
     assert pool_sentence_embedding(
         hidden, (1, 1, 0), "attention-mask-mean-pool-l2"
     ) == pytest.approx(l2_normalize((1.5, 4.5)))
@@ -385,9 +383,7 @@ def test_onnx_exporter_rejects_wrapper_name_collision(tmp_path):
     assert caught.value.detail == "ONNX graph collides with wrapper names"
 
 
-def test_atomic_onnx_save_uses_private_sibling_and_disables_external_data(
-    tmp_path, monkeypatch
-):
+def test_atomic_onnx_save_uses_private_sibling_and_disables_external_data(tmp_path, monkeypatch):
     destination = tmp_path / "nested" / "models" / "portable.onnx"
     calls = []
 
@@ -415,9 +411,7 @@ def test_atomic_onnx_save_uses_private_sibling_and_disables_external_data(
     assert not calls[0][1].exists()
 
 
-def test_produce_sentence_embedding_emits_provenance_without_native_claims(
-    tmp_path, monkeypatch
-):
+def test_produce_sentence_embedding_emits_provenance_without_native_claims(tmp_path, monkeypatch):
     fetched = _fetched(tmp_path)
     opened = []
 
@@ -459,9 +453,7 @@ def test_produce_sentence_embedding_emits_provenance_without_native_claims(
     report = json.loads(produced.report_path.read_text())
     assert produced.evidence.accepted
     assert produced.model_path.read_bytes() == b"portable"
-    assert produced.report_path.read_bytes() == json.dumps(
-        report, separators=(",", ":")
-    ).encode()
+    assert produced.report_path.read_bytes() == json.dumps(report, separators=(",", ":")).encode()
     assert tuple(report) == (
         "reportVersion",
         "kind",
@@ -497,10 +489,7 @@ def test_produce_sentence_embedding_emits_provenance_without_native_claims(
         "accepted",
     )
     assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
-    assert all(
-        tuple(claim) == ("status", "reason")
-        for claim in report["nativeTargets"].values()
-    )
+    assert all(tuple(claim) == ("status", "reason") for claim in report["nativeTargets"].values())
     assert opened == [("recipe", "sources")]
     assert source_calls == [fetched]
     assert portable_calls == [(produced.model_path, fetched)]

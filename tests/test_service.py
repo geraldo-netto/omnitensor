@@ -45,15 +45,17 @@ def build_service(fake_nodes, tmp_path, manifests=()):
 
 class ReadyKernelTelemetry:
     def read(self):
-        return parse_aggregate({
-            "version": 1,
-            "collectedAtMs": 1_700_000_000_000,
-            "histograms": [
-                {"name": "runq_latency_us", "unit": "us", "buckets": [1, 2]},
-                {"name": "block_latency_us", "unit": "us", "buckets": [3, 4]},
-            ],
-            "counters": [],
-        })
+        return parse_aggregate(
+            {
+                "version": 1,
+                "collectedAtMs": 1_700_000_000_000,
+                "histograms": [
+                    {"name": "runq_latency_us", "unit": "us", "buckets": [1, 2]},
+                    {"name": "block_latency_us", "unit": "us", "buckets": [3, 4]},
+                ],
+                "counters": [],
+            }
+        )
 
 
 def test_publish_once_emits_contract_valid_snapshot(fake_nodes, tmp_path):
@@ -148,9 +150,7 @@ def test_profile_gpu_choice_routes_executor_worker_lease_and_published_identitie
 ):
     add_gpu(fake_nodes, node=128, vendor="0x1002", device="0x73ff")
     add_gpu(fake_nodes, node=129, vendor="0x8086", device="0x46a6")
-    manifest = sample_manifest(
-        accelerator="gpu", acceleratorPreference=["gpu"]
-    )
+    manifest = sample_manifest(accelerator="gpu", acceleratorPreference=["gpu"])
     service = build_service(fake_nodes, tmp_path, [manifest])
 
     acknowledgement = json.loads(
@@ -172,15 +172,14 @@ def test_profile_gpu_choice_routes_executor_worker_lease_and_published_identitie
     )
 
     assert acknowledgement["status"] == "applied"
-    assert acknowledgement["portfolio"]["deviceChoices"] == {
-        "sample-workload": "gpu-renderD129"
-    }
+    assert acknowledgement["portfolio"]["deviceChoices"] == {"sample-workload": "gpu-renderD129"}
     assert [entry["id"] for entry in service.publish_once()["devices"]] == [
         "gpu-renderD128",
         "gpu-renderD129",
     ]
-    assert service._executor_view("sample-workload")["gpu"] is (
-        service._executors.device_executors["gpu-renderD129"]
+    assert (
+        service._executor_view("sample-workload")["gpu"]
+        is (service._executors.device_executors["gpu-renderD129"])
     )
     assert service._scheduler_lane("sample-workload", "gpu") == "gpu-renderD129"
     assert service._plugin_accelerator_devices("sample-workload")["gpu"] == Path(
@@ -189,9 +188,7 @@ def test_profile_gpu_choice_routes_executor_worker_lease_and_published_identitie
     assert service._pending_device_profiles == set()
 
 
-def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(
-    fake_nodes, tmp_path
-):
+def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(fake_nodes, tmp_path):
     add_gpu(fake_nodes, node=128)
     add_gpu(fake_nodes, node=129)
     service = build_service(fake_nodes, tmp_path)
@@ -244,9 +241,7 @@ def test_saved_gpu_choice_fails_closed_when_that_device_disappears(fake_nodes, t
     add_gpu(fake_nodes, node=129)
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
     service.control.state.device_choices["sample-workload"] = "gpu-renderD129"
-    remaining = [
-        device for device in service._devices if device.id != "gpu-renderD129"
-    ]
+    remaining = [device for device in service._devices if device.id != "gpu-renderD129"]
     service._devices = remaining
     service._executors = build_executors(remaining)
 
@@ -256,14 +251,10 @@ def test_saved_gpu_choice_fails_closed_when_that_device_disappears(fake_nodes, t
     assert unavailable.code == "device-absent"
     assert "gpu-renderD129" in unavailable.reason
     assert "gpu" not in service._plugin_accelerator_devices("sample-workload")
-    assert service.control.state.device_choices == {
-        "sample-workload": "gpu-renderD129"
-    }
+    assert service.control.state.device_choices == {"sample-workload": "gpu-renderD129"}
 
 
-def test_profile_identity_includes_installed_plugins_for_device_selection(
-    fake_nodes, tmp_path
-):
+def test_profile_identity_includes_installed_plugins_for_device_selection(fake_nodes, tmp_path):
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
 
     class Plugins:
@@ -281,9 +272,7 @@ def test_profile_identity_includes_installed_plugins_for_device_selection(
 def test_pcie_tpu_device_mapping_preserves_the_discovered_index(index):
     device = Device(f"tpu-pcie-{index}", "tpu", "TPU", "pcie")
 
-    assert plugin_accelerator_devices((device,)) == {
-        "tpu": Path(f"/dev/apex_{index}")
-    }
+    assert plugin_accelerator_devices((device,)) == {"tpu": Path(f"/dev/apex_{index}")}
 
 
 def test_default_plugin_runtime_receives_exact_host_owned_resources(
@@ -333,13 +322,20 @@ def test_profile_statuses_report_backend_or_reason(fake_nodes, tmp_path):
     executors = build_executors(devices)
 
     async def scenario():
-        service = build_service(fake_nodes, tmp_path, [
-            sample_manifest(),
-            sample_manifest("gpu-only", accelerator="gpu", acceleratorPreference=["gpu"]),
-        ])
+        service = build_service(
+            fake_nodes,
+            tmp_path,
+            [
+                sample_manifest(),
+                sample_manifest("gpu-only", accelerator="gpu", acceleratorPreference=["gpu"]),
+            ],
+        )
         service._scheduler.start()
         statuses = profile_statuses(
-            service._workloads, executors, service._scheduler, service.control.state,
+            service._workloads,
+            executors,
+            service._scheduler,
+            service.control.state,
         )
         await service._scheduler.stop()
         return statuses
@@ -375,7 +371,9 @@ def test_build_executors_reuses_only_unchanged_device_adapters():
     interpreters = first["tpu"]._interpreters
 
     same = build_executors(
-        [tpu], previous_devices=[tpu], previous_executors=first,
+        [tpu],
+        previous_devices=[tpu],
+        previous_executors=first,
     )
     assert same["tpu"] is first["tpu"]
     assert same["tpu"]._interpreters is interpreters
@@ -389,7 +387,9 @@ def test_build_executors_reuses_only_unchanged_device_adapters():
 
     replacement = Device(id="tpu-b", backend="tpu", name="TPU B", kind="usb")
     changed = build_executors(
-        [replacement], previous_devices=[tpu], previous_executors=same,
+        [replacement],
+        previous_devices=[tpu],
+        previous_executors=same,
     )
     assert changed["tpu"] is not same["tpu"]
     assert changed["npu"] is same["npu"]
@@ -440,9 +440,7 @@ def sample_manifest_with_model(digest=MODEL_DIGEST):
 
 def test_the_service_builds_a_runner_for_each_executable_profile(fake_nodes, tmp_path):
     add_pcie_tpu(fake_nodes)
-    service = build_service(
-        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
-    )
+    service = build_service(fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()])
 
     assert "runnable-workload" in service.runners.runners
     assert "declares no model" in service.runners.skipped["sample-workload"]
@@ -460,9 +458,7 @@ def test_a_profile_without_a_model_says_so_at_startup_not_at_first_job(fake_node
 def test_interrupted_jobs_are_reconciled_when_the_service_starts(fake_nodes, tmp_path):
     journal = tmp_path / "state/cancellations.json"
     journal.parent.mkdir(parents=True, exist_ok=True)
-    journal.write_text(
-        json.dumps({"version": 1, "jobs": {"job-1": "runnable-workload"}})
-    )
+    journal.write_text(json.dumps({"version": 1, "jobs": {"job-1": "runnable-workload"}}))
     add_pcie_tpu(fake_nodes)
     service = build_service(fake_nodes, tmp_path, [sample_manifest_with_model()])
 
@@ -478,9 +474,7 @@ def test_a_clean_start_reconciles_nothing(fake_nodes, tmp_path):
     assert service.reconcile_interrupted_jobs().interrupted == ()
 
 
-def test_a_declared_model_that_is_not_installed_is_not_reported_as_serving(
-    fake_nodes, tmp_path
-):
+def test_a_declared_model_that_is_not_installed_is_not_reported_as_serving(fake_nodes, tmp_path):
     """Declaring a model is not having one. Every fresh checkout ships the
     manifest without the artifact, and this claimed the profile was working."""
     add_pcie_tpu(fake_nodes)
@@ -552,9 +546,7 @@ def test_no_profile_serves_where_the_dispatcher_refuses_every_job(fake_nodes, tm
     halves are computed by different code and only their agreement matters.
     """
     add_pcie_tpu(fake_nodes)
-    service = build_service(
-        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
-    )
+    service = build_service(fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()])
 
     assert isinstance(service._job_dispatcher._inference, UnavailableJobDispatcher)
     assert _serving_profiles(service) == set()
@@ -605,9 +597,7 @@ def test_every_profile_carries_a_reason_code_the_schema_allows(fake_nodes, tmp_p
     code has to fail here rather than in a popup.
     """
     add_pcie_tpu(fake_nodes)
-    service = build_service(
-        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
-    )
+    service = build_service(fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()])
     allowed = _snapshot_reason_codes()
 
     profiles = service._build_runtime_snapshot()["profiles"]
@@ -619,9 +609,7 @@ def test_every_profile_carries_a_reason_code_the_schema_allows(fake_nodes, tmp_p
 
 def test_the_reason_names_the_state_each_branch_reached(fake_nodes, tmp_path):
     add_pcie_tpu(fake_nodes)
-    service = build_service(
-        fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()]
-    )
+    service = build_service(fake_nodes, tmp_path, [sample_manifest(), sample_manifest_with_model()])
     service._executors = {"tpu": _AvailableExecutor()}
 
     def reason_for(workload_id: str) -> str:
@@ -784,6 +772,7 @@ def test_a_profile_no_lane_can_run_leaves_readiness_quiet(fake_nodes, tmp_path):
 
     add_pcie_tpu(fake_nodes)
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
     def _never(_artifact_id):
         raise AssertionError("the store must not be consulted for an unrunnable profile")
 
@@ -819,7 +808,7 @@ def test_a_resolution_is_not_recomputed_until_the_artifact_moves(fake_nodes, tmp
     )
     calls = []
     real = service._artifact_store.resolve
-    service._artifact_store.resolve = lambda ref: (calls.append(ref) or real(ref))
+    service._artifact_store.resolve = lambda ref: calls.append(ref) or real(ref)
 
     first = service._resolve_artifact("runnable-model")
     for _ in range(5):
@@ -839,9 +828,7 @@ def test_a_resolution_is_not_recomputed_until_the_artifact_moves(fake_nodes, tmp
     assert hashlib.sha256(installed.read_bytes()).hexdigest() != MODEL_DIGEST
 
 
-def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(
-    fake_nodes, tmp_path
-):
+def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(fake_nodes, tmp_path):
     """F4/F5: policy was seeded from the catalog only, so plugins had none."""
     add_gpu(fake_nodes, node=128)
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
@@ -855,15 +842,17 @@ def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(
     refused = json.loads(
         asyncio.run(
             service.control.apply_command_text(
-                json.dumps({
-                    "version": CONTROL_VERSION,
-                    "id": "disable-organizer",
-                    "issuedAt": 1,
-                    "expectedRevision": 0,
-                    "operation": "set-profile-enabled",
-                    "profileId": "file-organizer",
-                    "value": False,
-                })
+                json.dumps(
+                    {
+                        "version": CONTROL_VERSION,
+                        "id": "disable-organizer",
+                        "issuedAt": 1,
+                        "expectedRevision": 0,
+                        "operation": "set-profile-enabled",
+                        "profileId": "file-organizer",
+                        "value": False,
+                    }
+                )
             )
         )
     )
@@ -874,15 +863,17 @@ def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(
     applied = json.loads(
         asyncio.run(
             service.control.apply_command_text(
-                json.dumps({
-                    "version": CONTROL_VERSION,
-                    "id": "disable-organizer",
-                    "issuedAt": 1,
-                    "expectedRevision": service.control.state.revision,
-                    "operation": "set-profile-enabled",
-                    "profileId": "file-organizer",
-                    "value": False,
-                })
+                json.dumps(
+                    {
+                        "version": CONTROL_VERSION,
+                        "id": "disable-organizer",
+                        "issuedAt": 1,
+                        "expectedRevision": service.control.state.revision,
+                        "operation": "set-profile-enabled",
+                        "profileId": "file-organizer",
+                        "value": False,
+                    }
+                )
             )
         )
     )
@@ -896,9 +887,7 @@ def test_a_discovered_plugin_becomes_a_profile_policy_can_actually_set(
     assert published["reason"] == "profile-disabled"
 
 
-def test_a_plugin_weight_reaches_the_pool_that_orders_plugin_jobs(
-    fake_nodes, tmp_path
-):
+def test_a_plugin_weight_reaches_the_pool_that_orders_plugin_jobs(fake_nodes, tmp_path):
     add_gpu(fake_nodes, node=128)
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
 

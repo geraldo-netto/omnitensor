@@ -87,9 +87,7 @@ class PluginTelemetryRegistry:
             or not isinstance(max_plugins, int)
             or not 1 <= max_plugins <= MAX_TELEMETRY_PLUGINS
         ):
-            raise ValueError(
-                f"max_plugins must be between 1 and {MAX_TELEMETRY_PLUGINS}"
-            )
+            raise ValueError(f"max_plugins must be between 1 and {MAX_TELEMETRY_PLUGINS}")
         self._max_plugins = max_plugins
         self._items: dict[str, PluginTelemetry] = {}
         self._lock = Lock()
@@ -124,9 +122,7 @@ class PluginTelemetryRegistry:
         """Return the fixed, public snapshot contract without private detail."""
         return [_telemetry_document(snapshot) for snapshot in self.snapshots()]
 
-    def set_health(
-        self, plugin_id: str, health: PluginTelemetryHealth
-    ) -> PluginTelemetry:
+    def set_health(self, plugin_id: str, health: PluginTelemetryHealth) -> PluginTelemetry:
         if not isinstance(health, PluginTelemetryHealth):
             raise TypeError("health must be PluginTelemetryHealth")
         return self._update(plugin_id, health=health)
@@ -160,10 +156,10 @@ class PluginTelemetryRegistry:
             )
 
     def advance(self, plugin_id: str, stage: PipelineStage) -> PluginTelemetry:
-        if (
-            not isinstance(stage, PipelineStage)
-            or stage in {PipelineStage.QUEUED, PipelineStage.TERMINAL}
-        ):
+        if not isinstance(stage, PipelineStage) or stage in {
+            PipelineStage.QUEUED,
+            PipelineStage.TERMINAL,
+        }:
             raise ValueError("active telemetry stage must be runnable")
         with self._lock:
             current = self._required_valid(plugin_id)
@@ -332,11 +328,7 @@ def _validate_plugin_id(plugin_id: object) -> None:
 
 
 def _validate_error(code: object, detail: object) -> None:
-    if (
-        not isinstance(code, str)
-        or not 1 <= len(code) <= 80
-        or _ERROR_CODE.fullmatch(code) is None
-    ):
+    if not isinstance(code, str) or not 1 <= len(code) <= 80 or _ERROR_CODE.fullmatch(code) is None:
         raise ValueError("telemetry error code is invalid")
     if not isinstance(detail, str):
         raise TypeError("telemetry error detail must be a string")
@@ -348,6 +340,4 @@ def _validate_timestamp(value: object) -> None:
         or not isinstance(value, int)
         or not 0 <= value <= MAX_TELEMETRY_TIMESTAMP_MS
     ):
-        raise ValueError(
-            "telemetry timestamp must be a non-negative JavaScript-safe integer"
-        )
+        raise ValueError("telemetry timestamp must be a non-negative JavaScript-safe integer")

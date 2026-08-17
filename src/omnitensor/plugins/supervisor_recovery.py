@@ -62,11 +62,7 @@ class WorkerRecoveryPolicy:
 
     def delay(self, attempt: int) -> float:
         maximum = _facade_value("MAX_RESTARTS", MAX_RESTARTS)
-        if (
-            isinstance(attempt, bool)
-            or not isinstance(attempt, int)
-            or not 1 <= attempt <= maximum
-        ):
+        if isinstance(attempt, bool) or not isinstance(attempt, int) or not 1 <= attempt <= maximum:
             raise ValueError(f"attempt must be between 1 and {maximum}")
         return min(
             self.initial_backoff_seconds * self.backoff_multiplier ** (attempt - 1),
@@ -169,10 +165,7 @@ async def recover_worker(
     first_attempt = host._restart_attempts[plugin_id] + 1
     for attempt in range(first_attempt, host._recovery_policy.max_restarts + 1):
         async with host._lock:
-            if (
-                not host._running
-                or host._recoveries.get(plugin_id) is not asyncio.current_task()
-            ):
+            if not host._running or host._recoveries.get(plugin_id) is not asyncio.current_task():
                 return
             previous = host._statuses[plugin_id]
             host._statuses[plugin_id] = WorkerStatus(

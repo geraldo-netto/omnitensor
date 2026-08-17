@@ -187,9 +187,7 @@ def test_a_trigger_for_another_plugin_is_refused():
         asyncio.run(collector().collect(trigger("other-plugin")))
 
     assert caught.value.code == "trigger-invalid"
-    assert caught.value.detail == (
-        "storage metadata requires a storage-intelligence trigger"
-    )
+    assert caught.value.detail == ("storage metadata requires a storage-intelligence trigger")
 
 
 def test_emission_is_bounded_and_truncation_is_reported():

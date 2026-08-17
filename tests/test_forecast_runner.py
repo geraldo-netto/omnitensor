@@ -518,9 +518,7 @@ async def test_runner_uses_one_derived_schema_snapshot_and_ignores_unrelated_ver
     assert output["reading"]["value"] == 0.75
     assert calls == [True]
     assert client.submissions[0]["version"] == 7
-    assert client.polls == [
-        {"version": 9, "requestId": "poll-derived", "jobId": "job-1"}
-    ]
+    assert client.polls == [{"version": 9, "requestId": "poll-derived", "jobId": "job-1"}]
 
 
 async def _record_sleep(seen, delay):

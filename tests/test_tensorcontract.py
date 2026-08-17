@@ -22,16 +22,18 @@ def model(**overrides) -> dict:
         "version": "1.0.0",
         "format": "ncnn",
         "tensorContract": {
-            "inputs": [{
-                "shape": [1, 3, 227, 227],
-                "dtype": "float32",
-                "layout": "NCHW",
-                "preprocess": {
-                    "channelOrder": "BGR",
-                    "mean": [104.0, 117.0, 123.0],
-                    "scale": [1.0, 1.0, 1.0],
-                },
-            }],
+            "inputs": [
+                {
+                    "shape": [1, 3, 227, 227],
+                    "dtype": "float32",
+                    "layout": "NCHW",
+                    "preprocess": {
+                        "channelOrder": "BGR",
+                        "mean": [104.0, 117.0, 123.0],
+                        "scale": [1.0, 1.0, 1.0],
+                    },
+                }
+            ],
         },
     }
     declared.update(overrides)
@@ -64,9 +66,7 @@ def test_a_model_declaring_no_contract_is_not_checked():
 def test_a_publisher_may_state_the_shape_without_the_normalisation():
     """Knowing what the graph wants and not how the values were produced is a
     real state, and refusing to record the half that is known helps nobody."""
-    specs = declared_inputs(
-        model(tensorContract={"inputs": [{"shape": [1, 4], "dtype": "uint8"}]})
-    )
+    specs = declared_inputs(model(tensorContract={"inputs": [{"shape": [1, 4], "dtype": "uint8"}]}))
 
     assert specs[0].preprocess is None
     assert specs[0].layout is None
@@ -75,10 +75,11 @@ def test_a_publisher_may_state_the_shape_without_the_normalisation():
 
 def test_the_input_contract_bound_is_enforced_without_truncation():
     def contract(count):
-        return model(tensorContract={"inputs": [
-            {"shape": [1, index + 1], "dtype": "float32"}
-            for index in range(count)
-        ]})
+        return model(
+            tensorContract={
+                "inputs": [{"shape": [1, index + 1], "dtype": "float32"} for index in range(count)]
+            }
+        )
 
     maximum = declared_inputs(contract(MAX_INPUTS))
     assert len(maximum) == MAX_INPUTS
@@ -112,13 +113,15 @@ def test_the_number_of_inputs_is_part_of_the_contract():
     specs = declared_inputs(model())
 
     assert "1 input" in contract_error(specs, [])
-    assert "2 were supplied" in contract_error(
-        specs, [((1, 3, 227, 227), "float32")] * 2
-    )
+    assert "2 were supplied" in contract_error(specs, [((1, 3, 227, 227), "float32")] * 2)
 
-    many = declared_inputs(model(tensorContract={"inputs": [
-        {"shape": [1], "dtype": "float32"} for _index in range(MAX_INPUTS)
-    ]}))
+    many = declared_inputs(
+        model(
+            tensorContract={
+                "inputs": [{"shape": [1], "dtype": "float32"} for _index in range(MAX_INPUTS)]
+            }
+        )
+    )
     supplied = [((1,), "float32")] * MAX_INPUTS
     assert contract_error(many, supplied) is None
     assert contract_error(many, supplied[:-1]) == (
@@ -187,12 +190,8 @@ def test_the_bundled_contract_matches_the_artifact_it_describes():
     if not param.is_file():
         pytest.skip("the artifact is not installed on this host")
 
-    declared = next(
-        line for line in param.read_text().splitlines() if line.startswith("Input")
-    )
-    sizes = dict(
-        part.split("=") for part in declared.split() if "=" in part and part[0].isdigit()
-    )
+    declared = next(line for line in param.read_text().splitlines() if line.startswith("Input"))
+    sizes = dict(part.split("=") for part in declared.split() if "=" in part and part[0].isdigit())
 
     assert specs[0].shape == (1, int(sizes["2"]), int(sizes["1"]), int(sizes["0"]))
 
@@ -232,17 +231,19 @@ def test_a_publisher_may_state_how_a_picture_becomes_the_shape():
     stated = declared_inputs(
         model(
             tensorContract={
-                "inputs": [{
-                    "shape": [1, 3, 8, 8],
-                    "dtype": "float32",
-                    "layout": "NCHW",
-                    "preprocess": {
-                        "channelOrder": "BGR",
-                        "mean": [0.0],
-                        "scale": [1.0],
-                        "resize": {"filter": "bicubic", "fit": "cover"},
-                    },
-                }]
+                "inputs": [
+                    {
+                        "shape": [1, 3, 8, 8],
+                        "dtype": "float32",
+                        "layout": "NCHW",
+                        "preprocess": {
+                            "channelOrder": "BGR",
+                            "mean": [0.0],
+                            "scale": [1.0],
+                            "resize": {"filter": "bicubic", "fit": "cover"},
+                        },
+                    }
+                ]
             }
         )
     )

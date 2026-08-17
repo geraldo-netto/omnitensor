@@ -336,9 +336,7 @@ def test_empty_link_snapshot_has_finite_zero_fractions(monkeypatch):
     assert all(math.isfinite(value) for value in result)
 
     monkeypatch.setattr("omnitensor.training.network._fraction", lambda *_args: math.inf)
-    assert error_code(lambda: _aggregate_features(snapshot(0), snapshot(1))) == (
-        "features-invalid"
-    )
+    assert error_code(lambda: _aggregate_features(snapshot(0), snapshot(1))) == ("features-invalid")
 
 
 def test_counter_regression_refuses_replay():
@@ -422,9 +420,7 @@ def test_counter_document_is_closed_and_duplicate_identity_is_rejected():
     document["counters"]["packets"] = 1
     assert error_code(lambda: _link_from_document(document)) == "snapshot-invalid"
 
-    duplicate = snapshot_document(
-        snapshot(0, links=(link(1_000_000, 1), link(1_000_000, 2)))
-    )
+    duplicate = snapshot_document(snapshot(0, links=(link(1_000_000, 1), link(1_000_000, 2))))
     assert error_code(lambda: _snapshot_from_document(duplicate)) == "snapshot-invalid"
 
 
@@ -470,9 +466,7 @@ def test_replay_error_detail_and_exact_size_boundaries(tmp_path, monkeypatch):
 
     path.write_bytes(b"{}\n")
     invalid_document = training_error(lambda: load_network_replay(path))
-    assert invalid_document.detail == (
-        "network replay line 1: network snapshot fields are invalid"
-    )
+    assert invalid_document.detail == ("network replay line 1: network snapshot fields are invalid")
 
     raw = write_replay(path, normal_snapshots(2))
     monkeypatch.setattr("omnitensor.training.network.MAX_REPLAY_BYTES", len(raw))
@@ -513,9 +507,7 @@ def test_training_snapshot_errors_preserve_stable_details():
         "network snapshot is not typed",
     )
     unhealthy = training_error(
-        lambda: network_feature_rows(
-            (snapshot(0, status=SourceStatus.UNAVAILABLE), snapshot(1))
-        )
+        lambda: network_feature_rows((snapshot(0, status=SourceStatus.UNAVAILABLE), snapshot(1)))
     )
     assert (unhealthy.code, unhealthy.detail) == (
         "snapshot-unhealthy",

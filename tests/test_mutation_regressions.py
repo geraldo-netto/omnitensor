@@ -59,9 +59,7 @@ def test_contract_bounds_refuse_instead_of_slicing_or_clamping():
         declared_inputs(overflow)
 
     scores = [float(index) for index in range(MAX_TOP_K + 1)]
-    assert len(
-        reduce_output(OutputSpec("classification", MAX_TOP_K), [scores])["top"]
-    ) == MAX_TOP_K
+    assert len(reduce_output(OutputSpec("classification", MAX_TOP_K), [scores])["top"]) == MAX_TOP_K
     with pytest.raises(ValueError, match=rf"\[1, {MAX_TOP_K}\]"):
         reduce_output(OutputSpec("classification", MAX_TOP_K + 1), [scores])
 
@@ -115,7 +113,9 @@ def test_control_rejections_and_acknowledgements_are_machine_readable():
         ({"version": 2}, "invalid"),
         (
             valid_command(
-                operation="set-profile-enabled", profileId="missing", value=True,
+                operation="set-profile-enabled",
+                profileId="missing",
+                value=True,
             ),
             "cmd-1",
         ),
@@ -161,7 +161,8 @@ def test_control_saves_exactly_the_published_state():
 
 def test_build_control_service_wires_a_store_at_the_given_path(tmp_path):
     control = build_control_service(
-        tmp_path / "policy.json", {"wl": ProfilePolicy(enabled=True, weight=2)},
+        tmp_path / "policy.json",
+        {"wl": ProfilePolicy(enabled=True, weight=2)},
     )
     apply(control, valid_command())
     persisted = json.loads((tmp_path / "policy.json").read_text())
@@ -175,14 +176,16 @@ def test_build_control_service_wires_a_store_at_the_given_path(tmp_path):
 
 def test_policy_save_writes_the_complete_policy_document(tmp_path):
     path = tmp_path / "policy.json"
-    PolicyStore(path, {}).save(PolicyState(
-        paused=False,
-        profiles={
-            "zeta": ProfilePolicy(enabled=True, weight=5),
-            "alpha": ProfilePolicy(enabled=False, weight=1),
-        },
-        revision=7,
-    ))
+    PolicyStore(path, {}).save(
+        PolicyState(
+            paused=False,
+            profiles={
+                "zeta": ProfilePolicy(enabled=True, weight=5),
+                "alpha": ProfilePolicy(enabled=False, weight=1),
+            },
+            revision=7,
+        )
+    )
     assert json.loads(path.read_text()) == {
         "deviceChoices": {},
         "modelChoices": {},
@@ -210,7 +213,10 @@ def device_kwargs(index: int = 0) -> dict:
     from omnitensor.discovery import Device
 
     return Device(
-        id=f"gpu-renderD{128 + index}", backend="gpu", name="AMD GPU", kind="dri",
+        id=f"gpu-renderD{128 + index}",
+        backend="gpu",
+        name="AMD GPU",
+        kind="dri",
     )
 
 
@@ -223,7 +229,10 @@ def test_snapshot_truncates_devices_to_the_contract_maximum():
 
 def test_snapshot_defaults_are_exact():
     snapshot = build_snapshot(
-        devices=[device_kwargs()], metrics={}, profiles={}, generated_at_ms=1234,
+        devices=[device_kwargs()],
+        metrics={},
+        profiles={},
+        generated_at_ms=1234,
     )
     assert snapshot["version"] == 1
     assert snapshot["generatedAt"] == 1234
@@ -460,7 +469,8 @@ def test_scheduler_worker_keeps_serving_after_going_idle():
         await scheduler.submit("tpu", "profile-a", "first", [])
         await asyncio.sleep(0.01)  # worker drains and goes back to waiting
         await asyncio.wait_for(
-            scheduler.submit("tpu", "profile-a", "second", []), timeout=2,
+            scheduler.submit("tpu", "profile-a", "second", []),
+            timeout=2,
         )
         assert [call[0] for call in executor.calls] == ["first", "second"]
         await scheduler.stop()
@@ -692,9 +702,7 @@ def test_optional_format_execution_preserves_the_legacy_executor_contract():
             return InferenceResult(outputs=["done"], duration_ms=0.0)
 
     aware = FormatAware()
-    assert run_executor(
-        aware, "misleading.onnx", [1], model_format="ncnn"
-    ).outputs == ["ncnn"]
+    assert run_executor(aware, "misleading.onnx", [1], model_format="ncnn").outputs == ["ncnn"]
     assert run_executor(aware, "legacy.param", [2]).outputs == ["legacy"]
     assert aware.calls == [
         ("format", "ncnn", "misleading.onnx", [1]),
@@ -981,7 +989,10 @@ def test_profile_statuses_expose_machine_readable_states():
             raise AssertionError("not executed")
 
     truncated = profile_statuses(
-        workloads, {"tpu": LongReasonExecutor()}, StatsScheduler(), policy,
+        workloads,
+        {"tpu": LongReasonExecutor()},
+        StatsScheduler(),
+        policy,
     )
     assert len(truncated["sample-workload"]["detail"]) == 240
 

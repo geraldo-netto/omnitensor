@@ -84,9 +84,7 @@ class ReplaySource:
 
     async def readiness(self) -> CollectorReadiness:
         if not self._snapshots:
-            return CollectorReadiness(
-                SourceStatus.UNAVAILABLE, f"{self._label} replay is empty", 0
-            )
+            return CollectorReadiness(SourceStatus.UNAVAILABLE, f"{self._label} replay is empty", 0)
         snapshot = self._snapshots[self._index]
         return CollectorReadiness(
             snapshot.status,
@@ -109,9 +107,7 @@ class ReplaySource:
 def _check_declared_plugin_id(collector_type: type) -> None:
     plugin_id = collector_type.__dict__.get("plugin_id")
     if not isinstance(plugin_id, str) or not plugin_id:
-        raise TypeError(
-            "BoundedCollector subclasses must declare a non-empty plugin_id"
-        )
+        raise TypeError("BoundedCollector subclasses must declare a non-empty plugin_id")
 
 
 class BoundedCollector(Generic[Sample]):
@@ -208,8 +204,7 @@ class BoundedCollector(Generic[Sample]):
         except Exception as error:  # noqa: BLE001 - host adapters fail arbitrarily
             return CollectorReadiness(
                 SourceStatus.UNAVAILABLE,
-                f"{self.readiness_label or self.label} readiness failed: "
-                f"{type(error).__name__}",
+                f"{self.readiness_label or self.label} readiness failed: {type(error).__name__}",
                 self._clock_ms(),
             )
         if (
@@ -232,9 +227,7 @@ class BoundedCollector(Generic[Sample]):
         """Read the source once and emit only what consent and bounds allow."""
         self._validate_trigger(trigger)
         if not self._permissions.allows(self.metadata_permission):
-            raise self.error_type(
-                "permission-denied", f"{self.label} permission is not granted"
-            )
+            raise self.error_type("permission-denied", f"{self.label} permission is not granted")
         snapshot = await self._source.snapshot()
         self._validate_snapshot(snapshot)
         items = self._snapshot_items(snapshot)
@@ -248,9 +241,7 @@ class BoundedCollector(Generic[Sample]):
         # it removed would be churn the user never experienced.
         current = {self.identity_of(item): item for item in eligible}
         authorized_previous = {
-            identity: item
-            for identity, item in self._previous.items()
-            if self._may_emit(identity)
+            identity: item for identity, item in self._previous.items() if self._may_emit(identity)
         }
         churn = self._churn(authorized_previous, current)
         document = self._output_document(
@@ -298,9 +289,7 @@ class BoundedCollector(Generic[Sample]):
         """Family-specific fields merged before validation and churn commit."""
         return {}
 
-    def _churn(
-        self, previous: dict[str, Sample], current: dict[str, Sample]
-    ) -> dict[str, list]:
+    def _churn(self, previous: dict[str, Sample], current: dict[str, Sample]) -> dict[str, list]:
         added = [
             self.identity_document(current[identity])
             for identity in sorted(current.keys() - previous.keys())
@@ -363,9 +352,7 @@ class BoundedCollector(Generic[Sample]):
                     "source-invalid", f"{self.label} item has an invalid type"
                 ) from error
             if not isinstance(identity, str) or not STABLE_ID.fullmatch(identity):
-                raise self.error_type(
-                    "source-invalid", f"{self.label} item identity is invalid"
-                )
+                raise self.error_type("source-invalid", f"{self.label} item identity is invalid")
 
 
 def validated_allowlist(allowed_ids: Collection[str]) -> frozenset[str]:

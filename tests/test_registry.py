@@ -1,5 +1,3 @@
-
-
 import pytest
 
 
@@ -74,9 +72,7 @@ def forecast_model(model_format="ncnn", **contract_changes):
         "version": "1.0.0",
         "format": model_format,
         "featureContract": forecast_contract(**contract_changes),
-        "tensorContract": {
-            "inputs": [{"shape": [1, 9], "dtype": "float32", "layout": "NC"}]
-        },
+        "tensorContract": {"inputs": [{"shape": [1, 9], "dtype": "float32", "layout": "NC"}]},
         "outputContract": {"kind": "raw"},
     }
 
@@ -102,9 +98,7 @@ def test_forecast_contract_refuses_same_shape_wrong_feature_order_across_lanes()
 def test_a_single_forecast_model_must_agree_with_its_tensor_semantics(change, expected):
     from omnitensor.registry import declared_models_error
 
-    assert expected in declared_models_error(
-        {"requirements": {"model": forecast_model(**change)}}
-    )
+    assert expected in declared_models_error({"requirements": {"model": forecast_model(**change)}})
 
 
 def test_a_forecast_contract_keeps_the_training_input_width_bound():
@@ -117,9 +111,7 @@ def test_a_forecast_contract_keeps_the_training_input_width_bound():
     model = forecast_model(featureNames=feature_names, window=128, targetFeature="feature-0")
     model["tensorContract"]["inputs"][0]["shape"] = [1, 640]
 
-    assert "exceeds 512 input values" in declared_models_error(
-        {"requirements": {"model": model}}
-    )
+    assert "exceeds 512 input values" in declared_models_error({"requirements": {"model": model}})
 
 
 @pytest.mark.parametrize(
@@ -134,11 +126,7 @@ def test_forecast_variants_must_repeat_every_semantic_field(change):
     from omnitensor.registry import declared_models_error
 
     assert "disagree about featureContract" in declared_models_error(
-        {
-            "requirements": {
-                "models": [forecast_model(), forecast_model("openvino", **change)]
-            }
-        }
+        {"requirements": {"models": [forecast_model(), forecast_model("openvino", **change)]}}
     )
 
 

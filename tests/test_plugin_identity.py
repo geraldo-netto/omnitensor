@@ -69,9 +69,7 @@ def forecast_manifest(plugin_id: str) -> dict:
         "fullyQuantized": False,
         "minimumCompilerVersion": "0.0.0",
         "minimumRuntimeVersion": "0.0.0",
-        "tensorContract": {
-            "inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]
-        },
+        "tensorContract": {"inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]},
         "featureContract": {
             "version": 1,
             "recipe": "forecast-v1",
@@ -132,9 +130,7 @@ def test_broken_candidates_are_rejected_without_hiding_valid_plugin(tmp_path):
         metadata_error="distribution metadata unavailable: RuntimeError",
     )
 
-    catalog = resolve_plugin_identities(
-        (missing, bundled_candidate(tmp_path), multiple, metadata)
-    )
+    catalog = resolve_plugin_identities((missing, bundled_candidate(tmp_path), multiple, metadata))
 
     assert [plugin.plugin_id for plugin in catalog.plugins] == ["bundled-plugin"]
     assert [rejection.entry_point_name for rejection in catalog.rejections] == [
@@ -147,9 +143,7 @@ def test_broken_candidates_are_rejected_without_hiding_valid_plugin(tmp_path):
         PluginRejectionCode.MANIFEST_COUNT,
         PluginRejectionCode.MANIFEST_COUNT,
     ]
-    assert catalog.rejections[0].detail == (
-        "distribution metadata unavailable: RuntimeError"
-    )
+    assert catalog.rejections[0].detail == ("distribution metadata unavailable: RuntimeError")
     assert catalog.rejections[1].detail == "candidate must provide exactly one manifest"
     assert catalog.rejections[1].distribution_name == "external-package"
 
@@ -165,9 +159,7 @@ def test_external_manifest_read_failures_are_bounded_and_redacted(tmp_path):
     oversized_path.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
     oversized = external_candidate(tmp_path, "oversized", paths=(oversized_path,))
 
-    catalog = resolve_plugin_identities(
-        (oversized, invalid, list_document, missing)
-    )
+    catalog = resolve_plugin_identities((oversized, invalid, list_document, missing))
 
     assert [(item.entry_point_name, item.code) for item in catalog.rejections] == [
         ("invalid-json", PluginRejectionCode.MANIFEST_IO),
@@ -326,8 +318,7 @@ def test_bundled_identity_must_belong_to_omnitensor(tmp_path):
     catalog = resolve_plugin_identities((wrong_distribution, missing_manifest))
 
     assert all(
-        rejection.code is PluginRejectionCode.IDENTITY_MISMATCH
-        for rejection in catalog.rejections
+        rejection.code is PluginRejectionCode.IDENTITY_MISMATCH for rejection in catalog.rejections
     )
     assert all(
         rejection.detail == "bundled candidate does not belong to OmniTensor"
@@ -366,10 +357,7 @@ def test_all_ambiguous_external_duplicates_are_rejected(tmp_path):
         "first-package",
         "second-package",
     ]
+    assert all(item.code is PluginRejectionCode.DUPLICATE_ID for item in catalog.rejections)
     assert all(
-        item.code is PluginRejectionCode.DUPLICATE_ID for item in catalog.rejections
-    )
-    assert all(
-        item.detail == "plugin ID is declared by multiple candidates"
-        for item in catalog.rejections
+        item.detail == "plugin ID is declared by multiple candidates" for item in catalog.rejections
     )

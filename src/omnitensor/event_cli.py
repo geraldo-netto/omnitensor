@@ -82,9 +82,7 @@ def legacy_selected_files(directory: Path, *, recursive: bool = False) -> tuple[
         raise EventClientError("directory-invalid", "input must be an existing absolute directory")
     iterator = root.rglob("*") if recursive else root.glob("*")
     paths = tuple(
-        str(path)
-        for path in sorted(iterator)
-        if path.is_file() and not path.is_symlink()
+        str(path) for path in sorted(iterator) if path.is_file() and not path.is_symlink()
     )
     # Reuse the workload's exact type, count, file, and size boundary.
     return tuple(source.item.path for source in select_sources("legacy-import", paths))

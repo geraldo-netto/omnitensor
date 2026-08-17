@@ -181,13 +181,9 @@ def run(argv: list[str]) -> tuple[int, str]:
         if arguments.command == "list":
             document = list_grants(ledger, arguments.plugin_id)
         elif arguments.command == "grant":
-            document = grant(
-                ledger, arguments.plugin_id, arguments.permission, arguments.reason
-            )
+            document = grant(ledger, arguments.plugin_id, arguments.permission, arguments.reason)
         else:
-            document = revoke(
-                ledger, arguments.plugin_id, arguments.permission, arguments.reason
-            )
+            document = revoke(ledger, arguments.plugin_id, arguments.permission, arguments.reason)
     except GrantError as error:
         # Named rather than raised: "permission-undeclared" tells somebody the
         # manifest never asked for it, which a traceback does not.

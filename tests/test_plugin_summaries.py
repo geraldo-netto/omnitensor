@@ -281,9 +281,7 @@ def test_registry_capacity_is_strict(maximum):
 
 def test_concurrent_publish_is_bounded_without_lost_or_partial_documents():
     counter = itertools.count()
-    instance = ResultSummaryRegistry(
-        alert_id_factory=lambda: f"alert-{next(counter)}"
-    )
+    instance = ResultSummaryRegistry(alert_id_factory=lambda: f"alert-{next(counter)}")
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         items = list(pool.map(lambda index: publish(instance, timestamp_ms=index), range(150)))

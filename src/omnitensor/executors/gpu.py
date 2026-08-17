@@ -31,6 +31,7 @@ GPU_PROVIDERS = ("CUDAExecutionProvider", "ROCMExecutionProvider")
 def _import_onnxruntime():  # pragma: no cover - trivial import shim
     try:
         import onnxruntime  # noqa: PLC0415
+
         return onnxruntime
     except ImportError:
         return None
@@ -88,9 +89,7 @@ class GpuExecutor:
         with self._sessions_lock:
             return self._sessions.get_or_build(
                 model_path,
-                lambda: self._runtime.InferenceSession(
-                    model_path, providers=self._providers()
-                ),
+                lambda: self._runtime.InferenceSession(model_path, providers=self._providers()),
             )
 
 
@@ -143,15 +142,15 @@ class CompositeGpuExecutor:
 
     def _executor_for(self, model_format: str, model_path: str):
         for executor in self._executors:
-            if (
-                model_format in executor.model_formats
-                and executor.availability().available
-            ):
+            if model_format in executor.model_formats and executor.availability().available:
                 return executor
         raise RuntimeError(f"No available GPU runtime for model: {model_path}")
 
     def run_for_format(
-        self, model_format: str, model_path: str, inputs: list,
+        self,
+        model_format: str,
+        model_path: str,
+        inputs: list,
     ) -> InferenceResult:
         """Run the lane selected by the manifest's declared model format."""
         return self._executor_for(model_format, model_path).run(model_path, inputs)

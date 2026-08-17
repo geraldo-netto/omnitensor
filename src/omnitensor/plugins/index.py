@@ -225,9 +225,7 @@ def validated_attributes(attributes: object) -> dict[str, object]:
 def prefixed_entry_id(digest: object, prefix: str, family: str) -> str:
     """Return a family entry ID while preserving the established digest contract."""
     if not isinstance(digest, str) or len(digest) != 64:
-        raise IndexStoreError(
-            "entry-invalid", f"{family} entry identity must be a sha256 digest"
-        )
+        raise IndexStoreError("entry-invalid", f"{family} entry identity must be a sha256 digest")
     return f"{prefix}{digest}"
 
 

@@ -131,9 +131,7 @@ def test_scanner_bounds_are_forwarded_to_repository_profiling(tmp_path):
     write(repo, "a.py")
     write(repo, "b.py")
 
-    [profile] = BuildMetadataIngestor(
-        [repo], permission_view(), max_files=1
-    ).profile()
+    [profile] = BuildMetadataIngestor([repo], permission_view(), max_files=1).profile()
 
     assert profile.file_count == 1
     assert profile.truncated is True
@@ -222,17 +220,13 @@ def test_one_build_record_is_a_valid_bound():
 
 
 def test_a_failed_build_carries_its_failed_checks():
-    accepted, _rejected = BuildMetadataIngestor(
-        ["/tmp"], permission_view()
-    ).accept_history(
+    accepted, _rejected = BuildMetadataIngestor(["/tmp"], permission_view()).accept_history(
         [record(outcome=BuildOutcome.FAILED, failed_checks=("lint", "types"))]
     )
     assert accepted[0].failed_checks == ("lint", "types")
 
 
 def test_a_missing_repository_profiles_as_empty(tmp_path):
-    [profile] = BuildMetadataIngestor(
-        [tmp_path / "absent"], permission_view()
-    ).profile()
+    [profile] = BuildMetadataIngestor([tmp_path / "absent"], permission_view()).profile()
     assert profile.file_count == 0
     assert profile.total_bytes == 0

@@ -37,9 +37,7 @@ def index(tmp_path, **changes):
 
 
 def test_an_ingested_document_becomes_an_indexable_entry():
-    item = document_entry(
-        ingested(), VECTOR, ("invoice",), {"pageCount": 3, "language": "pt-BR"}
-    )
+    item = document_entry(ingested(), VECTOR, ("invoice",), {"pageCount": 3, "language": "pt-BR"})
 
     assert item.entry_id == f"doc-{DIGEST}"
     assert item.attributes["format"] == "pdf"
@@ -48,9 +46,7 @@ def test_an_ingested_document_becomes_an_indexable_entry():
 
 
 def test_document_entry_allows_the_caller_to_override_derived_size_and_format():
-    item = document_entry(
-        ingested(), VECTOR, attributes={"sizeBytes": 7, "format": "reviewed"}
-    )
+    item = document_entry(ingested(), VECTOR, attributes={"sizeBytes": 7, "format": "reviewed"})
     assert item.attributes["sizeBytes"] == 7
     assert item.attributes["format"] == "reviewed"
 
@@ -192,9 +188,12 @@ def test_document_metadata_errors_keep_their_established_order(tmp_path, attribu
 
 @pytest.mark.parametrize("language", ["en", "pt-BR", "zh-Hans"])
 def test_a_well_formed_language_tag_is_accepted(tmp_path, language):
-    assert index(tmp_path).upsert(
-        [document_entry(ingested(), VECTOR, (), {"language": language})]
-    ).added == 1
+    assert (
+        index(tmp_path)
+        .upsert([document_entry(ingested(), VECTOR, (), {"language": language})])
+        .added
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -229,9 +228,7 @@ def test_a_deleted_document_is_removed_from_the_index(tmp_path):
 
 
 def test_the_index_survives_a_reload(tmp_path):
-    index(tmp_path).upsert(
-        [document_entry(ingested(), VECTOR, ("contract",), {"pageCount": 12})]
-    )
+    index(tmp_path).upsert([document_entry(ingested(), VECTOR, ("contract",), {"pageCount": 12})])
 
     state = index(tmp_path).load()
 

@@ -218,8 +218,7 @@ class PluginAdmissionQueue:
         pending = [
             profile_id
             for profile_id in self._order
-            if self._waiting[profile_id]
-            and (self._admits is None or self._admits(profile_id))
+            if self._waiting[profile_id] and (self._admits is None or self._admits(profile_id))
         ]
         if not pending:
             return None

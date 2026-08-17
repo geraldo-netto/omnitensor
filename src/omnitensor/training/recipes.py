@@ -101,9 +101,7 @@ _installed_source_matches = _fetch.installed_source_matches
 _source_file_matches = _fetch.source_file_matches
 
 
-def _validate_specialized_producer(
-    document: dict, producer: dict, inputs: list, kind: str
-) -> None:
+def _validate_specialized_producer(document: dict, producer: dict, inputs: list, kind: str) -> None:
     _validation.PRODUCER_VALIDATORS[kind].semantics(document, producer, inputs)
 
 

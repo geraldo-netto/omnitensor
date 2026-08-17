@@ -32,15 +32,10 @@ class SmokePlugin(ManagedPlugin):
         assert request.deadline_at_ms == 30_000
         if cancellation.cancelled:
             return cancelled_result(request, "cancelled", completed_at_ms=0)
-        await progress.report(
-            PluginProgress(request.job_id, "execute", 0.5, "smoke", 0)
-        )
+        await progress.report(PluginProgress(request.job_id, "execute", 0.5, "smoke", 0))
         return succeeded_result(
             request,
-            {
-                "value": request.payload["value"]
-                * self.configuration.optional("scale", int, 1)
-            },
+            {"value": request.payload["value"] * self.configuration.optional("scale", int, 1)},
             detail="smoke complete",
             completed_at_ms=0,
         )
@@ -48,9 +43,7 @@ class SmokePlugin(ManagedPlugin):
 
 class CancelledPlugin(SmokePlugin):
     async def execute(self, request, cancellation, progress):
-        return cancelled_result(
-            request, "fixture cancellation", completed_at_ms=0
-        )
+        return cancelled_result(request, "fixture cancellation", completed_at_ms=0)
 
 
 class FakeEntryPoint:
@@ -73,9 +66,7 @@ def test_installed_plugin_smoke_executes_a_complete_job():
             "smoke-plugin",
             {"value": 3},
             {"scale": 2},
-            entry_points_provider=lambda **selection: (
-                selections.append(selection) or [entry_point]
-            ),
+            entry_points_provider=lambda **selection: selections.append(selection) or [entry_point],
         )
 
     result = asyncio.run(scenario())
@@ -112,11 +103,7 @@ def test_smoke_contains_entry_point_enumeration_and_identity_failures():
         raise OSError("private")
 
     with pytest.raises(PluginSmokeError) as error:
-        asyncio.run(
-            run_installed_plugin_smoke(
-                "smoke-plugin", {}, entry_points_provider=fail
-            )
-        )
+        asyncio.run(run_installed_plugin_smoke("smoke-plugin", {}, entry_points_provider=fail))
     assert str(error.value) == "entry-point enumeration failed: OSError"
 
     for entries in ([], [FakeEntryPoint(), FakeEntryPoint()]):

@@ -72,9 +72,7 @@ def test_the_payload_the_client_builds_satisfies_the_manifest(workload_id):
     """The client's spec is a transcription of this manifest; this is the check
     that the transcription still says the same thing."""
     errors = sorted(
-        Draft202012Validator(input_schema(workload_id)).iter_errors(
-            CLIENT_PAYLOADS[workload_id]
-        ),
+        Draft202012Validator(input_schema(workload_id)).iter_errors(CLIENT_PAYLOADS[workload_id]),
         key=lambda error: error.path,
     )
 
@@ -100,9 +98,7 @@ def test_a_payload_missing_a_required_field_is_refused_by_the_manifest(workload_
         pytest.skip(f"{workload_id} requires nothing")
     for field in required:
         incomplete = {
-            name: value
-            for name, value in CLIENT_PAYLOADS[workload_id].items()
-            if name != field
+            name: value for name, value in CLIENT_PAYLOADS[workload_id].items() if name != field
         }
         errors = list(Draft202012Validator(schema).iter_errors(incomplete))
 

@@ -262,9 +262,7 @@ def changed_function_targets(
     selected = []
     for line in sorted(lines):
         containing = [
-            function
-            for function in functions
-            if function.first_line <= line <= function.last_line
+            function for function in functions if function.first_line <= line <= function.last_line
         ]
         if containing:
             selected.append(min(containing, key=lambda item: item.last_line - item.first_line))

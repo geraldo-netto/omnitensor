@@ -106,9 +106,7 @@ def test_all_gpu_identities_are_published_and_identical_hardware_is_disambiguate
         "gpu-renderD129",
         "gpu-renderD130",
     ]
-    assert [
-        (gpu.vendor, gpu.hardware_id, gpu.identity_index) for gpu in gpus
-    ] == [
+    assert [(gpu.vendor, gpu.hardware_id, gpu.identity_index) for gpu in gpus] == [
         ("0x1002", "0x73ff", 0),
         ("0x1002", "0x73ff", 1),
         ("0x8086", "0x46a6", 0),
@@ -129,15 +127,18 @@ def test_device_discovery_ignores_names_that_only_resemble_accelerators(fake_nod
 
 
 def test_a_node_removed_between_enumeration_and_inspection_is_ignored(fake_nodes):
-    assert discovery_module._detect_node(
-        fake_nodes.dev / "dri/renderD777",
-        fake_nodes.sys / "class/drm/renderD777/device/vendor",
-        discovery_module.GPU_VENDOR_NAMES,
-        "GPU (render node)",
-        "gpu-renderD777",
-        "gpu",
-        "dri",
-    ) is None
+    assert (
+        discovery_module._detect_node(
+            fake_nodes.dev / "dri/renderD777",
+            fake_nodes.sys / "class/drm/renderD777/device/vendor",
+            discovery_module.GPU_VENDOR_NAMES,
+            "GPU (render node)",
+            "gpu-renderD777",
+            "gpu",
+            "dri",
+        )
+        is None
+    )
 
 
 def test_combined_order_is_tpu_npu_gpu(fake_nodes):
@@ -166,6 +167,7 @@ def test_snapshot_entry_shape(fake_nodes):
 def test_gpu_utilization_reads_sysfs_busy_percent(fake_nodes):
     add_gpu(fake_nodes, node=128, vendor="0x1002")
     from omnitensor.discovery import device_utilization
+
     device = detect_gpu(fake_nodes)
     busy = fake_nodes.sys / "class/drm/renderD128/device/gpu_busy_percent"
     busy.write_text("37\n")
@@ -184,4 +186,5 @@ def test_gpu_utilization_reads_sysfs_busy_percent(fake_nodes):
 def test_utilization_only_applies_to_render_nodes(fake_nodes):
     add_npu(fake_nodes)
     from omnitensor.discovery import device_utilization
+
     assert device_utilization(fake_nodes, detect_npu(fake_nodes)) is None

@@ -45,9 +45,7 @@ class TestDeclaredBudget:
         assert call_timeout_for(document) == 90
 
     def test_a_declared_budget_outranks_the_derived_one(self):
-        document = manifest(
-            artifacts=[{"format": "gguf"}], budgets={"callTimeoutSeconds": 45}
-        )
+        document = manifest(artifacts=[{"format": "gguf"}], budgets={"callTimeoutSeconds": 45})
         assert call_timeout_for(document) == 45
 
     def test_an_unusable_budget_falls_back_rather_than_removing_the_bound(self):

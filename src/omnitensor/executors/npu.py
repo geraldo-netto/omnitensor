@@ -28,6 +28,7 @@ OPENVINO_DEVICE = "NPU"
 def _import_openvino():  # pragma: no cover - trivial import shim
     try:
         import openvino  # noqa: PLC0415
+
         return openvino
     except ImportError:
         return None

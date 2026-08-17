@@ -54,15 +54,10 @@ async def run_installed_plugin_smoke(
         "status": report.result.status.value,
         "output": dict(report.result.output),
         "detail": report.result.detail,
-        "progress": [
-            {"stage": item.stage, "fraction": item.fraction}
-            for item in report.progress
-        ],
+        "progress": [{"stage": item.stage, "fraction": item.fraction} for item in report.progress],
     }
     if report.result.status is not PluginResultStatus.SUCCEEDED:
-        raise PluginSmokeError(
-            f"plugin smoke job ended with status {report.result.status.value}"
-        )
+        raise PluginSmokeError(f"plugin smoke job ended with status {report.result.status.value}")
     return document
 
 
@@ -73,9 +68,7 @@ def _load_installed_plugin(
     try:
         candidates = tuple(entry_points_provider(group=PLUGIN_ENTRY_POINT_GROUP))
     except Exception as error:
-        raise PluginSmokeError(
-            f"entry-point enumeration failed: {type(error).__name__}"
-        ) from error
+        raise PluginSmokeError(f"entry-point enumeration failed: {type(error).__name__}") from error
     matches = [candidate for candidate in candidates if candidate.name == plugin_id]
     if len(matches) != 1:
         raise PluginSmokeError("plugin entry point is missing or ambiguous")

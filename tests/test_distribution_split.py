@@ -12,7 +12,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "src" / "omnitensor"
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "src" / "omnitensor"
+# The providers are the serving path too. Checking only `src/` missed that one
+# of them imported the trainers, which surfaced as a provider that could not be
+# imported at all on a machine with the service installed and nothing else.
+PROVIDERS = ROOT / "providers"
 
 
 def imported_names(path: Path):
@@ -25,15 +30,23 @@ def imported_names(path: Path):
                 yield alias.name
 
 
+def serving_modules():
+    for path in SOURCE.rglob("*.py"):
+        if "training" not in path.relative_to(SOURCE).parts:
+            yield path
+    for path in PROVIDERS.rglob("*.py"):
+        if "mutants" not in path.parts and "tests" not in path.parts:
+            yield path
+
+
 def test_the_serving_runtime_never_imports_the_producer_half():
     reaching = {
-        str(path.relative_to(SOURCE)): sorted(
+        str(path.relative_to(ROOT)): sorted(
             name
             for name in imported_names(path)
             if name.startswith(("omnitensor.training", ".training", "..training"))
         )
-        for path in SOURCE.rglob("*.py")
-        if "training" not in path.relative_to(SOURCE).parts
+        for path in serving_modules()
     }
 
     assert {path: names for path, names in reaching.items() if names} == {}

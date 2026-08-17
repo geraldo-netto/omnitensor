@@ -40,6 +40,7 @@ MAX_SVG_BYTES = 8 * 1024 * 1024
 MAX_RENDER_DIMENSION = 1600
 MAX_INFERENCE_DIMENSION = 768
 
+
 class AvMediaAdapter(MediaProbe, FrameSampler):
     """Decode metadata/audio/frames through bounded libav calls, never inference."""
 
@@ -297,9 +298,7 @@ def _svg_text(source: Path) -> str:
 
     root = ElementTree.fromstring(source.read_bytes())
     parts = (
-        "".join(node.itertext())
-        for node in root.iter()
-        if node.tag.rsplit("}", 1)[-1] == "text"
+        "".join(node.itertext()) for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "text"
     )
     return joined_visible_text(parts)
 
@@ -378,7 +377,6 @@ def _frame_at_or_after(decoded, stream, timestamp_ms: int):
     if fallback is not None:
         return fallback
     raise MediaTranscriptionError("frames-invalid", "video produced no frame at sample time")
-
 
 
 __all__ = ["AvMediaAdapter"]

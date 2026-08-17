@@ -54,9 +54,7 @@ def span_budget_tokens(output_tokens: int) -> int:
     """
     budget = int(output_tokens / (OUTPUT_HEADROOM * SPAN_SAFETY))
     if budget < 1:
-        raise TranslationError(
-            "budget-too-small", "the task's output budget cannot hold any span"
-        )
+        raise TranslationError("budget-too-small", "the task's output budget cannot hold any span")
     return budget
 
 

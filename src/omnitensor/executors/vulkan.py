@@ -71,8 +71,7 @@ def _requested_device(candidates, requested):
         matching = [
             item[2]
             for item in candidates
-            if (item[2].vendor_id, item[2].device_id)
-            == (requested.vendor_id, requested.device_id)
+            if (item[2].vendor_id, item[2].device_id) == (requested.vendor_id, requested.device_id)
         ]
         if requested.occurrence < len(matching):
             return matching[requested.occurrence]

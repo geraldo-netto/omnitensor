@@ -71,9 +71,7 @@ class QualifiedWorkload:
         model_path: Path,
         qualification: Qualification,
         embedder: BgeVulkanEmbedder | None = None,
-        additional_runtimes: tuple[
-            tuple[LlamaVulkanRuntime, Path, Qualification], ...
-        ] = (),
+        additional_runtimes: tuple[tuple[LlamaVulkanRuntime, Path, Qualification], ...] = (),
         load_receipt_path: Path | None = None,
         load_receipt_models: tuple[tuple[str, str], ...] = (),
     ) -> None:
@@ -154,9 +152,7 @@ class QualifiedWorkload:
         if clear_receipt_first:
             failure = _capture_sync_failure(self._clear_load_receipt, failure)
         for runtime, _model_path, _qualification in self._runtimes:
-            failure = await _capture_async_failure(
-                runtime.terminate("__startup__"), failure
-            )
+            failure = await _capture_async_failure(runtime.terminate("__startup__"), failure)
         failure = await _capture_async_failure(self._plugin.stop(), failure)
         if not clear_receipt_first:
             failure = _capture_sync_failure(self._clear_load_receipt, failure)
@@ -270,9 +266,7 @@ def create_selected_text_tools() -> QualifiedWorkload:
     if bootstrap.state_path is None:
         raise RuntimeError("selected-text load receipt state is unavailable")
     hebrew_model = bootstrap.require_artifact(HEBREW_ARTIFACT_ID)
-    hebrew_qualification = load_model_qualification(
-        hebrew_model.id, hebrew_model.sha256
-    )
+    hebrew_qualification = load_model_qualification(hebrew_model.id, hebrew_model.sha256)
     assert bootstrap.accelerator_lease_path is not None
     hebrew_runtime = HebrewTranslationRuntime(store, bootstrap.accelerator_lease_path)
     hebrew_descriptor = GenerationProviderDescriptor(

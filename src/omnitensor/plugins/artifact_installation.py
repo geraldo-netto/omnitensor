@@ -345,10 +345,7 @@ class ArtifactInstaller:
             except OSError as error:
                 return f"companion file is unreadable: {name}: {error}"
             if observed != expected:
-                return (
-                    "companion file does not match the digest its manifest declares: "
-                    f"{name}"
-                )
+                return f"companion file does not match the digest its manifest declares: {name}"
         return ""
 
     def activation(self, artifact_id: str) -> ArtifactActivation:

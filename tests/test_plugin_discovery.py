@@ -85,9 +85,7 @@ def test_discovery_combines_sorted_bundled_and_external_metadata_without_loading
     assert discovered[2].distribution_name == "external-dist"
     assert discovered[2].distribution_version == "2.0.0"
     assert discovered[2].entry_point_value == "alpha.module:Plugin"
-    assert discovered[2].manifest_paths == (
-        (dist_root / "pkg/omnitensor-plugin.json").resolve(),
-    )
+    assert discovered[2].manifest_paths == ((dist_root / "pkg/omnitensor-plugin.json").resolve(),)
     assert discovered[2].bundled_manifest is None
     assert discovered[2].metadata_error == ""
 
@@ -106,9 +104,7 @@ def test_external_sort_key_is_name_then_distribution_then_target(tmp_path):
         entry_points_provider=lambda **_selection: candidates,
     )
 
-    assert [
-        (item.distribution_name, item.entry_point_value) for item in discovered
-    ] == [
+    assert [(item.distribution_name, item.entry_point_value) for item in discovered] == [
         ("a-dist", "a.module:Plugin"),
         ("a-dist", "b.module:Plugin"),
         ("b-dist", "z.module:Plugin"),
@@ -129,9 +125,7 @@ def test_external_sort_key_handles_missing_distribution_and_target(tmp_path):
         entry_points_provider=lambda **_selection: candidates,
     )
 
-    assert [
-        (item.distribution_name, item.entry_point_value) for item in discovered
-    ] == [
+    assert [(item.distribution_name, item.entry_point_value) for item in discovered] == [
         (None, None),
         (None, "z.module:Plugin"),
         ("a-dist", "b.module:Plugin"),
@@ -227,8 +221,7 @@ def test_candidate_count_is_bounded(tmp_path):
 
 def test_candidate_count_accepts_the_exact_bound(tmp_path):
     candidates = [
-        FakeEntryPoint(f"plugin-{index}", "module:Plugin")
-        for index in range(MAX_PLUGIN_CANDIDATES)
+        FakeEntryPoint(f"plugin-{index}", "module:Plugin") for index in range(MAX_PLUGIN_CANDIDATES)
     ]
 
     discovered = discover_plugin_metadata(

@@ -160,9 +160,7 @@ def worker_filter(machine: str | None = None) -> bytes:
     if clone is not None:
         program.append(_instruction(_BPF_JEQ_K, 0, offset(allow_at), clone))
         program.append(_instruction(_BPF_LD_W_ABS, 0, 0, _OFFSET_ARG0_LOW))
-        program.append(
-            _instruction(_BPF_JSET_K, offset(allow_at), offset(eperm_at), CLONE_THREAD)
-        )
+        program.append(_instruction(_BPF_JSET_K, offset(allow_at), offset(eperm_at), CLONE_THREAD))
 
     assert len(program) == length, "filter layout and computed offsets disagree"
     program.append(_return(SECCOMP_RET_ALLOW))
@@ -246,9 +244,7 @@ def install_filter(program: bytes | None = None, *, machine: str | None = None, 
     # Without no_new_privs an unprivileged process may not install a filter at
     # all, and it is also what stops a setuid binary from escaping one.
     if library.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
-        raise SeccompInstallError(
-            f"could not set no_new_privs: {os.strerror(ctypes.get_errno())}"
-        )
+        raise SeccompInstallError(f"could not set no_new_privs: {os.strerror(ctypes.get_errno())}")
     buffer = ctypes.create_string_buffer(program, len(program))
     fprog = _SockFprog(instruction_count(program), ctypes.cast(buffer, ctypes.c_void_p))
     if library.syscall(number, SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(fprog)) != 0:

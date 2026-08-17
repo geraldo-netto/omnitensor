@@ -197,9 +197,7 @@ def load_document_acceptance_corpus(
     try:
         snapshot = read_bounded_json(corpus_path, MAX_CORPUS_BYTES)
     except JsonTooLargeError as error:
-        raise DocumentAcceptanceError(
-            "corpus-invalid", "corpus exceeds its byte limit"
-        ) from error
+        raise DocumentAcceptanceError("corpus-invalid", "corpus exceeds its byte limit") from error
     except OSError as error:
         raise DocumentAcceptanceError("corpus-invalid", "cannot read corpus") from error
     except (UnicodeError, ValueError) as error:
@@ -474,9 +472,7 @@ def _validate_bge_evidence(evidence: DocumentAcceptanceEvidence) -> str:
     if not isinstance(report, Mapping):
         raise DocumentAcceptanceError("evidence-invalid", "BGE report must be an object")
     if validate_document(DOCUMENT_MODEL_REPORT_SCHEMA, report):
-        raise DocumentAcceptanceError(
-            "device-unqualified", "BGE named-GPU evidence is invalid"
-        )
+        raise DocumentAcceptanceError("device-unqualified", "BGE named-GPU evidence is invalid")
     gate = report.get("nativeGate")
     device = report.get("device")
     if (
@@ -747,9 +743,7 @@ def _corpus_path() -> Path:
         Path(__file__).resolve().parent.parent / "evaluation-corpora" / "document-question-v1.json"
     )
     source = (
-        Path(__file__).resolve().parents[3]
-        / "evaluation-corpora"
-        / "document-question-v1.json"
+        Path(__file__).resolve().parents[3] / "evaluation-corpora" / "document-question-v1.json"
     )
     return discover_resource(package, source)
 

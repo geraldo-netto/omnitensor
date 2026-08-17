@@ -39,11 +39,7 @@ def resolved(manifest, source=PluginSource.EXTERNAL):
 
 
 def forecast_manifest(plugin_id: str, *, version: int = 2) -> dict:
-    manifest = (
-        sample_plugin_manifest(plugin_id)
-        if version == 2
-        else sample_manifest(plugin_id)
-    )
+    manifest = sample_plugin_manifest(plugin_id) if version == 2 else sample_manifest(plugin_id)
     manifest["requirements"]["accelerator"] = "gpu"
     manifest["requirements"]["acceleratorPreference"] = ["gpu"]
     manifest["requirements"]["model"] = {
@@ -54,9 +50,7 @@ def forecast_manifest(plugin_id: str, *, version: int = 2) -> dict:
         "fullyQuantized": False,
         "minimumCompilerVersion": "0.0.0",
         "minimumRuntimeVersion": "0.0.0",
-        "tensorContract": {
-            "inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]
-        },
+        "tensorContract": {"inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]},
         "featureContract": {
             "version": 1,
             "recipe": "forecast-v1",
@@ -99,9 +93,7 @@ def test_bundled_v1_adapter_is_schema_valid_fail_closed_and_non_mutating():
 
 def test_gate_adapts_only_bundled_v1_and_preserves_policy_fields():
     manifest = sample_manifest("legacy-plugin")
-    decision = PluginManifestCompatibilityGate().check(
-        resolved(manifest, PluginSource.BUNDLED)
-    )
+    decision = PluginManifestCompatibilityGate().check(resolved(manifest, PluginSource.BUNDLED))
 
     assert decision.compatible is True
     assert decision.code is ManifestCompatibilityCode.ADAPTED_V1
@@ -119,9 +111,7 @@ def test_gate_adapts_only_bundled_v1_and_preserves_policy_fields():
 
 def test_gate_preserves_valid_forecast_semantics_and_rejects_cross_field_drift():
     legacy = forecast_manifest("legacy-forecast", version=1)
-    adapted = PluginManifestCompatibilityGate().check(
-        resolved(legacy, PluginSource.BUNDLED)
-    )
+    adapted = PluginManifestCompatibilityGate().check(resolved(legacy, PluginSource.BUNDLED))
     assert adapted.compatible is True
     assert (
         adapted.plugin.manifest["requirements"]["model"]["featureContract"]
@@ -175,9 +165,7 @@ def test_gate_negotiates_highest_protocol_and_capability_intersection():
             "runtime API 2 is incompatible with 1",
         ),
         (
-            lambda manifest: manifest["plugin"]["protocol"].update(
-                minimum=2, maximum=4
-            ),
+            lambda manifest: manifest["plugin"]["protocol"].update(minimum=2, maximum=4),
             ManifestCompatibilityCode.PROTOCOL_VERSION,
             "plugin protocol 2-4 does not overlap runtime 1-1",
         ),
@@ -269,9 +257,7 @@ def test_manifest_migration_does_not_change_persisted_policy_state(tmp_path):
     )
     store.save(expected)
 
-    decision = PluginManifestCompatibilityGate().check(
-        resolved(manifest, PluginSource.BUNDLED)
-    )
+    decision = PluginManifestCompatibilityGate().check(resolved(manifest, PluginSource.BUNDLED))
 
     assert decision.compatible is True
     assert store.load() == expected

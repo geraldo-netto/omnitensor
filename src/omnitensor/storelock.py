@@ -55,9 +55,7 @@ def store_lock(
                 except BlockingIOError:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        raise TimeoutError(
-                            f"timed out acquiring store lock: {name}"
-                        ) from None
+                        raise TimeoutError(f"timed out acquiring store lock: {name}") from None
                     time.sleep(min(0.01, remaining))
         yield
     finally:

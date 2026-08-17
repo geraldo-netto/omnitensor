@@ -7,9 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .document_model_contracts import bundled_corpus_path
-from .document_model_installation import install_document_model
-from .document_model_types import (
+from ..document_model_types import (
     DEFAULT_ARTIFACT_ROOT,
     DEFAULT_BINDINGS_ROOT,
     DEFAULT_BUILD_ROOT,
@@ -17,6 +15,8 @@ from .document_model_types import (
     RECIPE_ID,
     DocumentModelError,
 )
+from .document_model_contracts import bundled_corpus_path
+from .document_model_installation import install_document_model
 from .recipe_fetch import fetch_model_sources
 from .recipe_model import ModelRecipeError
 from .recipe_registry import resolve_model_recipe_path

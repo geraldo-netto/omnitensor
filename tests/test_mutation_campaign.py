@@ -117,9 +117,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     ]
     assert sum(len(shard.selectors) for shard in manifest.shards) == 165
     modules = {
-        selector.split(".x", 1)[0]
-        for shard in manifest.shards
-        for selector in shard.selectors
+        selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
     assert modules == {
         "omnitensor.contract",
@@ -180,9 +178,9 @@ def test_source_inventory_uses_exact_function_and_method_encoding(tmp_path):
         "omnitensor.subject.x_inert",
         "omnitensor.subject.xǁWorkerǁrun",
     }
-    assert load_mutation_manifest(
-        _write_manifest(tmp_path, _document()), source_root=root
-    ).shard("subject").selectors == (
+    assert load_mutation_manifest(_write_manifest(tmp_path, _document()), source_root=root).shard(
+        "subject"
+    ).selectors == (
         "omnitensor.subject.x_alpha",
         "omnitensor.subject.xǁWorkerǁrun",
     )
@@ -192,9 +190,7 @@ def test_source_inventory_uses_exact_function_and_method_encoding(tmp_path):
     }
 
 
-def test_mutable_inventory_resolves_modules_and_requires_the_pinned_engine(
-    monkeypatch, tmp_path
-):
+def test_mutable_inventory_resolves_modules_and_requires_the_pinned_engine(monkeypatch, tmp_path):
     root = _source_root(tmp_path)
     package = root / "omnitensor/package"
     package.mkdir()
@@ -212,9 +208,7 @@ def test_mutable_inventory_resolves_modules_and_requires_the_pinned_engine(
     def missing_engine(_: str) -> str:
         raise importlib.metadata.PackageNotFoundError("mutmut")
 
-    monkeypatch.setattr(
-        "omnitensor.mutation_manifest.importlib.metadata.version", missing_engine
-    )
+    monkeypatch.setattr("omnitensor.mutation_manifest.importlib.metadata.version", missing_engine)
     with pytest.raises(ValueError, match="3.7.0 is required"):
         mutable_selector_inventory(root, frozenset({"omnitensor.subject"}))
 
@@ -245,9 +239,7 @@ def test_project_mutation_launcher_detaches_original_package_before_cli(monkeypa
     monkeypatch.setattr(
         mutation_engine, "disable_string_literal_mutations", lambda: calls.append("policy")
     )
-    monkeypatch.setattr(
-        mutation_engine, "_detach_project_imports", lambda: calls.append("detach")
-    )
+    monkeypatch.setattr(mutation_engine, "_detach_project_imports", lambda: calls.append("detach"))
     monkeypatch.setattr("mutmut.__main__.cli", lambda: calls.append("cli"))
     mutation_engine.main()
     assert calls == ["policy", "detach", "cli"]
@@ -287,9 +279,7 @@ def test_manifest_requires_every_and_only_mutation_bearing_callable(tmp_path):
             "must be unique",
         ),
         (
-            lambda document: document["shards"][0].update(
-                selectors=["omnitensor.subject.x_*"]
-            ),
+            lambda document: document["shards"][0].update(selectors=["omnitensor.subject.x_*"]),
             "without wildcards",
         ),
         (
@@ -324,9 +314,7 @@ def test_manifest_refuses_open_ambiguous_or_stale_scope(tmp_path, change, messag
             "blocked by OMNI-0297",
         ),
         (
-            lambda document: document["scope"].update(
-                onlyMutate=["src/omnitensor/*.py"]
-            ),
+            lambda document: document["scope"].update(onlyMutate=["src/omnitensor/*.py"]),
             "exact Python paths",
         ),
         (
@@ -338,9 +326,7 @@ def test_manifest_refuses_open_ambiguous_or_stale_scope(tmp_path, change, messag
             "nonempty array",
         ),
         (
-            lambda document: document["scope"].update(
-                onlyMutate=["src/omnitensor/missing.py"]
-            ),
+            lambda document: document["scope"].update(onlyMutate=["src/omnitensor/missing.py"]),
             "exactly match selector modules",
         ),
     ],
@@ -406,10 +392,7 @@ def test_campaign_builds_deterministic_shell_free_exact_commands():
         ("/venv/bin/mutmut", "results", "--all", "true"),
     )
     assert mutation_commands(shard)[0][0] == DEFAULT_MUTMUT_EXECUTABLE
-    assert (
-        str(Path(sys.executable).with_name("omnitensor-mutmut"))
-        == DEFAULT_MUTMUT_EXECUTABLE
-    )
+    assert str(Path(sys.executable).with_name("omnitensor-mutmut")) == DEFAULT_MUTMUT_EXECUTABLE
     assert Path(DEFAULT_MUTMUT_EXECUTABLE).is_file()
     with pytest.raises(ValueError, match="no selectors"):
         mutation_patterns(())
@@ -441,9 +424,7 @@ def test_campaign_runs_then_reports_and_gates_the_same_exact_selectors(tmp_path)
             {"check": False, "capture_output": True, "text": True},
         ),
     ]
-    assert report.read_text(encoding="utf-8") == (
-        "omnitensor.subject.x_alpha__mutmut_1: killed\n"
-    )
+    assert report.read_text(encoding="utf-8") == ("omnitensor.subject.x_alpha__mutmut_1: killed\n")
 
 
 @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ", max_size=512))
@@ -505,9 +486,12 @@ def test_campaign_cli_control_flow_without_expanding_selector_inventory(
 
     assert mutation_campaign.main(["manifest.json", "--list-shards"]) == 0
     assert capsys.readouterr().out == '["subject"]\n'
-    assert mutation_campaign.main(
-        ["manifest.json", "--list-shards", "--report", str(tmp_path / "report")]
-    ) == 2
+    assert (
+        mutation_campaign.main(
+            ["manifest.json", "--list-shards", "--report", str(tmp_path / "report")]
+        )
+        == 2
+    )
     assert "--report is invalid" in capsys.readouterr().out
     assert mutation_campaign.main(["manifest.json", "--shard", shard.name]) == 2
     assert "--report is required" in capsys.readouterr().out
@@ -535,6 +519,7 @@ def test_campaign_cli_control_flow_without_expanding_selector_inventory(
     )
     assert mutation_campaign.main(arguments) == 1
     assert "Per-callable mutation score below 90%" in capsys.readouterr().out
+
     def deny_manifest(*_args, **_kwargs):
         raise OSError("denied")
 
@@ -558,9 +543,10 @@ def test_campaign_cli_lists_manifest_shards_without_running_mutmut(capsys):
         "snapshot-forecast",
         "tensor-output",
     ]
-    assert mutation_campaign.main(
-        [str(MANIFEST), "--shard", "unknown", "--report", "/tmp/report"]
-    ) == 2
+    assert (
+        mutation_campaign.main([str(MANIFEST), "--shard", "unknown", "--report", "/tmp/report"])
+        == 2
+    )
     assert "no shard named unknown" in capsys.readouterr().out
 
 
@@ -609,9 +595,12 @@ def test_campaign_cli_gates_selected_shard_and_validates_mode_options(
     )
     assert mutation_campaign.main([str(MANIFEST), "--shard", "runtime-contract"]) == 2
     assert "--report is required" in capsys.readouterr().out
-    assert mutation_campaign.main(
-        [str(MANIFEST), "--list-shards", "--report", str(tmp_path / "report")]
-    ) == 2
+    assert (
+        mutation_campaign.main(
+            [str(MANIFEST), "--list-shards", "--report", str(tmp_path / "report")]
+        )
+        == 2
+    )
     assert "--report is invalid" in capsys.readouterr().out
 
 
@@ -624,23 +613,27 @@ def test_mutation_quality_accepts_the_same_manifest_shard(tmp_path, capsys):
         "\n".join(f"{selector}__mutmut_1: killed" for selector in shard.selectors),
         encoding="utf-8",
     )
-    assert mutation_quality_main(
-        [
-            str(report),
-            "--selector-file",
-            str(MANIFEST),
-            "--shard",
-            shard.name,
-            "--source-root",
-            str(ROOT / "src"),
-        ]
-    ) == 0
-    assert capsys.readouterr().out == (
-        "per-callable mutation score: 5 callables at or above 80%\n"
+    assert (
+        mutation_quality_main(
+            [
+                str(report),
+                "--selector-file",
+                str(MANIFEST),
+                "--shard",
+                shard.name,
+                "--source-root",
+                str(ROOT / "src"),
+            ]
+        )
+        == 0
     )
-    assert mutation_quality_main(
-        [str(report), "--selector-file", str(MANIFEST), "--source-root", str(ROOT / "src")]
-    ) == 2
+    assert capsys.readouterr().out == ("per-callable mutation score: 5 callables at or above 80%\n")
+    assert (
+        mutation_quality_main(
+            [str(report), "--selector-file", str(MANIFEST), "--source-root", str(ROOT / "src")]
+        )
+        == 2
+    )
     assert "--shard is required" in capsys.readouterr().out
 
 

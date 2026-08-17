@@ -67,9 +67,7 @@ def install_main(
             targets=selected,
             artifact_root=Path(arguments.artifact_root).expanduser(),
             bindings_root=Path(arguments.bindings_root).expanduser(),
-            build_root=(
-                Path(arguments.build_root).expanduser() if arguments.build_root else None
-            ),
+            build_root=(Path(arguments.build_root).expanduser() if arguments.build_root else None),
         )
     except (
         ArtifactInstallationError,

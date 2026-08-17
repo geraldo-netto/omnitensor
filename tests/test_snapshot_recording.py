@@ -63,12 +63,15 @@ def test_snapshot_recorder_deduplicates_and_refuses_time_travel(tmp_path):
     latest = runtime_snapshot(timestamp=2_000)
     selectors = ("queueDepth",)
 
-    assert record_runtime_snapshot(
-        latest,
-        profile_id="resource-scheduler",
-        selectors=selectors,
-        recorder=recorder,
-    ) is not None
+    assert (
+        record_runtime_snapshot(
+            latest,
+            profile_id="resource-scheduler",
+            selectors=selectors,
+            recorder=recorder,
+        )
+        is not None
+    )
     changed_duplicate = runtime_snapshot(timestamp=2_000, queue_depth=99)
     assert (
         record_runtime_snapshot(
@@ -103,9 +106,7 @@ def test_snapshot_recorder_deduplicates_and_refuses_time_travel(tmp_path):
         (("acceleratorLoad",), "unsupported selector: acceleratorLoad"),
     ],
 )
-def test_snapshot_recorder_refuses_unbounded_or_ambiguous_selectors(
-    tmp_path, selectors, detail
-):
+def test_snapshot_recorder_refuses_unbounded_or_ambiguous_selectors(tmp_path, selectors, detail):
     with pytest.raises(RecorderError) as captured:
         record_runtime_snapshot(
             runtime_snapshot(),
@@ -155,19 +156,21 @@ def test_snapshot_loader_is_bounded_and_contract_validating(tmp_path):
 
 
 def test_duplicate_in_an_older_retained_segment_is_still_skipped(tmp_path):
-    recorder = TelemetryRecorder(
-        tmp_path / "records", max_segment_bytes=100, max_segments=8
-    )
+    recorder = TelemetryRecorder(tmp_path / "records", max_segment_bytes=100, max_segments=8)
     for timestamp in range(1_000, 1_006):
-        assert recorder.record_unique(
-            "resource-scheduler", {"queueDepth": timestamp}, timestamp
-        ) is not None
+        assert (
+            recorder.record_unique("resource-scheduler", {"queueDepth": timestamp}, timestamp)
+            is not None
+        )
     assert recorder.segment_count("resource-scheduler") > 1
     before = recorder.rows("resource-scheduler")
 
-    assert recorder.record_unique(
-        "resource-scheduler", {"queueDepth": 999_999}, before[0].observed_at_ms
-    ) is None
+    assert (
+        recorder.record_unique(
+            "resource-scheduler", {"queueDepth": 999_999}, before[0].observed_at_ms
+        )
+        is None
+    )
     assert recorder.rows("resource-scheduler") == before
 
 
@@ -247,9 +250,10 @@ def test_snapshot_record_cli_uses_environment_and_default_records_root(
         "omnitensor.training.cli.DEFAULT_RECORDS_ROOT", str(tmp_path / "default-records")
     )
 
-    assert snapshot_record_main(
-        ["--profile", "resource-scheduler", "--selector", "runningProfiles"]
-    ) == 0
+    assert (
+        snapshot_record_main(["--profile", "resource-scheduler", "--selector", "runningProfiles"])
+        == 0
+    )
     assert json.loads(capsys.readouterr().out)["status"] == "recorded"
     [row] = TelemetryRecorder(tmp_path / "default-records").rows("resource-scheduler")
     assert row.features == {"runningProfiles": 2.0}
@@ -262,16 +266,19 @@ def test_snapshot_record_cli_honours_state_environment_and_has_stable_failure(
     path.write_text(json.dumps(runtime_snapshot()))
     monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(path))
 
-    assert snapshot_record_main(
-        [
-            "--profile",
-            "resource-scheduler",
-            "--selector",
-            "identity",
-            "--records-root",
-            str(tmp_path / "records"),
-        ]
-    ) == 1
+    assert (
+        snapshot_record_main(
+            [
+                "--profile",
+                "resource-scheduler",
+                "--selector",
+                "identity",
+                "--records-root",
+                str(tmp_path / "records"),
+            ]
+        )
+        == 1
+    )
     assert (
         capsys.readouterr().err
         == "snapshot recording failed: selectors-invalid: unsupported selector: identity\n"

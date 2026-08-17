@@ -61,9 +61,7 @@ def list_main(argv: list[str] | None = None) -> int:
                     "profileIds": list(recipe.profile_ids),
                     "sourceFormat": recipe.source_format,
                     "license": recipe.license.spdx,
-                    "targets": {
-                        target: claim.status for target, claim in recipe.targets.items()
-                    },
+                    "targets": {target: claim.status for target, claim in recipe.targets.items()},
                 }
                 for recipe in recipes
             ],

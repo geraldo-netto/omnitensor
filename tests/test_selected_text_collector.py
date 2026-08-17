@@ -98,9 +98,7 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
     case = SimpleNamespace(case_id="case-1", expected_provider_id="qwen3-8b-q4-k-m")
     corpus = SimpleNamespace(sha256="c" * 64, cases=(case,))
 
-    monkeypatch.setattr(
-        collector, "load_selected_text_worker_load_receipt", lambda _path: receipt
-    )
+    monkeypatch.setattr(collector, "load_selected_text_worker_load_receipt", lambda _path: receipt)
     monkeypatch.setattr(collector, "load_selected_text_corpus", lambda _path: corpus)
     monkeypatch.setattr(
         collector,
@@ -139,9 +137,7 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
     assert [method for method, _params in control.calls] == ["describe-plugins"]
 
 
-def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(
-    tmp_path, monkeypatch
-):
+def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(tmp_path, monkeypatch):
     collector = _collector_module()
     control = _install_control(monkeypatch, collector)
     writes = []
@@ -157,9 +153,7 @@ def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(
         "load_selected_text_corpus",
         lambda _path: pytest.fail("corpus was loaded"),
     )
-    monkeypatch.setattr(
-        collector, "file_digest", lambda _path: pytest.fail("model was digested")
-    )
+    monkeypatch.setattr(collector, "file_digest", lambda _path: pytest.fail("model was digested"))
     monkeypatch.setattr(
         collector,
         "write_json_atomic",
@@ -198,9 +192,7 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
     collector = _collector_module()
     receipt = _receipt()
     control = _install_control(monkeypatch, collector)
-    monkeypatch.setattr(
-        collector, "load_selected_text_worker_load_receipt", lambda _path: receipt
-    )
+    monkeypatch.setattr(collector, "load_selected_text_worker_load_receipt", lambda _path: receipt)
     monkeypatch.setattr(
         collector,
         "load_selected_text_corpus",

@@ -250,9 +250,7 @@ def test_live_revocation_stops_one_worker_without_recovery_and_cancels_orphans()
         monitor = supervisor._slots["alpha"].monitor
         recovery = asyncio.create_task(asyncio.sleep(60))
         supervisor._recoveries["alpha"] = recovery
-        supervisor._statuses["alpha"] = WorkerStatus(
-            "alpha", WorkerState.READY, 91, 2, "ready", 2
-        )
+        supervisor._statuses["alpha"] = WorkerStatus("alpha", WorkerState.READY, 91, 2, "ready", 2)
 
         status = await supervisor.revoke("alpha", "permission changed")
 
@@ -459,9 +457,7 @@ def test_supervisor_enforces_call_deadline_and_output_budget():
         await supervisor.start((spec,))
 
         with pytest.raises(PluginWorkerError) as rejected:
-            await supervisor.execute(
-                PluginRequest("job-1", "events", "manual", {}, 1, None)
-            )
+            await supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
 
         assert rejected.value.code == "deadline-exceeded"
         assert process.writer.closed is True
@@ -481,18 +477,22 @@ def test_supervisor_enforces_call_deadline_and_output_budget():
         )
         await supervisor.start((spec,))
         pending = asyncio.create_task(
-            supervisor.execute(
-                PluginRequest("job-1", "events", "manual", {}, 1, None)
-            )
+            supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
         )
         await asyncio.sleep(0)
-        process.reader.feed_data(encode_frame(result_frame(PluginResult(
-            "job-1",
-            PluginResultStatus.SUCCEEDED,
-            {"value": "x" * 128},
-            "",
-            2,
-        ))))
+        process.reader.feed_data(
+            encode_frame(
+                result_frame(
+                    PluginResult(
+                        "job-1",
+                        PluginResultStatus.SUCCEEDED,
+                        {"value": "x" * 128},
+                        "",
+                        2,
+                    )
+                )
+            )
+        )
 
         with pytest.raises(PluginWorkerError) as rejected:
             await pending
@@ -562,9 +562,7 @@ def test_supervisor_preserves_a_valid_worker_error_without_stopping_the_channel(
             "unexpected worker message: health",
         ),
         (
-            result_frame(
-                PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2)
-            ),
+            result_frame(PluginResult("other-job", PluginResultStatus.SUCCEEDED, {}, "done", 2)),
             "worker response names another request",
         ),
     ),
@@ -606,9 +604,7 @@ def test_supervisor_stops_and_evicts_a_protocol_desynchronised_worker(frame, det
         assert "events" not in supervisor._slots
         assert supervisor.statuses()[0].state is WorkerState.EXITED
         with pytest.raises(PluginWorkerError) as unavailable:
-            await supervisor.execute(
-                PluginRequest("job-2", "events", "manual", {}, 2, None)
-            )
+            await supervisor.execute(PluginRequest("job-2", "events", "manual", {}, 2, None))
         assert unavailable.value.code == "worker-unavailable"
         await supervisor.stop()
 

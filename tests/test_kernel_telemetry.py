@@ -116,10 +116,7 @@ def test_a_non_object_aggregate_is_refused():
 
 
 def test_aggregate_bounds_accept_their_exact_safe_limits():
-    histograms = [
-        {"name": f"h-{index}", "unit": "us", "buckets": []}
-        for index in range(64)
-    ]
+    histograms = [{"name": f"h-{index}", "unit": "us", "buckets": []} for index in range(64)]
     histograms[0]["buckets"] = [0] * 63 + [2**53 - 1]
     counters = [{"name": f"c-{index}", "value": 0} for index in range(64)]
     counters[-1]["value"] = 2**53 - 1
@@ -135,9 +132,7 @@ def test_aggregate_bounds_accept_their_exact_safe_limits():
 
 
 def test_an_omitted_histogram_unit_has_the_declared_nanosecond_default():
-    aggregate = parse_aggregate(
-        document(histograms=[{"name": "latency", "buckets": [1]}])
-    )
+    aggregate = parse_aggregate(document(histograms=[{"name": "latency", "buckets": [1]}]))
     assert aggregate.histograms[0].unit == "ns"
 
 
@@ -535,9 +530,7 @@ def test_the_helper_socket_serves_aggregates_or_bounded_errors(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("send_error", [BrokenPipeError("closed"), ConnectionResetError("reset")])
-def test_the_helper_survives_a_client_disconnect_while_writing(
-    monkeypatch, tmp_path, send_error
-):
+def test_the_helper_survives_a_client_disconnect_while_writing(monkeypatch, tmp_path, send_error):
     helper = load_helper()
     connection = FakeConnection(send_error)
     server = FakeServer(connection)
@@ -746,8 +739,14 @@ def test_a_worker_failure_reason_reaches_the_inventory_only_when_there_is_one():
     assert len(long["workerDetail"]) == 300
 
     for document in (silent, failed, long):
-        assert validate_document("plugin-inventory.schema.json", {
-            "version": 1,
-            "generatedAt": 1,
-            "plugins": [document],
-        }) == []
+        assert (
+            validate_document(
+                "plugin-inventory.schema.json",
+                {
+                    "version": 1,
+                    "generatedAt": 1,
+                    "plugins": [document],
+                },
+            )
+            == []
+        )

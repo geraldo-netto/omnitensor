@@ -95,11 +95,7 @@ class IngestionScan:
         seen: dict[str, list[str]] = {}
         for item in self.files:
             seen.setdefault(item.digest, []).append(item.path)
-        return {
-            digest: tuple(sorted(paths))
-            for digest, paths in seen.items()
-            if len(paths) > 1
-        }
+        return {digest: tuple(sorted(paths)) for digest, paths in seen.items() if len(paths) > 1}
 
 
 class OptedInRootScanner:

@@ -4,9 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = tuple(sorted((ROOT / ".github" / "workflows").glob("*.yml")))
-ACTION_REVISION = re.compile(
-    r"uses:\s+actions/[\w-]+@(?P<revision>[0-9a-f]{40})(?:\s+#\s+v\d+)?$"
-)
+ACTION_REVISION = re.compile(r"uses:\s+actions/[\w-]+@(?P<revision>[0-9a-f]{40})(?:\s+#\s+v\d+)?$")
 
 
 def test_root_lock_covers_ci_tooling() -> None:

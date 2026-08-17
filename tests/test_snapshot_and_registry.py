@@ -50,9 +50,7 @@ def test_snapshot_default_timestamp_floors_at_the_first_epoch_millisecond(
     add_pcie_tpu(fake_nodes)
     monkeypatch.setattr(snapshot_module.time, "time", lambda: epoch_seconds)
 
-    document = build_snapshot(
-        devices=detect_devices(fake_nodes), metrics={}, profiles={}
-    )
+    document = build_snapshot(devices=detect_devices(fake_nodes), metrics={}, profiles={})
 
     assert document["generatedAt"] == 1
 
@@ -243,8 +241,9 @@ def test_registry_wraps_unreadable_manifest_in_manifest_error(tmp_path):
 
 def test_registry_loads_valid_manifests_and_preference(tmp_path):
     write_workload(tmp_path, sample_manifest())
-    write_workload(tmp_path, sample_manifest("gpu-workload", accelerator="gpu",
-                                             acceleratorPreference=["gpu"]))
+    write_workload(
+        tmp_path, sample_manifest("gpu-workload", accelerator="gpu", acceleratorPreference=["gpu"])
+    )
     workloads = load_workloads(tmp_path)
     assert sorted(workloads) == ["gpu-workload", "sample-workload"]
     assert workloads["sample-workload"].preference == ("tpu", "npu", "gpu")
@@ -254,12 +253,14 @@ def test_registry_loads_valid_manifests_and_preference(tmp_path):
 
 def test_registry_loads_a_strict_plugin_manifest_v2(tmp_path):
     manifest = sample_plugin_manifest()
-    manifest["plugin"]["artifacts"] = [{
-        "id": "sample-model",
-        "version": "1.2.3",
-        "format": "tflite-edgetpu",
-        "sha256": "a" * 64,
-    }]
+    manifest["plugin"]["artifacts"] = [
+        {
+            "id": "sample-model",
+            "version": "1.2.3",
+            "format": "tflite-edgetpu",
+            "sha256": "a" * 64,
+        }
+    ]
     manifest["plugin"]["permissions"] = ["read:/sys/class/hwmon/*"]
     manifest["plugin"]["triggers"] = ["manual", "periodic"]
     write_workload(tmp_path, manifest)
@@ -281,17 +282,28 @@ def test_registry_loads_a_strict_plugin_manifest_v2(tmp_path):
             lambda manifest: manifest["plugin"].update({"triggers": ["manual", "manual"]}),
             "triggers",
         ),
-        (lambda manifest: manifest["plugin"].update({"permissions": ["ambient-root"]}),
-         "permissions"),
-        (lambda manifest: manifest["plugin"]["protocol"].update({"minimum": 0}),
-         "minimum"),
-        (lambda manifest: manifest["plugin"]["artifacts"].append({
-            "id": "model", "version": "1.0.0", "format": "onnx", "sha256": "bad",
-        }), "sha256"),
+        (
+            lambda manifest: manifest["plugin"].update({"permissions": ["ambient-root"]}),
+            "permissions",
+        ),
+        (lambda manifest: manifest["plugin"]["protocol"].update({"minimum": 0}), "minimum"),
+        (
+            lambda manifest: manifest["plugin"]["artifacts"].append(
+                {
+                    "id": "model",
+                    "version": "1.0.0",
+                    "format": "onnx",
+                    "sha256": "bad",
+                }
+            ),
+            "sha256",
+        ),
     ],
 )
 def test_plugin_manifest_v2_rejects_unbounded_or_malformed_contracts(
-    tmp_path, mutate, expected,
+    tmp_path,
+    mutate,
+    expected,
 ):
     manifest = sample_plugin_manifest()
     mutate(manifest)
@@ -324,7 +336,9 @@ def test_registry_default_preference_when_omitted(tmp_path):
     ],
 )
 def test_registry_rejects_preference_not_led_by_the_designed_for_accelerator(
-    tmp_path, accelerator, preference,
+    tmp_path,
+    accelerator,
+    preference,
 ):
     """The applet's own manifest checker enforces this; so must the schema."""
     manifest = sample_manifest(accelerator=accelerator, acceleratorPreference=preference)
@@ -342,7 +356,9 @@ def test_registry_rejects_preference_not_led_by_the_designed_for_accelerator(
     ],
 )
 def test_registry_accepts_preference_led_by_the_designed_for_accelerator(
-    tmp_path, accelerator, preference,
+    tmp_path,
+    accelerator,
+    preference,
 ):
     manifest = sample_manifest(accelerator=accelerator, acceleratorPreference=preference)
     write_workload(tmp_path, manifest)
@@ -510,9 +526,7 @@ def test_catalog_skips_an_oversized_user_manifest(tmp_path):
     user = tmp_path / "user"
     write_workload(bundled, sample_manifest("bundled-workload"))
     write_workload(user, sample_manifest("huge-workload"))
-    (user / "huge-workload/manifest.json").write_bytes(
-        b" " * (registry.MAX_MANIFEST_BYTES + 1)
-    )
+    (user / "huge-workload/manifest.json").write_bytes(b" " * (registry.MAX_MANIFEST_BYTES + 1))
 
     assert sorted(load_workload_catalog(user, bundled_root=bundled)) == ["bundled-workload"]
 
@@ -598,8 +612,7 @@ def test_a_schema_that_was_never_readable_still_raises(monkeypatch, tmp_path):
 
 
 def test_a_manifest_may_declare_a_model_digest(tmp_path):
-    manifest = sample_manifest("digest-workload", accelerator="gpu",
-                               acceleratorPreference=["gpu"])
+    manifest = sample_manifest("digest-workload", accelerator="gpu", acceleratorPreference=["gpu"])
     manifest["requirements"]["model"] = {
         "id": "sample-model",
         "version": "1.2.3",
@@ -617,8 +630,7 @@ def test_a_manifest_may_declare_a_model_digest(tmp_path):
 
 
 def test_a_malformed_model_digest_is_rejected(tmp_path):
-    manifest = sample_manifest("bad-digest", accelerator="gpu",
-                               acceleratorPreference=["gpu"])
+    manifest = sample_manifest("bad-digest", accelerator="gpu", acceleratorPreference=["gpu"])
     manifest["requirements"]["model"] = {
         "id": "sample-model",
         "version": "1.2.3",

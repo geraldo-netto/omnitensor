@@ -158,9 +158,7 @@ def _reconstruct_rgb(tensor, width: int, height: int) -> bytes:
             "runtime-unavailable", "install OmniTensor with the gpu extra for Pillow and NumPy"
         ) from error
     pixels = numpy.transpose(tensor[0], (1, 2, 0))
-    encoded = numpy.floor(pixels * numpy.float32(255.0) + numpy.float32(0.5)).astype(
-        numpy.uint8
-    )
+    encoded = numpy.floor(pixels * numpy.float32(255.0) + numpy.float32(0.5)).astype(numpy.uint8)
     image = Image.fromarray(encoded, mode="RGB")
     if image.size != (width, height):
         image = image.resize((width, height), Image.Resampling.BICUBIC)

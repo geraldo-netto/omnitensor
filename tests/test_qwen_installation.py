@@ -203,9 +203,7 @@ def test_parser_exposes_the_exact_required_path_and_license_contract():
         if action.dest != "help"
     }
 
-    assert parser.description == (
-        "Verify and install pinned artifacts for Qwen workload providers"
-    )
+    assert parser.description == ("Verify and install pinned artifacts for Qwen workload providers")
     assert actions == {
         "artifact_root": (("--artifact-root",), Path, True),
         "qwen_model": (("--qwen-model",), Path, True),
@@ -317,13 +315,13 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(
         if artifact["id"] == QWEN_REFERENCE.id
     ]
     assert qwen_artifacts == [
-            {
-                "id": QWEN_REFERENCE.id,
-                "version": QWEN_REFERENCE.version,
-                "format": QWEN_REFERENCE.format,
-                "sha256": QWEN_REFERENCE.sha256,
-            }
-        ]
+        {
+            "id": QWEN_REFERENCE.id,
+            "version": QWEN_REFERENCE.version,
+            "format": QWEN_REFERENCE.format,
+            "sha256": QWEN_REFERENCE.sha256,
+        }
+    ]
     assert "accelerator:gpu" in manifest["plugin"]["permissions"]
     assert validate_document("workload-manifest.schema.json", manifest) == []
     assert force_include == {
@@ -374,7 +372,6 @@ def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
             "selected-text-tools",
         ],
         "scope": (
-            "frozen per-workload acceptance on the named GPU; "
-            "arbitrary-domain quality not claimed"
+            "frozen per-workload acceptance on the named GPU; arbitrary-domain quality not claimed"
         ),
     }

@@ -66,9 +66,7 @@ def test_cli_facade_preserves_private_helpers_and_live_dependencies(monkeypatch)
     assert dependencies.binding_loader is loader
 
 
-def test_forecast_training_resolves_the_live_facade_feature_parser(
-    monkeypatch, tmp_path, capsys
-):
+def test_forecast_training_resolves_the_live_facade_feature_parser(monkeypatch, tmp_path, capsys):
     observed = []
 
     class Trainer:
@@ -154,20 +152,17 @@ def test_cli_leaves_import_before_facade_without_backedges():
     )
 
     for name in modules:
-        tree = ast.parse(
-            (ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8")
-        )
+        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
         assert not any(
-            isinstance(node, ast.ImportFrom) and node.module == "cli"
-            for node in ast.walk(tree)
+            isinstance(node, ast.ImportFrom) and node.module == "cli" for node in ast.walk(tree)
         )
 
 
 def test_console_targets_stay_on_facade_and_numeric_promotion_stays_separate():
     # The trainer entry points ship with the trainers, in their own distribution.
-    project = (
-        ROOT / "packaging" / "omnitensor-training" / "pyproject.toml"
-    ).read_text(encoding="utf-8")
+    project = (ROOT / "packaging" / "omnitensor-training" / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
     targets = (
         "record_main",
         "snapshot_record_main",

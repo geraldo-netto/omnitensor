@@ -173,9 +173,7 @@ def test_retinexformer_gate_refuses_bad_source_and_component_contract(monkeypatc
         )
 
 
-def test_pinned_loader_executes_exact_architecture_and_strict_checkpoint(
-    tmp_path, monkeypatch
-):
+def test_pinned_loader_executes_exact_architecture_and_strict_checkpoint(tmp_path, monkeypatch):
     fetched = _fetched(tmp_path)
     calls = {}
 
@@ -334,6 +332,7 @@ def test_torch_exporter_freezes_clamped_image_contract(tmp_path, monkeypatch):
         return real_onnx_load(path, load_external_data=load_external_data)
 
     monkeypatch.setattr(onnx, "load", checked_onnx_load)
+
     def load(source):
         assert source is fetched
         return candidate
@@ -428,9 +427,7 @@ def test_produce_retinexformer_emits_private_evidence_report(tmp_path, monkeypat
     )
     report = json.loads(produced.report_path.read_text())
     assert produced.model_path.read_bytes() == b"portable-retinexformer"
-    assert produced.report_path.read_bytes() == json.dumps(
-        report, separators=(",", ":")
-    ).encode()
+    assert produced.report_path.read_bytes() == json.dumps(report, separators=(",", ":")).encode()
     assert tuple(report) == (
         "reportVersion",
         "kind",
@@ -460,10 +457,7 @@ def test_produce_retinexformer_emits_private_evidence_report(tmp_path, monkeypat
         "accepted",
     )
     assert tuple(report["nativeTargets"]) == ("gpu", "npu", "tpu")
-    assert all(
-        tuple(claim) == ("status", "reason")
-        for claim in report["nativeTargets"].values()
-    )
+    assert all(tuple(claim) == ("status", "reason") for claim in report["nativeTargets"].values())
     generic = {
         "status": "unqualified",
         "reason": "no target compiler, native parity, or named-device evidence was run",

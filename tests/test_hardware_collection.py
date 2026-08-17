@@ -57,9 +57,7 @@ def snapshot(*samples, status=SourceStatus.READY, observed_at_ms=10):
 
 def collector(*samples, allowed=(CPU,), granted=(CPU,), **changes):
     source = ReplaySource([snapshot(*samples)], label="hardware")
-    return HardwareHealthCollector(
-        source, permissions(*granted), allowed, **changes
-    )
+    return HardwareHealthCollector(source, permissions(*granted), allowed, **changes)
 
 
 def trigger(payload=None, *, plugin_id=HARDWARE_HEALTH_PLUGIN_ID):
@@ -92,9 +90,7 @@ def test_only_allowlisted_and_granted_sensors_are_emitted():
 
 def test_a_missing_sensor_is_reported_rather_than_read_as_zero():
     """An absent thermal probe is not a cool machine."""
-    payload = collect(
-        collector(sample(CPU, health=SensorHealth.MISSING, value=None))
-    )
+    payload = collect(collector(sample(CPU, health=SensorHealth.MISSING, value=None)))
 
     [item] = payload["items"]
     assert item["health"] == "missing"
@@ -128,9 +124,7 @@ def test_a_service_percentage_is_bounded():
 
 def test_collection_without_the_metadata_grant_is_refused():
     source = ReplaySource([snapshot()], label="hardware")
-    subject = HardwareHealthCollector(
-        source, permissions(CPU, metadata=False), (CPU,)
-    )
+    subject = HardwareHealthCollector(source, permissions(CPU, metadata=False), (CPU,))
     with pytest.raises(CollectionError, match="permission-denied"):
         collect(subject)
 
@@ -188,9 +182,7 @@ def test_emission_is_bounded_and_truncation_is_reported():
 
 def test_churn_covers_every_eligible_sensor_not_only_the_emitted_ones():
     """A sensor past the cap is still attached, so it is not a removal."""
-    source = ReplaySource(
-        [snapshot(sample("sensor-a"), sample("sensor-b"))] * 2, label="hardware"
-    )
+    source = ReplaySource([snapshot(sample("sensor-a"), sample("sensor-b"))] * 2, label="hardware")
     subject = HardwareHealthCollector(
         source, permissions("sensor-a", "sensor-b"), ("sensor-a", "sensor-b"), max_items=1
     )
@@ -225,9 +217,7 @@ def test_a_sensor_that_disappears_is_reported_as_removed():
     source = ReplaySource(
         [snapshot(sample(CPU), sample(DIMM)), snapshot(sample(CPU))], label="hardware"
     )
-    subject = HardwareHealthCollector(
-        source, permissions(CPU, DIMM), (CPU, DIMM)
-    )
+    subject = HardwareHealthCollector(source, permissions(CPU, DIMM), (CPU, DIMM))
 
     asyncio.run(subject.collect(trigger()))
     second = asyncio.run(subject.collect(trigger())).payload
@@ -282,9 +272,7 @@ def test_a_trigger_for_another_plugin_is_refused():
         asyncio.run(collector().collect(trigger(plugin_id="other-plugin")))
 
     assert caught.value.code == "trigger-invalid"
-    assert caught.value.detail == (
-        "hardware health metadata requires a hardware-health trigger"
-    )
+    assert caught.value.detail == ("hardware health metadata requires a hardware-health trigger")
 
 
 @given(plugin_id=st.text().filter(lambda value: value != HARDWARE_HEALTH_PLUGIN_ID))

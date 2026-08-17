@@ -125,9 +125,7 @@ def test_a_shape_that_disagrees_with_the_file_is_refused(tmp_path):
     path, digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
 
     with pytest.raises(TensorReferenceError) as failure:
-        load_referenced_tensor(
-            parse_reference(reference(path, digest, (3, 3))), roots(tmp_path)
-        )
+        load_referenced_tensor(parse_reference(reference(path, digest, (3, 3))), roots(tmp_path))
 
     assert failure.value.code == "input-ref-mismatch"
     assert "36 bytes" in failure.value.detail
@@ -137,9 +135,7 @@ def test_a_file_that_does_not_match_its_digest_is_refused(tmp_path):
     path, _digest = buffer_file(tmp_path, [1.0, 2.0])
 
     with pytest.raises(TensorReferenceError, match="declared sha256"):
-        load_referenced_tensor(
-            parse_reference(reference(path, "b" * 64, (2,))), roots(tmp_path)
-        )
+        load_referenced_tensor(parse_reference(reference(path, "b" * 64, (2,))), roots(tmp_path))
 
 
 def test_a_digest_is_required(tmp_path):
@@ -296,9 +292,7 @@ def test_a_file_that_changed_size_after_the_check_is_refused(tmp_path):
         load_referenced_tensor(document, roots(tmp_path))
 
 
-def test_a_file_that_grows_between_the_check_and_the_read_is_still_bounded(
-    tmp_path, monkeypatch
-):
+def test_a_file_that_grows_between_the_check_and_the_read_is_still_bounded(tmp_path, monkeypatch):
     """Simulates the race the size check alone cannot close."""
     path, digest = buffer_file(tmp_path, [1.0, 2.0])
     document = parse_reference(reference(path, digest, (2,)))
@@ -323,8 +317,7 @@ def test_verification_accepts_a_reference_without_reading_it_into_a_tensor(tmp_p
     path, digest = buffer_file(tmp_path, [1.0, 2.0, 3.0, 4.0])
 
     assert (
-        verify_reference(parse_reference(reference(path, digest, (2, 2))), roots(tmp_path))
-        is None
+        verify_reference(parse_reference(reference(path, digest, (2, 2))), roots(tmp_path)) is None
     )
 
 
@@ -476,20 +469,14 @@ def test_shared_reader_carries_float_elements_for_both_retention_modes(
     )
 )
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-def test_shared_reader_property_hashes_finite_floats_and_controls_retention(
-    tmp_path, values
-):
+def test_shared_reader_property_hashes_finite_floats_and_controls_retention(tmp_path, values):
     payload = struct.pack(f"<{len(values)}f", *values)
     path = tmp_path / "property.f32"
     path.write_bytes(payload)
     reference = TensorReference(path, (len(values),), "float32", "unused")
 
-    discarded, checked_digest = _read_reference(
-        reference, len(payload), retain_bytes=False
-    )
-    retained, loaded_digest = _read_reference(
-        reference, len(payload), retain_bytes=True
-    )
+    discarded, checked_digest = _read_reference(reference, len(payload), retain_bytes=False)
+    retained, loaded_digest = _read_reference(reference, len(payload), retain_bytes=True)
 
     assert discarded is None
     assert retained == payload
@@ -497,17 +484,13 @@ def test_shared_reader_property_hashes_finite_floats_and_controls_retention(
 
 
 @pytest.mark.parametrize("retain_bytes", [False, True])
-def test_shared_reader_accepts_exact_max_and_refuses_one_byte_less(
-    tmp_path, retain_bytes
-):
+def test_shared_reader_accepts_exact_max_and_refuses_one_byte_less(tmp_path, retain_bytes):
     payload = struct.pack("<2f", 1.0, 2.0)
     path = tmp_path / "bounded.f32"
     path.write_bytes(payload)
     reference = TensorReference(path, (2,), "float32", _digest(path))
 
-    retained, digest = _read_reference(
-        reference, len(payload), retain_bytes=retain_bytes
-    )
+    retained, digest = _read_reference(reference, len(payload), retain_bytes=retain_bytes)
     assert retained == (payload if retain_bytes else None)
     assert digest == hashlib.sha256(payload).hexdigest()
 
@@ -550,9 +533,7 @@ def test_an_integer_buffer_is_digested_without_a_finiteness_check(
 
     monkeypatch.setattr(tensorref, "_refuse_non_finite", unexpected_scan)
 
-    retained, digest = _read_reference(
-        reference, len(payload), retain_bytes=retain_bytes
-    )
+    retained, digest = _read_reference(reference, len(payload), retain_bytes=retain_bytes)
 
     assert retained == (payload if retain_bytes else None)
     assert digest == reference.sha256

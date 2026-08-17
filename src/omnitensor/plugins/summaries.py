@@ -81,9 +81,7 @@ class ResultSummaryRegistry:
             or not isinstance(max_summaries, int)
             or not 1 <= max_summaries <= MAX_RESULT_SUMMARIES
         ):
-            raise ValueError(
-                f"max_summaries must be between 1 and {MAX_RESULT_SUMMARIES}"
-            )
+            raise ValueError(f"max_summaries must be between 1 and {MAX_RESULT_SUMMARIES}")
         if not callable(alert_id_factory):
             raise TypeError("alert_id_factory must be callable")
         self._max_summaries = max_summaries
@@ -210,9 +208,7 @@ def _optional_probability(name: str, value: object) -> float | None:
         or not math.isfinite(value)
         or not 0 <= value <= 1
     ):
-        raise SummaryError(
-            "invalid-probability", f"{name} must be finite and between 0 and 1"
-        )
+        raise SummaryError("invalid-probability", f"{name} must be finite and between 0 and 1")
     return float(value)
 
 
@@ -245,6 +241,4 @@ def _validate_public_id(name: str, value: object, maximum: int) -> None:
 
 def _validate_timestamp(value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise SummaryError(
-            "invalid-timestamp", "timestamp_ms must be a non-negative integer"
-        )
+        raise SummaryError("invalid-timestamp", "timestamp_ms must be a non-negative integer")

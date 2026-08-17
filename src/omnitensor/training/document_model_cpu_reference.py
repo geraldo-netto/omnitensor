@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .document_model_runners import BgeTokenizer
-from .document_model_types import (
+from ..document_model_runners import BgeTokenizer
+from ..document_model_types import (
     PRODUCER_CPU_REFERENCE_BACKEND,
     DocumentModelError,
 )

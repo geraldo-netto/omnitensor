@@ -345,6 +345,4 @@ async def call_control(
     try:
         return await asyncio.wait_for(exchange(), timeout_s)
     except TimeoutError:
-        raise ControlSocketError(
-            "timeout", f"no reply within {timeout_s:g}s from {path}"
-        ) from None
+        raise ControlSocketError("timeout", f"no reply within {timeout_s:g}s from {path}") from None

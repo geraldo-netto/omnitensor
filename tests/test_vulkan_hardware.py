@@ -77,9 +77,7 @@ def test_a_dispatched_job_runs_on_a_real_vulkan_device(absval_model):
     if not availability.available:
         pytest.skip(f"no usable Vulkan device: {availability.reason}")
 
-    manifest = sample_manifest(
-        "absval-workload", accelerator="gpu", acceleratorPreference=["gpu"]
-    )
+    manifest = sample_manifest("absval-workload", accelerator="gpu", acceleratorPreference=["gpu"])
     manifest["requirements"]["model"] = dict(ABSVAL_MODEL)
     workload = Workload(id="absval-workload", manifest=manifest)
 
@@ -101,9 +99,7 @@ def test_a_dispatched_job_runs_on_a_real_vulkan_device(absval_model):
         )
         try:
             result = await asyncio.wait_for(
-                dispatcher.dispatch(
-                    "job-1", "absval-workload", {"inputs": [[-1.5, 2.0, -3.0]]}
-                ),
+                dispatcher.dispatch("job-1", "absval-workload", {"inputs": [[-1.5, 2.0, -3.0]]}),
                 timeout=30,
             )
         finally:

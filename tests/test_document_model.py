@@ -525,9 +525,7 @@ def test_portable_runner_uses_only_cpu_reference_provider(monkeypatch, tmp_path)
             return [np.ones((1, 384), dtype=np.float32)]
 
     monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=Session))
-    runner = _producer_cpu_reference_runner(
-        tmp_path / "reference.onnx", _StaticTokenizer()
-    )
+    runner = _producer_cpu_reference_runner(tmp_path / "reference.onnx", _StaticTokenizer())
 
     assert runner.embed("text") == (1.0,) * 384
     assert observed["init"] == (
@@ -610,9 +608,7 @@ def test_portable_runner_contains_session_and_inference_failures(monkeypatch, tm
         sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=InvalidSession)
     )
     with pytest.raises(DocumentModelError) as invalid:
-        _producer_cpu_reference_runner(
-            tmp_path / "reference.onnx", _StaticTokenizer()
-        )
+        _producer_cpu_reference_runner(tmp_path / "reference.onnx", _StaticTokenizer())
     _assert_document_error(
         invalid.value, "portable-invalid", "cannot load portable model: bad graph"
     )
@@ -627,9 +623,7 @@ def test_portable_runner_contains_session_and_inference_failures(monkeypatch, tm
     monkeypatch.setitem(
         sys.modules, "onnxruntime", SimpleNamespace(InferenceSession=FailingSession)
     )
-    runner = _producer_cpu_reference_runner(
-        tmp_path / "reference.onnx", _StaticTokenizer()
-    )
+    runner = _producer_cpu_reference_runner(tmp_path / "reference.onnx", _StaticTokenizer())
     with pytest.raises(DocumentModelError) as failed:
         runner.embed("text")
     _assert_document_error(
@@ -647,9 +641,7 @@ def test_producer_only_dependency_failures_are_exact(monkeypatch, tmp_path):
 
     monkeypatch.setitem(sys.modules, "onnxruntime", None)
     with pytest.raises(DocumentModelError) as portable:
-        _producer_cpu_reference_runner(
-            tmp_path / "reference.onnx", _StaticTokenizer()
-        )
+        _producer_cpu_reference_runner(tmp_path / "reference.onnx", _StaticTokenizer())
     _assert_document_error(portable.value, "producer-dependency-missing", dependency_detail)
 
     monkeypatch.setitem(sys.modules, "pnnx", None)

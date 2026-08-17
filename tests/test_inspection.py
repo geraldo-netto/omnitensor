@@ -143,9 +143,7 @@ def test_an_entry_never_contains_configuration_values():
         "type": "object",
         "properties": {"token": {"type": "string", "x-omnitensor-secret": True}},
     }
-    entry = plugin_inventory_entry(
-        resolved(configuration=schema), resolve_artifact=ready
-    )
+    entry = plugin_inventory_entry(resolved(configuration=schema), resolve_artifact=ready)
 
     assert entry["configurationSchema"] == schema
     assert entry["secretConfigurationKeys"] == ["token"]
@@ -174,9 +172,9 @@ def test_the_inventory_is_contract_valid_and_ordered_by_plugin_id():
     document = build_plugin_inventory(
         plugins,
         resolve_artifact=unavailable,
-        granted_permissions=lambda plugin_id: {READ_SENSOR}
-        if plugin_id == "alpha-plugin"
-        else set(),
+        granted_permissions=lambda plugin_id: (
+            {READ_SENSOR} if plugin_id == "alpha-plugin" else set()
+        ),
         worker_states=lambda plugin_id: "ready" if plugin_id == "zeta-plugin" else None,
         generated_at_ms=1_700_000_000_000,
     )
@@ -192,9 +190,7 @@ def test_the_inventory_is_contract_valid_and_ordered_by_plugin_id():
 
 
 def test_an_empty_inventory_is_still_contract_valid():
-    document = build_plugin_inventory(
-        [], resolve_artifact=ready, generated_at_ms=1_700_000_000_000
-    )
+    document = build_plugin_inventory([], resolve_artifact=ready, generated_at_ms=1_700_000_000_000)
     assert validate_document(INVENTORY_SCHEMA, document) == []
     assert document["plugins"] == []
 
@@ -202,9 +198,7 @@ def test_an_empty_inventory_is_still_contract_valid():
 def test_a_document_that_would_violate_the_contract_is_refused():
     """The inventory is a published contract, so it self-checks before it leaves."""
     with pytest.raises(ValueError, match="violates contract"):
-        build_plugin_inventory(
-            [resolved()], resolve_artifact=ready, generated_at_ms=0
-        )
+        build_plugin_inventory([resolved()], resolve_artifact=ready, generated_at_ms=0)
 
 
 def test_building_the_inventory_never_imports_a_plugin(monkeypatch):

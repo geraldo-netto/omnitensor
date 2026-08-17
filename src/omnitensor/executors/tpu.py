@@ -33,6 +33,7 @@ DELEGATE_RETRY_SECONDS = 30.0
 def _import_tflite():  # pragma: no cover - trivial import shim
     try:
         from tflite_runtime import interpreter as tflite  # noqa: PLC0415
+
         return tflite
     except ImportError:
         return None

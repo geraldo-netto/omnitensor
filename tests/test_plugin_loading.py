@@ -158,9 +158,7 @@ def test_worker_parser_exposes_the_exact_trusted_bootstrap_contract():
             "required": False,
             "default": False,
             "action": "_StoreTrueAction",
-            "help": (
-                "run without the exec/fork filter; only for kernels that cannot install one"
-            ),
+            "help": ("run without the exec/fork filter; only for kernels that cannot install one"),
         },
     }
 
@@ -259,9 +257,7 @@ def test_external_worker_specs_are_deterministic_and_do_not_import_plugins(tmp_p
     assert spec.maximum_protocol == 4
     assert spec.capabilities == frozenset({"cancel", "execute", "health", "progress"})
     assert spec.sandbox is not None
-    assert spec.sandbox.python_path == str(
-        Path(worker_specs_module.__file__).resolve().parents[2]
-    )
+    assert spec.sandbox.python_path == str(Path(worker_specs_module.__file__).resolve().parents[2])
     assert spec.argv == (
         "/usr/bin/python3",
         "-m",
@@ -563,12 +559,15 @@ def test_profile_device_map_overrides_global_gpu_and_unavailable_choice_is_omitt
     )
     assert spec.sandbox.device_paths == (str(selected),)
 
-    assert external_worker_specs(
-        (plugin,),
-        granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
-        accelerator_devices={"gpu": first},
-        accelerator_devices_by_plugin={plugin.plugin_id: {}},
-    ) == ()
+    assert (
+        external_worker_specs(
+            (plugin,),
+            granted_permissions={plugin.plugin_id: {"accelerator:gpu"}},
+            accelerator_devices={"gpu": first},
+            accelerator_devices_by_plugin={plugin.plugin_id: {}},
+        )
+        == ()
+    )
 
 
 def test_vulkan_sysfs_mounts_only_selected_render_device_identity(tmp_path, monkeypatch):
@@ -608,9 +607,7 @@ def test_vulkan_sysfs_mounts_only_selected_render_device_identity(tmp_path, monk
     ) == ((identity,), ((relative_source, Path("/sys/dev/char/226:128")),))
 
 
-def test_vulkan_sysfs_ignores_non_drm_missing_and_escaped_identities(
-    tmp_path, monkeypatch
-):
+def test_vulkan_sysfs_ignores_non_drm_missing_and_escaped_identities(tmp_path, monkeypatch):
     char_root = tmp_path / "sys" / "dev" / "char"
     devices_root = tmp_path / "sys" / "devices"
     outside = tmp_path / "outside"
@@ -732,10 +729,7 @@ def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
     assert lease == (state_root / "_accelerator-gpu.lock").resolve()
     assert lease.stat().st_mode & 0o777 == 0o600
     assert loading_module._accelerator_lease_path(None, frozenset(), frozenset()) is None
-    assert (
-        loading_module._accelerator_lease_path(state_root, frozenset(), frozenset())
-        is None
-    )
+    assert loading_module._accelerator_lease_path(state_root, frozenset(), frozenset()) is None
     both = frozenset({"accelerator:gpu", "accelerator:npu"})
     with pytest.raises(ValueError) as ambiguous_lease:
         loading_module._accelerator_lease_path(state_root, both, both)
@@ -749,9 +743,7 @@ def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
         is None
     )
     assert (
-        loading_module._accelerator_lease_path(
-            state_root, both, both - {"accelerator:npu"}
-        )
+        loading_module._accelerator_lease_path(state_root, both, both - {"accelerator:npu"})
         == lease
     )
 
@@ -769,13 +761,11 @@ def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
     ) == (gpu, npu, tpu)
     with pytest.raises(ValueError) as missing_device:
         loading_module._accelerator_paths(
-        both,
-        frozenset({"accelerator:gpu"}),
-        {"gpu": tmp_path / "missing"},
+            both,
+            frozenset({"accelerator:gpu"}),
+            {"gpu": tmp_path / "missing"},
         )
-    assert str(missing_device.value) == (
-        "granted accelerator device is unavailable: gpu"
-    )
+    assert str(missing_device.value) == ("granted accelerator device is unavailable: gpu")
 
     resolution = ArtifactResolution(True, tmp_path / "model.gguf", "ready", 4)
     calls = []
@@ -1420,9 +1410,7 @@ def test_worker_cancel_frame_cancels_a_request_that_ignores_its_token(monkeypatc
         plugin = TokenIgnoringPlugin()
         writer = io.BytesIO()
         active = {}
-        await worker_module._handle_request_frame(
-            plugin, execute_frame(request), writer, 1, active
-        )
+        await worker_module._handle_request_frame(plugin, execute_frame(request), writer, 1, active)
         task, _token = active[request.job_id]
         await worker_module._handle_request_frame(
             plugin,
@@ -1695,9 +1683,7 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(  # 
         worker_import_paths=(tmp_path,),
         grant_source=Grants(),
         selected_files_root=broker,
-        profile_accelerator_devices=lambda plugin_id: {
-            "gpu": Path(f"/dev/dri/{plugin_id}")
-        },
+        profile_accelerator_devices=lambda plugin_id: {"gpu": Path(f"/dev/dri/{plugin_id}")},
     )
 
     async def scenario():
@@ -1732,9 +1718,7 @@ def test_installed_runtime_start_wires_exact_catalog_grants_and_worker_spec(  # 
                 "granted_permissions": {"external-example": frozenset({"files:read-selected"})},
                 "selected_files_root": broker.resolve(),
                 "accelerator_devices_by_plugin": {
-                    "external-example": {
-                        "gpu": Path("/dev/dri/external-example")
-                    },
+                    "external-example": {"gpu": Path("/dev/dri/external-example")},
                 },
             },
         ),
@@ -2553,9 +2537,7 @@ class _Transport:
         return None
 
 
-def test_installed_wheel_is_discovered_and_loaded_after_service_restart(
-    tmp_path, monkeypatch
-):
+def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path, monkeypatch):
     # This regression owns service restart and real worker IPC. Namespace
     # enforcement has dedicated integration tests and nested bwrap is not
     # available in every test runner (including the managed CI sandbox).
@@ -3033,9 +3015,7 @@ class TestCarryingAModelChoiceToTheWorker:
 
         assert bootstrap.chosen_or("qwen3-8b-q4-k-m").id == "qwen3-4b-q4-k-m"
 
-    def test_a_choice_that_was_never_mounted_refuses_rather_than_falling_back(
-        self, tmp_path
-    ):
+    def test_a_choice_that_was_never_mounted_refuses_rather_than_falling_back(self, tmp_path):
         """Silently answering with the other model would leave a person no
         reason to believe anything the window says about what ran."""
         from omnitensor.sdk.bootstrap import BootstrapArtifact, PluginBootstrap
@@ -3043,11 +3023,7 @@ class TestCarryingAModelChoiceToTheWorker:
 
         bootstrap = PluginBootstrap(
             "external-example",
-            (
-                BootstrapArtifact(
-                    "qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"
-                ),
-            ),
+            (BootstrapArtifact("qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"),),
             None,
             None,
             "qwen3-14b-q4-k-m",
@@ -3061,11 +3037,7 @@ class TestCarryingAModelChoiceToTheWorker:
 
         bootstrap = PluginBootstrap(
             "external-example",
-            (
-                BootstrapArtifact(
-                    "qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"
-                ),
-            ),
+            (BootstrapArtifact("qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"),),
             None,
             None,
         )

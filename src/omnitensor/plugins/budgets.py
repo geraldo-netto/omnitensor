@@ -80,18 +80,10 @@ class WorkerBudgetLimits:
             MAX_CALL_TIMEOUT_SECONDS,
         )
         _optional_bounded_integer(self.max_processes, "max_processes", MAX_PROCESSES_LIMIT)
-        _optional_bounded_integer(
-            self.max_memory_bytes, "max_memory_bytes", MAX_MEMORY_BYTES_LIMIT
-        )
-        _optional_bounded_integer(
-            self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT
-        )
-        _bounded_integer(
-            self.max_output_bytes, "max_output_bytes", MAX_OUTPUT_BYTES_LIMIT
-        )
-        _bounded_integer(
-            self.max_concurrency, "max_concurrency", MAX_CONCURRENCY_LIMIT
-        )
+        _optional_bounded_integer(self.max_memory_bytes, "max_memory_bytes", MAX_MEMORY_BYTES_LIMIT)
+        _optional_bounded_integer(self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT)
+        _bounded_integer(self.max_output_bytes, "max_output_bytes", MAX_OUTPUT_BYTES_LIMIT)
+        _bounded_integer(self.max_concurrency, "max_concurrency", MAX_CONCURRENCY_LIMIT)
         _bounded_number(
             self.resource_poll_seconds,
             "resource_poll_seconds",
@@ -382,9 +374,7 @@ def current_process_cgroup(
         if hierarchy != "0" or controllers:
             continue
         candidate = (root / member.lstrip("/")).resolve()
-        if (candidate == root or root in candidate.parents) and os.access(
-            candidate, os.W_OK
-        ):
+        if (candidate == root or root in candidate.parents) and os.access(candidate, os.W_OK):
             return candidate
         return None
     return None

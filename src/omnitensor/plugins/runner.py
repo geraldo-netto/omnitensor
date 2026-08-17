@@ -63,9 +63,7 @@ class PipelineRunner:
     ) -> None:
         missing = [stage for stage in STAGE_ORDER if stage not in stages]
         if missing:
-            raise ValueError(
-                f"every stage must be supplied; missing {', '.join(missing)}"
-            )
+            raise ValueError(f"every stage must be supplied; missing {', '.join(missing)}")
         self._plugin_id = plugin_id
         self._stages = dict(stages)
         self._policy = policy

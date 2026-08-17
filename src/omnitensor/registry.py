@@ -75,8 +75,7 @@ def workload_model_contract_schemas() -> dict[str, dict]:
     model = load_schema("workload-manifest.schema.json")["$defs"]["model"]
     properties = model["properties"]
     return {
-        field: copy.deepcopy(properties[field])
-        for field in ("tensorContract", "outputContract")
+        field: copy.deepcopy(properties[field]) for field in ("tensorContract", "outputContract")
     }
 
 

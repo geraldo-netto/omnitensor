@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_json_bounded
-from .document_model_types import (
+from ..document_model_types import (
     MAX_CORPUS_BYTES,
     QUERY_PREFIX,
     RECIPE_ID,

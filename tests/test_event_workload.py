@@ -151,9 +151,7 @@ async def test_event_worker_start_requires_a_qualified_ready_provider(tmp_path):
 
     with pytest.raises(GenerationError) as error:
         await plugin.start(
-            PluginContext(
-                "event-extraction", 1, {}, frozenset({"files:read-selected"})
-            )
+            PluginContext("event-extraction", 1, {}, frozenset({"files:read-selected"}))
         )
 
     assert error.value.code == "provider-unavailable"
@@ -223,10 +221,7 @@ def test_task_is_closed_grounded_contract():
         ),
         "modalities": ("text", "image"),
         "output_schema": json.loads(
-            (
-                Path(__file__).parents[1]
-                / "schemas/event-extraction-result.schema.json"
-            ).read_text()
+            (Path(__file__).parents[1] / "schemas/event-extraction-result.schema.json").read_text()
         ),
         "limits": {"context_tokens": 32768, "output_tokens": None, "output_bytes": None},
     }
@@ -335,8 +330,7 @@ async def test_optional_media_adapter_reports_missing_dependency(tmp_path, monke
     monkeypatch.setattr("builtins.__import__", missing)
     result = await DocumentExtractor(PyMuPdfAdapter()).extract(item(source))
     assert result.detail == (
-        "EventWorkloadError: adapter-unavailable: "
-        "install the events extra for PDF/image extraction"
+        "EventWorkloadError: adapter-unavailable: install the events extra for PDF/image extraction"
     )
 
 
@@ -501,9 +495,7 @@ async def test_plugin_rejects_well_formed_but_ungrounded_model_evidence(tmp_path
             document = json.loads(
                 await super().generate(task, generated_request, cancellation, progress)
             )
-            document["events"][0]["evidence"][0]["sourceRef"] = (
-                "private:job-1:source:9:page:1"
-            )
+            document["events"][0]["evidence"][0]["sourceRef"] = "private:job-1:source:9:page:1"
             return json.dumps(document)
 
     store = MemoryFragmentStore()
@@ -514,9 +506,7 @@ async def test_plugin_rejects_well_formed_but_ungrounded_model_evidence(tmp_path
         journal,
         clock_ms=lambda: 20,
     )
-    await plugin.start(
-        PluginContext("event-extraction", 1, {}, frozenset({"files:read-selected"}))
-    )
+    await plugin.start(PluginContext("event-extraction", 1, {}, frozenset({"files:read-selected"})))
 
     result = await plugin.execute(request(source), CancellationController(), Progress())
 
@@ -642,9 +632,7 @@ def test_selected_source_errors_are_stable_and_exact(tmp_path, monkeypatch):
     unsupported.write_bytes(b"one")
     with pytest.raises(EventWorkloadError) as wrong_type:
         event_workload._selected_source(str(unsupported))
-    assert str(wrong_type.value) == (
-        "source-unsupported: selected source type is unsupported"
-    )
+    assert str(wrong_type.value) == ("source-unsupported: selected source type is unsupported")
 
     original = Path.lstat
 
@@ -656,9 +644,7 @@ def test_selected_source_errors_are_stable_and_exact(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "lstat", unreadable)
     with pytest.raises(EventWorkloadError) as unreadable_error:
         event_workload._selected_source(str(source))
-    assert str(unreadable_error.value) == (
-        "source-unreadable: selected source cannot be read"
-    )
+    assert str(unreadable_error.value) == ("source-unreadable: selected source cannot be read")
 
 
 def test_selection_rejects_directories_symlinks_types_empty_and_duplicates(tmp_path):

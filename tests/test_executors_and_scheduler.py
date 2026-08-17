@@ -74,6 +74,7 @@ class FakeOrtSession:
     def get_inputs(self):
         class _Input:
             name = "input"
+
         return [_Input()]
 
     def run(self, _outputs, feed):
@@ -139,7 +140,8 @@ def test_tpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
     ticks = iter([10.0, 10.25])
     monkeypatch.setattr(tpu_module.time, "monotonic", lambda: next(ticks))
     result = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime()).run(
-        "model.tflite", [[1]],
+        "model.tflite",
+        [[1]],
     )
     assert result.duration_ms == 250.0
 
@@ -159,9 +161,12 @@ def test_gpu_executor_requires_gpu_provider_and_never_uses_cpu():
     assert availability.available is False
     assert "CPU provider is not used" in availability.reason
 
-    cuda = GpuExecutor(device_present=True, runtime=FakeOrtRuntime(
-        ["CUDAExecutionProvider", "CPUExecutionProvider"],
-    ))
+    cuda = GpuExecutor(
+        device_present=True,
+        runtime=FakeOrtRuntime(
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        ),
+    )
     assert cuda.availability().available is True
     result = cuda.run("model.onnx", [[1, 2]])
     assert result.outputs == [[2, 3]]
@@ -208,9 +213,7 @@ def test_gpu_executor_rebuilds_a_replaced_model_session(tmp_path):
 
 def test_gpu_executor_evicts_the_least_recently_used_session(tmp_path):
     runtime = CountingOrtRuntime()
-    executor = GpuExecutor(
-        device_present=True, runtime=runtime, max_cached_models=2
-    )
+    executor = GpuExecutor(device_present=True, runtime=runtime, max_cached_models=2)
     alpha = _model_file(tmp_path, "alpha.onnx")
     beta = _model_file(tmp_path, "beta.onnx")
     gamma = _model_file(tmp_path, "gamma.onnx")
@@ -238,9 +241,7 @@ def test_gpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
     ticks = iter([10.0, 10.25])
     monkeypatch.setattr(gpu_module.time, "monotonic", lambda: next(ticks))
 
-    result = GpuExecutor(
-        device_present=True, runtime=CountingOrtRuntime()
-    ).run("model.onnx", [[1]])
+    result = GpuExecutor(device_present=True, runtime=CountingOrtRuntime()).run("model.onnx", [[1]])
 
     assert result.duration_ms == 250.0
 
@@ -309,10 +310,12 @@ def test_select_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
         def availability(self):
             return self._availability
 
-    gpu = CompositeGpuExecutor([
-        Lane({"ncnn"}, True),
-        Lane({"onnx"}, False, "No CUDA or ROCm provider"),
-    ])
+    gpu = CompositeGpuExecutor(
+        [
+            Lane({"ncnn"}, True),
+            Lane({"onnx"}, False, "No CUDA or ROCm provider"),
+        ]
+    )
     npu = Lane({"onnx"}, True)
     manifest = sample_manifest(
         accelerator="gpu",
@@ -326,23 +329,33 @@ def test_select_backend_skips_gpu_when_matching_runtime_lane_is_unavailable():
             "minimumRuntimeVersion": "1",
         },
     )
-    choice = select_backend(Workload(id=manifest["id"], manifest=manifest), {
-        "gpu": gpu, "npu": npu,
-    })
+    choice = select_backend(
+        Workload(id=manifest["id"], manifest=manifest),
+        {
+            "gpu": gpu,
+            "npu": npu,
+        },
+    )
     assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
 
     choice = select_backend(
-        Workload(id=manifest["id"], manifest=manifest), {"npu": npu},
+        Workload(id=manifest["id"], manifest=manifest),
+        {"npu": npu},
     )
     assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
 
     incompatible_gpu = Lane({"ncnn"}, True)
-    choice = select_backend(Workload(id=manifest["id"], manifest=manifest), {
-        "gpu": incompatible_gpu, "npu": npu,
-    })
+    choice = select_backend(
+        Workload(id=manifest["id"], manifest=manifest),
+        {
+            "gpu": incompatible_gpu,
+            "npu": npu,
+        },
+    )
     assert (choice.backend, choice.reason, choice.code) == ("npu", "", "")
     choice = select_backend(
-        Workload(id=manifest["id"], manifest=manifest), {"gpu": incompatible_gpu},
+        Workload(id=manifest["id"], manifest=manifest),
+        {"gpu": incompatible_gpu},
     )
     assert choice.backend is None
     assert choice.reason == "gpu: model format not supported; npu: no executor"
@@ -368,10 +381,12 @@ class SlowExecutor:
 
     def availability(self):
         from omnitensor.executors.base import Availability
+
         return Availability(True)
 
     def run(self, model_path, inputs):
         from omnitensor.executors.base import InferenceResult
+
         self.served.append(model_path)
         return InferenceResult(outputs=[inputs], duration_ms=1.0)
 
@@ -388,8 +403,7 @@ def test_scheduler_serializes_per_device_and_reports_stats():
         scheduler = Scheduler({"tpu": executor}, weight_of=lambda _profile: 1)
         scheduler.start()
         futures = [
-            scheduler.submit("tpu", "profile-a", f"job-{index}", [index])
-            for index in range(5)
+            scheduler.submit("tpu", "profile-a", f"job-{index}", [index]) for index in range(5)
         ]
         results = await asyncio.gather(*futures)
         assert len(results) == 5
@@ -421,13 +435,9 @@ def test_scheduler_executor_uses_dedicated_off_loop_thread(monkeypatch):
 
     async def scenario():
         loop_thread = threading.get_ident()
-        scheduler = Scheduler(
-            {"tpu": ThreadRecordingExecutor()}, weight_of=lambda _profile: 1
-        )
+        scheduler = Scheduler({"tpu": ThreadRecordingExecutor()}, weight_of=lambda _profile: 1)
         scheduler.start()
-        result = await asyncio.wait_for(
-            scheduler.submit("tpu", "profile-a", "job", [1]), timeout=2
-        )
+        result = await asyncio.wait_for(scheduler.submit("tpu", "profile-a", "job", [1]), timeout=2)
         await scheduler.stop()
         return loop_thread, result
 
@@ -575,10 +585,7 @@ def test_submit_rejects_a_full_backend_queue_without_allocating_more_work():
             weight_of=lambda _profile: 1,
             max_backend_queue_depth=2,
         )
-        accepted = [
-            scheduler.submit("tpu", "profile-a", f"job-{index}", [])
-            for index in range(2)
-        ]
+        accepted = [scheduler.submit("tpu", "profile-a", f"job-{index}", []) for index in range(2)]
         with pytest.raises(QueueFullError) as excinfo:
             scheduler.submit("tpu", "profile-a", "rejected", [])
 
@@ -628,7 +635,8 @@ def test_worker_survives_executor_failure_and_serves_next_job():
             await scheduler.submit("tpu", "profile-a", "bad", [])
         # A plain executor failure must not kill the worker.
         result = await asyncio.wait_for(
-            scheduler.submit("tpu", "profile-a", "good", []), timeout=2,
+            scheduler.submit("tpu", "profile-a", "good", []),
+            timeout=2,
         )
         assert result.outputs == [[]]
         await scheduler.stop()
@@ -1057,6 +1065,7 @@ def test_npu_executor_reports_discovery_failure():
 def test_update_executors_reaps_finished_retired_workers():
     """Regression (OMNI-0027): retired worker tasks must be pruned once they
     finish cancelling, not accumulate until stop() under backend churn."""
+
     async def scenario():
         tpu = SlowExecutor()
         npu = SlowExecutor()
@@ -1102,9 +1111,7 @@ def test_a_profile_held_out_by_policy_does_not_burst_when_re_enabled():
         queue.push(_Job("served", f"served-{index}", [], future=None))
 
     for _ in range(8):
-        assert queue.pop_weighted(lambda _p: 1, lambda p: p == "served").workload_id == (
-            "served"
-        )
+        assert queue.pop_weighted(lambda _p: 1, lambda p: p == "served").workload_id == ("served")
 
     served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(4)]
 

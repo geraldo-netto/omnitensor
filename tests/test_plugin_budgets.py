@@ -289,18 +289,18 @@ def test_output_budget_measures_protocol_result_dataclasses_exactly(value):
         "",
         1,
     )
-    encoded_size = len(json.dumps(
-        asdict(result),
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8"))
+    encoded_size = len(
+        json.dumps(
+            asdict(result),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    )
 
     async def accepted():
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(max_output_bytes=encoded_size), usage
-        )
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(max_output_bytes=encoded_size), usage)
         assert await enforcer.run(lambda: asyncio.sleep(0, result=result)) == result
 
     async def rejected():
@@ -478,9 +478,7 @@ def test_procfs_probe_treats_a_pid_that_exits_mid_probe_as_no_usage(tmp_path):
     assert usage == WorkerResourceUsage(2, 2 * 1024, 1)
 
 
-def test_procfs_probe_tolerates_a_thread_that_exits_between_listing_and_read(
-    tmp_path, monkeypatch
-):
+def test_procfs_probe_tolerates_a_thread_that_exits_between_listing_and_read(tmp_path, monkeypatch):
     _write_process(tmp_path, 10, children="", rss_kb=2, descriptors=1)
     _write_thread(tmp_path, 10, 17, children="11")
     original = Path.read_text
@@ -491,9 +489,7 @@ def test_procfs_probe_tolerates_a_thread_that_exits_between_listing_and_read(
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", vanish)
-    assert ProcfsWorkerUsageProbe(10, proc_root=tmp_path)() == WorkerResourceUsage(
-        1, 2 * 1024, 1
-    )
+    assert ProcfsWorkerUsageProbe(10, proc_root=tmp_path)() == WorkerResourceUsage(1, 2 * 1024, 1)
 
 
 def test_procfs_probe_still_reports_unexpected_errors(tmp_path, monkeypatch):
@@ -512,9 +508,7 @@ def test_procfs_probe_still_reports_unexpected_errors(tmp_path, monkeypatch):
 
 def _write_cgroup(root, *, pids=(), memory_bytes=0):
     root.mkdir(parents=True, exist_ok=True)
-    (root / "cgroup.procs").write_text(
-        "".join(f"{pid}\n" for pid in pids), encoding="ascii"
-    )
+    (root / "cgroup.procs").write_text("".join(f"{pid}\n" for pid in pids), encoding="ascii")
     (root / "memory.current").write_text(f"{memory_bytes}\n", encoding="ascii")
     return root
 
@@ -526,16 +520,22 @@ def test_current_process_cgroup_accepts_only_a_writable_path_below_the_mount(tmp
     membership = tmp_path / "membership"
     membership.write_text("0::/user.slice/omnitensor.service\n", encoding="ascii")
 
-    assert current_process_cgroup(
-        membership_path=membership,
-        cgroup_root=cgroup_root,
-    ) == member
+    assert (
+        current_process_cgroup(
+            membership_path=membership,
+            cgroup_root=cgroup_root,
+        )
+        == member
+    )
 
     membership.write_text("0::/../../escape\n", encoding="ascii")
-    assert current_process_cgroup(
-        membership_path=membership,
-        cgroup_root=cgroup_root,
-    ) is None
+    assert (
+        current_process_cgroup(
+            membership_path=membership,
+            cgroup_root=cgroup_root,
+        )
+        is None
+    )
 
 
 def test_cgroup_probe_counts_a_daemonised_process_the_tree_walk_cannot_see(tmp_path):
@@ -545,9 +545,7 @@ def test_cgroup_probe_counts_a_daemonised_process_the_tree_walk_cannot_see(tmp_p
     _write_process(proc_root, 99, children="", rss_kb=8, descriptors=4)
     cgroup = _write_cgroup(tmp_path / "cgroup/worker", pids=(10, 99), memory_bytes=10 * 1024)
 
-    assert ProcfsWorkerUsageProbe(10, proc_root=proc_root)() == WorkerResourceUsage(
-        1, 2 * 1024, 1
-    )
+    assert ProcfsWorkerUsageProbe(10, proc_root=proc_root)() == WorkerResourceUsage(1, 2 * 1024, 1)
     assert CgroupWorkerUsageProbe(cgroup, proc_root=proc_root)() == WorkerResourceUsage(
         2, 10 * 1024, 5
     )
@@ -555,9 +553,7 @@ def test_cgroup_probe_counts_a_daemonised_process_the_tree_walk_cannot_see(tmp_p
 
 def test_cgroup_probe_reports_an_empty_cgroup_as_no_usage(tmp_path):
     cgroup = _write_cgroup(tmp_path / "cgroup/worker")
-    assert CgroupWorkerUsageProbe(cgroup, proc_root=tmp_path)() == WorkerResourceUsage(
-        0, 0, 0
-    )
+    assert CgroupWorkerUsageProbe(cgroup, proc_root=tmp_path)() == WorkerResourceUsage(0, 0, 0)
 
 
 def test_cgroup_probe_rejects_unavailable_memory_accounting(tmp_path):
@@ -580,9 +576,7 @@ def test_cgroup_probe_ignores_a_member_that_exits_mid_probe(tmp_path):
     proc_root = tmp_path / "proc"
     _write_process(proc_root, 10, children="", rss_kb=2, descriptors=3)
     cgroup = _write_cgroup(tmp_path / "cgroup/worker", pids=(10, 404), memory_bytes=99)
-    assert CgroupWorkerUsageProbe(cgroup, proc_root=proc_root)() == WorkerResourceUsage(
-        2, 99, 3
-    )
+    assert CgroupWorkerUsageProbe(cgroup, proc_root=proc_root)() == WorkerResourceUsage(2, 99, 3)
 
 
 def test_worker_cgroup_is_created_joined_and_removed(tmp_path):

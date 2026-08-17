@@ -186,8 +186,10 @@ class TestSelectedTextTools:
     def test_explaining_produces_text(self):
         output = succeeded(
             "selected-text-tools",
-            {"selection": "The mitochondrion is the powerhouse of the cell.",
-             "operation": "explain"},
+            {
+                "selection": "The mitochondrion is the powerhouse of the cell.",
+                "operation": "explain",
+            },
             "selected-text-result",
         )
 
@@ -196,8 +198,10 @@ class TestSelectedTextTools:
     def test_extracting_tasks_finds_the_two_that_are_there(self):
         output = succeeded(
             "selected-text-tools",
-            {"selection": "Ana ships the report on Friday. Bruno reviews it on Monday.",
-             "operation": "extract-tasks"},
+            {
+                "selection": "Ana ships the report on Friday. Bruno reviews it on Monday.",
+                "operation": "extract-tasks",
+            },
             "selected-text-result",
         )
 

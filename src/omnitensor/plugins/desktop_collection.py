@@ -162,9 +162,7 @@ class DesktopContextCollector(BoundedCollector[WindowSample]):
         # Consent is checked separately from the metadata grant: a user can
         # keep the plugin installed and withdraw only the desktop consent.
         if not self._permissions.allows(DESKTOP_CONSENT_PERMISSION):
-            raise CollectionError(
-                "consent-missing", "desktop context consent has not been given"
-            )
+            raise CollectionError("consent-missing", "desktop context consent has not been given")
         return await super().collect(trigger)
 
     def session_changed(self, session: DesktopSession) -> None:

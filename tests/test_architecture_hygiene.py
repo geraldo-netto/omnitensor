@@ -65,12 +65,15 @@ def test_compiler_tool_resolution_has_one_owner_and_a_legacy_seam(tmp_path):
     sibling.chmod(0o755)
 
     assert installation.resolve_compiler_tool is compilers.resolve_compiler_tool
-    assert compilers.resolve_compiler_tool(
-        "compiler",
-        python_executable=interpreter,
-        executable_check=lambda path, _mode: path == sibling,
-        path_search=lambda _name: "/wrong/path",
-    ) == sibling
+    assert (
+        compilers.resolve_compiler_tool(
+            "compiler",
+            python_executable=interpreter,
+            executable_check=lambda path, _mode: path == sibling,
+            path_search=lambda _name: "/wrong/path",
+        )
+        == sibling
+    )
     assert compilers.resolve_compiler_tool(
         "missing",
         python_executable=interpreter,
@@ -97,8 +100,11 @@ def test_desktop_history_owner_lock_seam_stays_live_after_legacy_import(monkeypa
         yield
 
     monkeypatch.setattr(desktop_history, "store_lock", lock)
-    assert desktop_history.revoke_desktop_history(
-        tmp_path / "missing.jsonl",
-        desktop_history.DESKTOP_REVOCATION_CONFIRMATION,
-    ) is False
+    assert (
+        desktop_history.revoke_desktop_history(
+            tmp_path / "missing.jsonl",
+            desktop_history.DESKTOP_REVOCATION_CONFIRMATION,
+        )
+        is False
+    )
     assert observed == [(tmp_path, ".desktop-training.lock")]

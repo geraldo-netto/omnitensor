@@ -442,9 +442,7 @@ def _selected_operation_hint(
     if task.task_id != "selected-text-tools" or len(request.content_references) != 2:
         return ""
     try:
-        control = json.loads(
-            store.resolve(request.request_id, request.content_references[0]).text
-        )
+        control = json.loads(store.resolve(request.request_id, request.content_references[0]).text)
     except (EventWorkloadError, UnicodeError, json.JSONDecodeError):
         return ""
     if not isinstance(control, dict) or set(control) != {"language", "operation"}:

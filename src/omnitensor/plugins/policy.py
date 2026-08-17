@@ -74,9 +74,7 @@ class PipelinePolicyGate:
         every profile at once, so it is reported before a per-profile reason.
         """
         if self._is_paused():
-            return PolicyDecision(
-                False, PolicyRefusal.PAUSED, "the runtime is paused by policy"
-            )
+            return PolicyDecision(False, PolicyRefusal.PAUSED, "the runtime is paused by policy")
         if not self._is_enabled(self._profile_id):
             return PolicyDecision(
                 False,

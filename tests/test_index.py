@@ -112,8 +112,7 @@ def test_prefixed_entry_policy_preserves_identity_then_slug_then_vocabulary_orde
     )
     candidate = entry("doc-" + "d" * 64, digest="d" * 64, tags=("Not Slug",))
     assert (
-        prefixed_entry_error(candidate, **options)
-        == "classification label is not a slug: Not Slug"
+        prefixed_entry_error(candidate, **options) == "classification label is not a slug: Not Slug"
     )
     candidate = entry("doc-" + "d" * 64, digest="d" * 64, tags=("contract",))
     assert (

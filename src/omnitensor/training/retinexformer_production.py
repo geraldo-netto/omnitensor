@@ -193,10 +193,13 @@ def structural_similarity(left: Sequence[float], right: Sequence[float]) -> floa
     right_mean = sum(right) / count
     left_variance = sum((value - left_mean) ** 2 for value in left) / count
     right_variance = sum((value - right_mean) ** 2 for value in right) / count
-    covariance = sum(
-        (left_value - left_mean) * (right_value - right_mean)
-        for left_value, right_value in zip(left, right, strict=True)
-    ) / count
+    covariance = (
+        sum(
+            (left_value - left_mean) * (right_value - right_mean)
+            for left_value, right_value in zip(left, right, strict=True)
+        )
+        / count
+    )
     luminance = 2 * left_mean * right_mean + 0.0001
     contrast = 2 * covariance + 0.0009
     denominator = (left_mean**2 + right_mean**2 + 0.0001) * (
@@ -261,9 +264,7 @@ def produce_retinexformer_source(
         model_path,
         report_path,
         conflict_detail="Retinexformer production output exists",
-        export=lambda: (exporter or TorchRetinexformerOnnxExporter()).export(
-            fetched, model_path
-        ),
+        export=lambda: (exporter or TorchRetinexformerOnnxExporter()).export(fetched, model_path),
         evaluate=lambda: evaluate_retinexformer_gate(
             holdout,
             source_runner_factory(fetched),
@@ -273,9 +274,7 @@ def produce_retinexformer_source(
         accepted=lambda evidence: evidence.accepted,
         rejection_code="quality-gate-failed",
         rejection_detail="Retinexformer did not pass gates",
-        report=lambda evidence: _retinexformer_report(
-            fetched, model_path, holdout, evidence
-        ),
+        report=lambda evidence: _retinexformer_report(fetched, model_path, holdout, evidence),
         report_prefix=".retinexformer-report-",
         result=ProducedRetinexformerSource,
         writer=write_json_atomic,

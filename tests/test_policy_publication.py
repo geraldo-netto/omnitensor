@@ -174,18 +174,14 @@ class TestTheContract:
 
 
 class TestWhatTheServicePublishes:
-    def test_the_published_policy_is_the_store_that_answers_commands(
-        self, fake_nodes, tmp_path
-    ):
+    def test_the_published_policy_is_the_store_that_answers_commands(self, fake_nodes, tmp_path):
         """One source by construction. Anything else is the drift this exists
         to remove."""
         snapshot, state = published(fake_nodes, tmp_path)
 
         assert snapshot["policy"] == state.snapshot_document()
 
-    def test_an_applied_command_is_visible_in_the_next_snapshot(
-        self, fake_nodes, tmp_path
-    ):
+    def test_an_applied_command_is_visible_in_the_next_snapshot(self, fake_nodes, tmp_path):
         snapshot, state = published(
             fake_nodes,
             tmp_path,
@@ -195,18 +191,14 @@ class TestWhatTheServicePublishes:
         assert snapshot["policy"]["profiles"][PROFILE]["weight"] == 4
         assert snapshot["policy"]["revision"] == state.revision
 
-    def test_pausing_everything_is_published_as_runtime_state(
-        self, fake_nodes, tmp_path
-    ):
+    def test_pausing_everything_is_published_as_runtime_state(self, fake_nodes, tmp_path):
         """A client that closed does not un-pause a runtime, so the pause has
         to be legible to the next client that opens."""
         snapshot, _state = published(fake_nodes, tmp_path, command("set-paused", value=True))
 
         assert snapshot["policy"]["paused"] is True
 
-    def test_the_revision_a_client_must_send_next_is_the_one_published(
-        self, fake_nodes, tmp_path
-    ):
+    def test_the_revision_a_client_must_send_next_is_the_one_published(self, fake_nodes, tmp_path):
         """The reason a cold client had to guess, and then retry on the
         rejection its guess earned."""
         snapshot, state = published(
@@ -341,9 +333,7 @@ class TestAChangedModelReplacesTheWorker:
         built._plugin_runtime = self.Runtime()
         return built
 
-    def test_choosing_a_different_model_marks_that_workload_for_reload(
-        self, fake_nodes, tmp_path
-    ):
+    def test_choosing_a_different_model_marks_that_workload_for_reload(self, fake_nodes, tmp_path):
         built = self.service_with(fake_nodes, tmp_path)
         built.control.state.model_choices[PROFILE] = "qwen3-4b-q4-k-m"
 
@@ -370,9 +360,7 @@ class TestAChangedModelReplacesTheWorker:
 
         assert built._changed_models() == {PROFILE}
 
-    def test_the_worker_is_built_with_whatever_policy_says_now(
-        self, fake_nodes, tmp_path
-    ):
+    def test_the_worker_is_built_with_whatever_policy_says_now(self, fake_nodes, tmp_path):
         """Asked each time rather than cached, so a worker started after a
         change gets the change."""
         built = self.service_with(fake_nodes, tmp_path)

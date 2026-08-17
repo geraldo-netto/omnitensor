@@ -127,9 +127,7 @@ def test_undeclared_permission_is_denied_before_persistence(tmp_path):
 def test_active_permissions_returns_only_declared_current_grants(tmp_path):
     ledger = GrantLedger(tmp_path / "grants.json")
     grant_once(ledger)
-    assert ledger.active_permissions("hardware-health", DECLARED) == frozenset(
-        {READ_SENSOR}
-    )
+    assert ledger.active_permissions("hardware-health", DECLARED) == frozenset({READ_SENSOR})
     assert ledger.active_permissions("hardware-health", set()) == frozenset()
 
 
@@ -501,14 +499,10 @@ def test_a_stale_ledger_cannot_resurrect_a_permission_revoked_elsewhere(tmp_path
     assert stale.revision == 1
 
     elsewhere = GrantLedger(path)
-    elsewhere.revoke(
-        "hardware-health", READ_SENSOR, DECLARED, provenance(), expected_revision=1
-    )
+    elsewhere.revoke("hardware-health", READ_SENSOR, DECLARED, provenance(), expected_revision=1)
 
     with pytest.raises(GrantError) as excinfo:
-        stale.grant(
-            "hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=1
-        )
+        stale.grant("hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=1)
     assert excinfo.value.code == "revision-mismatch"
     reread = GrantLedger(path)
     assert reread.snapshot("hardware-health", DECLARED).active == ()
@@ -521,9 +515,7 @@ def test_a_stale_ledger_observes_a_grant_committed_elsewhere(tmp_path):
         "hardware-health", READ_SENSOR, DECLARED, provenance(), expected_revision=0
     )
     with pytest.raises(GrantError) as excinfo:
-        stale.grant(
-            "hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=0
-        )
+        stale.grant("hardware-health", RUN_ACTION, DECLARED, provenance(), expected_revision=0)
     assert excinfo.value.code == "revision-mismatch"
     assert stale.revision == 1
 

@@ -556,9 +556,7 @@ def test_duration_sampling_frame_and_audio_helpers_enforce_bounds():
     with pytest.raises(MediaTranscriptionError, match="duration is unavailable"):
         provider._demux_duration_ms(without_timestamps, stream)
     overlong = SimpleNamespace(
-        demux=lambda _stream: [
-            SimpleNamespace(pts=0, dts=0, duration=(MAX_DURATION_MS + 1) * 2)
-        ]
+        demux=lambda _stream: [SimpleNamespace(pts=0, dts=0, duration=(MAX_DURATION_MS + 1) * 2)]
     )
     with pytest.raises(MediaTranscriptionError, match="exceeds ten minutes"):
         provider._demux_duration_ms(overlong, stream)
@@ -648,9 +646,7 @@ def test_svg_document_and_slide_failure_branches_are_bounded(monkeypatch, tmp_pa
         b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 160'/>"
     ) == (1600, 800)
     with pytest.raises(ValueError, match="viewBox is invalid"):
-        provider._svg_output_size(
-            b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10'/>"
-        )
+        provider._svg_output_size(b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10'/>")
     with pytest.raises(ValueError, match="dimensions are invalid"):
         provider._svg_output_size(
             b"<svg xmlns='http://www.w3.org/2000/svg' width='0' height='10'/>"

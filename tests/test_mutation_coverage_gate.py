@@ -68,12 +68,9 @@ def test_mutation_gate_cli_returns_nonzero_for_a_gap(tmp_path, capsys):
     path = tmp_path / "mutmut.txt"
     path.write_text(mutation_report("killed", "survived"), encoding="utf-8")
 
-    assert mutation_main(
-        [str(path), "--selector", "omnitensor.subject.x_method"]
-    ) == 1
+    assert mutation_main([str(path), "--selector", "omnitensor.subject.x_method"]) == 1
     assert capsys.readouterr().out == (
-        "Per-callable mutation score below 80%:\n"
-        "omnitensor.subject.x_method 50.0% (1/2 detected)\n"
+        "Per-callable mutation score below 80%:\nomnitensor.subject.x_method 50.0% (1/2 detected)\n"
     )
 
 
@@ -83,9 +80,7 @@ def test_mutation_gate_cli_reports_success_and_invalid_input(tmp_path, capsys):
     arguments = [str(path), "--selector", "omnitensor.subject.x_method"]
 
     assert mutation_main(arguments) == 0
-    assert capsys.readouterr().out == (
-        "per-callable mutation score: 1 callables at or above 80%\n"
-    )
+    assert capsys.readouterr().out == ("per-callable mutation score: 1 callables at or above 80%\n")
     assert mutation_main([str(tmp_path / "missing"), "--selector", "x"]) == 2
     assert capsys.readouterr().out.startswith("mutation gate failed: [Errno 2]")
     with pytest.raises(SystemExit, match="0"):

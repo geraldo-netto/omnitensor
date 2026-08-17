@@ -233,9 +233,7 @@ async def test_question_workload_requires_grant_ready_models_and_manual_request(
     plugin = DocumentQuestionPlugin(embedder, GenerationRouter(()), store)
     with pytest.raises(Exception, match="no qualified provider"):
         await plugin.start(
-            PluginContext(
-                "ask-selected-files", 1, {}, frozenset({"files:read-selected"})
-            )
+            PluginContext("ask-selected-files", 1, {}, frozenset({"files:read-selected"}))
         )
 
     plugin, _embedder, _worker, _store = await running_plugin(source)
@@ -279,9 +277,7 @@ def test_manifest_and_generation_task_are_closed_manual_contracts():
     ]
     assert declaration["schemas"]["input"]["properties"]["sources"]["maxItems"] == 16
     assert declaration["schemas"]["input"]["properties"]["question"]["maxLength"] == 4096
-    assert declaration["schemas"]["output"] == {
-        "$ref": "document-question-result.schema.json"
-    }
+    assert declaration["schemas"]["output"] == {"$ref": "document-question-result.schema.json"}
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
 
     task = document_question_task()
@@ -403,9 +399,12 @@ def test_public_answer_refuses_digest_span_and_duplicate_citation_drift():
             }
         ],
     }
-    assert grounded_answer_document(
-        base, "job", (span,), provider_id="qwen3-gpu", accelerator="gpu"
-    )["citations"][0]["fileName"] == "file.txt"
+    assert (
+        grounded_answer_document(base, "job", (span,), provider_id="qwen3-gpu", accelerator="gpu")[
+            "citations"
+        ][0]["fileName"]
+        == "file.txt"
+    )
 
     for change in (
         lambda value: value["citations"][0].update(sourceSha256="b" * 64),
@@ -532,9 +531,7 @@ def test_constructor_and_provider_boundary_refuse_invalid_dependencies():
             EmbeddingProvider("provider", accelerator, "a" * 64, True),
             require_qualified=True,
         )
-    _validate_embedding_provider(
-        EmbeddingProvider("provider", "gpu", "a" * 64, False)
-    )
+    _validate_embedding_provider(EmbeddingProvider("provider", "gpu", "a" * 64, False))
 
 
 def test_constructor_preserves_ports_clock_and_adapter_override():
@@ -580,9 +577,7 @@ async def test_start_refuses_unqualified_embedder_and_health_names_lane(tmp_path
     plugin = DocumentQuestionPlugin(embedder, GenerationRouter((worker,)), store)
     with pytest.raises(DocumentQuestionError) as caught:
         await plugin.start(
-            PluginContext(
-                "ask-selected-files", 1, {}, frozenset({"files:read-selected"})
-            )
+            PluginContext("ask-selected-files", 1, {}, frozenset({"files:read-selected"}))
         )
     assert caught.value.code == "embedder-unqualified"
 
@@ -687,9 +682,7 @@ async def test_empty_and_crashed_extraction_publish_no_answer(tmp_path, adapter,
         adapters={".txt": adapter},
     )
     await plugin.start(
-        PluginContext(
-            "ask-selected-files", 1, {}, frozenset({"files:read-selected"})
-        )
+        PluginContext("ask-selected-files", 1, {}, frozenset({"files:read-selected"}))
     )
     result = await plugin.execute(request(source), CancellationController(), Progress())
     assert result.status is PluginResultStatus.FAILED
@@ -779,12 +772,13 @@ def test_span_index_refuses_malformed_pages(page):
 
 
 def test_span_index_skips_blank_chunks_honors_zero_and_bounds_reference():
-    assert page_spans(
-        "job", 1, "file.txt", "a" * 64, (NormalisedPage(1, "text", (), ()),), remaining=0
-    ) == ()
-    assert page_spans(
-        "job", 1, "file.txt", "a" * 64, (NormalisedPage(1, "   ", (), ()),)
-    ) == ()
+    assert (
+        page_spans(
+            "job", 1, "file.txt", "a" * 64, (NormalisedPage(1, "text", (), ()),), remaining=0
+        )
+        == ()
+    )
+    assert page_spans("job", 1, "file.txt", "a" * 64, (NormalisedPage(1, "   ", (), ()),)) == ()
     with pytest.raises(DocumentQuestionError) as caught:
         page_spans(
             "r" * 220,
@@ -958,9 +952,7 @@ async def test_extract_span_failures_keep_exact_private_contract(tmp_path):
     candidate = request(source)
 
     store = MemoryFragmentStore()
-    plugin = DocumentQuestionPlugin(
-        Embedder(), GenerationRouter((AnswerWorker(store),)), store
-    )
+    plugin = DocumentQuestionPlugin(Embedder(), GenerationRouter((AnswerWorker(store),)), store)
     plugin._adapters.pop(".txt")  # noqa: SLF001
     with pytest.raises(DocumentQuestionError) as unsupported:
         await plugin._extract_spans(  # noqa: SLF001

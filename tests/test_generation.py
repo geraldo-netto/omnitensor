@@ -293,9 +293,7 @@ def test_task_contract_bounds_the_serialized_schema_and_rejects_non_json():
 
 
 def test_schema_serialization_is_canonical_compact_and_strict():
-    assert _canonical_json({"z": "é", "a": 1}, "payload") == (
-        b'{"a":1,"z":"\\u00e9"}'
-    )
+    assert _canonical_json({"z": "é", "a": 1}, "payload") == (b'{"a":1,"z":"\\u00e9"}')
 
     with pytest.raises(GenerationError) as excinfo:
         _canonical_json({"value": float("nan")}, "payload")
@@ -564,9 +562,7 @@ def test_npu_falls_back_to_gpu_only_for_pre_generation_refusals(code):
 
 
 def test_pre_generation_refusal_is_preserved_when_no_gpu_fallback_exists():
-    failure = ProviderGenerationError(
-        "admission-refused", "NPU is busy", generation_started=False
-    )
+    failure = ProviderGenerationError("admission-refused", "NPU is busy", generation_started=False)
     npu = FakeWorker(parse_provider_descriptor(provider_document("npu")), failure=failure)
 
     with pytest.raises(ProviderGenerationError) as excinfo:

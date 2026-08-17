@@ -35,9 +35,7 @@ from pathlib import Path
 import pytest
 from omnitensor_qwen_runtime import factories, qualification
 
-RECEIPT = (
-    Path(__file__).parents[1] / "src/omnitensor_qwen_runtime/qualification.json"
-)
+RECEIPT = Path(__file__).parents[1] / "src/omnitensor_qwen_runtime/qualification.json"
 
 
 def shipped() -> dict:

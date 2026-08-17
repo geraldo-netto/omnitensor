@@ -95,9 +95,7 @@ class PolicyState:
         }
 
 
-def _adopt_stored_profiles(
-    profiles: dict[str, ProfilePolicy], supplied: dict
-) -> None:
+def _adopt_stored_profiles(profiles: dict[str, ProfilePolicy], supplied: dict) -> None:
     """Keep policy for profiles this store has no default for.
 
     Defaults come from the workload catalog, which is read at construction and
@@ -170,9 +168,7 @@ class PolicyStore:
         return PolicyState(
             paused=raw.get("paused") is True,
             profiles=profiles,
-            device_choices=dict(
-                list(sanitized_choices.items())[:MAX_DEVICE_CHOICES]
-            ),
+            device_choices=dict(list(sanitized_choices.items())[:MAX_DEVICE_CHOICES]),
             model_choices=dict(list(sanitized_models.items())[:MAX_MODEL_CHOICES]),
             revision=_sanitized_revision(raw.get("revision")),
         )

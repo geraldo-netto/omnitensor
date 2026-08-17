@@ -102,15 +102,11 @@ class PluginSettingsStore:
         document = self._read(path, spec.plugin_id)
         settings = self._parse(document, spec.plugin_id)
         if settings.plugin_version == spec.plugin_version:
-            _validate_persisted_configuration(
-                validator, spec.schema, settings.configuration
-            )
+            _validate_persisted_configuration(validator, spec.schema, settings.configuration)
             return _copy_settings(settings)
 
         migrated = self._migrate(settings, spec, migrations)
-        _validate_persisted_configuration(
-            validator, spec.schema, migrated.configuration
-        )
+        _validate_persisted_configuration(validator, spec.schema, migrated.configuration)
         self._write(path, migrated)
         return _copy_settings(migrated)
 
@@ -318,11 +314,7 @@ def _validate_persisted_configuration(
     try:
         paths = validate_secret_references(schema, configuration)
     except SecretConfigurationError as error:
-        code = (
-            "invalid-schema"
-            if error.code == "invalid-secret-schema"
-            else error.code
-        )
+        code = "invalid-schema" if error.code == "invalid-secret-schema" else error.code
         raise PluginSettingsError(code, error.detail) from error
     errors = persisted_configuration_errors(validator, configuration, paths)
     if errors:

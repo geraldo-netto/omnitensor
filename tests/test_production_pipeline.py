@@ -438,10 +438,9 @@ def test_torch_export_is_atomic_and_preserves_exact_arguments(tmp_path, monkeypa
     graph = object()
     torch = SimpleNamespace(onnx=SimpleNamespace(export=export))
     onnx = SimpleNamespace(
-        load=lambda path, *, load_external_data: calls.setdefault(
-            "load", (path, load_external_data)
-        )
-        and graph,
+        load=lambda path, *, load_external_data: (
+            calls.setdefault("load", (path, load_external_data)) and graph
+        ),
         checker=SimpleNamespace(check_model=lambda value: calls.setdefault("checked", value)),
     )
     monkeypatch.setattr(pipeline.tempfile, "mkstemp", tracked_mkstemp)

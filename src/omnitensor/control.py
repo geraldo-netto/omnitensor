@@ -42,11 +42,11 @@ def _now_ms() -> int:
 
 
 _CHOOSERS = {
-    "set-profile-device": lambda control, state, profile_id, value: (
-        control._set_profile_device(state, profile_id, value)
+    "set-profile-device": lambda control, state, profile_id, value: control._set_profile_device(
+        state, profile_id, value
     ),
-    "set-profile-model": lambda control, state, profile_id, value: (
-        control._set_profile_model(state, profile_id, value)
+    "set-profile-model": lambda control, state, profile_id, value: control._set_profile_model(
+        state, profile_id, value
     ),
 }
 
@@ -261,15 +261,11 @@ class ControlService:
                 return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
             policy.weight = weight
         if "deviceId" in change:
-            error = self._set_profile_device(
-                state, change["profileId"], change["deviceId"]
-            )
+            error = self._set_profile_device(state, change["profileId"], change["deviceId"])
             if error is not None:
                 return error
         if "modelId" in change:
-            return self._set_profile_model(
-                state, change["profileId"], change["modelId"]
-            )
+            return self._set_profile_model(state, change["profileId"], change["modelId"])
         return None
 
     def _batch_error(self, state: PolicyState, change: dict) -> str | None:
@@ -295,10 +291,7 @@ class ControlService:
             profile_id in state.profiles
             or profile_id in state.device_choices
             or profile_id in state.model_choices
-            or (
-                self._profile_exists is not None
-                and self._profile_exists(profile_id) is True
-            )
+            or (self._profile_exists is not None and self._profile_exists(profile_id) is True)
         )
 
     def _device_choice_error(self, device_id: str | None) -> str | None:

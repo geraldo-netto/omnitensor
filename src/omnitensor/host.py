@@ -67,8 +67,7 @@ def build_host_ports(
 ) -> HostPorts:
     """Compose production adapters while preserving explicitly injected ports."""
     return HostPorts(
-        discovery=discovery
-        or SysfsDeviceDiscovery(discovery_paths, accelerator_device_ids),
+        discovery=discovery or SysfsDeviceDiscovery(discovery_paths, accelerator_device_ids),
         publisher=publisher or FileSnapshotPublisher(snapshot_path),
         transport=transport or SocketControlTransport(),
     )

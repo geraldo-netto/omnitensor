@@ -47,6 +47,7 @@ class RepositoryProfile:
     suffix_counts: dict[str, int]
     truncated: bool
 
+
 class BuildMetadataIngestor:
     """Profile configured repositories and validate exported build history."""
 
@@ -72,9 +73,7 @@ class BuildMetadataIngestor:
     def profile(self) -> tuple[RepositoryProfile, ...]:
         """Describe each configured repository from metadata alone."""
         if not self._permissions.allows(BUILD_METADATA_PERMISSION):
-            raise IngestionError(
-                "permission-denied", "build metadata permission is not granted"
-            )
+            raise IngestionError("permission-denied", "build metadata permission is not granted")
         scan: IngestionScan = self._scanner.scan()
         by_root: dict[str, list] = {str(root): [] for root in self._scanner.roots}
         for item in scan.files:
@@ -111,7 +110,5 @@ class BuildMetadataIngestor:
             else:
                 accepted.append(record)
         if len(records) > self._max_records:
-            rejected.append(
-                f"history truncated at {self._max_records} records"
-            )
+            rejected.append(f"history truncated at {self._max_records} records")
         return tuple(accepted), tuple(rejected)

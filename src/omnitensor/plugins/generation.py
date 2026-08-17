@@ -254,7 +254,7 @@ def validate_structured_output(task: GenerationTask, raw: str) -> dict:
                 "provider-output-invalid", "provider output exceeds its byte limit"
             )
     try:
-        document = json.loads(raw, parse_constant=lambda value: (_raise_json_constant(value)))
+        document = json.loads(raw, parse_constant=lambda value: _raise_json_constant(value))
     except (UnicodeError, json.JSONDecodeError, ValueError) as error:
         # Told apart because they need different answers from the person: a
         # model that ran out of output budget mid-object is asking for a

@@ -6,8 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..atomicio import write_bytes_atomic
+from ..document_model_types import RECIPE_ID, DocumentModelError, TokenizedText
 from .document_model_contracts import source_path
-from .document_model_types import RECIPE_ID, DocumentModelError, TokenizedText
 from .recipe_model import FetchedModelSource
 
 

@@ -227,9 +227,7 @@ def test_exact_unit_range_and_half_up_rgb_rounding_are_accepted():
 
 
 def test_validated_native_output_is_normalized_to_float32():
-    tensor = pipeline._validated_output_tensor(
-        [numpy.zeros((3, 256, 256), dtype=numpy.float64)]
-    )
+    tensor = pipeline._validated_output_tensor([numpy.zeros((3, 256, 256), dtype=numpy.float64)])
     assert tensor.dtype == numpy.float32
 
 
@@ -264,9 +262,7 @@ def test_rgb_reconstruction_calls_exact_axis_mode_and_resize(monkeypatch):
     monkeypatch.setattr(numpy, "transpose", transpose)
     monkeypatch.setattr(Image, "fromarray", fromarray)
 
-    payload = pipeline._reconstruct_rgb(
-        numpy.asarray(_model_output(), dtype=numpy.float32), 3, 2
-    )
+    payload = pipeline._reconstruct_rgb(numpy.asarray(_model_output(), dtype=numpy.float32), 3, 2)
 
     assert len(payload) == 18
     assert calls == [

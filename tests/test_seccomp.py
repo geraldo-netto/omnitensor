@@ -107,9 +107,7 @@ def test_an_architecture_without_a_table_is_refused():
 def test_an_architecture_without_fork_omits_it():
     """aarch64 has no fork or vfork; glibc implements both through clone."""
     assert "fork" not in SYSCALLS["aarch64"]
-    assert instruction_count(worker_filter("aarch64")) < instruction_count(
-        worker_filter("x86_64")
-    )
+    assert instruction_count(worker_filter("aarch64")) < instruction_count(worker_filter("x86_64"))
 
 
 @pytest.mark.skipif(

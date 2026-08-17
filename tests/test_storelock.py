@@ -34,9 +34,10 @@ def test_lock_timeout_bounds_a_contended_wait(tmp_path):
     fcntl.flock(descriptor, fcntl.LOCK_EX)
     started = time.monotonic()
     try:
-        with pytest.raises(
-            TimeoutError, match="timed out acquiring store lock"
-        ), store_lock(tmp_path, lock.name, timeout_seconds=0.02):
+        with (
+            pytest.raises(TimeoutError, match="timed out acquiring store lock"),
+            store_lock(tmp_path, lock.name, timeout_seconds=0.02),
+        ):
             pass
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)

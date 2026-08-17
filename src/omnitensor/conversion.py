@@ -281,9 +281,7 @@ class OvcConverter:
         return _run_converter(argv, workdir, timeout_seconds)
 
 
-def _run_converter(
-    argv: list[str], workdir: Path, timeout_seconds: float
-) -> ConversionOutcome:
+def _run_converter(argv: list[str], workdir: Path, timeout_seconds: float) -> ConversionOutcome:
     try:
         result = subprocess.run(  # noqa: S603 - argv is built here, never from input
             argv,
@@ -314,7 +312,7 @@ def _tail(output: str | None, limit: int = 400) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="omnitensor-convert-model",
-        description="Convert a model into an artifact for an accelerator lane"
+        description="Convert a model into an artifact for an accelerator lane",
     )
     parser.add_argument("source", help="the .onnx or .pt model to convert")
     parser.add_argument(

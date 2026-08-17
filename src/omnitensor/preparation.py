@@ -136,9 +136,7 @@ class PreparedArtifact:
             "accelerator": FORMAT_ACCELERATORS[self.reference.format],
             "sourcePath": str(self.source),
             "sizeBytes": self.size_bytes,
-            "companions": {
-                name: str(path) for name, path in sorted(self.companions.items())
-            },
+            "companions": {name: str(path) for name, path in sorted(self.companions.items())},
         }
 
 

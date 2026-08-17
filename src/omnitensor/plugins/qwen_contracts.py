@@ -188,9 +188,7 @@ def validate_event_policy(policy: EventQualificationPolicy) -> None:
         qwen_positive_integer(getattr(policy, name), name, "policy-invalid")
 
 
-def legacy_qwen_callback(
-    name: str, default: Callable[..., object]
-) -> Callable[..., object]:
+def legacy_qwen_callback(name: str, default: Callable[..., object]) -> Callable[..., object]:
     """Resolve one audited facade monkeypatch without importing the facade."""
     facade = sys.modules.get(_LEGACY_MODULE)
     return default if facade is None else getattr(facade, name, default)

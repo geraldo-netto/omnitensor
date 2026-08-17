@@ -343,8 +343,10 @@ class Scheduler:
         for queue in self._queues.values():
             ratio = min(100.0, 100.0 * queue.busy_ms / elapsed_ms)
             queue.busy_ms = 0.0
-            queue.load = ratio if queue.load is None else (
-                LOAD_SMOOTHING * ratio + (1 - LOAD_SMOOTHING) * queue.load
+            queue.load = (
+                ratio
+                if queue.load is None
+                else (LOAD_SMOOTHING * ratio + (1 - LOAD_SMOOTHING) * queue.load)
             )
 
     def kick(self) -> None:

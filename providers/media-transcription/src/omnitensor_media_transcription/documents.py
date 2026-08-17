@@ -21,6 +21,7 @@ from .text import joined_visible_text
 
 MAX_RENDER_DIMENSION = 1600
 
+
 class DocumentPageTranscriber(DocumentTranscriber):
     """Transcribe bounded PDF/TIFF pages as text plus whole-page visuals."""
 
@@ -126,7 +127,6 @@ def _render_tiff_page(source: Path, path: Path, page_number: int) -> str:
         rendered.thumbnail((MAX_RENDER_DIMENSION, MAX_RENDER_DIMENSION))
         rendered.save(path, format="PNG", optimize=False)
     return ""
-
 
 
 __all__ = ["DocumentPageTranscriber"]

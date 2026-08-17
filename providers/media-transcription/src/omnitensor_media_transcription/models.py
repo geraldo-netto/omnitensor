@@ -30,6 +30,7 @@ _LLAMA_DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)"
 _WHISPER_DEVICE = re.compile(r"ggml_vulkan:\s*\d+\s*=\s*(.+?)\s*\(", re.I)
 _WHISPER_BACKEND = re.compile(r"using Vulkan(\d+) backend", re.I)
 
+
 class VulkanLease:
     def __init__(self, path: Path) -> None:
         if not isinstance(path, Path) or not path.is_file():
@@ -342,7 +343,6 @@ def _close_whisper(model) -> None:
     import _pywhispercpp as native
 
     native.whisper_free(context)
-
 
 
 __all__ = [

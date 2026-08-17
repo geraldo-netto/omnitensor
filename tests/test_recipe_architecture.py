@@ -187,9 +187,7 @@ def test_recipe_leaves_are_independent_and_import_before_facade():
         "recipe_fetch",
     )
     for name in leaf_names:
-        tree = ast.parse(
-            (ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8")
-        )
+        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
         imports = {
             node.module
             for node in ast.walk(tree)
@@ -198,9 +196,7 @@ def test_recipe_leaves_are_independent_and_import_before_facade():
         assert "recipes" not in imports
         assert "omnitensor.training.recipes" not in imports
 
-    statement = ";".join(
-        f"import omnitensor.training.{name}" for name in (*leaf_names, "recipes")
-    )
+    statement = ";".join(f"import omnitensor.training.{name}" for name in (*leaf_names, "recipes"))
     completed = subprocess.run(
         [sys.executable, "-c", statement],
         check=False,
@@ -221,9 +217,7 @@ def test_production_callers_use_leaf_owners_and_facade_remains_class_free():
         "document_model.py": {"recipe_fetch", "recipe_model", "recipe_registry"},
     }
     for filename, required in expected.items():
-        tree = ast.parse(
-            (ROOT / "src/omnitensor/training" / filename).read_text(encoding="utf-8")
-        )
+        tree = ast.parse((ROOT / "src/omnitensor/training" / filename).read_text(encoding="utf-8"))
         imports = {
             node.module.rsplit(".", 1)[-1]
             for node in ast.walk(tree)
@@ -236,8 +230,8 @@ def test_production_callers_use_leaf_owners_and_facade_remains_class_free():
         (ROOT / "src/omnitensor/training/recipes.py").read_text(encoding="utf-8")
     )
     assert not any(isinstance(node, ast.ClassDef) for node in facade_tree.body)
-    validation_source = (
-        ROOT / "src/omnitensor/training/recipe_validation.py"
-    ).read_text(encoding="utf-8")
+    validation_source = (ROOT / "src/omnitensor/training/recipe_validation.py").read_text(
+        encoding="utf-8"
+    )
     assert "load_schema(" not in validation_source
     assert "workload_model_contract_schemas()" in validation_source

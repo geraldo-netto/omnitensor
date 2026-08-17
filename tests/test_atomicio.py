@@ -121,9 +121,7 @@ def test_atomic_bytes_stage_sync_and_publish_order(tmp_path, monkeypatch, replac
 
 
 @given(payload=st.binary(max_size=4096), mode=st.sampled_from([0o600, 0o640, 0o644]))
-def test_atomic_bytes_property_round_trips_exact_payload_and_mode(
-    tmp_path_factory, payload, mode
-):
+def test_atomic_bytes_property_round_trips_exact_payload_and_mode(tmp_path_factory, payload, mode):
     root = tmp_path_factory.mktemp("atomic-bytes")
     target = root / "nested/payload.bin"
 
@@ -157,9 +155,7 @@ def test_atomic_exclusive_publish_has_one_winner_under_a_race(tmp_path):
     assert [entry.name for entry in tmp_path.iterdir()] == ["winner.bin"]
 
 
-def test_atomic_bytes_cleans_stage_and_preserves_target_on_baseexception(
-    tmp_path, monkeypatch
-):
+def test_atomic_bytes_cleans_stage_and_preserves_target_on_baseexception(tmp_path, monkeypatch):
     class Interrupted(BaseException):
         pass
 
@@ -178,9 +174,7 @@ def test_atomic_bytes_cleans_stage_and_preserves_target_on_baseexception(
     assert [entry.name for entry in tmp_path.iterdir()] == ["payload.bin"]
 
 
-def test_atomic_bytes_cleans_stage_when_exclusive_publication_fails(
-    tmp_path, monkeypatch
-):
+def test_atomic_bytes_cleans_stage_when_exclusive_publication_fails(tmp_path, monkeypatch):
     target = tmp_path / "payload.bin"
 
     def refuse_link(*_args, **_kwargs):

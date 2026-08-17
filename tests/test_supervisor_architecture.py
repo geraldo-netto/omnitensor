@@ -122,7 +122,8 @@ def test_supervisor_leaves_have_no_facade_or_loading_backedge():
         tree = ast.parse(Path(owner.__file__).read_text(encoding="utf-8"))
         assert not any(
             isinstance(node, ast.ImportFrom)
-            and node.module in {
+            and node.module
+            in {
                 "supervisor",
                 "loading",
                 "omnitensor.plugins.supervisor",

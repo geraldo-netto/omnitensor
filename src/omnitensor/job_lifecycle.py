@@ -378,9 +378,7 @@ class JobSubmissionService:
             else:
                 timestamp = max(1, int(self._clock_ms()))
                 try:
-                    return _validated_result_reply(
-                        _record_reply(request_id, record, timestamp)
-                    )
+                    return _validated_result_reply(_record_reply(request_id, record, timestamp))
                 except (TypeError, ValueError, RecursionError, RuntimeError):
                     return _validated_result_reply(
                         _result_reply(

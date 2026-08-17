@@ -88,9 +88,7 @@ class TestThresholds:
         assert DEFAULT_CPU_PERCENT == 80.0
 
     def test_each_threshold_is_configurable_on_its_own(self):
-        limits = configured_limits(
-            {MEMORY_PERCENT_VARIABLE: "65", CPU_PERCENT_VARIABLE: "95"}
-        )
+        limits = configured_limits({MEMORY_PERCENT_VARIABLE: "65", CPU_PERCENT_VARIABLE: "95"})
 
         assert limits == (65.0, 95.0)
 

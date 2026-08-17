@@ -192,8 +192,7 @@ def contract_error(
     for index, (spec, (shape, dtype)) in enumerate(zip(specs, shapes, strict=True)):
         if shape is not None and tuple(shape) != spec.shape:
             return (
-                f"input {index} has shape {list(shape)} and the model declares "
-                f"{list(spec.shape)}"
+                f"input {index} has shape {list(shape)} and the model declares {list(spec.shape)}"
             )
         if dtype is not None and dtype != spec.dtype:
             return f"input {index} is {dtype} and the model declares {spec.dtype}"

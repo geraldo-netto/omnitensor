@@ -85,9 +85,7 @@ def test_a_crash_before_any_page_is_not_partial():
 
 
 def test_an_adapter_that_never_finishes_is_bounded_by_a_deadline():
-    result = extract(
-        Adapter([page(1, "Slow"), page(2, "Slower")], delay=0.2), timeout_seconds=0.05
-    )
+    result = extract(Adapter([page(1, "Slow"), page(2, "Slower")], delay=0.2), timeout_seconds=0.05)
 
     assert result.outcome is ExtractionOutcome.TIMED_OUT
     assert "deadline" in result.detail

@@ -45,9 +45,7 @@ def test_plugin_contract_and_cancellation() -> None:
     async def scenario() -> None:
         context = PluginContext("template-workload", 1, {"scale": 2}, frozenset())
         report = await run_plugin_contract(TemplatePlugin(), context, _request())
-        cancelled = await run_cancellation_contract(
-            TemplatePlugin(), context, _request()
-        )
+        cancelled = await run_cancellation_contract(TemplatePlugin(), context, _request())
 
         assert report.result.status is PluginResultStatus.SUCCEEDED
         assert report.result.output == {"score": 0.5}
@@ -124,25 +122,17 @@ def test_pipeline_and_consumer_enforce_bounds_and_cancellation() -> None:
     async def scenario() -> None:
         cancellation = CancellationController()
         pipeline = TemplatePipeline(2)
-        preprocessed = await pipeline.preprocess(
-            CollectedOutput({"values": [-2, 2]}), cancellation
-        )
+        preprocessed = await pipeline.preprocess(CollectedOutput({"values": [-2, 2]}), cancellation)
         assert preprocessed.tensors == {"mean": 0.0}
         assert preprocessed.metadata == {"count": 2}
-        postprocessed = await pipeline.postprocess(
-            InferenceOutput({"score": 0.75}), cancellation
-        )
-        delivered = await TemplateResultConsumer().deliver(
-            postprocessed, cancellation
-        )
+        postprocessed = await pipeline.postprocess(InferenceOutput({"score": 0.75}), cancellation)
+        delivered = await TemplateResultConsumer().deliver(postprocessed, cancellation)
         assert delivered.output == {"score": 0.75}
         assert delivered.detail == "template result accepted"
 
         for score in (None, True, -0.1, 1.1, math.nan, math.inf):
             with pytest.raises(SDKContractError) as error:
-                await pipeline.postprocess(
-                    InferenceOutput({"score": score}), cancellation
-                )
+                await pipeline.postprocess(InferenceOutput({"score": score}), cancellation)
             assert error.value.code == "invalid-score"
 
         cancellation.cancel()
@@ -164,9 +154,7 @@ def test_explicit_execution_reports_bounded_progress() -> None:
         health = await plugin.health()
         assert health.detail == "template ready"
         progress = ProgressProbe("job-1")
-        result = await plugin.execute(
-            _request({"values": [1]}), CancellationController(), progress
-        )
+        result = await plugin.execute(_request({"values": [1]}), CancellationController(), progress)
         await plugin.stop()
 
         assert result.output == {"score": 1.0}

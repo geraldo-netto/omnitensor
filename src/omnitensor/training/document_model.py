@@ -9,6 +9,33 @@ from pathlib import Path
 from omnitensor.preparation import file_digest, install_prepared, prepare_artifact
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..document_model_runners import (
+    BgeTokenizer,
+    VulkanBgeRunner,
+    select_document_vulkan_device,
+)
+from ..document_model_types import (
+    DEFAULT_ARTIFACT_ROOT,
+    DEFAULT_BINDINGS_ROOT,
+    DEFAULT_BUILD_ROOT,
+    DEFAULT_SOURCE_ROOT,
+    DOCUMENT_MODEL_REPORT_SCHEMA,
+    MAX_CORPUS_BYTES,
+    MAX_NATIVE_ABSOLUTE_ERROR,
+    MAX_TEXT_BYTES,
+    MIN_NATIVE_COSINE,
+    MIN_RETRIEVAL_OVERLAP,
+    PRODUCER_CPU_REFERENCE_BACKEND,
+    PROFILE_ID,
+    QUERY_PREFIX,
+    RECIPE_ID,
+    SEQUENCE_LENGTH,
+    DocumentModelError,
+    DocumentModelEvidence,
+    InstalledDocumentModel,
+    TokenizedText,
+    native_tensor_contract,
+)
 from ..registry import (
     bundled_workloads_path,
     load_workloads,
@@ -51,33 +78,6 @@ from .document_model_installation import (
 from .document_model_installation import (
     install_document_model as _install_document_model,
 )
-from .document_model_runners import (
-    BgeTokenizer,
-    VulkanBgeRunner,
-    select_document_vulkan_device,
-)
-from .document_model_types import (
-    DEFAULT_ARTIFACT_ROOT,
-    DEFAULT_BINDINGS_ROOT,
-    DEFAULT_BUILD_ROOT,
-    DEFAULT_SOURCE_ROOT,
-    DOCUMENT_MODEL_REPORT_SCHEMA,
-    MAX_CORPUS_BYTES,
-    MAX_NATIVE_ABSOLUTE_ERROR,
-    MAX_TEXT_BYTES,
-    MIN_NATIVE_COSINE,
-    MIN_RETRIEVAL_OVERLAP,
-    PRODUCER_CPU_REFERENCE_BACKEND,
-    PROFILE_ID,
-    QUERY_PREFIX,
-    RECIPE_ID,
-    SEQUENCE_LENGTH,
-    DocumentModelError,
-    DocumentModelEvidence,
-    InstalledDocumentModel,
-    TokenizedText,
-    native_tensor_contract,
-)
 from .embedding_production import (
     EmbeddingHoldout,
     SentenceEmbeddingOnnxExporter,
@@ -95,9 +95,7 @@ _LEGACY_NATIVE_CONTRACT = "NATIVE_TENSOR_CONTRACT"
 def __getattr__(name: str):
     if name != _LEGACY_NATIVE_CONTRACT:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    contract = native_tensor_contract(
-        _load_model_recipe(resolve_model_recipe_path(RECIPE_ID))
-    )
+    contract = native_tensor_contract(_load_model_recipe(resolve_model_recipe_path(RECIPE_ID)))
     globals()[name] = contract
     return contract
 

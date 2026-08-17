@@ -50,9 +50,7 @@ def write_report(root, recipe="backblaze-smart-risk-v1", **changes):
             "filename": "model.onnx",
             "sha256": file_digest(model),
         },
-        "tensorContract": {
-            "inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]
-        },
+        "tensorContract": {"inputs": [{"shape": [1, 2], "dtype": "float32", "layout": "NC"}]},
         "outputContract": {"kind": "raw"},
         "targets": {"tpu": "uncompiled", "npu": "uncompiled", "gpu": "uncompiled"},
     }
@@ -117,9 +115,7 @@ def signing_boundary():
             "local.models", "release-1", f"report:sha256:{report_sha256}", 1, ""
         )
         signature = private_key.sign(artifact_signature_payload(reference, unsigned))
-        return dataclasses.replace(
-            unsigned, signature=base64.b64encode(signature).decode("ascii")
-        )
+        return dataclasses.replace(unsigned, signature=base64.b64encode(signature).decode("ascii"))
 
     return sign, verifier
 
@@ -360,17 +356,13 @@ def test_promotion_refuses_tpu_and_requires_exact_independent_versions(tmp_path)
         "trust_verifier": verifier,
     }
     with pytest.raises(TrainingError) as tpu_error:
-        promote_numeric_training(
-            **common, variant_versions={"tpu": "1.0.0"}, targets=("tpu",)
-        )
+        promote_numeric_training(**common, variant_versions={"tpu": "1.0.0"}, targets=("tpu",))
     assert (tpu_error.value.code, tpu_error.value.detail) == (
         "source-incompatible",
         "numeric ONNX reports need a separate representative fully-int8 TPU export",
     )
     with pytest.raises(TrainingError) as version_error:
-        promote_numeric_training(
-            **common, variant_versions={"npu": "1.0.0"}, targets=("gpu",)
-        )
+        promote_numeric_training(**common, variant_versions={"npu": "1.0.0"}, targets=("gpu",))
     assert (version_error.value.code, version_error.value.detail) == (
         "versions-invalid",
         "variant versions must exactly match targets",
@@ -398,9 +390,7 @@ def test_promotion_preserves_compiler_errors_and_missing_provider(tmp_path):
         "no compiler provider for gpu",
     )
     with pytest.raises(TrainingError) as duplicate:
-        promote_numeric_training(
-            **arguments, compilers=(FakeCompiler("gpu"), FakeCompiler("gpu"))
-        )
+        promote_numeric_training(**arguments, compilers=(FakeCompiler("gpu"), FakeCompiler("gpu")))
     assert (duplicate.value.code, duplicate.value.detail) == (
         "compiler-invalid",
         "duplicate compiler target: gpu",
@@ -518,6 +508,4 @@ def test_numeric_binding_deep_copies_profile_and_variant(tmp_path, monkeypatch):
 
     assert "model" not in binding["requirements"]
     assert binding["requirements"]["accelerator"] == "gpu"
-    assert binding["requirements"]["models"] == [
-        {"trainingContract": {"recipe": report.recipe}}
-    ]
+    assert binding["requirements"]["models"] == [{"trainingContract": {"recipe": report.recipe}}]

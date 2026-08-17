@@ -19,11 +19,7 @@ class PreparedDispatchLane:
     def __post_init__(self) -> None:
         if self.backend not in BACKENDS:
             raise ValueError(f"prepared lane backend must be one of {', '.join(BACKENDS)}")
-        if (
-            not isinstance(self.device_id, str)
-            or not self.device_id
-            or len(self.device_id) > 120
-        ):
+        if not isinstance(self.device_id, str) or not self.device_id or len(self.device_id) > 120:
             raise ValueError("prepared lane device_id must contain 1-120 characters")
         if not isinstance(self.model_reference, ArtifactReference):
             raise TypeError("prepared lane model_reference must be an ArtifactReference")

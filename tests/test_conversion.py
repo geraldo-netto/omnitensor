@@ -198,9 +198,7 @@ def test_openvino_output_can_be_directed_elsewhere(tmp_path):
     destination = tmp_path / "nested" / "ir"
     converter = FakeConverter(produce=("model.xml", "model.bin"))
 
-    converted = convert_to_openvino(
-        source, "[1,2]", output_dir=destination, converter=converter
-    )
+    converted = convert_to_openvino(source, "[1,2]", output_dir=destination, converter=converter)
 
     assert converted.xml.parent == destination
     assert converter.calls == [(source, (1, 2), destination, 900.0)]
@@ -243,9 +241,7 @@ def test_the_cli_reports_the_pair_and_the_next_command(tmp_path, capsys, monkeyp
     assert "omnitensor-prepare-artifact" in document["next"]
 
 
-def test_the_cli_selects_openvino_and_reports_its_prepare_command(
-    tmp_path, capsys, monkeypatch
-):
+def test_the_cli_selects_openvino_and_reports_its_prepare_command(tmp_path, capsys, monkeypatch):
     import json
 
     source = onnx_file(tmp_path)
@@ -366,15 +362,9 @@ def test_real_ovc_output_is_readable_digested_and_installable(tmp_path):
     openvino = pytest.importorskip("openvino")
 
     source = tmp_path / "tiny.onnx"
-    model_input = onnx.helper.make_tensor_value_info(
-        "input", onnx.TensorProto.FLOAT, [1, 2]
-    )
-    model_output = onnx.helper.make_tensor_value_info(
-        "output", onnx.TensorProto.FLOAT, [1, 2]
-    )
-    bias = onnx.helper.make_tensor(
-        "bias", onnx.TensorProto.FLOAT, [1, 2], [0.5, -0.25]
-    )
+    model_input = onnx.helper.make_tensor_value_info("input", onnx.TensorProto.FLOAT, [1, 2])
+    model_output = onnx.helper.make_tensor_value_info("output", onnx.TensorProto.FLOAT, [1, 2])
+    bias = onnx.helper.make_tensor("bias", onnx.TensorProto.FLOAT, [1, 2], [0.5, -0.25])
     graph = onnx.helper.make_graph(
         [onnx.helper.make_node("Add", ["input", "bias"], ["output"])],
         "tiny-add",
@@ -432,9 +422,7 @@ def test_the_adapter_reports_a_converter_that_failed(tmp_path, monkeypatch):
     import subprocess as sp
 
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/true")
-    monkeypatch.setattr(
-        sp, "run", lambda *a, **k: sp.CompletedProcess(a, 3, "", "bad graph")
-    )
+    monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(a, 3, "", "bad graph"))
 
     outcome = PnnxConverter().convert(onnx_file(tmp_path), (1, 3, 4, 4), tmp_path, 10.0)
 
@@ -442,9 +430,7 @@ def test_the_adapter_reports_a_converter_that_failed(tmp_path, monkeypatch):
     assert "bad graph" in outcome.output
 
 
-def test_pnnx_receives_an_absolute_source_when_output_directory_differs(
-    tmp_path, monkeypatch
-):
+def test_pnnx_receives_an_absolute_source_when_output_directory_differs(tmp_path, monkeypatch):
     import subprocess as sp
 
     source_root = tmp_path / "source"

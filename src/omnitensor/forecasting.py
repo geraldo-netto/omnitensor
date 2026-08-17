@@ -35,6 +35,7 @@ DEFAULT_RIDGE = 1e-6
 MAX_FEATURES_PER_FIT = 512
 MIN_TRAINING_ROWS = 8
 
+
 def fit_forecaster(
     inputs: Sequence[Sequence[float]],
     targets: Sequence[float],

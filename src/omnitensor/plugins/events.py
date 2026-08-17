@@ -247,9 +247,7 @@ def _result_state(document: Mapping[str, object]) -> tuple[str, Sequence[object]
                 "result-invalid", "succeeded and partial results require an event"
             )
         if state != "pending":
-            raise EventResultError(
-                "confirmation-required", "model candidates must start pending"
-            )
+            raise EventResultError("confirmation-required", "model candidates must start pending")
     return outcome, raw_events
 
 

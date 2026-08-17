@@ -30,9 +30,7 @@ def _reference():
     return ArtifactReference("retinexformer-lol-v1", "1.0.0", "ncnn", "a" * 64)
 
 
-def test_default_identity_is_created_once_reused_and_signs_offline(
-    tmp_path, monkeypatch
-):
+def test_default_identity_is_created_once_reused_and_signs_offline(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
 
@@ -129,9 +127,13 @@ def test_incomplete_and_mismatched_keypairs_are_refused(tmp_path):
 
     private.unlink()
     identity = load_or_create_publisher_identity(key_root=keys, trust_root=trusts)
-    other_public = Ed25519PrivateKey.generate().public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
+    other_public = (
+        Ed25519PrivateKey.generate()
+        .public_key()
+        .public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
     )
     identity.paths.public_key.write_bytes(other_public)
     with pytest.raises(PublisherIdentityError, match="publisher keypair does not match"):
@@ -225,9 +227,7 @@ def test_atomic_key_write_removes_partial_file_on_sync_failure(tmp_path, monkeyp
     assert list(tmp_path.iterdir()) == []
 
 
-def test_keypair_creation_removes_private_half_when_public_write_fails(
-    tmp_path, monkeypatch
-):
+def test_keypair_creation_removes_private_half_when_public_write_fails(tmp_path, monkeypatch):
     paths = publisher_identity.PublisherIdentityPaths(
         tmp_path / "private.pem",
         tmp_path / "public.pem",

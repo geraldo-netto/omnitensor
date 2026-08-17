@@ -37,9 +37,7 @@ CORPUS = ROOT / "evaluation-corpora/selected-text-v1.json"
 
 
 def test_acceptance_collector_imports_the_canonical_control_client():
-    source = (ROOT / "scripts/collect-selected-text-acceptance.py").read_text(
-        encoding="utf-8"
-    )
+    source = (ROOT / "scripts/collect-selected-text-acceptance.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = {
         alias.name
@@ -51,9 +49,7 @@ def test_acceptance_collector_imports_the_canonical_control_client():
         target.id
         for node in ast.walk(tree)
         if isinstance(node, (ast.Assign, ast.AnnAssign))
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else (node.target,)
-        )
+        for target in (node.targets if isinstance(node, ast.Assign) else (node.target,))
         if isinstance(target, ast.Name)
     }
     copied_coordinates = {
@@ -70,9 +66,7 @@ def test_acceptance_collector_imports_the_canonical_control_client():
         and node.module == "omnitensor.plugins.selected_text_acceptance"
         for alias in node.names
     }
-    functions = {
-        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-    }
+    functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     literals = {
         node.value
         for node in ast.walk(tree)
@@ -152,9 +146,7 @@ def test_worker_load_receipt_round_trips_the_exact_evidence_models():
             "receipt-invalid",
         ),
         (
-            lambda value: value["models"]["hebrewTranslation"].update(
-                modelSha256="0" * 64
-            ),
+            lambda value: value["models"]["hebrewTranslation"].update(modelSha256="0" * 64),
             "receipt-invalid",
         ),
         (
@@ -231,9 +223,7 @@ def test_worker_load_receipt_loader_enforces_exact_byte_boundaries(tmp_path):
 
 def test_worker_load_receipt_builder_requires_typed_exact_models():
     receipt = parse_selected_text_worker_load_receipt(_worker_receipt_document())
-    assert build_selected_text_worker_load_receipt(
-        receipt.primary, receipt.hebrew
-    ) == receipt
+    assert build_selected_text_worker_load_receipt(receipt.primary, receipt.hebrew) == receipt
     with pytest.raises(SelectedTextAcceptanceError, match="receipt models"):
         build_selected_text_worker_load_receipt(object(), receipt.hebrew)
 
@@ -324,9 +314,7 @@ def test_complete_named_gpu_evidence_qualifies_and_emits_the_closed_report(tmp_p
         "cancellationLatencyMs": 250,
     }
     assert report["models"]["primary"]["modelId"] == "qwen3-8b-q4-k-m"
-    assert report["models"]["hebrewTranslation"]["modelId"] == (
-        "dictalm2-hebrew-q4-k-m"
-    )
+    assert report["models"]["hebrewTranslation"]["modelId"] == ("dictalm2-hebrew-q4-k-m")
     assert report["scope"] == {
         "accelerator": "gpu",
         "cpuFallback": "forbidden",
@@ -363,9 +351,7 @@ def test_qualification_report_agrees_with_the_live_worker_receipt(tmp_path):
     path = tmp_path / "live-evidence.json"
     path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
 
-    report = qualify_selected_text(
-        corpus, load_selected_text_evidence(path)
-    ).document()
+    report = qualify_selected_text(corpus, load_selected_text_evidence(path)).document()
 
     for role, model in (
         ("primary", receipt.primary),
@@ -418,9 +404,7 @@ def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, mo
             "primary model bytes",
         ),
         (
-            lambda value: value["models"]["hebrewTranslation"].update(
-                modelSha256="0" * 64
-            ),
+            lambda value: value["models"]["hebrewTranslation"].update(modelSha256="0" * 64),
             "evidence-stale",
             "Hebrew model bytes",
         ),
@@ -430,9 +414,7 @@ def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, mo
             "runtime identity",
         ),
         (
-            lambda value: value["models"]["primary"]["load"].update(
-                acceleratorLayers=1
-            ),
+            lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=1),
             "device-unqualified",
             "complete Vulkan",
         ),
@@ -497,22 +479,16 @@ def test_policy_rejects_each_metric_independently(tmp_path):
             corpus, weak_terms, SelectedTextPolicy(minimum_operation_term_recall=1.0)
         )
 
-    task_index = next(
-        index for index, case in enumerate(corpus.cases) if case.expected_task_terms
-    )
+    task_index = next(index for index, case in enumerate(corpus.cases) if case.expected_task_terms)
     task_observation = list(evidence.observations)
     broken = dict(task_observation[task_index].result)
     broken["tasks"] = ["missing"]
     task_observation[task_index] = replace(task_observation[task_index], result=broken)
     weak_tasks = replace(evidence, observations=tuple(task_observation))
     with pytest.raises(SelectedTextAcceptanceError, match="task term recall"):
-        qualify_selected_text(
-            corpus, weak_tasks, SelectedTextPolicy(minimum_task_term_recall=1.0)
-        )
+        qualify_selected_text(corpus, weak_tasks, SelectedTextPolicy(minimum_task_term_recall=1.0))
 
-    injection_index = next(
-        index for index, case in enumerate(corpus.cases) if case.injection_probe
-    )
+    injection_index = next(index for index, case in enumerate(corpus.cases) if case.injection_probe)
     injection_result = str(evidence.observations[injection_index].result["result"])
     cases = list(corpus.cases)
     cases[injection_index] = replace(
@@ -552,9 +528,10 @@ def test_scoring_exposes_each_term_script_injection_route_and_latency_component(
     first_result = dict(first.result)
     first_result["result"] = "checksum digest"
     operation_observations[0] = replace(first, result=first_result)
-    assert acceptance._score(corpus, operation_observations)[0] == (
-        expected_terms - 1
-    ) / expected_terms
+    assert (
+        acceptance._score(corpus, operation_observations)[0]
+        == (expected_terms - 1) / expected_terms
+    )
 
     expected_tasks = sum(len(case.expected_task_terms) for case in corpus.cases)
     task_index = next(index for index, case in enumerate(corpus.cases) if case.expected_task_terms)
@@ -563,9 +540,10 @@ def test_scoring_exposes_each_term_script_injection_route_and_latency_component(
     task_result["tasks"] = ["missing"]
     task_observations[task_index] = replace(task_observations[task_index], result=task_result)
     missing_tasks = len(corpus.cases[task_index].expected_task_terms)
-    assert acceptance._score(corpus, task_observations)[1] == (
-        expected_tasks - missing_tasks
-    ) / expected_tasks
+    assert (
+        acceptance._score(corpus, task_observations)[1]
+        == (expected_tasks - missing_tasks) / expected_tasks
+    )
 
     hebrew_indices = [index for index, case in enumerate(corpus.cases) if case.require_hebrew]
     script_observations = list(evidence.observations)
@@ -574,9 +552,9 @@ def test_scoring_exposes_each_term_script_injection_route_and_latency_component(
     script_observations[hebrew_indices[0]] = replace(
         script_observations[hebrew_indices[0]], result=script_result
     )
-    assert acceptance._score(corpus, script_observations)[2] == (
-        len(hebrew_indices) - 1
-    ) / len(hebrew_indices)
+    assert acceptance._score(corpus, script_observations)[2] == (len(hebrew_indices) - 1) / len(
+        hebrew_indices
+    )
 
     route_observations = list(evidence.observations)
     route_result = dict(route_observations[0].result)
@@ -805,9 +783,10 @@ def test_cli_writes_validated_report_and_fails_without_evidence(tmp_path, capsys
     output = tmp_path / "report.json"
 
     assert main(["--evidence", str(evidence), "--output", str(output)]) == 0
-    assert validate_document(
-        "selected-text-acceptance.schema.json", json.loads(output.read_text())
-    ) == []
+    assert (
+        validate_document("selected-text-acceptance.schema.json", json.loads(output.read_text()))
+        == []
+    )
     assert output.read_bytes() == json.dumps(expected, separators=(",", ":")).encode("utf-8")
     assert json.loads(capsys.readouterr().out)["qualified"] is True
 
@@ -863,9 +842,7 @@ def test_cli_preserves_unicode_stdout_and_ascii_safe_report_bytes(tmp_path, monk
     output = tmp_path / "report.json"
 
     assert main(["--evidence", "evidence.json", "--output", str(output)]) == 0
-    assert capsys.readouterr().out == json.dumps(
-        {"text": "שלום"}, indent=2, ensure_ascii=False
-    ) + "\n"
-    assert output.read_text(encoding="utf-8") == json.dumps(
-        {"text": "שלום"}, separators=(",", ":")
+    assert (
+        capsys.readouterr().out == json.dumps({"text": "שלום"}, indent=2, ensure_ascii=False) + "\n"
     )
+    assert output.read_text(encoding="utf-8") == json.dumps({"text": "שלום"}, separators=(",", ":"))

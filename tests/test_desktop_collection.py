@@ -129,9 +129,7 @@ def test_a_trigger_for_another_plugin_is_refused():
         asyncio.run(collector().collect(trigger("other-plugin")))
 
     assert caught.value.code == "trigger-invalid"
-    assert caught.value.detail == (
-        "desktop context metadata requires a desktop-context trigger"
-    )
+    assert caught.value.detail == ("desktop context metadata requires a desktop-context trigger")
 
 
 def test_identities_are_per_session_so_they_cannot_be_correlated():
@@ -157,9 +155,7 @@ def test_a_session_must_be_a_desktop_session():
     with pytest.raises(TypeError, match="DesktopSession"):
         collector().session_changed("session-b")
     with pytest.raises(TypeError, match="DesktopSession"):
-        DesktopContextCollector(
-            ReplaySource([snapshot()]), permissions(), "session-a", ()
-        )
+        DesktopContextCollector(ReplaySource([snapshot()]), permissions(), "session-a", ())
 
 
 def test_a_window_moving_workspace_is_reported_as_a_change():
@@ -171,9 +167,7 @@ def test_a_window_moving_workspace_is_reported_as_a_change():
 
 def test_a_closed_window_is_reported_as_removed():
     other = window_identity("session-a", "0x1002")
-    subject = collector(
-        snapshot(sample(), sample(other)), snapshot(sample())
-    )
+    subject = collector(snapshot(sample(), sample(other)), snapshot(sample()))
     asyncio.run(subject.collect(trigger()))
     second = asyncio.run(subject.collect(trigger())).payload
     assert [item["id"] for item in second["churn"]["removed"]] == [other]

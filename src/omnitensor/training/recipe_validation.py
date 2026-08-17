@@ -166,8 +166,7 @@ def _sentence_embedding_producer(document: dict, producer: dict, inputs: list) -
     source_shape = producer["sourceOutputShape"]
     output_shape = producer["outputShape"]
     if (
-        producer["postprocessing"]
-        not in {"attention-mask-mean-pool-l2", "cls-token-l2"}
+        producer["postprocessing"] not in {"attention-mask-mean-pool-l2", "cls-token-l2"}
         or source_shape[:2] != [batch, sequence]
         or len(source_shape) != 3
         or output_shape != [batch, source_shape[2]]
@@ -264,16 +263,12 @@ def _timeseries_producer(document: dict, producer: dict, inputs: list) -> None:
 PRODUCER_VALIDATORS = MappingProxyType(
     {
         "identity": ProducerValidator(_accept_any_contract, _identity_producer),
-        "sentence-embedding": ProducerValidator(
-            _embedding_contract, _sentence_embedding_producer
-        ),
+        "sentence-embedding": ProducerValidator(_embedding_contract, _sentence_embedding_producer),
         "clip-image-embedding": ProducerValidator(_embedding_contract, _clip_image_producer),
         "retinexformer-image-enhancement": ProducerValidator(
             _retinexformer_contract, _retinexformer_producer
         ),
-        "timeseries-point-forecast": ProducerValidator(
-            _timeseries_contract, _timeseries_producer
-        ),
+        "timeseries-point-forecast": ProducerValidator(_timeseries_contract, _timeseries_producer),
         "timeseries-quantile-forecast": ProducerValidator(
             _timeseries_contract, _timeseries_producer
         ),

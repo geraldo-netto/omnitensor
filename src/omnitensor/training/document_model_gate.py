@@ -10,12 +10,12 @@ from jsonschema.exceptions import SchemaError
 from omnitensor.preparation import file_digest
 
 from ..atomicio import write_json_atomic
-from ..registry import validate_document
-from .document_model_types import (
+from ..document_model_types import (
     DOCUMENT_MODEL_REPORT_SCHEMA,
     DocumentModelError,
     native_tensor_contract,
 )
+from ..registry import validate_document
 from .embedding_production import l2_normalize
 
 

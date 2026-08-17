@@ -212,10 +212,7 @@ def test_a_long_programme_is_parsed_whole():
     # There was a ceiling here: 64 events and 16 evidence entries, refused as
     # "result-invalid" above that. A conference programme with a hundred talks
     # is not an invalid result, and telling somebody it is loses the talks.
-    events = [
-        candidate(f"event-{index}", title=f"Talk {index}")
-        for index in range(250)
-    ]
+    events = [candidate(f"event-{index}", title=f"Talk {index}") for index in range(250)]
     events[0]["evidence"] = [evidence() for _ in range(64)]
 
     parsed = parse_grounded_event_result(result_document(*events))
@@ -360,9 +357,7 @@ def test_ics_contains_only_confirmed_candidates_and_escapes_text():
 
 
 def test_ics_omits_optional_end_and_location_and_reports_all_confirmed():
-    parsed = parse_grounded_event_result(
-        result_document(candidate(end=None, location=None))
-    )
+    parsed = parse_grounded_event_result(result_document(candidate(end=None, location=None)))
     decided = confirm_event_candidates(parsed, ["event-1"])
     assert decided.confirmation_state == "confirmed"
     rendered = render_confirmed_ics(decided)
@@ -446,18 +441,14 @@ def test_bounded_extraction_pages_become_private_source_fragments():
             "extraction produced no usable pages",
         ),
         (
-            ExtractionResult(
-                ExtractionOutcome.SUCCEEDED, (NormalisedPage(1, "x", (), ()),)
-            ),
+            ExtractionResult(ExtractionOutcome.SUCCEEDED, (NormalisedPage(1, "x", (), ()),)),
             "/home/user/file",
             "a" * 64,
             "source-invalid",
             "source reference must be opaque and private",
         ),
         (
-            ExtractionResult(
-                ExtractionOutcome.SUCCEEDED, (NormalisedPage(1, "x", (), ()),)
-            ),
+            ExtractionResult(ExtractionOutcome.SUCCEEDED, (NormalisedPage(1, "x", (), ()),)),
             "private:one",
             "A" * 64,
             "source-invalid",
@@ -482,9 +473,7 @@ def test_source_fragments_refuse_unusable_or_untrusted_inputs(
         max_size=40,
     ),
 )
-def test_property_valid_utc_candidates_round_trip_and_require_confirmation(
-    hour, duration, title
-):
+def test_property_valid_utc_candidates_round_trip_and_require_confirmation(hour, duration, title):
     start = f"2026-01-10T{hour:02d}:00:00+00:00"
     end = f"2026-01-10T{hour:02d}:{duration:02d}:00+00:00"
     document = result_document(

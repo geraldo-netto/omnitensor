@@ -12,9 +12,7 @@ def disable_string_literal_mutations() -> None:
     from mutmut.mutation import mutators  # noqa: PLC0415
 
     mutators.mutation_operators[:] = [
-        entry
-        for entry in mutators.mutation_operators
-        if entry[1] is not mutators.operator_string
+        entry for entry in mutators.mutation_operators if entry[1] is not mutators.operator_string
     ]
 
 

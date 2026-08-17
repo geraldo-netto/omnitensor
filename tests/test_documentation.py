@@ -168,7 +168,7 @@ def test_event_workload_guide_covers_dependencies_privacy_and_legacy_transition(
         "There is no CPU lane",
         "1–32 absolute paths",
         "packaging template, not a bundled live profile",
-        "workerState: \"ready\"",
+        'workerState: "ready"',
         "per-request broker directory",
         "never writes, moves, renames, or deletes",
         "must be a new absolute path",
@@ -178,9 +178,7 @@ def test_event_workload_guide_covers_dependencies_privacy_and_legacy_transition(
 
 
 def test_document_question_guide_freezes_manual_privacy_and_model_boundaries():
-    guide = " ".join(
-        (ROOT / "docs/document-questions.md").read_text(encoding="utf-8").split()
-    )
+    guide = " ".join((ROOT / "docs/document-questions.md").read_text(encoding="utf-8").split())
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for required in (
@@ -278,9 +276,7 @@ def test_model_tooling_guide_covers_every_reviewed_license_and_target_stage():
 
 def test_document_model_guide_keeps_opsets_one_contract_and_native_gate_explicit():
     project = tomllib.loads(
-        (ROOT / "packaging" / "omnitensor-training" / "pyproject.toml").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "packaging" / "omnitensor-training" / "pyproject.toml").read_text(encoding="utf-8")
     )
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     normalized = " ".join(guide.split())
@@ -411,9 +407,9 @@ def test_plugin_admission_guide_documents_the_pool_and_how_to_tune_it():
     assert "OMNITENSOR_PLUGIN_SLOTS" in guide
     assert f"| {DEFAULT_MAX_CONCURRENT} | {MAX_CONCURRENT_LIMIT} |" in guide
     assert "1 / weight" in guide
-    assert "[Plugin admission](docs/plugin-admission.md)" in (
-        ROOT / "README.md"
-    ).read_text(encoding="utf-8")
+    assert "[Plugin admission](docs/plugin-admission.md)" in (ROOT / "README.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_boundary_guide_splits_capability_from_intent_and_records_the_refusals():

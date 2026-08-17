@@ -205,7 +205,7 @@ class InferenceJobDispatcher:
             raise JobDispatchError(
                 "prepared-lane-unavailable",
                 f"{workload_id}: {backend} has no stable device identity",
-        )
+            )
         reference = declared_artifact_reference(workload, model)
         _refuse_unpinned(workload_id, reference)
         assert reference is not None
@@ -264,13 +264,9 @@ class InferenceJobDispatcher:
                 f"{workload_id}: prepared scheduler lane {prepared.scheduler_lane} disappeared",
             ) from error
 
-    def _prepared_model(
-        self, workload: Workload, prepared: PreparedDispatchLane
-    ) -> dict:
+    def _prepared_model(self, workload: Workload, prepared: PreparedDispatchLane) -> dict:
         if not isinstance(prepared, PreparedDispatchLane):
-            raise JobDispatchError(
-                "prepared-lane-invalid", "Prepared dispatch lane is invalid"
-            )
+            raise JobDispatchError("prepared-lane-invalid", "Prepared dispatch lane is invalid")
         for model in workload.models:
             if declared_artifact_reference(workload, model) == prepared.model_reference:
                 return model
@@ -279,9 +275,7 @@ class InferenceJobDispatcher:
             f"{workload.id}: prepared model is not declared by this workload",
         )
 
-    def _prepared_executor(
-        self, workload_id: str, prepared: PreparedDispatchLane
-    ) -> Executor:
+    def _prepared_executor(self, workload_id: str, prepared: PreparedDispatchLane) -> Executor:
         if self._executor_for_device is not None:
             executor = self._executor_for_device(prepared.backend, prepared.device_id)
         else:
@@ -303,9 +297,7 @@ class InferenceJobDispatcher:
         """The profile this job names, if it exists and can run inference."""
         workload = self._workloads.get(workload_id)
         if workload is None:
-            raise JobDispatchError(
-                "workload-unknown", f"No such workload profile: {workload_id}"
-            )
+            raise JobDispatchError("workload-unknown", f"No such workload profile: {workload_id}")
         if not workload.models:
             raise JobDispatchError(
                 "workload-has-no-model",
@@ -393,9 +385,7 @@ class InferenceJobDispatcher:
                 f"{workload_id}: artifact store is unreadable: {type(error).__name__}",
             ) from error
         if not resolution.ready or resolution.path is None:
-            raise JobDispatchError(
-                "artifact-unavailable", f"{workload_id}: {resolution.reason}"
-            )
+            raise JobDispatchError("artifact-unavailable", f"{workload_id}: {resolution.reason}")
         return str(resolution.path)
 
 
@@ -427,9 +417,7 @@ def _inline_inputs(payload: dict, max_input_tensors: int) -> list:
     """The tensors a payload carries inline, bounded by count."""
     inputs = payload.get("inputs")
     if not isinstance(inputs, list):
-        raise JobDispatchError(
-            "payload-invalid", "Job payload must contain an inputs array"
-        )
+        raise JobDispatchError("payload-invalid", "Job payload must contain an inputs array")
     if len(inputs) > max_input_tensors:
         raise JobDispatchError(
             "payload-invalid",
@@ -450,9 +438,7 @@ def validate_input_tensor(value: object, budget: _ElementBudget) -> object:
     if isinstance(value, (int, float)):
         budget.spend()
         if isinstance(value, float) and not math.isfinite(value):
-            raise JobDispatchError(
-                "payload-invalid", "Input tensors must contain finite numbers"
-            )
+            raise JobDispatchError("payload-invalid", "Input tensors must contain finite numbers")
         return value
     if not isinstance(value, list):
         raise JobDispatchError(
@@ -472,9 +458,7 @@ def _tensor_shape(value: object) -> tuple[int, ...]:
     return (len(value),) + (_tensor_shape(value[0]) if value else ())
 
 
-def declared_artifact_reference(
-    workload: Workload, model: dict
-) -> ArtifactReference | None:
+def declared_artifact_reference(workload: Workload, model: dict) -> ArtifactReference | None:
     """The allowlisted artifact entry matching this workload's model.
 
     Returns ``None`` when the manifest declares no digest for it, which is the
@@ -494,9 +478,7 @@ def declared_artifact_reference(
             )
     digest = model.get("sha256")
     if digest:
-        return ArtifactReference(
-            model["id"], model["version"], model["format"], digest, companions
-        )
+        return ArtifactReference(model["id"], model["version"], model["format"], digest, companions)
     return None
 
 
@@ -520,16 +502,12 @@ def inference_result_payload(
     while guaranteeing that what crosses IPC is encodable.
     """
     if not isinstance(result, InferenceResult):
-        raise JobDispatchError(
-            "executor-result-invalid", "Executor returned a non-result value"
-        )
+        raise JobDispatchError("executor-result-invalid", "Executor returned a non-result value")
     budget = _ElementBudget(max_elements)
     outputs = [encode_tensor(tensor, budget) for tensor in result.outputs]
     duration = float(result.duration_ms)
     if not math.isfinite(duration):
-        raise JobDispatchError(
-            "executor-result-invalid", "Executor reported a non-finite duration"
-        )
+        raise JobDispatchError("executor-result-invalid", "Executor reported a non-finite duration")
     return {"outputs": outputs, "durationMs": round(duration, 3)}
 
 

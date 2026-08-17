@@ -444,16 +444,12 @@ def _selected_source(raw_path: object) -> tuple[IngestedFile, tuple[int, int]]:
             raise EventWorkloadError("source-invalid", "selected source size is outside bounds")
         suffix = path.suffix.lower()
         if suffix not in SUPPORTED_SUFFIXES:
-            raise EventWorkloadError(
-                "source-unsupported", "selected source type is unsupported"
-            )
+            raise EventWorkloadError("source-unsupported", "selected source type is unsupported")
         digest = file_digest(path)
     except EventWorkloadError:
         raise
     except OSError as error:
-        raise EventWorkloadError(
-            "source-unreadable", "selected source cannot be read"
-        ) from error
+        raise EventWorkloadError("source-unreadable", "selected source cannot be read") from error
     item = IngestedFile(
         str(path),
         status.st_size,

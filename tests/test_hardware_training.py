@@ -281,9 +281,7 @@ def test_sensor_binding_parser_errors_are_stable():
 
 def test_sensor_binding_catalog_bounds_and_uniqueness():
     assert parse_sensor_bindings(("single=id",)) == (SensorBinding("single", "id"),)
-    maximum = tuple(
-        f"role-{index}=id-{index}" for index in range(MAX_TRAINING_SENSORS)
-    )
+    maximum = tuple(f"role-{index}=id-{index}" for index in range(MAX_TRAINING_SENSORS))
     assert len(parse_sensor_bindings(maximum)) == MAX_TRAINING_SENSORS
     assert parse_sensor_bindings(("cpu-temperature=cpu-package-0", "ecc=dimm-0")) == BINDINGS
     with pytest.raises(ValueError) as sequence_error:
@@ -295,10 +293,7 @@ def test_sensor_binding_catalog_bounds_and_uniqueness():
         parse_sensor_bindings(("a=same", "b=same"))
     with pytest.raises(ValueError, match="1 to"):
         parse_sensor_bindings(
-            tuple(
-                f"role-{index}=id-{index}"
-                for index in range(MAX_TRAINING_SENSORS + 1)
-            )
+            tuple(f"role-{index}=id-{index}" for index in range(MAX_TRAINING_SENSORS + 1))
         )
     assert _binding_from_text("role=id") == SensorBinding("role", "id")
 
@@ -408,9 +403,7 @@ def test_sensor_set_duplicates_missing_extra_and_semantic_drift_are_refused(tmp_
         "sensor-set-mismatch"
     )
     extra = document(0)
-    extra["snapshot"]["items"].append(
-        item("fan-0", 1_000_000, kind="fan", unit="rpm")
-    )
+    extra["snapshot"]["items"].append(item("fan-0", 1_000_000, kind="fan", unit="rpm"))
     assert error_code(lambda: _observation_from_document(extra, BINDINGS)) == (
         "sensor-set-mismatch"
     )
@@ -420,11 +413,14 @@ def test_sensor_set_duplicates_missing_extra_and_semantic_drift_are_refused(tmp_
     second = document(1)
     second["snapshot"]["items"][0]["unit"] = "celsius"
     path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
-    assert error_code(
-        lambda: load_hardware_history(
-            path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "sensor-drift"
+        == "sensor-drift"
+    )
 
 
 def test_sensor_features_distinguish_health_and_missing_without_fake_zero():
@@ -466,26 +462,35 @@ def test_history_file_safety_labels_bounds_and_order(tmp_path, monkeypatch):
         "hardware history is not a safe regular file",
     )
     path.mkdir()
-    assert error_code(
-        lambda: load_hardware_history(
-            path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "history-invalid"
+        == "history-invalid"
+    )
     path.rmdir()
     write_history(path, 2)
     alias = tmp_path / "alias"
     alias.symlink_to(path)
-    assert error_code(
-        lambda: load_hardware_history(
-            alias, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                alias, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "history-invalid"
+        == "history-invalid"
+    )
     monkeypatch.setattr("omnitensor.training.hardware.MAX_HISTORY_BYTES", path.stat().st_size - 1)
-    assert error_code(
-        lambda: load_hardware_history(
-            path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "history-too-large"
+        == "history-too-large"
+    )
 
 
 @pytest.mark.parametrize("raw", [b"\n", b"not-json\n", b"\xff\n"])
@@ -529,21 +534,27 @@ def test_history_line_exact_limit_and_count(tmp_path, monkeypatch):
     path = tmp_path / "history.jsonl"
     write_history(path, 2)
     monkeypatch.setattr("omnitensor.training.hardware.MAX_HISTORY_SNAPSHOTS", 1)
-    assert error_code(
-        lambda: load_hardware_history(
-            path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "history-too-large"
+        == "history-too-large"
+    )
 
 
 def test_empty_and_unordered_history_are_refused(tmp_path):
     path = tmp_path / "history.jsonl"
     path.write_bytes(b"")
-    assert error_code(
-        lambda: load_hardware_history(
-            path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+    assert (
+        error_code(
+            lambda: load_hardware_history(
+                path, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
+            )
         )
-    ) == "insufficient-history"
+        == "insufficient-history"
+    )
     observations = (
         HardwareObservation(2, 0, "observed", (0.0,) * 8),
         HardwareObservation(2, 1, "observed", (1.0,) * 8),
@@ -588,13 +599,9 @@ def test_split_class_and_metric_boundaries():
     )
     _require_classes(examples, 5, "balanced")
     assert error_code(lambda: _require_classes(examples, 6, "short")) == "class-imbalance"
-    all_faults = tuple(
-        HardwareObservation(index, 1, "observed", (1.0,)) for index in range(4)
-    )
+    all_faults = tuple(HardwareObservation(index, 1, "observed", (1.0,)) for index in range(4))
     all_fault_examples = _window_examples(all_faults, 1)
-    class_error = training_error(
-        lambda: _require_classes(all_fault_examples, 1, "training")
-    )
+    class_error = training_error(lambda: _require_classes(all_fault_examples, 1, "training"))
     assert (class_error.code, class_error.detail) == (
         "class-imbalance",
         "training split needs at least 1 baseline and fault examples",
@@ -608,8 +615,7 @@ def test_split_class_and_metric_boundaries():
 
 def test_split_purges_every_training_window_overlapping_holdout():
     observations = tuple(
-        HardwareObservation(index, index % 2, "observed", (float(index),))
-        for index in range(12)
+        HardwareObservation(index, index % 2, "observed", (float(index),)) for index in range(12)
     )
     examples = _window_examples(observations, 4)
 
@@ -719,9 +725,7 @@ def test_empty_export_is_refused(tmp_path):
     dataset = load_hardware_history(
         history, bindings=BINDINGS, confirm_labels=HARDWARE_LABEL_CONFIRMATION
     )
-    error = training_error(
-        lambda: trainer(FakeExporter(b"")).train(dataset, tmp_path / "empty")
-    )
+    error = training_error(lambda: trainer(FakeExporter(b"")).train(dataset, tmp_path / "empty"))
     assert (error.code, error.detail) == (
         "export-failed",
         "exporter produced no portable model",
@@ -889,31 +893,38 @@ def test_hardware_cli_help_defaults_and_errors(tmp_path, capsys, monkeypatch):
         "maximum_false_positive_rate": DEFAULT_MAX_FALSE_POSITIVE_RATE,
     }
     assert captured["train"] == ("dataset", tmp_path / "fit")
-    assert capsys.readouterr().out == json.dumps(
-        {
-            "report": str(tmp_path / "fit/hardware-training-report.json"),
-            "portableModel": str(tmp_path / "fit/model.onnx"),
-            "samples": {"training": 80, "holdout": 20},
-            "quality": {"auc": 1},
-            "next": "compile and qualify this source separately for each target lane",
-        },
-        indent=2,
-    ) + "\n"
+    assert (
+        capsys.readouterr().out
+        == json.dumps(
+            {
+                "report": str(tmp_path / "fit/hardware-training-report.json"),
+                "portableModel": str(tmp_path / "fit/model.onnx"),
+                "samples": {"training": 80, "holdout": 20},
+                "quality": {"auc": 1},
+                "next": "compile and qualify this source separately for each target lane",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     monkeypatch.setattr(
         "omnitensor.training.cli.parse_sensor_bindings",
         lambda _values: (_item for _item in ()).throw(ValueError("bad binding")),
     )
-    assert hardware_train_main(
-        [
-            "--history",
-            "missing",
-            "--sensor",
-            "bad",
-            "--confirm-labels",
-            HARDWARE_LABEL_CONFIRMATION,
-        ]
-    ) == 1
+    assert (
+        hardware_train_main(
+            [
+                "--history",
+                "missing",
+                "--sensor",
+                "bad",
+                "--confirm-labels",
+                HARDWARE_LABEL_CONFIRMATION,
+            ]
+        )
+        == 1
+    )
     assert capsys.readouterr().err == "hardware training failed: bad binding\n"
 
 

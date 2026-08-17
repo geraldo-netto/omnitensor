@@ -231,11 +231,7 @@ def _histograms(raw: object) -> tuple[LatencyHistogram, ...]:
         if not isinstance(buckets, list) or len(buckets) > MAX_BUCKETS:
             raise KernelTelemetryError("aggregate-invalid", "histogram buckets are invalid")
         for count in buckets:
-            if (
-                isinstance(count, bool)
-                or not isinstance(count, int)
-                or not 0 <= count <= MAX_COUNT
-            ):
+            if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= MAX_COUNT:
                 raise KernelTelemetryError("aggregate-invalid", "bucket counts must be counts")
         parsed.append(
             LatencyHistogram(
@@ -255,11 +251,7 @@ def _counters(raw: object) -> tuple[KernelCounter, ...]:
         if not isinstance(item, Mapping):
             raise KernelTelemetryError("aggregate-invalid", "counter must be an object")
         value = item.get("value")
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or not 0 <= value <= MAX_COUNT
-        ):
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_COUNT:
             raise KernelTelemetryError("aggregate-invalid", "counter value must be a count")
         parsed.append(KernelCounter(_bounded_name(item.get("name")), value))
     return tuple(parsed)

@@ -101,9 +101,7 @@ def _forecast_train_main(argv, deps: TrainingCliDependencies) -> int:
     output = (
         Path(arguments.output_dir).expanduser()
         if arguments.output_dir
-        else Path(deps.outputs["forecast"]).expanduser()
-        / arguments.profile
-        / arguments.version
+        else Path(deps.outputs["forecast"]).expanduser() / arguments.profile / arguments.version
     )
     try:
         spec = TrainingSpec(

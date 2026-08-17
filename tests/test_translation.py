@@ -60,18 +60,14 @@ class TestSizingTheSpans:
 class TestTranslatingTheWholeThing:
     @pytest.mark.asyncio
     async def test_every_span_appears_in_the_result_in_order(self):
-        translation = await translate_document(
-            DOCUMENT, output_tokens=4_096, translate_span=upper
-        )
+        translation = await translate_document(DOCUMENT, output_tokens=4_096, translate_span=upper)
 
         assert translation.text == DOCUMENT.upper()
 
     @pytest.mark.asyncio
     async def test_a_document_needing_many_generations_still_comes_back_whole(self):
         """The case the old cap could not do at all."""
-        translation = await translate_document(
-            DOCUMENT, output_tokens=200, translate_span=upper
-        )
+        translation = await translate_document(DOCUMENT, output_tokens=200, translate_span=upper)
 
         assert translation.span_count > 1
         assert translation.text == DOCUMENT.upper()
@@ -84,9 +80,7 @@ class TestTranslatingTheWholeThing:
             asked.append(span)
             return span.text
 
-        translation = await translate_document(
-            "", output_tokens=4_096, translate_span=record
-        )
+        translation = await translate_document("", output_tokens=4_096, translate_span=record)
 
         assert translation.text == ""
         assert asked == []
@@ -110,9 +104,7 @@ class TestTranslatingTheWholeThing:
             return "" if span.index == 2 else span.text
 
         with pytest.raises(TranslationError) as failure:
-            await translate_document(
-                DOCUMENT, output_tokens=200, translate_span=blank_on_the_third
-            )
+            await translate_document(DOCUMENT, output_tokens=200, translate_span=blank_on_the_third)
 
         assert "span 3 of" in failure.value.detail
 

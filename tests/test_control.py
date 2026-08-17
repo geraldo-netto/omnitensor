@@ -36,15 +36,17 @@ def control(tmp_path):
 
 
 def command(operation, profile_id, value, revision=0, command_id="xpuwlm-1"):
-    return json.dumps({
-        "version": CONTROL_VERSION,
-        "id": command_id,
-        "issuedAt": 1_700_000_000_000,
-        "expectedRevision": revision,
-        "operation": operation,
-        "profileId": profile_id,
-        "value": value,
-    })
+    return json.dumps(
+        {
+            "version": CONTROL_VERSION,
+            "id": command_id,
+            "issuedAt": 1_700_000_000_000,
+            "expectedRevision": revision,
+            "operation": operation,
+            "profileId": profile_id,
+            "value": value,
+        }
+    )
 
 
 def apply(control, text):
@@ -65,10 +67,13 @@ def test_apply_enable_and_weight_increment_revision_and_persist(control, tmp_pat
     assert second["revision"] == 2
     assert second["portfolio"]["profiles"]["visual-library"]["weight"] == 5
 
-    reloaded = PolicyStore(tmp_path / "policy.json", {
-        "hardware-health": ProfilePolicy(enabled=True, weight=2),
-        "visual-library": ProfilePolicy(enabled=False, weight=3),
-    }).load()
+    reloaded = PolicyStore(
+        tmp_path / "policy.json",
+        {
+            "hardware-health": ProfilePolicy(enabled=True, weight=2),
+            "visual-library": ProfilePolicy(enabled=False, weight=3),
+        },
+    ).load()
     assert reloaded.revision == 2
     assert reloaded.profiles["visual-library"].weight == 5
 
@@ -226,9 +231,7 @@ def test_policy_persistence_does_not_block_the_event_loop(tmp_path):
     async def scenario():
         control = ControlService(BlockingStore())
         applying = asyncio.create_task(
-            control.apply_command_text(
-                command("set-profile-enabled", "visual-library", False)
-            )
+            control.apply_command_text(command("set-profile-enabled", "visual-library", False))
         )
         while not started.is_set():
             await asyncio.sleep(0.001)
@@ -290,9 +293,7 @@ def test_an_integral_float_weight_is_stored_as_an_integer(tmp_path, value):
     defaults = {"visual-library": ProfilePolicy(enabled=True, weight=1)}
     control = ControlService(PolicyStore(path, defaults))
 
-    acknowledgement = apply(
-        control, command("set-profile-weight", "visual-library", value)
-    )
+    acknowledgement = apply(control, command("set-profile-weight", "visual-library", value))
 
     assert acknowledgement["status"] == "applied"
     stored = json.loads(path.read_text())["profiles"]["visual-library"]["weight"]
@@ -302,32 +303,44 @@ def test_an_integral_float_weight_is_stored_as_an_integer(tmp_path, value):
 
 
 def test_a_boolean_is_never_accepted_as_a_weight(tmp_path):
-    control = ControlService(PolicyStore(tmp_path / "policy.json", {
-        "visual-library": ProfilePolicy(enabled=True, weight=1),
-    }))
+    control = ControlService(
+        PolicyStore(
+            tmp_path / "policy.json",
+            {
+                "visual-library": ProfilePolicy(enabled=True, weight=1),
+            },
+        )
+    )
     acknowledgement = apply(control, command("set-profile-weight", "visual-library", True))
     assert acknowledgement["status"] == "rejected"
 
 
 def batch(changes, revision=0, command_id="xpuwlm-batch"):
-    return json.dumps({
-        "version": CONTROL_VERSION,
-        "id": command_id,
-        "issuedAt": 1_700_000_000_000,
-        "expectedRevision": revision,
-        "operation": "apply-profiles",
-        "profileId": None,
-        "value": None,
-        "changes": changes,
-    })
+    return json.dumps(
+        {
+            "version": CONTROL_VERSION,
+            "id": command_id,
+            "issuedAt": 1_700_000_000_000,
+            "expectedRevision": revision,
+            "operation": "apply-profiles",
+            "profileId": None,
+            "value": None,
+            "changes": changes,
+        }
+    )
 
 
 def test_a_batch_is_one_call_one_revision_and_one_acknowledgement(control):
     """The same settings sent one at a time spend a revision each."""
-    acknowledgement = apply(control, batch([
-        {"profileId": "visual-library", "enabled": True, "weight": 5},
-        {"profileId": "hardware-health", "enabled": False},
-    ]))
+    acknowledgement = apply(
+        control,
+        batch(
+            [
+                {"profileId": "visual-library", "enabled": True, "weight": 5},
+                {"profileId": "hardware-health", "enabled": False},
+            ]
+        ),
+    )
 
     assert acknowledgement["status"] == "applied"
     assert acknowledgement["revision"] == 1
@@ -342,9 +355,14 @@ def test_a_batch_persists_schema_integer_floats_as_integers(weight):
     store = MemoryStore()
     control = ControlService(store)
 
-    acknowledgement = apply(control, batch([
-        {"profileId": "visual-library", "weight": float(weight)},
-    ]))
+    acknowledgement = apply(
+        control,
+        batch(
+            [
+                {"profileId": "visual-library", "weight": float(weight)},
+            ]
+        ),
+    )
 
     acknowledged = acknowledgement["portfolio"]["profiles"]["visual-library"]["weight"]
     persisted = store.saved[0].profiles["visual-library"].weight
@@ -356,18 +374,29 @@ def test_a_batch_persists_schema_integer_floats_as_integers(weight):
 
 def test_a_batch_that_cannot_apply_whole_changes_nothing(control):
     """Half-applied policy with nothing to retry is the defect this removes."""
-    before = json.loads(asyncio.run(control.apply_command_text(batch([
-        {"profileId": "visual-library", "enabled": True},
-    ]))))["portfolio"]
+    before = json.loads(
+        asyncio.run(
+            control.apply_command_text(
+                batch(
+                    [
+                        {"profileId": "visual-library", "enabled": True},
+                    ]
+                )
+            )
+        )
+    )["portfolio"]
 
-    acknowledgement = apply(control, batch(
-        [
-            {"profileId": "visual-library", "enabled": False, "weight": 1},
-            {"profileId": "no-such-profile", "enabled": True},
-        ],
-        revision=1,
-        command_id="xpuwlm-batch-2",
-    ))
+    acknowledgement = apply(
+        control,
+        batch(
+            [
+                {"profileId": "visual-library", "enabled": False, "weight": 1},
+                {"profileId": "no-such-profile", "enabled": True},
+            ],
+            revision=1,
+            command_id="xpuwlm-batch-2",
+        ),
+    )
 
     assert acknowledgement["status"] == "rejected"
     assert "no-such-profile" in acknowledgement["message"]
@@ -390,9 +419,19 @@ def test_the_batch_operation_is_bounded_by_the_same_contract_as_the_rest(control
         assert acknowledgement["status"] == "rejected"
         assert acknowledgement["revision"] == 0
 
-    assert validate_document("runtime-command.schema.json", json.loads(batch([
-        {"profileId": "visual-library", "enabled": True},
-    ]))) == []
+    assert (
+        validate_document(
+            "runtime-command.schema.json",
+            json.loads(
+                batch(
+                    [
+                        {"profileId": "visual-library", "enabled": True},
+                    ]
+                )
+            ),
+        )
+        == []
+    )
 
 
 def selectable_control(store=None):
@@ -412,12 +451,8 @@ def test_device_choice_is_validated_persisted_acknowledged_and_cleared():
         command("set-profile-device", "visual-library", "gpu-renderD129"),
     )
     assert selected["status"] == "applied"
-    assert selected["portfolio"]["deviceChoices"] == {
-        "visual-library": "gpu-renderD129"
-    }
-    assert store.saved[-1].device_choices == {
-        "visual-library": "gpu-renderD129"
-    }
+    assert selected["portfolio"]["deviceChoices"] == {"visual-library": "gpu-renderD129"}
+    assert store.saved[-1].device_choices == {"visual-library": "gpu-renderD129"}
 
     cleared = apply(
         control,
@@ -472,10 +507,7 @@ def test_device_choice_count_bound_rejects_new_profile_but_allows_replace_and_cl
         gpu_device_ids=lambda: ("gpu-renderD128", "gpu-renderD129"),
     )
     control.state.device_choices.update(
-        {
-            f"external-{index:03d}": "gpu-renderD128"
-            for index in range(MAX_DEVICE_CHOICES)
-        }
+        {f"external-{index:03d}": "gpu-renderD128" for index in range(MAX_DEVICE_CHOICES)}
     )
 
     rejected = apply(
@@ -508,9 +540,7 @@ def test_external_plugin_device_choice_and_batch_use_the_same_contract():
         control,
         command("set-profile-device", "external-plugin", "gpu-renderD128"),
     )
-    assert selected["portfolio"]["deviceChoices"] == {
-        "external-plugin": "gpu-renderD128"
-    }
+    assert selected["portfolio"]["deviceChoices"] == {"external-plugin": "gpu-renderD128"}
 
     changed = apply(
         control,
@@ -523,17 +553,20 @@ def test_external_plugin_device_choice_and_batch_use_the_same_contract():
         ),
     )
     assert changed["status"] == "applied"
-    assert changed["portfolio"]["deviceChoices"] == {
-        "external-plugin": "gpu-renderD129"
-    }
+    assert changed["portfolio"]["deviceChoices"] == {"external-plugin": "gpu-renderD129"}
 
 
 def test_a_batch_still_obeys_the_revision_compare_and_swap(control):
     apply(control, command("set-paused", None, True))
 
-    stale = apply(control, batch(
-        [{"profileId": "visual-library", "enabled": True}], revision=0, command_id="xpuwlm-stale"
-    ))
+    stale = apply(
+        control,
+        batch(
+            [{"profileId": "visual-library", "enabled": True}],
+            revision=0,
+            command_id="xpuwlm-stale",
+        ),
+    )
 
     assert stale["status"] == "rejected"
     assert "revision" in stale["message"].lower()

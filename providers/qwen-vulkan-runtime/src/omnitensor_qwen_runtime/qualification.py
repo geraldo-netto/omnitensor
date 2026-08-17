@@ -169,9 +169,7 @@ def qualified_models(plugin_id: str) -> tuple[str, ...]:
     """
     workload = _workload_entry(_qualification_document()["workloads"], plugin_id)
     return tuple(
-        model_id
-        for model_id, record in workload["models"].items()
-        if record["result"] == PASSED
+        model_id for model_id, record in workload["models"].items() if record["result"] == PASSED
     )
 
 

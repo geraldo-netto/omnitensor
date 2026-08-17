@@ -428,9 +428,7 @@ def test_builder_requires_reviewed_terms_and_valid_bounds():
     with pytest.raises(TrainingError) as terms:
         BackblazeDatasetBuilder(accept_terms="")
     assert terms.value.code == "dataset-terms-not-accepted"
-    assert terms.value.detail == (
-        "review the Backblaze data terms and pass Backblaze-Drive-Stats"
-    )
+    assert terms.value.detail == ("review the Backblaze data terms and pass Backblaze-Drive-Stats")
     invalid = (
         ({"horizon_days": True}, "storage intake bounds must be integers"),
         ({"max_rows": 0}, "storage intake bounds must be positive"),
@@ -510,14 +508,15 @@ def test_time_split_requires_dates_and_nonempty_purged_sides():
 
 def test_class_balance_and_quality_gates_refuse_unusable_fit(tmp_path):
     balanced = tuple(example(day, day % 2, 0) for day in range(30))
-    assert error_code(lambda: _require_classes(balanced[:2], 2, "training")) == (
-        "class-imbalance"
+    assert error_code(lambda: _require_classes(balanced[:2], 2, "training")) == ("class-imbalance")
+    assert (
+        error_code(
+            lambda: StorageTrainer(
+                FakeExporter(), minimum_positive_examples=1, minimum_auc=1
+            ).train(dataset(balanced), tmp_path)
+        )
+        == "model-not-useful"
     )
-    assert error_code(
-        lambda: StorageTrainer(
-            FakeExporter(), minimum_positive_examples=1, minimum_auc=1
-        ).train(dataset(balanced), tmp_path)
-    ) == "model-not-useful"
 
     positive_short = (example(0, 0), example(1, 0), example(2, 1))
     negative_short = (example(0, 1), example(1, 1), example(2, 0))
@@ -802,7 +801,7 @@ def test_storage_cli_forwards_exact_defaults_and_prints_exact_envelope(
         "trainer": {"minimum_positive_examples": 25, "minimum_auc": 0.6},
         "train": ("dataset", tmp_path / "fit"),
     }
-    assert rendered.startswith("{\n  \"report\":")
+    assert rendered.startswith('{\n  "report":')
     assert json.loads(rendered) == {
         "report": str(tmp_path / "fit/storage-training-report.json"),
         "portableModel": str(tmp_path / "fit/model.onnx"),

@@ -31,9 +31,7 @@ from omnitensor.plugins.text_encoding import (
         ),
     ],
 )
-def test_decode_plain_text_supports_allowlisted_legacy_encodings(
-    text, codec, detected, confidence
-):
+def test_decode_plain_text_supports_allowlisted_legacy_encodings(text, codec, detected, confidence):
     raw = text.encode(codec)
     calls = []
 

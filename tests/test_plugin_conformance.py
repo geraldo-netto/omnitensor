@@ -112,9 +112,7 @@ def test_contract_rejects_missing_surface_and_identity_mismatch():
 def test_contract_timeout_must_be_positive(timeout):
     async def scenario():
         with pytest.raises(ValueError, match="timeout must be positive"):
-            await sdk.run_plugin_contract(
-                ConformingPlugin(), context(), request(), timeout=timeout
-            )
+            await sdk.run_plugin_contract(ConformingPlugin(), context(), request(), timeout=timeout)
         with pytest.raises(ValueError, match="timeout must be positive"):
             await sdk.run_cancellation_contract(
                 ConformingPlugin(cancellation=True),
