@@ -524,27 +524,6 @@ def _result_state(document: Mapping[str, object]) -> tuple[str, Sequence[object]
     return outcome, raw_events
 
 
-def _event_datetime(value: str, timezone: str, label: str) -> datetime:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise EventResultError("date-invalid", f"event {label} is not ISO 8601") from error
-    if timezone == "floating":
-        if parsed.tzinfo is not None:
-            raise EventResultError("date-invalid", f"floating {label} must omit a UTC offset")
-        return parsed
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise EventResultError("date-invalid", f"zoned {label} must include a UTC offset")
-    try:
-        zone = ZoneInfo(timezone)
-    except ZoneInfoNotFoundError as error:
-        raise EventResultError("timezone-invalid", f"unknown timezone: {timezone}") from error
-    local = parsed.astimezone(zone)
-    if local.replace(tzinfo=None) != parsed.replace(tzinfo=None):
-        raise EventResultError("date-invalid", f"event {label} offset disagrees with timezone")
-    return parsed
-
-
 def _parse_evidence(document: object) -> SourceEvidence:
     assert isinstance(document, Mapping)
     source_ref = str(document["sourceRef"])

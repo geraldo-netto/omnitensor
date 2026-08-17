@@ -13,8 +13,8 @@ from omnitensor.plugins.event_workload import (
     EventRecoveryJournal,
     event_generation_task,
 )
-from omnitensor.plugins.fragments import MemoryFragmentStore
 from omnitensor.plugins.file_organizer import FileOrganizerPlugin, file_organizer_task
+from omnitensor.plugins.fragments import MemoryFragmentStore
 from omnitensor.plugins.generation import (
     ArtifactProvenance,
     GenerationProviderDescriptor,

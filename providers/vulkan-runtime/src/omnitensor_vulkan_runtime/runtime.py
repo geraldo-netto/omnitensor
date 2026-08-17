@@ -103,7 +103,9 @@ class LlamaVulkanRuntime:
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport:
         if accelerator != "gpu" or len(artifacts) != 1:
             raise ProviderGenerationError(
-                "model-load-failed", "Vulkan generation requires one GPU GGUF", generation_started=False
+                "model-load-failed",
+                "Vulkan generation requires one GPU GGUF",
+                generation_started=False,
             )
         model = Path(artifacts[0])
         if model.suffix != ".gguf" or not model.is_file():

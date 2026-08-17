@@ -39,8 +39,8 @@ from .event_workload import (
     SelectedSource,
     select_sources,
 )
-from .fragments import SourceFragment
 from .extraction import DocumentExtractor, ExtractionAdapter, ExtractionOutcome
+from .fragments import SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,

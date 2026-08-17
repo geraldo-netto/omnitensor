@@ -14,7 +14,6 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from omnitensor.preparation import file_digest
 
@@ -40,18 +39,18 @@ from .events import (
     parse_grounded_event_result,
     source_fragments,
 )
-from .fragments import (
-    FragmentStoreError,
-    MemoryFragmentStore,
-    PrivateFragmentStore,
-    SourceFragment,
-)
 from .extraction import (
     AdapterKind,
     DocumentExtractor,
     ExtractionAdapter,
     ExtractionOutcome,
     PageContent,
+)
+from .fragments import (
+    FragmentStoreError,
+    MemoryFragmentStore,
+    PrivateFragmentStore,
+    SourceFragment,
 )
 from .generation import (
     GenerationError,
