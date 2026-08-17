@@ -523,28 +523,27 @@ class OmniTensorService:
             clock_ms=lambda: int(time.time() * 1000),
         )
 
+    def _workload_executors(self, workload: Workload) -> dict:
+        """The executors this workload may use, which is its own lane's view.
+
+        Both callers used to open with the same six lines guarding
+        `getattr(self, "_executor_view", None)` and `callable(...)` — a method
+        this class defines, so the guard could not fail and the fallback to
+        every executor could not run. What the duplication hid is that the two
+        methods differ only in what they do with the answer.
+        """
+        return self._lanes.executors_for(workload.id)
+
     def _profile_artifact_ready(self, workload: Workload) -> tuple[bool, str]:
-        executor_view = getattr(self, "_executor_view", None)
-        executors = (
-            executor_view(workload.id)
-            if callable(executor_view) and hasattr(workload, "id")
-            else self._executors
-        )
         return artifacts.profile_artifact_ready(
             workload,
-            executors,
+            self._workload_executors(workload),
             self._resolve_artifact,
             self._selected_backend,
         )
 
     def _selected_backend(self, workload: Workload) -> str:
-        executor_view = getattr(self, "_executor_view", None)
-        executors = (
-            executor_view(workload.id)
-            if callable(executor_view) and hasattr(workload, "id")
-            else self._executors
-        )
-        return artifacts.selected_backend(workload, executors)
+        return artifacts.selected_backend(workload, self._workload_executors(workload))
 
     @property
     def _artifact_store(self):
@@ -575,16 +574,6 @@ class OmniTensorService:
         reference: ArtifactReference,
     ) -> ArtifactResolution:
         return self._artifacts.cached(artifact_id, reference)
-
-    def _artifact_stamp(
-        self,
-        artifact_id: str,
-        reference: ArtifactReference,
-    ) -> tuple | None:
-        return self._artifacts.stamp(artifact_id, reference)
-
-    def _declared_reference(self, artifact_id: str) -> ArtifactReference | None:
-        return self._artifacts.declared_reference(artifact_id)
 
     def _build_runtime_snapshot(self) -> dict:
         return observation.runtime_snapshot(

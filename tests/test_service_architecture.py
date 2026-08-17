@@ -453,10 +453,17 @@ def test_invalid_plugin_runtime_returns_empty_inventory_without_reading_clock():
 
 
 def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeypatch):
-    workload = object()
+    workload = SimpleNamespace(id="profile")
     calls = []
+    executors = {"gpu": object()}
+    # The owner supplies its lane view like the real service does. It used to
+    # omit it, and `_selected_backend` carried a `getattr`/`callable` guard so
+    # that this double would fall back to every executor — a branch in shipped
+    # code whose only caller was this test.
     owner = SimpleNamespace(
-        _executors={"gpu": object()},
+        _executors=executors,
+        _lanes=SimpleNamespace(executors_for=lambda _profile_id: executors),
+        _workload_executors=lambda _workload: executors,
         jobs=SimpleNamespace(note_progress=lambda *values: calls.append(values)),
     )
     monkeypatch.setattr(
