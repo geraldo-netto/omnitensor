@@ -105,11 +105,13 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # event-workload grew by version 2's serializers, the pass planner, and the
     # confirmation gate and calendar renderer split out of `events`. The private
     # fragment store moved to `fragments`, which no workload owns, and its
-    # selectors moved with it — the shard is a batch, not an owner.
+    # selectors moved with it — the shard is a batch, not an owner. The pass
+    # merger's dedup key went the other way: it was a copy of the parser's and
+    # was removed rather than kept in sync.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         44,
         3,
-        54,
+        53,
         21,
         16,
         2,
@@ -118,7 +120,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 191
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 190
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

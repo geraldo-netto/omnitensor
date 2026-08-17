@@ -2795,39 +2795,65 @@ def test_qualified_workload_refuses_device_or_layer_drift(monkeypatch, physical_
     assert calls == ["__startup__", "stop"]
 
 
-def test_qualified_device_selection_uses_unique_named_vulkan_adapter(monkeypatch):
-    names = ("integrated", bge.QUALIFIED_DEVICE, "software")
-    fake_ncnn = SimpleNamespace(
+def _ncnn(names):
+    return SimpleNamespace(
         get_gpu_count=lambda: len(names),
         get_gpu_info=lambda index: SimpleNamespace(device_name=lambda: names[index]),
     )
-    monkeypatch.setitem(sys.modules, "ncnn", fake_ncnn)
-
-    assert bge._qualified_device_index() == 1
 
 
-def test_qualified_device_selection_refuses_missing_ncnn(monkeypatch):
+def test_the_named_device_is_used_when_it_is_present(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("integrated", bge.QUALIFIED_DEVICE, "software")))
+
+    assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 1
+
+
+def test_a_sole_gpu_is_used_whatever_it_is_called(monkeypatch):
+    """The measured card is a preference, and this machine does not have it.
+
+    This is the case the old gate refused outright: `ask-selected-files` was
+    unavailable on every machine but one, because the only device present was
+    not the device the receipt named.
+    """
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("AMD Radeon 610M (RADV GFX1103_R1)",)))
+
+    assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 0
+
+
+def test_device_selection_refuses_missing_ncnn(monkeypatch):
     monkeypatch.setitem(sys.modules, "ncnn", None)
 
     with pytest.raises(ValueError) as excinfo:
-        bge._qualified_device_index()
+        bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
 
     assert str(excinfo.value) == "ncnn is unavailable"
 
 
-@pytest.mark.parametrize("names", [(), ("other",), (bge.QUALIFIED_DEVICE,) * 2])
-def test_qualified_device_selection_refuses_absent_or_ambiguous_adapter(monkeypatch, names):
-    fake_ncnn = SimpleNamespace(
-        get_gpu_count=lambda: len(names),
-        get_gpu_info=lambda index: SimpleNamespace(device_name=lambda: names[index]),
-    )
-    monkeypatch.setitem(sys.modules, "ncnn", fake_ncnn)
+def test_device_selection_refuses_only_when_the_choice_is_genuinely_ambiguous(monkeypatch):
+    """Two unnamed cards is a question for the person, not a default to guess.
 
-    with pytest.raises(ValueError, match="qualified BGE Vulkan device is unavailable"):
-        bge._qualified_device_index()
+    The refusal names them, because "qualified BGE Vulkan device is
+    unavailable" told somebody with two working GPUs nothing they could act on.
+    """
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("integrated", "discrete")))
+
+    with pytest.raises(ValueError, match="one of: discrete, integrated"):
+        bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
+
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(()))
+    with pytest.raises(ValueError, match="no Vulkan device is available"):
+        bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
 
 
-def test_bge_embedder_uses_qualified_device_and_query_prefix(tmp_path, monkeypatch):
+def test_two_cards_with_the_measured_name_is_still_a_choice(monkeypatch):
+    """Duplicates cannot disambiguate themselves, so the person is asked."""
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn((bge.QUALIFIED_DEVICE,) * 2))
+
+    with pytest.raises(ValueError, match="name the Vulkan device"):
+        bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
+
+
+def test_bge_embedder_uses_the_selected_device_and_query_prefix(tmp_path, monkeypatch):
     lease = tmp_path / "generation.lock"
     lease.touch()
     model = tmp_path / "model.param"
@@ -2835,7 +2861,7 @@ def test_bge_embedder_uses_qualified_device_and_query_prefix(tmp_path, monkeypat
     calls = []
 
     class FakeRunner:
-        device_name = bge.QUALIFIED_DEVICE
+        device_name = "whatever this machine has"
 
         def __init__(self, selected_model, selected_tokenizer, *, device_index):
             calls.append((selected_model, selected_tokenizer, device_index))
@@ -2846,11 +2872,12 @@ def test_bge_embedder_uses_qualified_device_and_query_prefix(tmp_path, monkeypat
 
     monkeypatch.setattr(bge, "BgeTokenizer", lambda path: ("tokenizer", path))
     monkeypatch.setattr(bge, "VulkanBgeRunner", FakeRunner)
-    monkeypatch.setattr(bge, "_qualified_device_index", lambda: 2)
+    monkeypatch.setattr(bge, "vulkan_device_index", lambda _preferred: 2)
     embedder = bge.BgeVulkanEmbedder(model, tokenizer, "a" * 64, lease)
 
     vectors = embedder._embed_sync(("question",), True, None)
 
+    # The runner's device is recorded, never compared: what ran is what ran.
     assert calls[0] == (model, ("tokenizer", tokenizer), 2)
     assert calls[1] == f"{bge.QUERY_PREFIX}question"
     assert vectors == ((0.5,) * 384,)
@@ -2860,6 +2887,37 @@ def test_bge_embedder_uses_qualified_device_and_query_prefix(tmp_path, monkeypat
         "a" * 64,
         True,
     )
+
+
+def test_a_caller_may_name_the_device_to_embed_on(tmp_path, monkeypatch):
+    """The 610M case: the 6600 XT is busy, so the work goes to the other card."""
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    asked = []
+
+    class FakeRunner:
+        device_name = "AMD Radeon 610M (RADV GFX1103_R1)"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def embed(self, _text):
+            return [0.5] * 384
+
+    monkeypatch.setattr(bge, "BgeTokenizer", lambda path: path)
+    monkeypatch.setattr(bge, "VulkanBgeRunner", FakeRunner)
+    monkeypatch.setattr(bge, "vulkan_device_index", lambda preferred: asked.append(preferred) or 0)
+    embedder = bge.BgeVulkanEmbedder(
+        tmp_path / "model",
+        tmp_path / "tokenizer",
+        "a" * 64,
+        lease,
+        device="AMD Radeon 610M (RADV GFX1103_R1)",
+    )
+
+    embedder._embed_sync(("text",), False, None)
+
+    assert asked == ["AMD Radeon 610M (RADV GFX1103_R1)"]
 
 
 def test_bge_public_async_surface_preflights_and_observes_cancellation(tmp_path, monkeypatch):
@@ -2884,7 +2942,7 @@ def test_bge_public_async_surface_preflights_and_observes_cancellation(tmp_path,
     assert vectors == ((1.0,) * 384,)
 
 
-def test_bge_refuses_missing_lease_wrong_device_and_invalid_vector(tmp_path, monkeypatch):
+def test_bge_refuses_a_missing_lease_and_an_invalid_vector(tmp_path, monkeypatch):
     with pytest.raises(ValueError) as missing_lease:
         bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, tmp_path / "x")
     assert str(missing_lease.value) == "accelerator lease is unavailable"
@@ -2893,24 +2951,19 @@ def test_bge_refuses_missing_lease_wrong_device_and_invalid_vector(tmp_path, mon
     lease.touch()
     embedder = bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, lease)
     monkeypatch.setattr(bge, "BgeTokenizer", lambda _path: object())
-    monkeypatch.setattr(bge, "_qualified_device_index", lambda: 0)
+    monkeypatch.setattr(bge, "vulkan_device_index", lambda _preferred: 0)
 
-    class WrongDevice:
-        device_name = "unexpected"
+    class InvalidVector:
+        device_name = "some other card"
 
         def __init__(self, *_args, **_kwargs):
             pass
 
-    monkeypatch.setattr(bge, "VulkanBgeRunner", WrongDevice)
-    with pytest.raises(ValueError, match="not qualified"):
-        embedder._embed_sync(("text",), False, None)
-
-    class InvalidVector(WrongDevice):
-        device_name = bge.QUALIFIED_DEVICE
-
         def embed(self, _text):
             return [float("nan")] * 384
 
+    # An unmeasured device is no longer a refusal; a vector that is not a
+    # vector still is.
     monkeypatch.setattr(bge, "VulkanBgeRunner", InvalidVector)
     with pytest.raises(ValueError, match="invalid embedding"):
         embedder._embed_sync(("text",), False, CancellationController())
