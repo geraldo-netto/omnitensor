@@ -239,6 +239,8 @@ def resolved_artifacts(
             declared["format"],
             declared["sha256"],
             tuple(sorted((declared.get("companions") or {}).items())),
+            declared.get("sourceUri", ""),
+            declared.get("licenseSpdx", ""),
         )
         resolution = (
             resolver(reference)
