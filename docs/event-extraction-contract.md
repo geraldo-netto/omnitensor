@@ -7,26 +7,35 @@ failure OMNI-0352 was.
 
 ## Why it changes
 
-The shipped result schema says this about the thing the workload exists to
-produce:
+Two required fields cannot be satisfied from the evidence the same task insists
+on:
 
 ```json
-"events": { "type": "array", "maxItems": 64 }
+"start":    { "type": "string", "minLength": 16 },   // full datetime, no null
+"timezone": { "type": "string", "minLength": 1 }     // no null
 ```
 
-No item schema. No properties, no required fields. The grammar built from it
-gives the model no shape for an event, and the prompt never lists the fields
-either — while the plugin needs eight of them plus evidence carrying two
-SHA-256 digests. The one branch the prompt does specify exactly is the refusal.
-Measured on 2026-08-17: seven answerable documents, seven identical refusals,
-on `qwen3-4b`, `qwen3-8b` and `qwen3.5-9b`, on both cards. A model asked to
-choose between an output it can form and one it must guess forms the one it
-can.
+*"Project review with Ana on 2026-09-03 at 14:00 in Lisbon"* states no
+timezone. A valid event therefore requires the model to invent one, while the
+system prompt says **"Extract only calendar events explicitly supported by
+evidence."** Both rules cannot hold at once, and `refused` is the only output
+that satisfies both.
 
-The second defect is in the rule itself. "If no named activity has an explicit
+That is what a wording theory could not explain: measured on 2026-08-17, seven
+answerable documents produced seven byte-identical refusals on `qwen3-4b`,
+`qwen3-8b` and `qwen3.5-9b`, on both cards. Models from different generations
+agreeing exactly is the signature of a contract contradiction rather than a
+phrasing preference.
+
+The second defect is the rule itself. "If no named activity has an explicit
 date and time, refuse" throws away a real event because part of it is missing.
 A banner that says *Jazz night, Fridays, Casa da Música* is an event somebody
 wants to keep; it is not nothing.
+
+A correction to an earlier reading of this file, kept because it cost a
+measurement: `events.items` is a `$ref` to `$defs/event`, which specifies all
+eight fields and requires them. The schema is not vague about what an event is.
+It is precise about it in a way no source can satisfy.
 
 ## Principles
 
@@ -238,6 +247,37 @@ person deserves to see that it came from a photograph.
 The span stays verifiable either way — the plugin holds the fragment text the
 model was given and checks the offsets against it.
 
+## How many events
+
+No ceiling. The shipped schema caps `events` at 64 and `evidence` at 16 per
+event, and a cap is a wrong answer waiting for a large enough document: a
+conference programme, a year of a venue's listings, a PDF of a school calendar.
+Sixty-five events means one of them is discarded, or the whole answer fails
+validation — neither of which the person asked for.
+
+Removing the number is the easy half. The real ceiling is arithmetic, and
+naming it is the point:
+
+- One fully populated event is roughly 400–600 tokens, most of it the two
+  64-character digests each evidence entry carries.
+- The task declares 1,024 output tokens. Even raised to 4,096 that is about
+  seven events, and a generation that runs out mid-object produces truncated
+  JSON — which surfaces as an unexplained invalid output, not as "there were
+  more".
+
+So the answer is the same one translation reached: **split the work, never the
+answer**. Extraction runs in passes over the source fragments, each pass
+bounded by the output budget rather than by a count, and the passes accumulate.
+The dedup key below is what makes accumulation safe, since a recurring meeting
+mentioned on three pages is one event.
+
+Two ceilings that stay, because they bound *input* rather than an answer:
+`MAX_SOURCES` (32 selected files) and `MAX_SOURCE_BYTES` (128 MiB each). Those
+describe what a person selected. And a per-event `evidence` list stays bounded
+in practice by the passes it was found in, not by a constant — an event
+supported by forty spans is a citation list nobody reads, so the passes record
+the spans that carried the fields, not every mention.
+
 ## Outcome, and what refusal means now
 
 - `succeeded` — one or more events. Some may carry `needs`; that is not a
@@ -264,11 +304,11 @@ merging them would silently choose one time over none.
   grammar able to express a success at all.
 - **The prompt** states the success path with the precision the refusal already
   has, and the refusal rule shrinks to "no event at all".
-- **The output budget** must rise. One fully populated event with recurrence,
-  address parts and two 64-character digests is roughly 400–600 tokens; the task
-  still declares 1,024 for the whole answer. `ask-selected-files` already had to
-  go from 1,024 to 2,048 for the same reason — truncation that surfaced as an
-  unexplained invalid output. 4,096 is the honest figure here.
+- **The output budget** must rise and the event count must lose its ceiling.
+  One fully populated event is roughly 400–600 tokens; the task still declares
+  1,024 for the whole answer. `ask-selected-files` already had to go from 1,024
+  to 2,048 for the same reason — truncation that surfaced as an unexplained
+  invalid output. 4,096 per pass, and as many passes as the sources need.
 - **The benchmark cases** are rewritten against the new shape, and gain the ones
   this design exists for: a date without a time, a time without a date, a place
   without a zone, a recurrence, a cancellation, a banner read through OCR.

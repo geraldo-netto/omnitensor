@@ -144,3 +144,82 @@
 [2026-08-17 12:34:24]   organize-two-invoices              ok     36.8s
 [2026-08-17 12:35:05]   organize-mixed-kinds               ok     41.2s
 [2026-08-17 12:35:28]   organize-single-file               ok     22.7s
+[2026-08-17 12:35:58]   organize-duplicates                FAIL   30.0s  failed: at_least
+[2026-08-17 12:36:53]   organize-three-mixed               ok     54.5s
+[2026-08-17 12:37:34]   organize-photos                    ok     41.1s
+[2026-08-17 12:38:19]   organize-code-and-docs             ok     45.3s
+[2026-08-17 12:38:39]   organize-keeps-names               ok     20.5s
+[2026-08-17 12:39:46]   organize-four-files                FAIL   67.0s  output was not JSON  failed: produced-a-usable-document
+[2026-08-17 12:40:10]   organize-ambiguous-name            ok     23.2s
+[2026-08-17 12:40:10] qwen3-5-9b-q4-k-m · file-organizer: 8/10 correct (80%), rules 92%, 38.2s per case
+[2026-08-17 12:40:10]   what failed: {"at_least": 1, "produced-a-usable-document": 1}
+[2026-08-17 12:40:10] qwen3-5-9b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 12:40:28]   text-summarize                     ok     18.5s
+[2026-08-17 12:40:46]   text-summarize-keeps-the-name      ok     18.3s
+[2026-08-17 12:41:04]   text-explain                       ok     17.3s
+[2026-08-17 12:41:20]   text-rewrite                       ok     16.6s
+[2026-08-17 12:41:43]   text-extract-tasks                 ok     22.9s
+[2026-08-17 12:42:01]   text-extract-single-task           ok     17.6s
+[2026-08-17 12:42:19]   text-translate-hebrew              ok     17.8s
+[2026-08-17 12:42:35]   text-translate-hebrew-names        ok     16.5s
+[2026-08-17 12:42:54]   text-translate-hebrew-paragraph    ok     18.9s
+[2026-08-17 12:43:11]   text-translate-portuguese          ok     16.9s
+[2026-08-17 12:43:11] qwen3-5-9b-q4-k-m · selected-text-tools: 10/10 correct (100%), rules 100%, 18.1s per case
+[2026-08-17 12:43:11] results written to benchmarks/results/candidates-discrete/benchmark.md
+[2026-08-17 12:43:11] qwen3-8b-q5-k-m: 5.45 GiB weights + 2.39 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — short 0.46 GiB
+[2026-08-17 12:43:11] loading qwen3-8b-q5-k-m from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 12:43:14] loaded in 2.4s — 37/37 layers on Vulkan
+[2026-08-17 12:43:14] qwen3-8b-q5-k-m · ask-selected-files: 10 cases
+[2026-08-17 12:43:22]   ask-invoice-total                  ok      8.7s
+[2026-08-17 12:43:35]   ask-who-signed                     ok     12.4s
+[2026-08-17 12:43:46]   ask-deadline                       ok     11.4s
+[2026-08-17 12:43:57]   ask-warranty-length                ok     11.2s
+[2026-08-17 12:44:09]   ask-two-documents                  ok     12.0s
+[2026-08-17 12:44:21]   ask-percentage                     ok     11.3s
+[2026-08-17 12:44:32]   ask-role-and-name                  ok     11.0s
+[2026-08-17 12:44:43]   ask-language-portuguese            ok     11.2s
+[2026-08-17 12:44:54]   ask-absent-fact                    FAIL   11.4s  failed: no_invented_numbers
+[2026-08-17 12:45:05]   ask-absent-person                  ok     10.8s
+[2026-08-17 12:45:05] qwen3-8b-q5-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 11.1s per case
+[2026-08-17 12:45:05]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 12:45:05] qwen3-8b-q5-k-m · event-extraction: 10 cases
+[2026-08-17 12:45:11]   event-explicit-date-time           FAIL    5.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:45:16]   event-written-month                FAIL    5.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:45:22]   event-two-in-one-document          FAIL    5.6s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:45:27]   event-with-location                FAIL    5.4s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:45:33]   event-ics-like                     FAIL    5.7s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 12:45:39]   event-afternoon-24h                FAIL    5.8s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:45:44]   event-named-activity               FAIL    5.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 12:45:50]   event-no-time-refuses              ok      5.7s
+[2026-08-17 12:45:56]   event-no-activity-refuses          ok      5.7s
+[2026-08-17 12:46:01]   event-relative-date-refuses        ok      5.6s
+[2026-08-17 12:46:01] qwen3-8b-q5-k-m · event-extraction: 3/10 correct (30%), rules 14%, 5.6s per case
+[2026-08-17 12:46:01]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 12:46:01] qwen3-8b-q5-k-m · file-organizer: 10 cases
+[2026-08-17 12:46:28]   organize-two-invoices              ok     26.4s
+[2026-08-17 12:46:54]   organize-mixed-kinds               ok     26.3s
+[2026-08-17 12:47:39]   organize-single-file               FAIL   45.1s  output was not JSON  failed: produced-a-usable-document
+[2026-08-17 12:48:04]   organize-duplicates                ok     24.5s
+[2026-08-17 12:48:47]   organize-three-mixed               ok     43.0s
+[2026-08-17 12:49:12]   organize-photos                    ok     25.2s
+[2026-08-17 12:49:40]   organize-code-and-docs             ok     27.5s
+[2026-08-17 12:50:04]   organize-keeps-names               ok     24.8s
+[2026-08-17 12:50:47]   organize-four-files                ok     42.4s
+[2026-08-17 12:51:12]   organize-ambiguous-name            ok     24.8s
+[2026-08-17 12:51:12] qwen3-8b-q5-k-m · file-organizer: 9/10 correct (90%), rules 96%, 31.0s per case
+[2026-08-17 12:51:12]   what failed: {"produced-a-usable-document": 1}
+[2026-08-17 12:51:12] qwen3-8b-q5-k-m · selected-text-tools: 10 cases
+[2026-08-17 12:51:26]   text-summarize                     ok     14.1s
+[2026-08-17 12:51:40]   text-summarize-keeps-the-name      ok     14.4s
+[2026-08-17 12:51:52]   text-explain                       ok     12.4s
+[2026-08-17 12:52:04]   text-rewrite                       ok     11.8s
+[2026-08-17 12:52:20]   text-extract-tasks                 ok     16.3s
+[2026-08-17 12:52:32]   text-extract-single-task           ok     11.9s
+[2026-08-17 12:52:45]   text-translate-hebrew              ok     13.0s
+[2026-08-17 12:52:58]   text-translate-hebrew-names        ok     12.9s
+[2026-08-17 12:53:13]   text-translate-hebrew-paragraph    FAIL   14.5s  failed: no_foreign_script
+[2026-08-17 12:53:26]   text-translate-portuguese          ok     13.2s
+[2026-08-17 12:53:26] qwen3-8b-q5-k-m · selected-text-tools: 9/10 correct (90%), rules 97%, 13.5s per case
+[2026-08-17 12:53:26]   what failed: {"no_foreign_script": 1}
+[2026-08-17 12:53:26] results written to benchmarks/results/candidates-discrete/benchmark.md
+[2026-08-17 12:53:26] done
