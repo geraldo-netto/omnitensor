@@ -1,127 +1,275 @@
 {
- "workload": "event-extraction",
- "note": "One fragment per document. A case that states refuses expects the workload to decline rather than invent a date.",
- "cases": [
-  {
-   "id": "event-explicit-date-time",
-   "sources": [
-    "Project review with Ana on 2026-09-03 at 14:00 in Lisbon."
-   ],
-   "expect": {
-    "event_starts": [
-     "2026-09-03T14:00"
-    ],
-    "at_least": {
-     "events": 1
+  "corpusVersion": 2,
+  "note": "Version 2 records what a source states and reports what it does not, so a partial source is a case with an expectation rather than a refusal. Seven of these were refused by version 1 for stating no timezone.",
+  "cases": [
+    {
+      "id": "event-explicit-date-time",
+      "sources": [
+        "Project review with Ana on 2026-09-03 at 14:00 in Lisbon."
+      ],
+      "expect": {
+        "event_starts": [
+          "2026-09-03T14:00"
+        ],
+        "at_least": {
+          "events": 1
+        },
+        "contains": [
+          "Lisbon"
+        ]
+      },
+      "note": "A date, a time and a place, stated plainly. Refused by version 1 because no timezone was named."
+    },
+    {
+      "id": "event-written-month",
+      "sources": [
+        "The board meets on 12 October 2026 at 09:30 in the Porto office."
+      ],
+      "expect": {
+        "event_starts": [
+          "2026-10-12T09:30"
+        ],
+        "at_least": {
+          "events": 1
+        }
+      },
+      "note": "A month in words."
+    },
+    {
+      "id": "event-two-in-one-document",
+      "sources": [
+        "Kick-off on 2026-05-04 at 10:00. Retrospective on 2026-05-29 at 16:00."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 2
+        },
+        "event_starts": [
+          "2026-05-04T10:00",
+          "2026-05-29T16:00"
+        ]
+      },
+      "note": "Two events in one paragraph; neither may swallow the other."
+    },
+    {
+      "id": "event-with-location",
+      "sources": [
+        "Contract signing on 2026-04-02 at 11:00 at the notary in Lisbon."
+      ],
+      "expect": {
+        "event_starts": [
+          "2026-04-02T11:00"
+        ],
+        "at_least": {
+          "events": 1
+        },
+        "contains": [
+          "notary"
+        ]
+      },
+      "note": "A named place."
+    },
+    {
+      "id": "event-ics-like",
+      "sources": [
+        "BEGIN:VEVENT\nSUMMARY:Quarterly review\nDTSTART:20260903T140000Z\nLOCATION:Lisbon\nEND:VEVENT"
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "2026-09-03T14:00"
+        ]
+      },
+      "note": "A calendar file round-tripping through the workload."
+    },
+    {
+      "id": "event-afternoon-24h",
+      "sources": [
+        "Delivery inspection is scheduled for 2026-11-20 at 15:45 at the warehouse."
+      ],
+      "expect": {
+        "event_starts": [
+          "2026-11-20T15:45"
+        ],
+        "at_least": {
+          "events": 1
+        }
+      },
+      "note": "A 24-hour clock."
+    },
+    {
+      "id": "event-named-activity",
+      "sources": [
+        "Budget review with Marta Oliveira takes place on 2026-09-30 at 08:00."
+      ],
+      "expect": {
+        "event_starts": [
+          "2026-09-30T08:00"
+        ],
+        "at_least": {
+          "events": 1
+        },
+        "contains": [
+          "Marta Oliveira"
+        ]
+      },
+      "note": "A named person the event belongs to."
+    },
+    {
+      "id": "event-date-without-time",
+      "sources": [
+        "The office is closed for inventory on 2026-12-27."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "2026-12-27"
+        ],
+        "event_needs": [
+          [
+            "time"
+          ]
+        ]
+      },
+      "note": "A date and no time. Kept, and it says a time is missing."
+    },
+    {
+      "id": "event-time-without-date",
+      "sources": [
+        "Stand-up is at 09:15 every working morning in the Porto office."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "T09:15"
+        ],
+        "event_needs": [
+          [
+            "date"
+          ]
+        ]
+      },
+      "note": "A time and no date: the person supplies the day."
+    },
+    {
+      "id": "event-recurring-weekly",
+      "sources": [
+        "Jazz night runs every Friday at 21:00 at Casa da Musica until 2026-12-18."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "contains": [
+          "Casa da Musica"
+        ],
+        "event_needs": [
+          [
+            "date"
+          ]
+        ]
+      },
+      "note": "A recurrence with an end and no first date."
+    },
+    {
+      "id": "event-banner-no-year",
+      "sources": [
+        "SUMMER FESTIVAL - 14 July, 18:00 - Main Square - free entry"
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "contains": [
+          "Main Square"
+        ],
+        "event_needs": [
+          [
+            "date"
+          ]
+        ]
+      },
+      "note": "A poster with no year, the case OCR most often produces."
+    },
+    {
+      "id": "event-online-meeting",
+      "sources": [
+        "Sprint demo on 2026-03-11 at 16:00 CET. Join at https://meet.example.invalid/demo-7."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "2026-03-11T16:00"
+        ],
+        "contains": [
+          "https://meet.example.invalid/demo-7"
+        ]
+      },
+      "note": "An online event: the link is where it happens."
+    },
+    {
+      "id": "event-cancelled",
+      "sources": [
+        "The AGM planned for 2026-06-05 at 10:00 in Room 2 is cancelled and will not be rescheduled."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "2026-06-05T10:00"
+        ],
+        "contains": [
+          "cancelled"
+        ]
+      },
+      "note": "A cancellation must not read like an invitation."
+    },
+    {
+      "id": "event-with-registration",
+      "sources": [
+        "Workshop on 2026-02-18 at 14:00, Sala Azul. Register by 2026-02-10; entry 25.00 EUR."
+      ],
+      "expect": {
+        "at_least": {
+          "events": 1
+        },
+        "event_starts": [
+          "2026-02-18T14:00"
+        ],
+        "contains": [
+          "25.00"
+        ]
+      },
+      "note": "A deadline and a price stated alongside the event."
+    },
+    {
+      "id": "event-no-activity-refuses",
+      "sources": [
+        "The invoice total is 4,235.00 EUR and the amount is due within 30 days of receipt."
+      ],
+      "expect": {
+        "refuses": true
+      },
+      "note": "An invoice names no activity: still nothing to extract."
+    },
+    {
+      "id": "event-prose-without-event",
+      "sources": [
+        "Thanks for the notes. I agree with the approach and will read the appendix carefully."
+      ],
+      "expect": {
+        "refuses": true
+      },
+      "note": "Ordinary correspondence with nothing to place."
     }
-   }
-  },
-  {
-   "id": "event-written-month",
-   "sources": [
-    "The board meets on 12 October 2026 at 09:30 in the Porto office."
-   ],
-   "expect": {
-    "event_starts": [
-     "2026-10-12T09:30"
-    ],
-    "at_least": {
-     "events": 1
-    }
-   }
-  },
-  {
-   "id": "event-two-in-one-document",
-   "sources": [
-    "Kick-off on 2026-05-04 at 10:00. Retrospective on 2026-05-29 at 16:00."
-   ],
-   "expect": {
-    "at_least": {
-     "events": 2
-    }
-   }
-  },
-  {
-   "id": "event-with-location",
-   "sources": [
-    "Contract signing on 2026-04-02 at 11:00 at the notary in Lisbon."
-   ],
-   "expect": {
-    "event_starts": [
-     "2026-04-02T11:00"
-    ],
-    "at_least": {
-     "events": 1
-    }
-   }
-  },
-  {
-   "id": "event-ics-like",
-   "sources": [
-    "BEGIN:VEVENT\nSUMMARY:Quarterly review\nDTSTART:20260903T140000Z\nLOCATION:Lisbon\nEND:VEVENT"
-   ],
-   "expect": {
-    "at_least": {
-     "events": 1
-    }
-   }
-  },
-  {
-   "id": "event-afternoon-24h",
-   "sources": [
-    "Delivery inspection is scheduled for 2026-11-20 at 15:45 at the warehouse."
-   ],
-   "expect": {
-    "event_starts": [
-     "2026-11-20T15:45"
-    ],
-    "at_least": {
-     "events": 1
-    }
-   }
-  },
-  {
-   "id": "event-named-activity",
-   "sources": [
-    "Budget review with Marta Oliveira takes place on 2026-09-30 at 08:00."
-   ],
-   "expect": {
-    "event_starts": [
-     "2026-09-30T08:00"
-    ],
-    "at_least": {
-     "events": 1
-    }
-   }
-  },
-  {
-   "id": "event-no-time-refuses",
-   "sources": [
-    "We should meet some time in September to review the budget."
-   ],
-   "note": "No explicit date and time: refusing is the correct answer.",
-   "expect": {
-    "refuses": true
-   }
-  },
-  {
-   "id": "event-no-activity-refuses",
-   "sources": [
-    "The invoice total is 4,235.00 EUR and the amount is due within 30 days."
-   ],
-   "expect": {
-    "refuses": true
-   }
-  },
-  {
-   "id": "event-relative-date-refuses",
-   "sources": [
-    "Let us do the retrospective next Tuesday afternoon."
-   ],
-   "note": "Relative to nothing this document states.",
-   "expect": {
-    "refuses": true
-   }
-  }
- ]
+  ]
 }

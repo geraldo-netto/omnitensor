@@ -13,6 +13,7 @@
       "src/omnitensor/plugins/acceptance_kit.py",
       "src/omnitensor/plugins/document_acceptance.py",
       "src/omnitensor/plugins/document_qa.py",
+      "src/omnitensor/plugins/event_passes.py",
       "src/omnitensor/plugins/event_workload.py",
       "src/omnitensor/scheduler.py",
       "src/omnitensor/snapshot.py",
@@ -84,6 +85,10 @@
     {
       "name": "event-workload",
       "selectors": [
+        "omnitensor.plugins.event_passes.x__key",
+        "omnitensor.plugins.event_passes.x__with_unique_id",
+        "omnitensor.plugins.event_passes.x_merge",
+        "omnitensor.plugins.event_passes.x_plan_passes",
         "omnitensor.plugins.event_workload.x__contact_document",
         "omnitensor.plugins.event_workload.x__event_document",
         "omnitensor.plugins.event_workload.x__people_document",
@@ -101,6 +106,7 @@
         "omnitensor.plugins.event_workload.x_select_sources",
         "omnitensor.plugins.event_workload.x_validate_event_grounding",
         "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1__init__",
+        "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1_generate_passes",
         "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1_report",
         "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1_validate_request",
         "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1execute",

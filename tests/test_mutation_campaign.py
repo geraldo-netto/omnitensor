@@ -103,12 +103,12 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "snapshot-forecast",
         "tensor-output",
     )
-    # event-workload grew by the eight serializers version 2 needed: an event
-    # now carries what the source said rather than four fixed fields.
+    # event-workload grew by the eight serializers version 2 needed and by the
+    # pass planner that makes an uncapped answer deliverable over many sources.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         42,
         3,
-        38,
+        43,
         21,
         16,
         2,
@@ -117,7 +117,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 173
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 178
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
@@ -131,6 +131,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.plugins.acceptance_kit",
         "omnitensor.plugins.document_acceptance",
         "omnitensor.plugins.document_qa",
+        "omnitensor.plugins.event_passes",
         "omnitensor.plugins.event_workload",
         "omnitensor.scheduler",
         "omnitensor.snapshot",
@@ -155,7 +156,10 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
             "omnitensor.plugins.document_acceptance",
         },
         "document-binding": {"omnitensor.training.binding"},
-        "event-workload": {"omnitensor.plugins.event_workload"},
+        "event-workload": {
+            "omnitensor.plugins.event_passes",
+            "omnitensor.plugins.event_workload",
+        },
         "grounded-answer": {"omnitensor.plugins.document_qa"},
         "mutation-launcher": {"omnitensor.mutation_engine"},
     }

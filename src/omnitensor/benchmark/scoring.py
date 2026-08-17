@@ -238,13 +238,36 @@ def _field_equals(document: dict, wanted: object, _sources) -> bool:
 
 
 def _event_at(document: dict, wanted: object, _sources) -> bool:
-    """An event with this start, however many others were found."""
-    starts = {
-        str(entry.get("start", ""))[:16]
-        for entry in document.get("events", []) or []
-        if isinstance(entry, dict)
-    }
-    return all(str(moment)[:16] in starts for moment in _as_list(wanted))
+    """An event that starts when the case says, however many others were found.
+
+    A wanted moment is `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, or `THH:MM` for a case
+    whose source states a time and no date — which version 2 records rather
+    than refusing, so the cases have to be able to ask for it.
+    """
+    found = set()
+    for entry in document.get("events", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        when = entry.get("when") or {}
+        date = str(when.get("date") or "")
+        time = str(when.get("time") or "")[:5]
+        found.update({f"{date}T{time}", date, f"T{time}"} - {"", "T"})
+    return all(str(moment)[:16] in found for moment in _as_list(wanted))
+
+
+def _event_needs(document: dict, wanted: object, _sources) -> bool:
+    """Every event reports exactly the gaps the case says its source has.
+
+    The rule that would have caught the original defect: an extraction that
+    silently completes a partial source passes `event_starts` and is still
+    wrong, because a calendar will place it somewhere nobody chose.
+    """
+    wanted_sets = [set(_as_list(item)) for item in _as_list(wanted)]
+    events = [entry for entry in document.get("events", []) or [] if isinstance(entry, dict)]
+    if len(events) != len(wanted_sets):
+        return False
+    reported = [set((entry.get("when") or {}).get("needs") or ()) for entry in events]
+    return all(any(item == expected for item in reported) for expected in wanted_sets)
 
 
 def _dig(document: object, path: Sequence[str]):
@@ -272,6 +295,7 @@ RULES: dict[str, Callable[[dict, object, Given], bool]] = {
     "operation": _operation_is,
     "fields": _field_equals,
     "event_starts": _event_at,
+    "event_needs": _event_needs,
 }
 
 

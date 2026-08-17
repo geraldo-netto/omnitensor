@@ -32,6 +32,7 @@ from ..sdk import (
     succeeded_result,
 )
 from ..storelock import store_lock
+from .event_passes import merge, plan_passes
 from .events import (
     EventResultError,
     GroundedEventResult,
@@ -62,6 +63,7 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
+from .spans import estimate_tokens
 from .text_encoding import TextEncodingError, decode_plain_text
 
 PLUGIN_ID = "event-extraction"
@@ -309,6 +311,41 @@ class EventExtractionPlugin(ManagedPlugin):
         )
         return PluginHealth(PluginHealthStatus.READY, detail, self._clock_ms())
 
+    async def _generate_passes(
+        self, request, references, private_fragments, progress, cancellation
+    ) -> list:
+        """One generation per group of sources, accumulating what each found.
+
+        As many passes as the sources need: a single generation cannot read
+        twenty long documents and still have room to answer, and the answer is
+        the thing that must never be cut.
+        """
+        task = event_generation_task()
+        groups = plan_passes(
+            [(reference, private_fragments[reference].text) for reference in references],
+            context_tokens=task.limits.context_tokens,
+            prompt_tokens=estimate_tokens(task.system_prompt + task.instruction_template),
+        )
+        parsed = []
+        for index, group in enumerate(groups):
+            cancellation.raise_if_cancelled()
+            generated = await self._router.run(
+                task,
+                generation_request(request.job_id, PLUGIN_ID, group),
+                cancellation,
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="generate",
+                    offset=0.6 + 0.25 * index / len(groups),
+                    scale=0.25 / len(groups),
+                    error_type=EventWorkloadError,
+                ),
+            )
+            parsed.append(parse_grounded_event_result(generated.document))
+        return parsed
+
     async def execute(
         self,
         request: PluginRequest,
@@ -353,23 +390,12 @@ class EventExtractionPlugin(ManagedPlugin):
             cancellation.raise_if_cancelled()
             self._journal.stage(request.job_id, "generate")
             await self._report(request, progress, "generate", 0.6)
-            generated = await self._router.run(
-                event_generation_task(),
-                generation_request(request.job_id, PLUGIN_ID, references),
-                cancellation,
-                ScaledProgressReporter(
-                    request,
-                    progress,
-                    self._clock_ms,
-                    stage="generate",
-                    offset=0.6,
-                    scale=0.25,
-                    error_type=EventWorkloadError,
-                ),
+            parsed = await self._generate_passes(
+                request, references, private_fragments, progress, cancellation
             )
             self._journal.stage(request.job_id, "validate")
             await self._report(request, progress, "validate", 0.9)
-            grounded = parse_grounded_event_result(generated.document)
+            grounded = merge(parsed, request.job_id)
             validate_event_grounding(grounded, request.job_id, private_fragments)
             await self._report(request, progress, "terminal", 1.0)
             return succeeded_result(

@@ -202,16 +202,33 @@ class TestTheOtherRules:
         assert not judge(case(expect={"at_least": {"tasks": 3}}), one, SOURCES).correct
 
     def test_an_event_is_checked_at_its_stated_start(self):
-        found = {"events": [{"start": "2026-09-03T14:00:00Z"}]}
+        found = {"events": [{"when": {"date": "2026-09-03", "time": "14:00", "needs": []}}]}
 
         assert judge(case(expect={"event_starts": ["2026-09-03T14:00"]}), found, SOURCES).correct
 
     def test_an_event_at_the_wrong_time_is_not_the_event(self):
-        found = {"events": [{"start": "2026-09-03T09:00:00Z"}]}
+        found = {"events": [{"when": {"date": "2026-09-03", "time": "09:00", "needs": []}}]}
 
         assert not judge(
             case(expect={"event_starts": ["2026-09-03T14:00"]}), found, SOURCES
         ).correct
+
+    def test_a_source_that_states_only_a_date_can_be_asked_for_by_date(self):
+        # Version 2 keeps an event whose source named no time, so a case has to
+        # be able to expect exactly that rather than a full datetime.
+        found = {"events": [{"when": {"date": "2026-12-27", "needs": ["time"]}}]}
+
+        assert judge(case(expect={"event_starts": ["2026-12-27"]}), found, SOURCES).correct
+
+    def test_an_extraction_that_invents_the_missing_part_is_caught(self):
+        # The rule that would have caught the original defect from the other
+        # side: silently completing a partial source passes `event_starts` and
+        # still puts an event where nobody chose.
+        invented = {"events": [{"when": {"date": "2026-12-27", "time": "09:00", "needs": []}}]}
+
+        assert not judge(case(expect={"event_needs": [["time"]]}), invented, SOURCES).correct
+        honest = {"events": [{"when": {"date": "2026-12-27", "needs": ["time"]}}]}
+        assert judge(case(expect={"event_needs": [["time"]]}), honest, SOURCES).correct
 
     def test_a_longer_answer_is_never_scored_below_a_shorter_one(self):
         """Enforced rather than assumed: a benchmark that rewarded brevity

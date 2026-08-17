@@ -112,6 +112,7 @@ only_mutate = [
     "src/omnitensor/plugins/acceptance_kit.py",
     "src/omnitensor/plugins/document_acceptance.py",
     "src/omnitensor/plugins/document_qa.py",
+    "src/omnitensor/plugins/event_passes.py",
     "src/omnitensor/plugins/event_workload.py",
     "src/omnitensor/scheduler.py",
     "src/omnitensor/snapshot.py",
