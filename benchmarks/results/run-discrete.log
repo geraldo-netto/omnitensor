@@ -72,3 +72,15 @@
 [2026-08-17 02:40:37] qwen3-4b-q4-k-m · ask-selected-files: 10/10 correct (100%), rules 100%, 37.1s per case
 [2026-08-17 02:40:37] qwen3-4b-q4-k-m · event-extraction: 10 cases
 [2026-08-17 02:40:53]   event-explicit-date-time           FAIL   16.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 02:41:09]   event-written-month                FAIL   15.8s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 02:41:26]   event-two-in-one-document          FAIL   16.9s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 02:41:42]   event-with-location                FAIL   16.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 02:41:59]   event-ics-like                     FAIL   17.2s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 02:42:16]   event-afternoon-24h                FAIL   16.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 02:42:32]   event-named-activity               FAIL   16.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 02:42:49]   event-no-time-refuses              ok     17.3s
+[2026-08-17 02:43:07]   event-no-activity-refuses          ok     17.4s
+[2026-08-17 02:43:24]   event-relative-date-refuses        ok     17.1s
+[2026-08-17 02:43:24] qwen3-4b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 16.7s per case
+[2026-08-17 02:43:24]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 02:43:24] qwen3-4b-q4-k-m · file-organizer: 10 cases

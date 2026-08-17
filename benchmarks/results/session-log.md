@@ -97,6 +97,12 @@ rewritten after each model, so an interrupted run still leaves findings.
   corrected re-run makes the two comparable; until then the fair statement is
   "the 4B passed everything asked of it, faster", not "the 4B beat the 8B".
 
+- **`event-extraction` fails identically on the 4B**: same 3/10, same seven
+  refusals, same 14%. Two independently trained models behaving exactly alike
+  is not a model problem — it moves OMNI-0354 into the task itself (prompt,
+  grammar projection, evidence rules) and out of "that provider needs tuning".
+  That is the most useful thing this run has produced.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
