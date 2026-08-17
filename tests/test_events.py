@@ -45,9 +45,7 @@ def when(
     all_day=False,
 ) -> dict:
     """A `when` whose `needs` is derived exactly as the parser derives it."""
-    value: dict = {"allDay": all_day}
-    if date is not None:
-        value["date"] = date
+    value: dict = {"allDay": all_day, "date": date if date is not None else "unknown"}
     if time is not None:
         value["time"] = time
     if end_time is not None:
@@ -160,11 +158,7 @@ def test_candidate_ids_are_unique_even_when_event_meanings_differ():
 @pytest.mark.parametrize(
     ("changes", "code", "detail"),
     [
-        (
-            {"when": {"date": "2026-08-12", "time": "10:00", "needs": []}},
-            "date-invalid",
-            "event needs ['timezone'] rather than []",
-        ),
+
         (
             {"when": when(timezone="Mars/Olympus")},
             "timezone-invalid",
@@ -183,6 +177,7 @@ def test_candidate_ids_are_unique_even_when_event_meanings_differ():
         (
             {
                 "when": {
+                    "date": "unknown",
                     "time": "10:00",
                     "needs": ["date"],
                     "timezone": {"name": "UTC", "utcOffset": "+00:00", "source": "stated"},
@@ -200,6 +195,17 @@ def test_when_semantics_fail_closed(changes, code, detail):
         parse_grounded_event_result(document)
 
     assert (caught.value.code, caught.value.detail) == (code, detail)
+
+
+def test_a_model_that_misreports_what_is_missing_is_corrected_rather_than_refused():
+    # `needs` is derived from the other fields, so the model's copy adds
+    # nothing — and refusing the job over a disagreement threw away an answer
+    # somebody could use. Measured: the model gets this wrong almost always.
+    misreported = candidate(when={**when(timezone=None), "needs": []})
+
+    [event] = parse_grounded_event_result(result_document(misreported)).events
+
+    assert event.when.needs == ("timezone",)
 
 
 def test_an_event_missing_part_of_its_when_is_kept_and_says_what_it_needs():

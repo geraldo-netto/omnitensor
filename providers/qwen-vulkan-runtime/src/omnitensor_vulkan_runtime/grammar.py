@@ -29,7 +29,15 @@ def _project_grammar_keywords(value) -> None:
     if not isinstance(value, dict):
         return
     value.pop("maxLength", None)
-    value.pop("pattern", None)
+    # A pattern written with `\d` compiles to literal garbage — llama.cpp emits
+    # `"\d\d\d\d" "-\d-\d"` rather than a digit class — which is why these
+    # were stripped wholesale. A pattern written as a character class compiles
+    # correctly and is enforced, and enforcing the shape of a date is the whole
+    # point of requiring one: a model that must emit the key will otherwise
+    # displace a neighbouring value into it.
+    pattern = value.get("pattern")
+    if isinstance(pattern, str) and "\\d" in pattern:
+        value.pop("pattern", None)
     properties = value.get("properties")
     if isinstance(properties, dict):
         confirmation = properties.get("confirmation")

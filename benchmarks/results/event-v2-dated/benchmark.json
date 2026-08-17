@@ -1,0 +1,658 @@
+{
+ "version": 1,
+ "runs": [
+  {
+   "workload": "event-extraction",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+   "contextTokens": 32768,
+   "cache": "q8_0",
+   "layersOffloaded": 33,
+   "loadSeconds": 2.33,
+   "accuracy": 0.5,
+   "ruleScore": 0.6078,
+   "correct": 8,
+   "cases": 16,
+   "errors": 1,
+   "secondsPerCase": 19.31,
+   "charactersPerSecond": 39.4,
+   "failures": {
+    "answers-rather-than-refusing": 5,
+    "at_least": 5,
+    "event_starts": 5,
+    "contains": 2,
+    "event_needs": 2,
+    "produced-a-usable-document": 1
+   },
+   "outcomes": [
+    {
+     "caseId": "event-explicit-date-time",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [],
+     "seconds": 20.38,
+     "outputCharacters": 775,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source text.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-explicit-date-time-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-explicit-date-time:0",
+          "sourceSha256": "5f08fc4feae61d6689c0180ae1cbfa548b9e47cd462b4e0300e99f5345605e9d",
+          "span": {
+           "start": 0,
+           "end": 57
+          },
+          "textSha256": "5f08fc4feae61d6689c0180ae1cbfa548b9e47cd462b4e0300e99f5345605e9d"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Project review with Ana"
+        },
+        "when": {
+         "date": "2026-09-03",
+         "needs": [],
+         "time": "14:00"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "Lisbon"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-explicit-date-time",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-written-month",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.04,
+     "outputCharacters": 244,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-written-month",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-two-in-one-document",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.02,
+     "outputCharacters": 250,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-two-in-one-document",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-with-location",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [],
+     "seconds": 21.49,
+     "outputCharacters": 762,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-with-location-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-with-location:0",
+          "sourceSha256": "b08d8344a77e39a451f5b0e47a1acc5cf3fac5896d4cb5cad17d13071449a429",
+          "span": {
+           "start": 0,
+           "end": 64
+          },
+          "textSha256": "b08d8344a77e39a451f5b0e47a1acc5cf3fac5896d4cb5cad17d13071449a429"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Contract signing"
+        },
+        "when": {
+         "date": "2026-04-02",
+         "needs": [],
+         "time": "11:00"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "the notary in Lisbon"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-with-location",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-ics-like",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [],
+     "seconds": 22.31,
+     "outputCharacters": 732,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-ics-like-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-ics-like:0",
+          "sourceSha256": "42f34be3ed3823f4831277f49f42d40a99c49199214181e8aef072b7319f3422",
+          "span": {
+           "start": 0,
+           "end": 89
+          },
+          "textSha256": "42f34be3ed3823f4831277f49f42d40a99c49199214181e8aef072b7319f3422"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Quarterly review"
+        },
+        "when": {
+         "date": "2026-09-03",
+         "needs": [],
+         "time": "14:00"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "Lisbon"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-ics-like",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-afternoon-24h",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [],
+     "seconds": 22.1,
+     "outputCharacters": 758,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-afternoon-24h-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-afternoon-24h:0",
+          "sourceSha256": "b4be5c73e42285637026eb2fed132aacb9f46d398f7344c0ed8eb782748d2507",
+          "span": {
+           "start": 0,
+           "end": 74
+          },
+          "textSha256": "b4be5c73e42285637026eb2fed132aacb9f46d398f7344c0ed8eb782748d2507"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Delivery inspection"
+        },
+        "when": {
+         "date": "2026-11-20",
+         "needs": [],
+         "time": "15:45"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "the warehouse"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-afternoon-24h",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-named-activity",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [],
+     "seconds": 20.89,
+     "outputCharacters": 704,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-named-activity-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-named-activity:0",
+          "sourceSha256": "7ea5173584afd136a1968500427a2427daa53cd6f72d04e4b43b07ac62116dea",
+          "span": {
+           "start": 0,
+           "end": 69
+          },
+          "textSha256": "7ea5173584afd136a1968500427a2427daa53cd6f72d04e4b43b07ac62116dea"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Budget review with Marta Oliveira"
+        },
+        "when": {
+         "date": "2026-09-30",
+         "needs": [],
+         "time": "08:00"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-named-activity",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-date-without-time",
+     "correct": true,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts",
+      "event_needs"
+     ],
+     "failed": [],
+     "seconds": 23.4,
+     "outputCharacters": 800,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "The office is closed for inventory on 2026-12-27.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-date-without-time-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-date-without-time:0",
+          "sourceSha256": "5398f5387dadbf2d1267c7ee39235cf52ff91e26b038293d9c5125598a39aa90",
+          "span": {
+           "start": 0,
+           "end": 49
+          },
+          "textSha256": "5398f5387dadbf2d1267c7ee39235cf52ff91e26b038293d9c5125598a39aa90"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Office closed for inventory"
+        },
+        "when": {
+         "date": "2026-12-27",
+         "needs": [
+          "time"
+         ],
+         "time": null
+        },
+        "where": {
+         "kind": "physical",
+         "source": "deduced",
+         "venue": "The office"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-date-without-time",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-time-without-date",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts",
+      "event_needs"
+     ],
+     "seconds": 8.45,
+     "outputCharacters": 337,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event — only a description of a recurring meeting pattern without a specific date or instance.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-time-without-date",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-recurring-weekly",
+     "correct": false,
+     "passed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least"
+     ],
+     "failed": [
+      "event_needs"
+     ],
+     "seconds": 25.42,
+     "outputCharacters": 856,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source text.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-recurring-weekly-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-recurring-weekly:0",
+          "sourceSha256": "b3db8c7d36b7f2cde846e02f8c7b570b55cb894a4994b2c1a83a869360a1bfb6",
+          "span": {
+           "start": 0,
+           "end": 73
+          },
+          "textSha256": "b3db8c7d36b7f2cde846e02f8c7b570b55cb894a4994b2c1a83a869360a1bfb6"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Jazz night"
+        },
+        "when": {
+         "date": "2026-12-18",
+         "needs": [
+          "time",
+          "timezone",
+          "date"
+         ],
+         "time": "21:00"
+        },
+        "repeats": {
+         "freq": "WEEKLY",
+         "source": "stated",
+         "text": "every Friday"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "Casa da Musica"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-recurring-weekly",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-banner-no-year",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "produced-a-usable-document"
+     ],
+     "seconds": 76.59,
+     "outputCharacters": 3988,
+     "error": "output was not JSON",
+     "document": null
+    },
+    {
+     "caseId": "event-online-meeting",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.25,
+     "outputCharacters": 245,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-online-meeting",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-cancelled",
+     "correct": false,
+     "passed": [
+      "contains"
+     ],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 9.05,
+     "outputCharacters": 386,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "The source text explicitly states that the event is cancelled and will not be rescheduled. Per instructions, a cancelled event is not extracted as a valid calendar event.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-cancelled",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-with-registration",
+     "correct": false,
+     "passed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "failed": [
+      "contains"
+     ],
+     "seconds": 22.08,
+     "outputCharacters": 755,
+     "error": "",
+     "document": {
+      "code": "succeeded",
+      "confirmationState": "pending",
+      "detail": "Event extracted from source.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [
+       {
+        "candidateId": "bench-event-with-registration-0",
+        "confirmation": "pending",
+        "evidence": [
+         {
+          "page": 1,
+          "readAs": "text",
+          "sourceRef": "case:bench-event-with-registration:0",
+          "sourceSha256": "5ccad26eb4b5dc747dab73bbb1101c4f868e521f3f229662d2b2ba88ea20b35d",
+          "span": {
+           "start": 0,
+           "end": 84
+          },
+          "textSha256": "5ccad26eb4b5dc747dab73bbb1101c4f868e521f3f229662d2b2ba88ea20b35d"
+         }
+        ],
+        "label": {
+         "source": "stated",
+         "text": "Workshop"
+        },
+        "when": {
+         "date": "2026-02-18",
+         "needs": [],
+         "time": "14:00"
+        },
+        "where": {
+         "kind": "physical",
+         "source": "stated",
+         "venue": "Sala Azul"
+        }
+       }
+      ],
+      "outcome": "succeeded",
+      "requestId": "bench-event-with-registration",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-no-activity-refuses",
+     "correct": true,
+     "passed": [
+      "refuses"
+     ],
+     "failed": [],
+     "seconds": 7.8,
+     "outputCharacters": 296,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no calendar events; text describes invoice terms only.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-no-activity-refuses",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-prose-without-event",
+     "correct": true,
+     "passed": [
+      "refuses"
+     ],
+     "failed": [],
+     "seconds": 7.62,
+     "outputCharacters": 279,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "No calendar events found in the provided source text.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-prose-without-event",
+      "version": 2
+     }
+    }
+   ]
+  }
+ ]
+}

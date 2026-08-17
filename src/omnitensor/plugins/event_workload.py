@@ -600,9 +600,14 @@ def _stated_document(value) -> dict:
 
 
 def _when_document(when) -> dict:
-    document = {"needs": list(when.needs), "allDay": when.all_day, "isPast": when.is_past}
-    if when.date is not None:
-        document["date"] = when.date
+    document = {
+        "needs": list(when.needs),
+        "allDay": when.all_day,
+        "isPast": when.is_past,
+        # Always written, and `unknown` when the source named none: the key is
+        # required so that both moment slots exist on every event.
+        "date": when.date if when.date is not None else "unknown",
+    }
     if when.time is not None:
         document["time"] = when.time
     if when.end_date is not None or when.end_time is not None:

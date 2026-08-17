@@ -360,8 +360,12 @@ def _parse_when(value: object) -> EventWhen:
     end = value.get("end") or {}
     if not isinstance(end, Mapping):
         raise EventResultError("result-invalid", "event end is not an object")
+    stated_date = value.get("date")
     when = EventWhen(
-        date=_optional(value.get("date"), str),
+        # `unknown` is how a source that names no date says so. The key is
+        # required — a model given the option of omitting it filled exactly one
+        # of date and time on 8 of 8 events — so the absence has to be sayable.
+        date=None if stated_date in (None, "unknown") else str(stated_date),
         time=_optional(value.get("time"), str),
         end_date=_optional(end.get("date"), str),
         end_time=_optional(end.get("time"), str),
@@ -373,15 +377,17 @@ def _parse_when(value: object) -> EventWhen:
     return when
 
 
-def _check_when(when: EventWhen, value: Mapping[str, object]) -> None:
-    # `needs` is derived here rather than trusted: a model that under-reports
-    # what is missing would produce an event a calendar silently misplaces.
-    stated = tuple(str(item) for item in value.get("needs", ()))
-    if stated != when.needs:
-        raise EventResultError(
-            "date-invalid",
-            f"event needs {list(when.needs)} rather than {list(stated)}",
-        )
+def _check_when(when: EventWhen, _value: Mapping[str, object]) -> None:
+    """Check what the model cannot recompute, and recompute the rest.
+
+    `needs` is a pure function of the date, time, zone and all-day flag, so the
+    model's copy carries nothing the parser cannot derive. It used to be
+    compared and a disagreement refused the whole job — and the model disagrees
+    almost always: measured, it reported `[]` beside a missing date seven times
+    and listed three missing fields beside a present one once. Refusing on a
+    redundant field turned an answer somebody could use into no answer at all,
+    so the derived value simply wins.
+    """
     if when.all_day and when.time is not None:
         raise EventResultError("date-invalid", "an all-day event states no time")
     if when.end_date is not None and when.date is not None and when.end_date < when.date:
