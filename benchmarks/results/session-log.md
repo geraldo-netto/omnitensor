@@ -90,6 +90,13 @@ rewritten after each model, so an interrupted run still leaves findings.
   They cannot see that "אירופי" is the wrong word. Somebody who reads Hebrew
   should look at `benchmark.json` before this decides anything.
 
+- **The 4B matched the 8B on `ask-selected-files`, at 2.3× the speed**: 10/10
+  against 8/10, 37.1s per case against 87.1s. Read that carefully — the 4B ran
+  *after* the case fix, so it was judged on the invention rules and passed
+  them, while the 8B's row was scored under the impossible refusal rules. The
+  corrected re-run makes the two comparable; until then the fair statement is
+  "the 4B passed everything asked of it, faster", not "the 4B beat the 8B".
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.

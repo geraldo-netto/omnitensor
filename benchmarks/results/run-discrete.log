@@ -61,3 +61,14 @@
 [2026-08-17 02:34:26] qwen3-4b-q4-k-m · ask-selected-files: 10 cases
 [2026-08-17 02:35:03]   ask-invoice-total                  ok     37.3s
 [2026-08-17 02:35:39]   ask-who-signed                     ok     35.9s
+[2026-08-17 02:36:17]   ask-deadline                       ok     37.6s
+[2026-08-17 02:36:54]   ask-warranty-length                ok     37.0s
+[2026-08-17 02:37:35]   ask-two-documents                  ok     41.3s
+[2026-08-17 02:38:12]   ask-percentage                     ok     36.7s
+[2026-08-17 02:38:47]   ask-role-and-name                  ok     35.2s
+[2026-08-17 02:39:23]   ask-language-portuguese            ok     36.2s
+[2026-08-17 02:40:00]   ask-absent-fact                    ok     37.0s
+[2026-08-17 02:40:37]   ask-absent-person                  ok     36.7s
+[2026-08-17 02:40:37] qwen3-4b-q4-k-m · ask-selected-files: 10/10 correct (100%), rules 100%, 37.1s per case
+[2026-08-17 02:40:37] qwen3-4b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 02:40:53]   event-explicit-date-time           FAIL   16.3s  failed: answers-rather-than-refusing, at_least, event_starts
