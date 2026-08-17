@@ -16,7 +16,7 @@
    "valueCache": "q8_0"
   }
  },
- "recordedAt": "2026-08-13",
+ "recordedAt": "2026-08-17",
  "runtime": {
   "binaries": {
    "libggml-vulkan.so": "505fd5f88249babd789a5ef9272617893833526b69616d08e269cd7562b48ccf",
@@ -33,7 +33,7 @@
    "models": {
     "qwen3-8b-q4-k-m": {
      "result": "passed",
-     "taskSha256": "ccc9037e411cf00b9d4fb5f45a9c073b879262340e82be40bf0068e5601eacf4"
+     "taskSha256": "6d1711de3e9ef5d9cb5e33f9be62d457af63af4ef6da3b8e9603695b7f547d58"
     }
    }
   },
@@ -42,7 +42,7 @@
    "models": {
     "qwen3-8b-q4-k-m": {
      "result": "passed",
-     "taskSha256": "7634ecb26f3de71ae2232e35782e47b494d49f20d154b2cc0ca6641ca7b3dc63"
+     "taskSha256": "bec284ee06732da721e8a9dcbd269520255b553c01b6232e8892d0bbbf4f7549"
     }
    }
   },
@@ -51,7 +51,7 @@
    "models": {
     "qwen3-8b-q4-k-m": {
      "result": "passed",
-     "taskSha256": "5cfc4943339ed59f21bd6bfdfea17cb7c3d387a8e86700aa2309b27acc64a6a0"
+     "taskSha256": "1d306e3c56ed8c1f1a5195a29554ee31dd092a33d012e960a161f98767dc0e0f"
     }
    }
   },
@@ -60,7 +60,7 @@
    "models": {
     "qwen3-8b-q4-k-m": {
      "result": "passed",
-     "taskSha256": "b27d00d228d50fe7bd1fbf6eb5a0a1937e33a261912256ba82d3cd0f0d5be127"
+     "taskSha256": "c6ab03dcf52b3f74abd68ac3fa8d44ec95d9c40a17c1a353d580bd18264f7a82"
     }
    }
   }

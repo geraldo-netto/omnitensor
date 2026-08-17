@@ -1133,7 +1133,9 @@ def test_hebrew_runtime_uses_one_user_message_and_builds_closed_grounded_json(tm
         "temperature": 0.0,
         "top_p": 1.0,
         "seed": 0,
-        "max_tokens": 1024,
+        # The task states no output ceiling, so none is imposed: a translation
+        # is as long as the text is, and 1,024 tokens cut the long ones off.
+        "max_tokens": None,
         "stream": True,
     }
 
