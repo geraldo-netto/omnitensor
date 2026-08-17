@@ -192,15 +192,20 @@ class SilentProgress:
         return None
 
 
-def lease_file(directory: Path) -> Path:
+def lease_file(directory: Path, device_index: int = 0) -> Path:
     """The cross-worker GPU lease the runtime insists on holding.
 
     It exists to stop two workers loading a model onto one card at once, which
     is exactly as true for a benchmark as for a job — so this takes a real one
     rather than working around it.
+
+    One lease per card, because "one card" is what it protects. A single shared
+    lease also serialised the discrete and integrated lanes against each other,
+    which was never the point: they are different memory and different queues,
+    and measuring both takes twice as long for no reason.
     """
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = directory / "accelerator.lease"
+    path = directory / f"accelerator-{device_index}.lease"
     if not path.is_file():
         path.write_bytes(b"")
     return path

@@ -89,7 +89,9 @@ def run_model(
     os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
 
     store = MemoryFragmentStore()
-    runtime = LlamaVulkanRuntime(store, lease_file(Path.home() / ".cache/omnitensor-bench"))
+    runtime = LlamaVulkanRuntime(
+        store, lease_file(Path.home() / ".cache/omnitensor-bench", device.index)
+    )
 
     say(f"loading {model_id} from {path.name} on {device.name}")
     started = time.monotonic()

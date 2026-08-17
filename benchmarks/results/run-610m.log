@@ -1,0 +1,101 @@
+[2026-08-17 10:21:04] measuring on 0: AMD Radeon 610M (RADV RAPHAEL_MENDOCINO) (integrated)
+[2026-08-17 10:21:04] models: qwen3-4b-q4-k-m, qwen3-8b-q4-k-m
+[2026-08-17 10:21:04] workloads: ask-selected-files, event-extraction, file-organizer, selected-text-tools
+[2026-08-17 10:21:05] qwen3-4b-q4-k-m: 2.33 GiB weights + 2.39 GiB cache at 32,768 tokens against 44.77 GiB free on gpu-renderD129 — expected to fit
+[2026-08-17 10:21:05] loading qwen3-4b-q4-k-m from model.gguf on AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)
+[2026-08-17 10:21:06] loaded in 1.1s — 37/37 layers on Vulkan
+[2026-08-17 10:21:06] qwen3-4b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 10:22:07]   ask-invoice-total                  ok     61.2s
+[2026-08-17 10:23:07]   ask-who-signed                     ok     59.7s
+[2026-08-17 10:24:09]   ask-deadline                       ok     62.6s
+[2026-08-17 10:24:59]   ask-warranty-length                ok     49.2s
+[2026-08-17 10:25:54]   ask-two-documents                  ok     55.7s
+[2026-08-17 10:26:46]   ask-percentage                     ok     51.8s
+[2026-08-17 10:27:36]   ask-role-and-name                  ok     50.0s
+[2026-08-17 10:28:24]   ask-language-portuguese            ok     47.5s
+[2026-08-17 10:29:31]   ask-absent-fact                    FAIL   67.7s  failed: no_invented_numbers
+[2026-08-17 10:30:23]   ask-absent-person                  ok     51.7s
+[2026-08-17 10:30:23] qwen3-4b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 55.7s per case
+[2026-08-17 10:30:23]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 10:30:23] qwen3-4b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 10:30:44]   event-explicit-date-time           FAIL   21.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 10:31:07]   event-written-month                FAIL   22.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 10:31:31]   event-two-in-one-document          FAIL   24.6s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 10:31:53]   event-with-location                FAIL   21.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 10:32:16]   event-ics-like                     FAIL   23.7s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 10:32:40]   event-afternoon-24h                FAIL   23.8s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 10:33:03]   event-named-activity               FAIL   22.4s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 10:33:26]   event-no-time-refuses              ok     23.5s
+[2026-08-17 10:33:49]   event-no-activity-refuses          ok     23.1s
+[2026-08-17 10:34:15]   event-relative-date-refuses        ok     25.7s
+[2026-08-17 10:34:15] qwen3-4b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 23.2s per case
+[2026-08-17 10:34:15]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 10:34:15] qwen3-4b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 10:36:11]   organize-two-invoices              ok    115.8s
+[2026-08-17 10:37:51]   organize-mixed-kinds               ok    100.2s
+[2026-08-17 10:38:55]   organize-single-file               ok     64.3s
+[2026-08-17 10:40:35]   organize-duplicates                ok    100.2s
+[2026-08-17 10:43:48]   organize-three-mixed               ok    192.3s
+[2026-08-17 10:46:06]   organize-photos                    ok    138.7s
+[2026-08-17 10:48:14]   organize-code-and-docs             ok    127.6s
+[2026-08-17 10:50:35]   organize-keeps-names               ok    141.5s
+[2026-08-17 10:58:08]   organize-four-files                ok    452.5s
+[2026-08-17 10:59:54]   organize-ambiguous-name            ok    106.4s
+[2026-08-17 10:59:54] qwen3-4b-q4-k-m · file-organizer: 10/10 correct (100%), rules 100%, 153.9s per case
+[2026-08-17 10:59:54] qwen3-4b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 11:00:42]   text-summarize                     ok     47.5s
+[2026-08-17 11:01:25]   text-summarize-keeps-the-name      ok     43.1s
+[2026-08-17 11:02:02]   text-explain                       ok     37.4s
+[2026-08-17 11:02:38]   text-rewrite                       ok     35.7s
+[2026-08-17 11:03:25]   text-extract-tasks                 ok     47.3s
+[2026-08-17 11:04:02]   text-extract-single-task           ok     36.5s
+[2026-08-17 11:04:42]   text-translate-hebrew              ok     40.5s
+[2026-08-17 11:05:44]   text-translate-hebrew-names        FAIL   61.6s  failed: no_foreign_script
+[2026-08-17 11:06:32]   text-translate-hebrew-paragraph    ok     48.4s
+[2026-08-17 11:07:38]   text-translate-portuguese          ok     65.3s
+[2026-08-17 11:07:38] qwen3-4b-q4-k-m · selected-text-tools: 9/10 correct (90%), rules 97%, 46.3s per case
+[2026-08-17 11:07:38]   what failed: {"no_foreign_script": 1}
+[2026-08-17 11:07:38] results written to benchmarks/results/integrated/benchmark.md
+[2026-08-17 11:07:38] qwen3-8b-q4-k-m: 4.68 GiB weights + 2.39 GiB cache at 32,768 tokens against 44.65 GiB free on gpu-renderD129 — expected to fit
+[2026-08-17 11:07:38] loading qwen3-8b-q4-k-m from model.gguf on AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)
+[2026-08-17 11:07:40] loaded in 1.6s — 37/37 layers on Vulkan
+[2026-08-17 11:07:40] qwen3-8b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 11:08:59]   ask-invoice-total                  ok     79.8s
+[2026-08-17 11:10:35]   ask-who-signed                     ok     96.0s
+[2026-08-17 11:12:03]   ask-deadline                       ok     87.2s
+[2026-08-17 11:13:40]   ask-warranty-length                ok     97.8s
+[2026-08-17 11:15:30]   ask-two-documents                  ok    109.3s
+[2026-08-17 11:16:51]   ask-percentage                     ok     81.1s
+[2026-08-17 11:17:59]   ask-role-and-name                  ok     68.3s
+[2026-08-17 11:19:10]   ask-language-portuguese            ok     71.0s
+[2026-08-17 11:20:22]   ask-absent-fact                    FAIL   72.1s  failed: no_invented_numbers
+[2026-08-17 11:21:26]   ask-absent-person                  ok     64.2s
+[2026-08-17 11:21:26] qwen3-8b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 82.7s per case
+[2026-08-17 11:21:26]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 11:21:26] qwen3-8b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 11:22:01]   event-explicit-date-time           FAIL   34.4s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 11:22:33]   event-written-month                FAIL   31.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 11:23:20]   event-two-in-one-document          FAIL   47.1s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 11:23:50]   event-with-location                FAIL   30.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 11:24:55]   event-ics-like                     FAIL   64.4s  failed: answers-rather-than-refusing, at_least
+[2026-08-17 11:25:26]   event-afternoon-24h                FAIL   31.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 11:25:57]   event-named-activity               FAIL   30.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 11:26:28]   event-no-time-refuses              ok     31.0s
+[2026-08-17 11:27:02]   event-no-activity-refuses          ok     33.4s
+[2026-08-17 11:27:33]   event-relative-date-refuses        ok     31.1s
+[2026-08-17 11:27:33] qwen3-8b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 36.6s per case
+[2026-08-17 11:27:33]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+[2026-08-17 11:27:33] qwen3-8b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 11:30:17]   organize-two-invoices              ok    163.7s
+[2026-08-17 11:33:11]   organize-mixed-kinds               FAIL  174.8s  failed: contains
+[2026-08-17 11:34:41]   organize-single-file               ok     89.9s
+[2026-08-17 11:37:21]   organize-duplicates                ok    159.8s
+[2026-08-17 11:42:04]   organize-three-mixed               ok    282.8s
+[2026-08-17 11:46:48]   organize-photos                    ok    284.5s
+[2026-08-17 11:49:34]   organize-code-and-docs             FAIL  165.5s  failed: contains
+[2026-08-17 11:52:13]   organize-keeps-names               ok    159.1s
+[2026-08-17 11:57:20]   organize-four-files                ok    306.7s
+[2026-08-17 11:59:51]   organize-ambiguous-name            ok    151.8s
+[2026-08-17 11:59:51] qwen3-8b-q4-k-m · file-organizer: 8/10 correct (80%), rules 93%, 193.9s per case
+[2026-08-17 11:59:51]   what failed: {"contains": 2}
+[2026-08-17 11:59:51] qwen3-8b-q4-k-m · selected-text-tools: 10 cases
