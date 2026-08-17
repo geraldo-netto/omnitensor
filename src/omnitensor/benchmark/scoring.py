@@ -72,11 +72,7 @@ def judge(
     needs the names, and passing two lists that must stay in step would be a
     worse bargain than passing both forms of the same thing.
     """
-    given = (
-        sources
-        if isinstance(sources, Given)
-        else Given(tuple(sources), tuple(texts))
-    )
+    given = sources if isinstance(sources, Given) else Given(tuple(sources), tuple(texts))
     if document is None:
         # Nothing parseable came back. Recorded as a failed rule rather than
         # skipped, because a model that cannot hold its own output contract is

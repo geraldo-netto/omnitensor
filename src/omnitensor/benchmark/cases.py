@@ -76,8 +76,10 @@ def _case(workload: str, entry: object, index: int) -> Case:
     if not isinstance(entry, dict):
         raise CaseError(f"{workload} case {index} is not an object")
     sources = entry.get("sources")
-    if not isinstance(sources, list) or not sources or not all(
-        isinstance(source, str) and source.strip() for source in sources
+    if (
+        not isinstance(sources, list)
+        or not sources
+        or not all(isinstance(source, str) and source.strip() for source in sources)
     ):
         raise CaseError(f"{workload} case {index} supplies no sources")
     expect = entry.get("expect", {})

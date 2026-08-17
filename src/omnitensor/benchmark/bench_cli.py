@@ -34,6 +34,9 @@ from .harness import (
     run_cases,
 )
 from .report import write_results
+from .vulkan_devices import DeviceError, VulkanDevice, confirm
+from .vulkan_devices import devices as vulkan_devices
+from .vulkan_devices import select as select_device
 
 DEFAULT_ARTIFACT_ROOT = Path.home() / ".local/share/omnitensor/artifacts"
 DEFAULT_RESULT_ROOT = Path(__file__).resolve().parents[3] / "benchmarks" / "results"
@@ -68,7 +71,7 @@ def run_model(
     *,
     artifact_root: Path,
     case_root: Path,
-    device_index: int,
+    device: VulkanDevice,
     say,
 ) -> tuple[Run, ...]:
     """Load one model once, then every case of every workload on it."""
@@ -82,13 +85,13 @@ def run_model(
     path = model_path(artifact_root, model_id)
     # Vulkan device selection, done the way llama.cpp offers it: the provider
     # always takes device 0, so the choice is which device *is* 0. Set before
-    # the runtime loads anything.
-    os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device_index)
+    # the runtime loads anything, and confirmed against the card that answers.
+    os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
 
     store = MemoryFragmentStore()
     runtime = LlamaVulkanRuntime(store, lease_file(Path.home() / ".cache/omnitensor-bench"))
 
-    say(f"loading {model_id} from {path.name} on Vulkan device {device_index}")
+    say(f"loading {model_id} from {path.name} on {device.name}")
     started = time.monotonic()
     report = asyncio_run(runtime.load((path,), "gpu"))
     load_seconds = time.monotonic() - started
@@ -96,6 +99,9 @@ def run_model(
         f"loaded in {load_seconds:.1f}s — {report.accelerator_layers}/"
         f"{report.total_model_layers} layers on {report.device}"
     )
+    # The measurement is worthless if it describes a card nobody asked for,
+    # and that has happened: refuse rather than write it down.
+    confirm(device, runtime.physical_device)
 
     every_task = tasks()
     runs = []
@@ -130,7 +136,7 @@ def run_model(
         run = Run(
             workload=workload,
             model_id=model_id,
-            device=f"vulkan-{device_index}",
+            device=device.name,
             outcomes=outcomes,
             load_seconds=load_seconds,
             layers_offloaded=report.accelerator_layers,
@@ -151,7 +157,7 @@ def run_model(
     return tuple(runs)
 
 
-def fit_note(model_id: str, artifact_root: Path, device_index: int, say) -> bool:
+def fit_note(model_id: str, artifact_root: Path, device: VulkanDevice, say) -> bool:
     """Say whether this is even expected to fit, before spending the minutes.
 
     Reuses the prober rather than repeating it, and does not refuse on its own
@@ -163,19 +169,54 @@ def fit_note(model_id: str, artifact_root: Path, device_index: int, say) -> bool
     except (FileNotFoundError, GgufError, OSError) as error:
         say(f"cannot read {model_id}: {error}")
         return False
-    devices = device_memory()
-    if device_index >= len(devices):
-        say(f"no card at Vulkan index {device_index}; proceeding anyway")
+    # sysfs orders render nodes its own way, so the card is found by what it
+    # is — integrated or not — rather than by reusing the Vulkan index.
+    matching = [card for card in device_memory() if card.integrated == device.integrated]
+    if len(matching) != 1:
+        say(f"cannot tell which render node is {device.name}; proceeding anyway")
         return True
-    device = devices[device_index]
-    answer = verdict(estimate(shape, 32_768), device)
+    memory = matching[0]
+    answer = verdict(estimate(shape, 32_768), memory)
     say(
         f"{model_id}: {gibibytes(answer.estimate.weight_bytes)} weights + "
         f"{gibibytes(answer.estimate.cache_bytes)} cache at 32,768 tokens against "
-        f"{gibibytes(device.usable_free_bytes)} free on {device.device_id} — "
+        f"{gibibytes(memory.usable_free_bytes)} free on {memory.device_id} — "
         + ("expected to fit" if answer.fits else f"short {gibibytes(answer.short_by_bytes)}")
     )
     return True
+
+
+def measure(
+    models: Sequence[str],
+    workloads: Sequence[str],
+    *,
+    device: VulkanDevice,
+    artifact_root: Path,
+    case_root: Path,
+    result_root: Path,
+    say,
+) -> list[Run]:
+    """Every model in turn, writing results after each so nothing is lost."""
+    every_run: list[Run] = []
+    for model_id in models:
+        if not fit_note(model_id, artifact_root, device, say):
+            continue
+        try:
+            every_run.extend(
+                run_model(
+                    model_id,
+                    workloads,
+                    artifact_root=artifact_root,
+                    case_root=case_root,
+                    device=device,
+                    say=say,
+                )
+            )
+        except Exception as failure:  # one model failing is a result, not the end
+            say(f"{model_id} could not be measured: {type(failure).__name__}: {failure}")
+        written = write_results(every_run, result_root)
+        say(f"results written to {written}")
+    return every_run
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -190,9 +231,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULT_ROOT)
     parser.add_argument(
         "--device",
-        type=int,
-        default=0,
-        help="Vulkan device index: 0 is the discrete card on this desk, 1 the integrated one",
+        default="",
+        help=(
+            "which card to measure, by name — 'RX 6600' or '610M'. An index still "
+            "works and is checked against the list. Default: the first device."
+        ),
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="print the Vulkan devices this machine offers, and their indices",
     )
     arguments = parser.parse_args(argv)
 
@@ -201,32 +249,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         # log while it is still going.
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
 
+    available = vulkan_devices()
+    if arguments.list_devices:
+        for card in available:
+            say(str(card))
+        return 0 if available else 1
+    try:
+        device = select_device(arguments.device or "0", available)
+    except DeviceError as refusal:
+        say(str(refusal))
+        return 1
+    say(f"measuring on {device}")
+
     models = [name for name in arguments.models.split(",") if name.strip()]
     workloads = [name for name in arguments.workloads.split(",") if name.strip()]
     say(f"models: {', '.join(models)}")
     say(f"workloads: {', '.join(workloads)}")
 
-    every_run: list[Run] = []
-    for model_id in models:
-        if not fit_note(model_id, arguments.artifacts, arguments.device, say):
-            continue
-        try:
-            every_run.extend(
-                run_model(
-                    model_id,
-                    workloads,
-                    artifact_root=arguments.artifacts,
-                    case_root=arguments.cases,
-                    device_index=arguments.device,
-                    say=say,
-                )
-            )
-        except Exception as failure:  # one model failing is a result, not the end
-            say(f"{model_id} could not be measured: {type(failure).__name__}: {failure}")
-        # Written after every model, so an interrupted run still leaves its
-        # findings behind.
-        written = write_results(every_run, arguments.results)
-        say(f"results written to {written}")
+    every_run = measure(
+        models,
+        workloads,
+        device=device,
+        artifact_root=arguments.artifacts,
+        case_root=arguments.cases,
+        result_root=arguments.results,
+        say=say,
+    )
 
     if not every_run:
         say("nothing was measured")
