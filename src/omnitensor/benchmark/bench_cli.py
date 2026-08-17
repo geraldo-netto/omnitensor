@@ -60,9 +60,9 @@ def model_path(artifact_root: Path, model_id: str) -> Path:
 
 def tasks() -> dict:
     """The task factories the provider itself runs, by workload id."""
-    from omnitensor_vulkan_runtime import factories  # noqa: PLC0415 - provider is optional
+    from omnitensor_vulkan_runtime import workload_tasks  # noqa: PLC0415 - provider is optional
 
-    return dict(factories._TASKS)
+    return workload_tasks()
 
 
 def run_model(

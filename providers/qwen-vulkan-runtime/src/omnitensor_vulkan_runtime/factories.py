@@ -19,6 +19,7 @@ from omnitensor.plugins.generation import (
     ArtifactProvenance,
     GenerationProviderDescriptor,
     GenerationRouter,
+    GenerationTask,
 )
 from omnitensor.plugins.generation_workers import LlamaCppVulkanWorker
 from omnitensor.plugins.protocol import (
@@ -233,6 +234,20 @@ _TASKS = {
     "file-organizer": file_organizer_task,
     "selected-text-tools": selected_text_task,
 }
+
+
+def workload_tasks() -> dict[str, Callable[[], GenerationTask]]:
+    """The task each workload runs, by workload id.
+
+    Published because something outside this distribution needs it: the
+    benchmark measures the tasks that actually run, and was reaching into
+    `_TASKS` — an underscore name this package never promised, which a patch
+    release could have renamed without breaking any stated contract.
+
+    A copy, so a caller cannot alter what the workloads run by editing what it
+    was handed.
+    """
+    return dict(_TASKS)
 
 
 def create_event_extraction() -> QualifiedWorkload:

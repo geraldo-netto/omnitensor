@@ -5,6 +5,7 @@ from .factories import (
     create_event_extraction,
     create_file_organizer,
     create_selected_text_tools,
+    workload_tasks,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "create_event_extraction",
     "create_file_organizer",
     "create_selected_text_tools",
+    "workload_tasks",
 ]

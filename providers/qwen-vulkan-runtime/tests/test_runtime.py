@@ -308,6 +308,7 @@ def test_organizer_same_file_merge_never_exceeds_tag_contract(first, second):
     pattern=st.text(min_size=1, max_size=64),
 )
 def test_grammar_projection_property_removes_only_llama_unsupported_string_limits(maximum, pattern):
+    """`maxLength` always goes; a pattern goes only when it uses `\\d`."""
     canonical = {
         "type": "object",
         "properties": {
@@ -323,21 +324,33 @@ def test_grammar_projection_property_removes_only_llama_unsupported_string_limit
 
     projected = grammar.grammar_schema(canonical)
 
+    survives = {} if "\\d" in pattern else {"pattern": pattern}
     assert projected == {
         "type": "object",
-        "properties": {"value": {"type": "string", "minLength": 1}},
+        "properties": {"value": {"type": "string", "minLength": 1, **survives}},
         "additionalProperties": False,
     }
     assert canonical["properties"]["value"]["maxLength"] == maximum
     assert canonical["properties"]["value"]["pattern"] == pattern
 
 
-def test_grammar_projection_inlines_local_definitions_and_removes_patterns():
+def test_grammar_projection_inlines_definitions_and_drops_only_unusable_patterns():
+    """A pattern survives projection unless llama.cpp would mangle it.
+
+    `\\d` compiles to the literal `"\\d\\d\\d\\d"` rather than a digit
+    class, which is why patterns were dropped wholesale. A character class
+    compiles correctly and is enforced — and enforcing the shape of a date is
+    what stops a model, required to emit the key, from displacing a
+    neighbouring value into it.
+    """
     canonical = {
         "$defs": {
             "evidence": {
                 "type": "object",
-                "properties": {"reference": {"type": "string", "pattern": "^private:"}},
+                "properties": {
+                    "reference": {"type": "string", "pattern": "^private:"},
+                    "day": {"type": "string", "pattern": "^\\d{4}$"},
+                },
             }
         },
         "type": "array",
@@ -350,9 +363,12 @@ def test_grammar_projection_inlines_local_definitions_and_removes_patterns():
     assert projected["items"] == {
         "type": "object",
         "description": "grounding",
-        "properties": {"reference": {"type": "string"}},
+        "properties": {
+            "reference": {"type": "string", "pattern": "^private:"},
+            "day": {"type": "string"},
+        },
     }
-    assert canonical["$defs"]["evidence"]["properties"]["reference"]["pattern"] == "^private:"
+    assert canonical["$defs"]["evidence"]["properties"]["day"]["pattern"] == "^\\d{4}$"
 
 
 @pytest.mark.parametrize(
