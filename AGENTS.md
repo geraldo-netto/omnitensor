@@ -17,6 +17,12 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
 - Once a finding is fully resolved and verified, remove its row in the same scoped commit as
   the resolution. `done` is transitional only; no completed row may remain after its
   resolution is committed.
+- A row is removed only when the work is genuinely finished. When an item is implemented
+  only in part, keep its row and add to the description exactly what is still missing,
+  naming the specific remainder rather than calling it partial. A row deleted after half
+  the work silently loses the rest: nothing records it and nobody finds it again. Work
+  that the resolution newly reveals is a new row with a new id, not a note appended to
+  the old one.
 - Findings intentionally rejected or not planned move to the `Rejected / Won't fix` table with
   the rationale in the description; never mix them into the active `Findings` table.
 - Use stable sequential IDs in the form `OMNI-0001`.
