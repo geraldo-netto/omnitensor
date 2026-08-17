@@ -328,6 +328,46 @@ the spans that carried the fields, not every mention.
 never confirms an event; a person does, and that rule is a security property
 rather than a wording preference.
 
+## Export, and who resolves `needs`
+
+Decided: the client shows what an event is missing and does **not** ask. The
+person decides if and when to import, and their calendar application is where
+they fill a gap — it already has the dialogs, the timezone list and the
+recurrence editor, and it is where the event ends up anyway.
+
+That makes `needs` an export rule rather than a conversation, and iCalendar
+already has a container for every case:
+
+| `needs` | exported as | meaning to the calendar |
+| --- | --- | --- |
+| `[]` | `DTSTART;TZID=Europe/Lisbon:20260903T140000` | placed exactly |
+| `["timezone"]` | `DTSTART:20260903T140000` — floating | local time wherever it is opened |
+| `["time"]` | `DTSTART;VALUE=DATE:20260903` | an all-day event |
+| `["date"]`, `["date","time"]` | `VTODO` with no `DUE` | a task: decide when |
+
+**Floating time is the answer to the three-country problem.** RFC 5545 defines
+a datetime with no zone and no `Z` as local to whoever opens it, which is
+precisely "the source did not say, so use mine". It is a standard behaviour of
+every calendar client rather than a convention we would be inventing.
+
+An event with no date at all cannot be a `VEVENT`: RFC 5545 requires `DTSTART`
+when the object carries no `METHOD`. Writing one anyway produces a file that
+some clients reject and others silently place today. `VTODO` has no such
+requirement, says what the thing actually is — something to schedule — and
+keeps it out of the calendar grid until the person decides.
+
+`plugins/events.py` has to change to allow this. Today `_ics_event` asserts
+`event.timezone != "floating"` and `_confirmed_events` raises
+`timezone-required` — "confirmed events need a named timezone". Floating was
+anticipated and then forbidden, which is the same rigidity that makes the
+workload refuse in the first place.
+
+The client's part shrinks to one renderer: `_event_line` in
+`workflows/specs/summaries.py` shows the label, what is known, and what is
+missing — *"Jazz night · 3 September · needs a time"*. No dialog, no round
+trip, no second copy of a calendar UI. Its `limits.events` display cap goes at
+the same time, for the same reason the schema's did.
+
 ## Deduplication
 
 The current key is title + start + location, which breaks as soon as a start may
