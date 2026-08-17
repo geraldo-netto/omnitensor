@@ -41,7 +41,7 @@ def publish(instance, **changes):
         "timestamp_ms": 10,
         "confidence": 0.9,
         "risk_score": 0.85,
-        "result_reference": "result-job-1",
+        "job_id": "job-1",
         "redactor": SecretRedactor([]),
     }
     arguments.update(changes)
@@ -103,7 +103,7 @@ def test_publish_redacts_bounds_and_emits_only_allowlisted_snapshot_fields():
         "confidence",
         "risk_score",
         "resolved",
-        "result_reference",
+        "job_id",
     ]
     assert item.document() == {
         "id": "alert-public",
@@ -115,7 +115,7 @@ def test_publish_redacts_bounds_and_emits_only_allowlisted_snapshot_fields():
         "confidence": 0.9,
         "riskScore": 0.85,
         "resolved": False,
-        "resultRef": "result-job-1",
+        "jobId": "job-1",
     }
 
     snapshot = build_snapshot(
@@ -129,8 +129,8 @@ def test_publish_redacts_bounds_and_emits_only_allowlisted_snapshot_fields():
 
 
 def test_reference_is_opaque_and_full_result_is_never_retained():
-    item = publish(registry("alert-1"), result_reference="result-random-capability")
-    assert item.result_reference == "result-random-capability"
+    item = publish(registry("alert-1"), job_id="random-capability")
+    assert item.job_id == "random-capability"
     assert "output" not in {field.name for field in fields(item)}
     assert "payload" not in item.document()
 
@@ -228,12 +228,14 @@ def test_plugin_identity_is_strict(plugin_id):
 
 @pytest.mark.parametrize(
     "reference",
-    ["", "job-1", "result bad", "result-", "result-" + "x" * 114, None],
+    # A job id is what `get-job-result` accepts: bounded, and without the
+    # spaces or slashes a path would carry.
+    ["", "job 1", "job/1", "x" * 121, None],
 )
-def test_full_result_reference_is_opaque_bounded_capability(reference):
+def test_the_job_id_is_the_one_get_job_result_accepts(reference):
     with pytest.raises(SummaryError) as excinfo:
-        publish(registry("alert"), result_reference=reference)
-    assert excinfo.value.code == "invalid-result-reference"
+        publish(registry("alert"), job_id=reference)
+    assert excinfo.value.code == "invalid-job-id"
 
 
 @pytest.mark.parametrize("alert_id", ["", "bad id", "x" * 121, None, 1])

@@ -211,10 +211,11 @@
           "resolved": {
             "type": "boolean"
           },
-          "resultRef": {
+          "jobId": {
+            "description": "The job whose result this alert summarises, in the form `get-job-result` accepts. It used to be a `resultRef` carrying `result-<jobId>`, which nothing could resolve without stripping the prefix, and which nothing read.",
             "type": "string",
-            "pattern": "^result-[A-Za-z0-9._-]+$",
-            "minLength": 8,
+            "pattern": "^[A-Za-z0-9._-]{1,120}$",
+            "minLength": 1,
             "maxLength": 120
           }
         }

@@ -127,7 +127,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MAX_SECRET_PROVIDER_CHARS": (".secrets", "MAX_SECRET_PROVIDER_CHARS"),
     "MAX_SECRET_VALUE_BYTES": (".secrets", "MAX_SECRET_VALUE_BYTES"),
     "MAX_RESTARTS": (".supervisor_recovery", "MAX_RESTARTS"),
-    "MAX_RESULT_REFERENCE_CHARS": (".summaries", "MAX_RESULT_REFERENCE_CHARS"),
+    "MAX_JOB_ID_CHARS": (".summaries", "MAX_JOB_ID_CHARS"),
     "MAX_RESULT_SUMMARIES": (".summaries", "MAX_RESULT_SUMMARIES"),
     "MAX_PROTOCOL_CAPABILITIES": (".manifest_compatibility", "MAX_PROTOCOL_CAPABILITIES"),
     "MAX_PROTOCOL_CAPABILITY_CHARS": (".manifest_compatibility", "MAX_PROTOCOL_CAPABILITY_CHARS"),

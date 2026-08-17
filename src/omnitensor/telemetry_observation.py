@@ -114,7 +114,7 @@ class ResultSummaryObserver:
                 timestamp_ms=self._clock_ms(),
                 confidence=None,
                 risk_score=None,
-                result_reference=f"result-{job_id}",
+                job_id=job_id,
                 redactor=SecretRedactor(()),
             )
         except (SummaryError, TypeError, ValueError) as error:
@@ -129,7 +129,7 @@ class ResultSummaryObserver:
                 timestamp_ms=self._clock_ms(),
                 confidence=None,
                 risk_score=None,
-                result_reference=f"result-{job_id}",
+                job_id=job_id,
                 redactor=SecretRedactor(()),
             )
         except (SummaryError, TypeError, ValueError) as error:

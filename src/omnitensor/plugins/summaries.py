@@ -13,13 +13,13 @@ from typing import Protocol
 MAX_RESULT_SUMMARIES = 100
 MAX_SUMMARY_TITLE_CHARS = 160
 MAX_SUMMARY_TEXT_CHARS = 500
-MAX_RESULT_REFERENCE_CHARS = 120
+MAX_JOB_ID_CHARS = 120
 MAX_ALERT_ID_CHARS = 120
 ADVISORY_RISK_MAX = 0.5
 WARNING_RISK_MAX = 0.8
 _PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PUBLIC_ID = re.compile(r"^[A-Za-z0-9._-]+$")
-_RESULT_REFERENCE = re.compile(r"^result-[A-Za-z0-9._-]+$")
+_JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 
 
 class SummarySeverity(StrEnum):
@@ -50,7 +50,7 @@ class ResultSummary:
     confidence: float | None
     risk_score: float | None
     resolved: bool
-    result_reference: str
+    job_id: str
 
     def document(self) -> dict:
         return {
@@ -63,7 +63,7 @@ class ResultSummary:
             "confidence": self.confidence,
             "riskScore": self.risk_score,
             "resolved": self.resolved,
-            "resultRef": self.result_reference,
+            "jobId": self.job_id,
         }
 
 
@@ -98,14 +98,14 @@ class ResultSummaryRegistry:
         timestamp_ms: int,
         confidence: float | None,
         risk_score: float | None,
-        result_reference: str,
+        job_id: str,
         redactor: TextRedactor,
     ) -> ResultSummary:
         _validate_plugin_id(plugin_id)
         _validate_timestamp(timestamp_ms)
         confidence = _optional_probability("confidence", confidence)
         risk_score = _optional_probability("risk_score", risk_score)
-        _validate_result_reference(result_reference)
+        _validate_job_id(job_id)
         if not hasattr(redactor, "redact_text"):
             raise TypeError("redactor must provide redact_text")
         public_title = _public_text(
@@ -126,7 +126,7 @@ class ResultSummaryRegistry:
             confidence,
             risk_score,
             False,
-            result_reference,
+            job_id,
         )
         with self._lock:
             if alert_id in self._summaries:
@@ -221,13 +221,19 @@ def _validate_plugin_id(value: object) -> None:
         raise SummaryError("invalid-plugin-id", "plugin ID is invalid")
 
 
-def _validate_result_reference(value: object) -> None:
+def _validate_job_id(value: object) -> None:
+    """The job this alert summarises, in the form `get-job-result` accepts.
+
+    It used to be a `result-<jobId>` reference, which no verb took: a client
+    holding one had to strip the prefix to fetch anything, and none did — the
+    field was published on every alert and read by nobody.
+    """
     if (
         not isinstance(value, str)
-        or not 1 <= len(value) <= MAX_RESULT_REFERENCE_CHARS
-        or _RESULT_REFERENCE.fullmatch(value) is None
+        or not 1 <= len(value) <= MAX_JOB_ID_CHARS
+        or _JOB_ID.fullmatch(value) is None
     ):
-        raise SummaryError("invalid-result-reference", "result reference is invalid")
+        raise SummaryError("invalid-job-id", "job id is invalid")
 
 
 def _validate_public_id(name: str, value: object, maximum: int) -> None:

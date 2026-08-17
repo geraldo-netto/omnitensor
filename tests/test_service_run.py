@@ -855,7 +855,7 @@ def test_runtime_snapshot_publishes_only_result_summary_documents(tmp_path):
         timestamp_ms=10,
         confidence=0.8,
         risk_score=0.6,
-        result_reference="result-runtime-job",
+        job_id="result-runtime-job",
         redactor=SecretRedactor([]),
     )
 
@@ -1920,7 +1920,7 @@ def test_a_readable_result_becomes_something_the_desktop_can_see(tmp_path):
     assert alerts[0]["profileId"] == "visual-library"
     assert alerts[0]["title"] == "class 1"
     assert "best 0.900" in alerts[0]["summary"]
-    assert alerts[0]["resultRef"] == "result-job-1"
+    assert alerts[0]["jobId"] == "job-1"
 
 
 def test_a_label_is_preferred_over_an_index_when_the_model_supplies_one(tmp_path):
@@ -1978,7 +1978,7 @@ def test_a_forecast_becomes_an_advisory_without_invented_semantics(tmp_path, mon
     assert alert["timestamp"] == 1234
     assert alert["confidence"] is None
     assert alert["riskScore"] is None
-    assert alert["resultRef"] == "result-forecast-1"
+    assert alert["jobId"] == "forecast-1"
     snapshot = service.publish_once()
     assert validate_document("runtime-snapshot.schema.json", snapshot) == []
     assert snapshot["alerts"][0]["title"] == "queueDepth forecast"
