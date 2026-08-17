@@ -236,10 +236,10 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl
+  "$OMNI_WHEELS"/omnitensor_event_extraction_extraction-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_ask_selected_files_selected_files-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_selected_text_tools_tools-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_file_organizer-0.2.0-*.whl
 ```
 
 Install optional document/media parsing only when needed:
@@ -539,10 +539,10 @@ systemctl --user stop omnitensor.service
 "$OMNI_SERVICE/pip" install --force-reinstall --no-deps \
   /absolute/path/to/previous/llama_cpp_python-0.3.34-*.whl \
   /absolute/path/to/previous/omnitensor_qwen_vulkan_runtime-*.whl \
-  /absolute/path/to/previous/omnitensor_qwen_event_extraction-*.whl \
-  /absolute/path/to/previous/omnitensor_qwen_ask_selected_files-*.whl \
-  /absolute/path/to/previous/omnitensor_qwen_selected_text_tools-*.whl \
-  /absolute/path/to/previous/omnitensor_qwen_file_organizer-*.whl
+  /absolute/path/to/previous/omnitensor_event_extraction_extraction-*.whl \
+  /absolute/path/to/previous/omnitensor_ask_selected_files_selected_files-*.whl \
+  /absolute/path/to/previous/omnitensor_selected_text_tools_tools-*.whl \
+  /absolute/path/to/previous/omnitensor_file_organizer-*.whl
 systemctl --user start omnitensor.service
 ```
 

@@ -11,10 +11,10 @@ license = "MIT"
 dependencies = ["omnitensor-qwen-vulkan-runtime==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
-event-extraction = "omnitensor_qwen_event:create"
+event-extraction = "omnitensor_event_extraction:create"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnitensor_qwen_event"]
+packages = ["src/omnitensor_event_extraction"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"../../plugin-manifests/event-extraction.json" = "omnitensor_qwen_event/omnitensor-plugin.json"
+"../../plugin-manifests/event-extraction.json" = "omnitensor_event_extraction/omnitensor-plugin.json"

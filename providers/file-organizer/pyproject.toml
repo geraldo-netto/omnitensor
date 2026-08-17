@@ -11,10 +11,10 @@ license = "MIT"
 dependencies = ["omnitensor-qwen-vulkan-runtime==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
-file-organizer = "omnitensor_qwen_file_organizer:create"
+file-organizer = "omnitensor_file_organizer:create"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnitensor_qwen_file_organizer"]
+packages = ["src/omnitensor_file_organizer"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"../../plugin-manifests/file-organizer.json" = "omnitensor_qwen_file_organizer/omnitensor-plugin.json"
+"../../plugin-manifests/file-organizer.json" = "omnitensor_file_organizer/omnitensor-plugin.json"

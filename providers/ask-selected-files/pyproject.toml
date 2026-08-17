@@ -11,10 +11,10 @@ license = "MIT"
 dependencies = ["omnitensor-qwen-vulkan-runtime[documents]==0.2.0"]
 
 [project.entry-points."omnitensor.workloads"]
-ask-selected-files = "omnitensor_qwen_ask:create"
+ask-selected-files = "omnitensor_ask_selected_files:create"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnitensor_qwen_ask"]
+packages = ["src/omnitensor_ask_selected_files"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"../../plugin-manifests/ask-selected-files.json" = "omnitensor_qwen_ask/omnitensor-plugin.json"
+"../../plugin-manifests/ask-selected-files.json" = "omnitensor_ask_selected_files/omnitensor-plugin.json"
