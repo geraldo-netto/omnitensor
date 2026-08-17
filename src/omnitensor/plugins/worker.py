@@ -161,6 +161,11 @@ async def serve_worker_requests(
     await plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
     _write_frame(writer, ready_frame(plugin.plugin_id))
     active: dict[str, tuple[asyncio.Task, CancellationController]] = {}
+    # The loop holds only weak references to tasks, so a grace timer nobody
+    # keeps can be collected while it sleeps — and the hard cancel it exists to
+    # deliver never arrives. That is exactly the plugin the grace period is for:
+    # one that ignores its cooperative token.
+    deadlines: set[asyncio.Task] = set()
     try:
         while True:
             try:
@@ -173,9 +178,12 @@ async def serve_worker_requests(
                 writer,
                 agreement.protocol_version,
                 active,
+                deadlines,
             ):
                 break
     finally:
+        for deadline in tuple(deadlines):
+            deadline.cancel()
         await _cancel_active_requests(active)
         await plugin.stop()
     return agreement
@@ -187,6 +195,7 @@ async def _handle_request_frame(
     writer: BinaryIO,
     protocol_version: int,
     active: dict[str, tuple[asyncio.Task, CancellationController]],
+    deadlines: set[asyncio.Task],
 ) -> bool:
     if frame.type is WorkerMessageType.CANCEL and frame.request_id is None:
         return False
@@ -216,7 +225,12 @@ async def _handle_request_frame(
     if frame.type is WorkerMessageType.CANCEL and frame.request_id is not None:
         current = active.get(frame.request_id)
         if current is not None and current[1].cancel("cancelled by service"):
-            asyncio.create_task(_cancel_after_grace(current[0], WORKER_CANCEL_GRACE_SECONDS))
+            deadline = asyncio.create_task(
+                _cancel_after_grace(current[0], WORKER_CANCEL_GRACE_SECONDS),
+                name=f"omnitensor-plugin-cancel-{frame.request_id}",
+            )
+            deadlines.add(deadline)
+            deadline.add_done_callback(deadlines.discard)
         return True
     _write_error(writer, protocol_version, frame.request_id, "unsupported-message")
     return True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import io
 import json
 import os
@@ -1348,6 +1349,7 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
         plugin = TrackingPlugin()
         writer = io.BytesIO()
         active = {}
+        deadlines = set()
         assert (
             await worker_module._handle_request_frame(
                 plugin,
@@ -1355,23 +1357,25 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
                 writer,
                 1,
                 active,
+                deadlines,
             )
             is False
         )
         wrong = execute_frame(PluginRequest("wrong-job", "other-plugin", "manual", {}, 1, None))
-        assert await worker_module._handle_request_frame(plugin, wrong, writer, 1, active)
+        assert await worker_module._handle_request_frame(plugin, wrong, writer, 1, active, deadlines)
         token = CancellationController()
         active["duplicate"] = (asyncio.current_task(), token)
         duplicate = execute_frame(
             PluginRequest("duplicate", "external-example", "manual", {}, 1, None)
         )
-        assert await worker_module._handle_request_frame(plugin, duplicate, writer, 1, active)
+        assert await worker_module._handle_request_frame(plugin, duplicate, writer, 1, active, deadlines)
         assert await worker_module._handle_request_frame(
             plugin,
             IPCFrame(1, WorkerMessageType.CANCEL, "duplicate", {"reason": "cancel"}),
             writer,
             1,
             active,
+            deadlines,
         )
         assert token.cancelled is True
         assert token.reason == "cancelled by service"
@@ -1381,6 +1385,7 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
             writer,
             1,
             active,
+            deadlines,
         )
         return writer
 
@@ -1395,6 +1400,47 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
         "duplicate",
         "health",
     ]
+
+
+def test_worker_cancel_grace_timer_survives_garbage_collection(monkeypatch):
+    """The loop keeps only weak references, so an untracked timer can vanish.
+
+    It sleeps for the whole grace period, which is exactly the window in which
+    nothing else refers to it. Collected there, the hard cancel never arrives
+    and a plugin that ignores its token runs for as long as it likes.
+    """
+    monkeypatch.setattr(worker_module, "WORKER_CANCEL_GRACE_SECONDS", 0.05)
+    request = PluginRequest("job-1", "external-example", "manual", {}, 1, None)
+
+    class TokenIgnoringPlugin:
+        plugin_id = "external-example"
+
+        async def execute(self, _request, cancellation, _progress):
+            await asyncio.Event().wait()
+
+    async def scenario():
+        plugin = TokenIgnoringPlugin()
+        writer = io.BytesIO()
+        active, deadlines = {}, set()
+        await worker_module._handle_request_frame(
+            plugin, execute_frame(request), writer, 1, active, deadlines
+        )
+        task, _token = active[request.job_id]
+        await worker_module._handle_request_frame(
+            plugin,
+            IPCFrame(1, WorkerMessageType.CANCEL, request.job_id, {"reason": "user"}),
+            writer,
+            1,
+            active,
+            deadlines,
+        )
+        assert len(deadlines) == 1, "the timer is held, not left to the collector"
+        gc.collect()
+        await asyncio.sleep(0.2)
+        assert task.cancelled() or task.done()
+        assert deadlines == set(), "and it releases itself once it has fired"
+
+    asyncio.run(scenario())
 
 
 def test_worker_cancel_frame_cancels_a_request_that_ignores_its_token(monkeypatch):
@@ -1412,7 +1458,10 @@ def test_worker_cancel_frame_cancels_a_request_that_ignores_its_token(monkeypatc
         plugin = TokenIgnoringPlugin()
         writer = io.BytesIO()
         active = {}
-        await worker_module._handle_request_frame(plugin, execute_frame(request), writer, 1, active)
+        deadlines = set()
+        await worker_module._handle_request_frame(
+            plugin, execute_frame(request), writer, 1, active, deadlines
+        )
         task, _token = active[request.job_id]
         await worker_module._handle_request_frame(
             plugin,
@@ -1420,6 +1469,7 @@ def test_worker_cancel_frame_cancels_a_request_that_ignores_its_token(monkeypatc
             writer,
             1,
             active,
+            deadlines,
         )
         await asyncio.sleep(0.02)
         assert task.done() is True

@@ -371,25 +371,27 @@ def _acceptance_metrics(
     actual = {item.case_id: item for item in observations}
     if len(actual) != len(observations) or set(actual) != set(expected):
         raise DocumentAcceptanceError("evidence-invalid", "every corpus case must appear once")
-    totals = [0, 0, 0, 0, 0]
+    # Five running totals, named. They used to share one list, so the reader had
+    # to hold "slot 3 is the expected-term count" in their head to see that
+    # `totals[2] / totals[3]` was grounded-term recall — and a transposed index
+    # would have divided retrieval by terms and still returned a plausible ratio.
+    retrieved = expected_files = grounded_terms = expected_terms = cited = 0
     latencies: list[int] = []
     peak_memory = 0
     for case_id, case in expected.items():
         score = _score_observation(case, actual[case_id])
-        retrieval, grounded, citations = score.matched, score.matched_terms, score.extra
-        latency, memory = score.latency_ms, score.peak_memory_bytes
-        totals[0] += retrieval
-        totals[1] += len(case.expected_file_ids)
-        totals[2] += grounded
-        totals[3] += len(case.expected_terms)
-        totals[4] += citations
-        latencies.append(latency)
-        peak_memory = max(peak_memory, memory)
+        retrieved += score.matched
+        expected_files += len(case.expected_file_ids)
+        grounded_terms += score.matched_terms
+        expected_terms += len(case.expected_terms)
+        cited += score.extra
+        latencies.append(score.latency_ms)
+        peak_memory = max(peak_memory, score.peak_memory_bytes)
     citation_total = sum(len(case.expected_file_ids) for case in corpus.cases)
     return (
-        totals[0] / totals[1],
-        totals[2] / totals[3],
-        totals[4] / citation_total,
+        retrieved / expected_files,
+        grounded_terms / expected_terms,
+        cited / citation_total,
         sorted(latencies)[math.ceil(len(latencies) * 0.95) - 1],
         peak_memory,
     )
