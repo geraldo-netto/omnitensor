@@ -99,7 +99,6 @@
         "omnitensor.plugins.event_confirmation.x_confirm_event_candidates",
         "omnitensor.plugins.event_confirmation.x_render_confirmed_ics",
         "omnitensor.plugins.event_confirmation.x_write_confirmed_events",
-        "omnitensor.plugins.event_passes.x__key",
         "omnitensor.plugins.event_passes.x__with_unique_id",
         "omnitensor.plugins.event_passes.x_merge",
         "omnitensor.plugins.event_passes.x_plan_passes",

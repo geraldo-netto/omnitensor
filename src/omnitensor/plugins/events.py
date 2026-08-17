@@ -263,7 +263,7 @@ def parse_grounded_event_result(document: object) -> GroundedEventResult:
         if event.candidate_id in ids:
             raise EventResultError("result-invalid", "candidate ids must be unique")
         ids.add(event.candidate_id)
-        key = _duplicate_key(event)
+        key = duplicate_key(event)
         if key in keys:
             duplicates += 1
             continue
@@ -552,13 +552,18 @@ def _validate_source_identity(source_ref: str, source_sha256: str) -> None:
         raise EventResultError("source-invalid", "source digest must be lower-case SHA-256")
 
 
-def _duplicate_key(event: EventCandidate) -> tuple:
+def duplicate_key(event: EventCandidate) -> tuple:
     """What makes two extractions the same event.
 
     Label, date, time and place, with absent compared as absent. A recurring
     meeting named on three pages is one event; "3 September" and "3 September
     at 14:00" are two, and merging them would silently choose one time over
     none.
+
+    Public because the pass merger needs the same answer. It kept its own copy,
+    identical statement for statement, so the parser and the merger could have
+    drifted into disagreeing about what a duplicate is — and an event deduped
+    on one path would then survive on the other.
     """
     label = tuple(event.label.text.casefold().split())
     place = ()
@@ -590,6 +595,7 @@ __all__ = [
     "GroundedEventResult",
     "SourceEvidence",
     "SourceFragment",
+    "duplicate_key",
     "parse_grounded_event_result",
     "source_fragments",
 ]

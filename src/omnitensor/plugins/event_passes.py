@@ -16,7 +16,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .events import EventCandidate, EventResultError, GroundedEventResult
+from .events import (
+    EventCandidate,
+    EventResultError,
+    GroundedEventResult,
+    duplicate_key,
+)
 from .spans import estimate_tokens
 
 # What is left for the sources after the prompt and the answer. An event costs
@@ -72,7 +77,7 @@ def merge(results: Sequence[GroundedEventResult], request_id: str) -> GroundedEv
     outcomes = {result.outcome for result in results}
     for result in results:
         for event in result.events:
-            key = _key(event)
+            key = duplicate_key(event)
             if key in seen:
                 duplicates += 1
                 continue
@@ -86,16 +91,6 @@ def merge(results: Sequence[GroundedEventResult], request_id: str) -> GroundedEv
     return GroundedEventResult(
         request_id, outcome, "events-extracted", detail, tuple(events), duplicates
     )
-
-
-def _key(event: EventCandidate) -> tuple:
-    label = tuple(event.label.text.casefold().split())
-    place = ()
-    if event.where is not None:
-        stated = event.where.address.full if event.where.address else event.where.venue
-        stated = stated or event.where.url
-        place = () if stated is None else tuple(stated.casefold().split())
-    return label, event.when.date, event.when.time, place
 
 
 def _with_unique_id(event: EventCandidate, taken: set[str]) -> EventCandidate:
