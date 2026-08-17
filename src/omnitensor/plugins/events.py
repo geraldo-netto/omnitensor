@@ -13,7 +13,7 @@ import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -21,7 +21,7 @@ from omnitensor.registry import validate_document
 
 from .extraction import ExtractionOutcome, ExtractionResult
 
-DUPLICATE_POLICY = "keep-first-title-start-location"
+DUPLICATE_POLICY = "keep-first-label-date-time-place"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 _PRIVATE_REFERENCE = re.compile(r"^private:[A-Za-z0-9._:-]{1,200}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -44,18 +44,166 @@ class SourceEvidence:
     span_start: int
     span_end: int
     text_sha256: str
+    # `text` or `ocr`. An image never reaches the model as pixels — it goes
+    # through PyMuPDF and, when a page has no text layer, Tesseract — so a span
+    # from a banner addresses OCR output and is a weaker citation than a span
+    # from an email body. Saying which is the difference between a citation a
+    # person can trust and one they should read twice.
+    read_as: str = "text"
+
+
+@dataclass(frozen=True, slots=True)
+class Stated:
+    """A value and where it came from: read, summarised, or worked out."""
+
+    text: str
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class EventTimezone:
+    name: str
+    utc_offset: str | None
+    source: str
+
+
+@dataclass(frozen=True, slots=True)
+class EventWhen:
+    """When an event happens, including the parts the source never said.
+
+    Version 1 demanded a full datetime and a named zone, so *"Jazz night,
+    Fridays, Casa da Música"* had nowhere to go and came back as a refusal.
+    Here the date and the time are separate and either may be absent, and
+    ``needs`` says what a person still has to supply.
+    """
+
+    date: str | None = None
+    time: str | None = None
+    end_date: str | None = None
+    end_time: str | None = None
+    all_day: bool = False
+    timezone: EventTimezone | None = None
+    is_past: bool = False
+
+    @property
+    def needs(self) -> tuple[str, ...]:
+        """What blocks placing this in a calendar — never what merely lacks detail.
+
+        A missing location stops nothing, so it is not listed. A missing zone
+        does not stop a calendar either, strictly: it is exported as a floating
+        time, which every client reads as local. It is listed because events
+        arriving from three countries make "local" the wrong guess often enough
+        that a person should be asked.
+        """
+        missing = []
+        if self.date is None:
+            missing.append("date")
+        if self.time is None and not self.all_day:
+            missing.append("time")
+        if self.timezone is None and self.time is not None:
+            missing.append("timezone")
+        return tuple(missing)
+
+    @property
+    def placeable(self) -> bool:
+        """Whether a calendar can put this somewhere without asking."""
+        return self.date is not None
+
+
+@dataclass(frozen=True, slots=True)
+class Recurrence:
+    """An RFC 5545 rule, and the words it was read from.
+
+    ``text`` exists so a person can check the rule without reconstructing
+    RRULE in their head, and the source is always ``stated``: a recurrence
+    inferred from two dates a week apart is how a calendar acquires an event
+    every Tuesday for a year.
+    """
+
+    freq: str
+    text: str
+    interval: int = 1
+    by_day: tuple[str, ...] = ()
+    by_month_day: tuple[int, ...] = ()
+    by_month: tuple[int, ...] = ()
+    by_set_pos: tuple[int, ...] = ()
+    count: int | None = None
+    until: str | None = None
+    exceptions: tuple[str, ...] = ()
+    source: str = "stated"
+
+
+@dataclass(frozen=True, slots=True)
+class PostalAddress:
+    full: str
+    street: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EventPlace:
+    kind: str
+    source: str
+    venue: str | None = None
+    address: PostalAddress | None = None
+    url: str | None = None
+    joining: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Person:
+    name: str
+    source: str
+    email: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EventPeople:
+    organiser: Person | None = None
+    participants: tuple[Person, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Cost:
+    amount: str
+    currency: str
+
+
+@dataclass(frozen=True, slots=True)
+class Registration:
+    source: str
+    required: bool = False
+    deadline: str | None = None
+    url: str | None = None
+    cost: Cost | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Contact:
+    source: str
+    email: str | None = None
+    phone: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EventCandidate:
     candidate_id: str
-    title: str
-    start: datetime
-    end: datetime | None
-    timezone: str
-    location: str | None
+    label: Stated
+    when: EventWhen
     confirmation: str
     evidence: tuple[SourceEvidence, ...]
+    what: Stated | None = None
+    repeats: Recurrence | None = None
+    where: EventPlace | None = None
+    people: EventPeople | None = None
+    status: str = "scheduled"
+    registration: Registration | None = None
+    contact: Contact | None = None
+    reference: str | None = None
+    language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +225,16 @@ class GroundedEventResult:
         if states == {"confirmed"}:
             return "confirmed"
         return "mixed"
+
+    @property
+    def unplaceable(self) -> tuple[EventCandidate, ...]:
+        """Events a calendar cannot place until somebody says more.
+
+        Kept as a property rather than a separate list so nothing has to
+        remember to recompute it: an event is unplaceable exactly while its
+        `when` is missing a date.
+        """
+        return tuple(event for event in self.events if not event.when.placeable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,21 +371,187 @@ def source_fragments(
 
 
 def _parse_event(document: Mapping[str, object]) -> EventCandidate:
-    start = _event_datetime(document["start"], str(document["timezone"]), "start")
-    raw_end = document["end"]
-    end = None if raw_end is None else _event_datetime(raw_end, str(document["timezone"]), "end")
-    if end is not None and end <= start:
-        raise EventResultError("date-invalid", "event end must be after start")
+    when = _parse_when(document["when"])
     evidence = tuple(_parse_evidence(item) for item in document["evidence"])
     return EventCandidate(
-        str(document["candidateId"]),
-        str(document["title"]),
-        start,
-        end,
-        str(document["timezone"]),
-        None if document["location"] is None else str(document["location"]),
-        "pending",
-        evidence,
+        candidate_id=str(document["candidateId"]),
+        label=_parse_stated(document["label"], "label"),
+        when=when,
+        confirmation="pending",
+        evidence=evidence,
+        what=_optional(document.get("what"), lambda value: _parse_stated(value, "what")),
+        repeats=_optional(document.get("repeats"), _parse_recurrence),
+        where=_optional(document.get("where"), _parse_place),
+        people=_optional(document.get("people"), _parse_people),
+        status=str(document.get("status", "scheduled")),
+        registration=_optional(document.get("registration"), _parse_registration),
+        contact=_optional(document.get("contact"), _parse_contact),
+        reference=_optional(document.get("reference"), str),
+        language=_optional(document.get("language"), str),
+    )
+
+
+def _optional(value, parse):
+    return None if value is None else parse(value)
+
+
+def _parse_stated(value: object, label: str) -> Stated:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", f"event {label} is not a stated value")
+    return Stated(str(value["text"]), str(value["source"]))
+
+
+def _parse_when(value: object) -> EventWhen:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event when is not an object")
+    end = value.get("end") or {}
+    if not isinstance(end, Mapping):
+        raise EventResultError("result-invalid", "event end is not an object")
+    when = EventWhen(
+        date=_optional(value.get("date"), str),
+        time=_optional(value.get("time"), str),
+        end_date=_optional(end.get("date"), str),
+        end_time=_optional(end.get("time"), str),
+        all_day=bool(value.get("allDay", False)),
+        timezone=_optional(value.get("timezone"), _parse_timezone),
+        is_past=bool(value.get("isPast", False)),
+    )
+    _check_when(when, value)
+    return when
+
+
+def _check_when(when: EventWhen, value: Mapping[str, object]) -> None:
+    # `needs` is derived here rather than trusted: a model that under-reports
+    # what is missing would produce an event a calendar silently misplaces.
+    stated = tuple(str(item) for item in value.get("needs", ()))
+    if stated != when.needs:
+        raise EventResultError(
+            "date-invalid",
+            f"event needs {list(when.needs)} rather than {list(stated)}",
+        )
+    if when.all_day and when.time is not None:
+        raise EventResultError("date-invalid", "an all-day event states no time")
+    if when.end_date is not None and when.date is not None and when.end_date < when.date:
+        raise EventResultError("date-invalid", "event end date precedes its start")
+    if (
+        when.end_time is not None
+        and when.time is not None
+        and when.end_date in (None, when.date)
+        and when.end_time <= when.time
+    ):
+        raise EventResultError("date-invalid", "event end time is not after its start")
+    if when.timezone is not None and when.timezone.name != "floating":
+        try:
+            ZoneInfo(when.timezone.name)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise EventResultError(
+                "timezone-invalid", f"unknown timezone: {when.timezone.name}"
+            ) from error
+    if when.timezone is not None and when.timezone.utc_offset is not None and when.date is None:
+        # The offset depends on the date — Europe/Lisbon is +00:00 in January
+        # and +01:00 in July — so one without a date is a fact with a hole in it.
+        raise EventResultError("date-invalid", "a UTC offset without a date is not determinate")
+
+
+def _parse_timezone(value: object) -> EventTimezone:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event timezone is not an object")
+    return EventTimezone(
+        str(value["name"]),
+        _optional(value.get("utcOffset"), str),
+        str(value["source"]),
+    )
+
+
+def _parse_recurrence(value: object) -> Recurrence:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event recurrence is not an object")
+    if value.get("count") is not None and value.get("until") is not None:
+        raise EventResultError("date-invalid", "a recurrence states COUNT or UNTIL, never both")
+    return Recurrence(
+        freq=str(value["freq"]),
+        text=str(value["text"]),
+        interval=int(value.get("interval", 1)),
+        by_day=tuple(str(item) for item in value.get("byDay", ())),
+        by_month_day=tuple(int(item) for item in value.get("byMonthDay", ())),
+        by_month=tuple(int(item) for item in value.get("byMonth", ())),
+        by_set_pos=tuple(int(item) for item in value.get("bySetPos", ())),
+        count=_optional(value.get("count"), int),
+        until=_optional(value.get("until"), str),
+        exceptions=tuple(str(item) for item in value.get("exceptions", ())),
+        source=str(value.get("source", "stated")),
+    )
+
+
+def _parse_place(value: object) -> EventPlace:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event place is not an object")
+    kind = str(value["kind"])
+    place = EventPlace(
+        kind=kind,
+        source=str(value["source"]),
+        venue=_optional(value.get("venue"), str),
+        address=_optional(value.get("address"), _parse_address),
+        url=_optional(value.get("url"), str),
+        joining=_optional(value.get("joining"), str),
+    )
+    if kind in {"online", "hybrid"} and place.url is None:
+        raise EventResultError("place-invalid", "an online event states where to join")
+    if kind == "physical" and place.address is None and place.venue is None:
+        raise EventResultError("place-invalid", "a physical event states where it is")
+    if kind == "unknown" and (place.url or place.address or place.venue):
+        raise EventResultError("place-invalid", "an unknown place states nothing")
+    return place
+
+
+def _parse_address(value: object) -> PostalAddress:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event address is not an object")
+    return PostalAddress(
+        full=str(value["full"]),
+        street=_optional(value.get("street"), str),
+        postal_code=_optional(value.get("postalCode"), str),
+        city=_optional(value.get("city"), str),
+        region=_optional(value.get("region"), str),
+        country=_optional(value.get("country"), str),
+    )
+
+
+def _parse_people(value: object) -> EventPeople:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event people is not an object")
+    return EventPeople(
+        organiser=_optional(value.get("organiser"), _parse_person),
+        participants=tuple(_parse_person(item) for item in value.get("participants", ())),
+    )
+
+
+def _parse_person(value: object) -> Person:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event person is not an object")
+    return Person(str(value["name"]), str(value["source"]), _optional(value.get("email"), str))
+
+
+def _parse_registration(value: object) -> Registration:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event registration is not an object")
+    cost = value.get("cost")
+    return Registration(
+        source=str(value["source"]),
+        required=bool(value.get("required", False)),
+        deadline=_optional(value.get("deadline"), str),
+        url=_optional(value.get("url"), str),
+        cost=None if cost is None else Cost(str(cost["amount"]), str(cost["currency"])),
+    )
+
+
+def _parse_contact(value: object) -> Contact:
+    if not isinstance(value, Mapping):
+        raise EventResultError("result-invalid", "event contact is not an object")
+    return Contact(
+        source=str(value["source"]),
+        email=_optional(value.get("email"), str),
+        phone=_optional(value.get("phone"), str),
     )
 
 
@@ -300,10 +624,21 @@ def _validate_source_identity(source_ref: str, source_sha256: str) -> None:
         raise EventResultError("source-invalid", "source digest must be lower-case SHA-256")
 
 
-def _duplicate_key(event: EventCandidate) -> tuple[tuple[str, ...], datetime, tuple[str, ...]]:
-    title = tuple(event.title.casefold().split())
-    location = () if event.location is None else tuple(event.location.casefold().split())
-    return title, event.start, location
+def _duplicate_key(event: EventCandidate) -> tuple:
+    """What makes two extractions the same event.
+
+    Label, date, time and place, with absent compared as absent. A recurring
+    meeting named on three pages is one event; "3 September" and "3 September
+    at 14:00" are two, and merging them would silently choose one time over
+    none.
+    """
+    label = tuple(event.label.text.casefold().split())
+    place = ()
+    if event.where is not None:
+        stated = event.where.address.full if event.where.address else event.where.venue
+        stated = stated or event.where.url
+        place = () if stated is None else tuple(stated.casefold().split())
+    return label, event.when.date, event.when.time, place
 
 
 def _decision_ids(values: Sequence[str], label: str) -> set[str]:
@@ -325,26 +660,116 @@ def _confirmed_events(result: GroundedEventResult) -> tuple[EventCandidate, ...]
     confirmed = tuple(event for event in result.events if event.confirmation == "confirmed")
     if not confirmed:
         raise EventResultError("confirmation-required", "no candidate was confirmed")
-    if any(event.timezone == "floating" for event in confirmed):
-        raise EventResultError("timezone-required", "confirmed events need a named timezone")
+    # A named timezone used to be required here, which is the same rigidity
+    # that made the workload refuse every ordinary invitation, one layer down:
+    # floating time is what RFC 5545 provides for "the source did not say", and
+    # the calendar the person imports into resolves it.
     return confirmed
 
 
 def _ics_event(event: EventCandidate) -> tuple[str, ...]:
-    assert event.timezone != "floating"
-    start = event.start.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-    end = event.end.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ") if event.end else None
+    """One calendar component, in whichever form the event can honestly take.
+
+    RFC 5545 already has a container for every case, so nothing has to be
+    invented and nothing has to be withheld:
+
+    - a date and a time with a zone becomes a zoned ``DTSTART``;
+    - a date and a time with no zone becomes a *floating* ``DTSTART``, which
+      every client reads as local — exactly "the source did not say, so use
+      mine", and the reason an event from a Brazilian invitation does not
+      arrive three hours out;
+    - a date with no time becomes an all-day ``DTSTART;VALUE=DATE``;
+    - no date at all cannot be a ``VEVENT``, because ``DTSTART`` is required
+      without a ``METHOD``, so it becomes a ``VTODO`` with no ``DUE`` — a task
+      that says decide when, kept off the calendar grid until somebody does.
+    """
     identity = hashlib.sha256(
-        f"{event.candidate_id}\0{event.start.isoformat()}".encode()
+        f"{event.candidate_id}\0{event.when.date or ''}\0{event.when.time or ''}".encode()
     ).hexdigest()
-    lines = ["BEGIN:VEVENT", f"UID:{identity}@omnitensor", f"DTSTART:{start}"]
-    if end is not None:
-        lines.append(f"DTEND:{end}")
-    lines.append(f"SUMMARY:{_ics_text(event.title)}")
-    if event.location is not None:
-        lines.append(f"LOCATION:{_ics_text(event.location)}")
+    if not event.when.placeable:
+        lines = [
+            "BEGIN:VTODO",
+            f"UID:{identity}@omnitensor",
+            f"SUMMARY:{_ics_text(event.label.text)}",
+        ]
+        lines.extend(_ics_common(event))
+        lines.append("END:VTODO")
+        return tuple(lines)
+
+    lines = ["BEGIN:VEVENT", f"UID:{identity}@omnitensor"]
+    lines.append(_ics_moment("DTSTART", event.when.date, event.when.time, event.when.timezone))
+    end_date = event.when.end_date or (event.when.date if event.when.end_time else None)
+    if end_date is not None:
+        lines.append(_ics_moment("DTEND", end_date, event.when.end_time, event.when.timezone))
+    lines.append(f"SUMMARY:{_ics_text(event.label.text)}")
+    if event.repeats is not None:
+        lines.append(f"RRULE:{_ics_rrule(event.repeats)}")
+        for excluded in event.repeats.exceptions:
+            lines.append(f"EXDATE;VALUE=DATE:{excluded.replace('-', '')}")
+    lines.extend(_ics_common(event))
     lines.append("END:VEVENT")
     return tuple(lines)
+
+
+def _ics_common(event: EventCandidate) -> tuple[str, ...]:
+    """The parts a task and an event describe the same way."""
+    lines = []
+    if event.what is not None:
+        lines.append(f"DESCRIPTION:{_ics_text(event.what.text)}")
+    if event.where is not None:
+        place = event.where
+        stated = place.address.full if place.address else place.venue
+        if stated is not None:
+            lines.append(f"LOCATION:{_ics_text(stated)}")
+        if place.url is not None:
+            lines.append(f"URL:{_ics_text(place.url)}")
+    if event.people is not None and event.people.organiser is not None:
+        organiser = event.people.organiser
+        address = f";MAILTO:{organiser.email}" if organiser.email else ""
+        lines.append(f"ORGANIZER;CN={_ics_text(organiser.name)}{address}")
+    for participant in () if event.people is None else event.people.participants:
+        address = f":MAILTO:{participant.email}" if participant.email else ":"
+        lines.append(f"ATTENDEE;CN={_ics_text(participant.name)}{address}")
+    if event.status != "scheduled":
+        # RFC 5545 has three: a postponed event is tentative until it is
+        # rescheduled, which is what the source actually told us.
+        mapped = {"cancelled": "CANCELLED", "tentative": "TENTATIVE", "postponed": "TENTATIVE"}
+        lines.append(f"STATUS:{mapped[event.status]}")
+    return tuple(lines)
+
+
+def _ics_moment(name: str, date: str, time: str | None, timezone: EventTimezone | None) -> str:
+    stamp = date.replace("-", "")
+    if time is None:
+        return f"{name};VALUE=DATE:{stamp}"
+    clock = time.replace(":", "")
+    if len(clock) == 4:
+        clock = f"{clock}00"
+    if timezone is None or timezone.name == "floating":
+        # Floating: no zone, no Z. Local to whoever opens it.
+        return f"{name}:{stamp}T{clock}"
+    if timezone.name == "UTC":
+        return f"{name}:{stamp}T{clock}Z"
+    return f"{name};TZID={timezone.name}:{stamp}T{clock}"
+
+
+def _ics_rrule(repeats: Recurrence) -> str:
+    parts = [f"FREQ={repeats.freq}"]
+    if repeats.interval != 1:
+        parts.append(f"INTERVAL={repeats.interval}")
+    for name, values in (
+        ("BYDAY", repeats.by_day),
+        ("BYMONTHDAY", repeats.by_month_day),
+        ("BYMONTH", repeats.by_month),
+        ("BYSETPOS", repeats.by_set_pos),
+    ):
+        if values:
+            parts.append(f"{name}={','.join(str(value) for value in values)}")
+    if repeats.count is not None:
+        parts.append(f"COUNT={repeats.count}")
+    if repeats.until is not None:
+        parts.append(f"UNTIL={repeats.until.replace('-', '')}")
+    return ";".join(parts)
 
 
 def _ics_text(value: str) -> str:

@@ -116,17 +116,31 @@ def artifact(tmp_path, name, content):
 
 def event_document(case, *, events=None):
     values = []
-    for index, (title, start, timezone, location) in enumerate(
+    for index, (label, date, clock, place) in enumerate(
         case.expected if events is None else events
     ):
+        when = {"needs": []}
+        if date:
+            when["date"] = date
+        if clock:
+            when["time"] = clock
+            when["timezone"] = {"name": "Europe/Rome", "utcOffset": "+02:00", "source": "stated"}
+        needs = []
+        if not date:
+            needs.append("date")
+        if not clock:
+            needs.append("time")
+        when["needs"] = needs
         values.append(
             {
                 "candidateId": f"candidate-{index}",
-                "title": title,
-                "start": start,
-                "end": None,
-                "timezone": timezone,
-                "location": location or None,
+                "label": {"text": label, "source": "stated"},
+                "when": when,
+                **(
+                    {"where": {"kind": "physical", "venue": place, "source": "stated"}}
+                    if place
+                    else {}
+                ),
                 "confirmation": "pending",
                 "evidence": [
                     {
@@ -135,17 +149,18 @@ def event_document(case, *, events=None):
                         "page": 1,
                         "span": {"start": 0, "end": 1},
                         "textSha256": "b" * 64,
+                        "readAs": "text",
                     }
                 ],
             }
         )
     return {
-        "version": 1,
+        "version": 2,
         "requestId": "request-1",
         "outcome": "succeeded",
         "code": "events-extracted",
         "detail": "",
-        "duplicatePolicy": "keep-first-title-start-location",
+        "duplicatePolicy": "keep-first-label-date-time-place",
         "confirmationState": "pending",
         "events": values,
     }
@@ -498,8 +513,8 @@ def test_corpus_rejects_drift_and_malformed_cases(tmp_path, mutate):
             "expected event fields are invalid",
         ),
         (
-            lambda value: value["cases"][0]["expected"][0].update(title=None),
-            "title must be bounded text",
+            lambda value: value["cases"][0]["expected"][0].update(label=None),
+            "expected event needs a label",
         ),
     ],
 )
@@ -1007,7 +1022,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
     missed_result = event_document(corpus.cases[0], events=())
     missed_result.update(
         outcome="refused",
-        code="no-event-supported",
+        code="no-event-found",
         confirmationState="refused",
     )
     observations[0] = replace(observations[0], result=missed_result)
@@ -1025,7 +1040,7 @@ def test_qualification_rejects_malformed_injected_or_low_quality_output():
 
     observations = list(evidence(corpus).observations)
     expected = corpus.cases[0].expected
-    extra = ("Ungrounded", "2026-08-30T10:00:00+02:00", "Europe/Rome", "Elsewhere")
+    extra = ("Ungrounded", "2026-08-30", "10:00", "Elsewhere")
     observations[0] = replace(
         observations[0], result=event_document(corpus.cases[0], events=expected + (extra,))
     )

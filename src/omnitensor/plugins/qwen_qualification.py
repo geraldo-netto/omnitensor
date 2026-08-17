@@ -211,11 +211,21 @@ def _validate_evidence_identity(
 
 
 def _event_key(event) -> tuple[str, str, str, str]:
+    """What the corpus compares: the label, when it starts, and where.
+
+    Date and time are separate now and either may be absent, so an expectation
+    states what the source states — a corpus case for a banner with no year
+    compares an empty date rather than being impossible to write.
+    """
+    place = ""
+    if event.where is not None:
+        stated = event.where.address.full if event.where.address else event.where.venue
+        place = stated or event.where.url or ""
     return (
-        event.title,
-        event.start.isoformat(),
-        event.timezone,
-        event.location or "",
+        event.label.text,
+        event.when.date or "",
+        event.when.time or "",
+        place,
     )
 
 
@@ -248,11 +258,19 @@ def _case(document: object) -> FrozenEventCase:
 
 def _expected_event(document: object) -> tuple[str, str, str, str]:
     value = qwen_mapping(document, "expected event", "corpus-invalid")
-    if set(value) != {"title", "start", "timezone", "location"}:
+    if set(value) != {"label", "date", "time", "place"}:
         raise QwenProviderError("corpus-invalid", "expected event fields are invalid")
+    # A corpus case may state an empty date, time or place: that is what a
+    # banner without a year actually says, and version 2 records it rather than
+    # refusing the event.
+    if not isinstance(value["label"], str) or not value["label"]:
+        raise QwenProviderError("corpus-invalid", "expected event needs a label")
+    for name in ("date", "time", "place"):
+        if value[name] is not None and not isinstance(value[name], str):
+            raise QwenProviderError("corpus-invalid", f"expected event {name} is invalid")
     return tuple(
-        qwen_text(value[name], name, "corpus-invalid", 200)
-        for name in ("title", "start", "timezone", "location")
+        qwen_text(value[name], name, "corpus-invalid", 200) if value[name] else ""
+        for name in ("label", "date", "time", "place")
     )
 
 

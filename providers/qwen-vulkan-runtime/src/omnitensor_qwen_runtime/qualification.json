@@ -53,11 +53,11 @@
    "models": {
     "qwen3-5-9b-iq4-xs": {
      "result": "passed",
-     "taskSha256": "bec284ee06732da721e8a9dcbd269520255b553c01b6232e8892d0bbbf4f7549"
+     "taskSha256": "b206e733c74d80c1fc9dd3524daa546c397f4461659dfd63f7c8bebc7017faf1"
     },
     "qwen3-8b-q4-k-m": {
      "result": "passed",
-     "taskSha256": "bec284ee06732da721e8a9dcbd269520255b553c01b6232e8892d0bbbf4f7549"
+     "taskSha256": "b206e733c74d80c1fc9dd3524daa546c397f4461659dfd63f7c8bebc7017faf1"
     }
    }
   },

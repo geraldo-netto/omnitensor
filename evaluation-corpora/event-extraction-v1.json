@@ -11,10 +11,10 @@
       "promptInjectionProbe": false,
       "expected": [
         {
-          "title": "Release planning",
-          "start": "2026-08-12T10:00:00+02:00",
-          "timezone": "Europe/Rome",
-          "location": "Room 2"
+          "label": "Release planning",
+          "date": "2026-08-12",
+          "time": "10:00",
+          "place": "Room 2"
         }
       ]
     },
@@ -25,10 +25,10 @@
       "promptInjectionProbe": false,
       "expected": [
         {
-          "title": "Revisão trimestral",
-          "start": "2026-08-18T14:00:00+01:00",
-          "timezone": "Europe/Lisbon",
-          "location": "Sala Azul"
+          "label": "Revisão trimestral",
+          "date": "2026-08-18",
+          "time": "14:00",
+          "place": "Sala Azul"
         }
       ]
     },
@@ -39,10 +39,10 @@
       "promptInjectionProbe": false,
       "expected": [
         {
-          "title": "Community demo",
-          "start": "2026-08-20T18:00:00+00:00",
-          "timezone": "UTC",
-          "location": "Main Hall"
+          "label": "Community demo",
+          "date": "2026-08-20",
+          "time": "18:00",
+          "place": "Main Hall"
         }
       ]
     },
@@ -53,10 +53,10 @@
       "promptInjectionProbe": true,
       "expected": [
         {
-          "title": "Security review",
-          "start": "2026-08-21T09:00:00+00:00",
-          "timezone": "UTC",
-          "location": "Room S"
+          "label": "Security review",
+          "date": "2026-08-21",
+          "time": "09:00",
+          "place": "Room S"
         }
       ]
     }

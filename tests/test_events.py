@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime
 
 import pytest
 from hypothesis import given
@@ -24,41 +23,74 @@ from omnitensor.plugins.extraction import (
 from omnitensor.registry import validate_document
 
 
-def evidence(*, page=1, start=0, end=12, source_ref="private:document-1") -> dict:
+def evidence(*, page=1, start=0, end=12, source_ref="private:document-1", read_as="text") -> dict:
     return {
         "sourceRef": source_ref,
         "sourceSha256": "a" * 64,
         "page": page,
         "span": {"start": start, "end": end},
         "textSha256": "b" * 64,
+        "readAs": read_as,
     }
+
+
+def when(
+    *,
+    date="2026-08-12",
+    time="10:00",
+    end_time="11:00",
+    timezone="Europe/Rome",
+    all_day=False,
+) -> dict:
+    """A `when` whose `needs` is derived exactly as the parser derives it."""
+    value: dict = {"allDay": all_day}
+    if date is not None:
+        value["date"] = date
+    if time is not None:
+        value["time"] = time
+    if end_time is not None:
+        value["end"] = {"time": end_time}
+    if timezone is not None:
+        value["timezone"] = {
+            "name": timezone,
+            "utcOffset": "+02:00" if date is not None else None,
+            "source": "stated",
+        }
+    missing = []
+    if date is None:
+        missing.append("date")
+    if time is None and not all_day:
+        missing.append("time")
+    if timezone is None and time is not None:
+        missing.append("timezone")
+    value["needs"] = missing
+    return value
 
 
 def candidate(
     candidate_id="event-1",
     *,
     title="Release planning",
-    start="2026-08-12T10:00:00+02:00",
-    end="2026-08-12T11:00:00+02:00",
-    timezone="Europe/Rome",
     location="Room 2",
     confirmation="pending",
+    **over,
 ) -> dict:
-    return {
+    event = {
         "candidateId": candidate_id,
-        "title": title,
-        "start": start,
-        "end": end,
-        "timezone": timezone,
-        "location": location,
+        "label": {"text": title, "source": "stated"},
+        "when": over.pop("when", when()),
         "confirmation": confirmation,
         "evidence": [evidence()],
     }
+    if location is not None:
+        event["where"] = {"kind": "physical", "venue": location, "source": "stated"}
+    event.update(over)
+    return event
 
 
 def result_document(*events, outcome="succeeded", state="pending") -> dict:
     return {
-        "version": 1,
+        "version": 2,
         "requestId": "request-1",
         "outcome": outcome,
         "code": "ok" if outcome != "refused" else "source-refused",
@@ -80,12 +112,15 @@ def test_grounded_result_preserves_source_evidence_and_resolved_times():
     assert parsed.confirmation_state == "pending"
     assert parsed.duplicates_dropped == 0
     [event] = parsed.events
-    assert event.title == "Release planning"
-    assert event.start == datetime.fromisoformat("2026-08-12T10:00:00+02:00")
-    assert event.end == datetime.fromisoformat("2026-08-12T11:00:00+02:00")
-    assert event.timezone == "Europe/Rome"
-    assert event.location == "Room 2"
+    assert event.label.text == "Release planning"
+    assert (event.when.date, event.when.time) == ("2026-08-12", "10:00")
+    assert event.when.end_time == "11:00"
+    assert event.when.timezone.name == "Europe/Rome"
+    assert event.when.needs == ()
+    assert event.when.placeable is True
+    assert event.where.venue == "Room 2"
     [proof] = event.evidence
+    assert proof.read_as == "text"
     assert proof.source_ref == "private:document-1"
     assert proof.page == 1
     assert (proof.span_start, proof.span_end) == (0, 12)
@@ -103,7 +138,7 @@ def test_duplicate_policy_keeps_the_first_normalized_title_start_location():
 
 
 def test_duplicate_policy_keeps_equal_text_at_different_starts():
-    later = candidate("later", start="2026-08-12T12:00:00+02:00", end=None)
+    later = candidate("later", when=when(time="12:00", end_time=None))
     parsed = parse_grounded_event_result(result_document(candidate("first"), later))
     assert [item.candidate_id for item in parsed.events] == ["first", "later"]
     assert parsed.duplicates_dropped == 0
@@ -124,68 +159,74 @@ def test_candidate_ids_are_unique_even_when_event_meanings_differ():
     ("changes", "code", "detail"),
     [
         (
-            {"start": "xxxxxxxxxxxxxxxx"},
+            {"when": {"date": "2026-08-12", "time": "10:00", "needs": []}},
             "date-invalid",
-            "event start is not ISO 8601",
+            "event needs ['timezone'] rather than []",
         ),
         (
-            {"start": "2026-08-12T10:00:00", "timezone": "Europe/Rome"},
-            "date-invalid",
-            "zoned start must include a UTC offset",
-        ),
-        (
-            {"start": "2026-08-12T10:00:00+00:00", "timezone": "Europe/Rome"},
-            "date-invalid",
-            "event start offset disagrees with timezone",
-        ),
-        (
-            {"start": "2026-08-12T10:00:00+02:00", "timezone": "Mars/Olympus"},
+            {"when": when(timezone="Mars/Olympus")},
             "timezone-invalid",
             "unknown timezone: Mars/Olympus",
         ),
         (
-            {
-                "start": "2026-08-12T10:00:00+02:00",
-                "end": "2026-08-12T09:59:59+02:00",
-            },
+            {"when": {**when(), "end": {"time": "09:00"}}},
             "date-invalid",
-            "event end must be after start",
+            "event end time is not after its start",
         ),
         (
-            {"start": "2026-08-12T10:00:00+02:00", "timezone": "floating"},
+            {"when": {**when(time=None, all_day=True), "time": "10:00"}},
             "date-invalid",
-            "floating start must omit a UTC offset",
+            "an all-day event states no time",
+        ),
+        (
+            {
+                "when": {
+                    "time": "10:00",
+                    "needs": ["date"],
+                    "timezone": {"name": "UTC", "utcOffset": "+00:00", "source": "stated"},
+                }
+            },
+            "date-invalid",
+            "a UTC offset without a date is not determinate",
         ),
     ],
 )
-def test_date_and_timezone_semantics_fail_closed(changes, code, detail):
-    event = candidate()
-    event.update(changes)
+def test_when_semantics_fail_closed(changes, code, detail):
+    document = result_document(candidate(**changes))
+
     with pytest.raises(EventResultError) as caught:
-        parse_grounded_event_result(result_document(event))
+        parse_grounded_event_result(document)
+
     assert (caught.value.code, caught.value.detail) == (code, detail)
 
 
-def test_floating_candidates_are_valid_but_cannot_be_exported():
-    event = candidate(
-        start="2026-08-12T10:00:00",
-        end="2026-08-12T11:00:00",
-        timezone="floating",
-    )
-    parsed = parse_grounded_event_result(result_document(event))
-    decided = confirm_event_candidates(parsed, ["event-1"])
-    with pytest.raises(EventResultError) as caught:
-        render_confirmed_ics(decided)
-    assert (caught.value.code, caught.value.detail) == (
-        "timezone-required",
-        "confirmed events need a named timezone",
-    )
+def test_an_event_missing_part_of_its_when_is_kept_and_says_what_it_needs():
+    # The whole point of version 2. A banner that names a night and a place but
+    # no year is an event somebody wants; version 1 called it a refusal.
+    partial = candidate(when=when(date=None, timezone=None))
+
+    [event] = parse_grounded_event_result(result_document(partial)).events
+
+    assert event.when.needs == ("date", "timezone")
+    assert event.when.placeable is False
+    assert event.label.text == "Release planning"
+
+
+def test_an_all_day_event_needs_no_time():
+    [event] = parse_grounded_event_result(
+        result_document(candidate(when=when(time=None, end_time=None, all_day=True)))
+    ).events
+
+    assert event.when.needs == ()
+    assert event.when.placeable is True
 
 
 def test_evidence_requires_a_forward_span_and_an_opaque_source():
     for changed, expected in (
         ({"span": {"start": 5, "end": 5}}, "evidence span end must be after start"),
-        ({"sourceRef": "file:///home/user/private.pdf"}, "does not match"),
+        # v1 refused this in the schema; v2 lets the reference be any opaque
+        # string and refuses it where the rule lives, which says why.
+        ({"sourceRef": "file:///home/user/private.pdf"}, "opaque and private"),
     ):
         event = candidate()
         event["evidence"][0].update(changed)
@@ -341,8 +382,11 @@ def test_ics_contains_only_confirmed_candidates_and_escapes_text():
     rendered = render_confirmed_ics(decided)
 
     assert rendered.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
-    assert "DTSTART:20260812T080000Z" in rendered
-    assert "DTEND:20260812T090000Z" in rendered
+    # A zoned event keeps its zone rather than being flattened to UTC: the
+    # calendar receiving it knows what Europe/Rome means on that date, and a
+    # recurrence resolved in UTC would drift across a daylight-saving change.
+    assert "DTSTART;TZID=Europe/Rome:20260812T100000" in rendered
+    assert "DTEND;TZID=Europe/Rome:20260812T110000" in rendered
     assert "SUMMARY:Review\\, plan\\; confirm" in rendered
     assert "LOCATION:Room\\\\Two" in rendered
     assert "Room 3" not in rendered
@@ -357,7 +401,9 @@ def test_ics_contains_only_confirmed_candidates_and_escapes_text():
 
 
 def test_ics_omits_optional_end_and_location_and_reports_all_confirmed():
-    parsed = parse_grounded_event_result(result_document(candidate(end=None, location=None)))
+    parsed = parse_grounded_event_result(
+        result_document(candidate(when=when(end_time=None), location=None))
+    )
     decided = confirm_event_candidates(parsed, ["event-1"])
     assert decided.confirmation_state == "confirmed"
     rendered = render_confirmed_ics(decided)
@@ -474,13 +520,20 @@ def test_source_fragments_refuse_unusable_or_untrusted_inputs(
     ),
 )
 def test_property_valid_utc_candidates_round_trip_and_require_confirmation(hour, duration, title):
-    start = f"2026-01-10T{hour:02d}:00:00+00:00"
-    end = f"2026-01-10T{hour:02d}:{duration:02d}:00+00:00"
     document = result_document(
-        candidate(title=title, start=start, end=end, timezone="UTC", location=None)
+        candidate(
+            title=title,
+            when=when(
+                date="2026-01-10",
+                time=f"{hour:02d}:00",
+                end_time=f"{hour:02d}:{duration:02d}",
+                timezone="UTC",
+            ),
+            location=None,
+        )
     )
     parsed = parse_grounded_event_result(document)
-    assert parsed.events[0].title == title
+    assert parsed.events[0].label.text == title
     with pytest.raises(EventResultError, match="human decision"):
         render_confirmed_ics(parsed)
 

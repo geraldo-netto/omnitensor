@@ -12,21 +12,24 @@ from omnitensor.plugins.qwen import QwenCatalog, QwenEvaluation, QwenSource
 
 def result_document():
     return {
-        "version": 1,
+        "version": 2,
         "requestId": "request-1",
         "outcome": "succeeded",
         "code": "events-found",
         "detail": "",
-        "duplicatePolicy": "keep-first-title-start-location",
+        "duplicatePolicy": "keep-first-label-date-time-place",
         "confirmationState": "pending",
         "events": [
             {
                 "candidateId": "event-1",
-                "title": "Review",
-                "start": "2026-08-12T10:00:00+02:00",
-                "end": None,
-                "timezone": "Europe/Rome",
-                "location": "Room 1",
+                "label": {"text": "Review", "source": "stated"},
+                "when": {
+                    "date": "2026-08-12",
+                    "time": "10:00",
+                    "timezone": {"name": "Europe/Rome", "utcOffset": "+02:00", "source": "stated"},
+                    "needs": [],
+                },
+                "where": {"kind": "physical", "venue": "Room 1", "source": "stated"},
                 "confirmation": "pending",
                 "evidence": [
                     {
@@ -35,6 +38,7 @@ def result_document():
                         "page": 1,
                         "span": {"start": 0, "end": 6},
                         "textSha256": "b" * 64,
+                        "readAs": "text",
                     }
                 ],
             }
@@ -52,11 +56,13 @@ def test_preview_contains_evidence_count_but_no_private_material():
         "events": [
             {
                 "candidateId": "event-1",
-                "title": "Review",
-                "start": "2026-08-12T10:00:00+02:00",
-                "end": None,
+                "label": "Review",
+                "date": "2026-08-12",
+                "time": "10:00",
                 "timezone": "Europe/Rome",
-                "location": "Room 1",
+                "place": "Room 1",
+                "needs": [],
+                "status": "scheduled",
                 "evidenceCount": 1,
             }
         ],

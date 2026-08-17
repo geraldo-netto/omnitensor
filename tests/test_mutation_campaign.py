@@ -103,10 +103,12 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "snapshot-forecast",
         "tensor-output",
     )
+    # event-workload grew by the eight serializers version 2 needed: an event
+    # now carries what the source said rather than four fixed fields.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         42,
         3,
-        30,
+        38,
         21,
         16,
         2,
@@ -115,7 +117,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 165
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 173
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

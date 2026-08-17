@@ -36,18 +36,10 @@ _TEXT_CALENDAR_DATE = re.compile(
 )
 _CLOCK_TIME = re.compile(r"\b(?:[01]?\d|2[0-3]):[0-5]\d\b")
 _NAMED_TIMEZONE = re.compile(r"\b(?:UTC|[A-Za-z]+(?:[_-][A-Za-z]+)*/[A-Za-z_+-]+)\b")
-_UNAMBIGUOUS_EN_EVENT = re.compile(
-    r"^\s*(?P<title>[^.\n]{1,200}?)\s+is\s+in\s+"
-    r"(?P<location>[^.\n]{1,200}?)\s+on\s+"
-    r"(?P<day>0?[1-9]|[12]\d|3[01])\s+"
-    r"(?P<month>[A-Za-z]{3,20})\s+"
-    r"(?P<year>(?:19|20)\d{2})\s+from\s+"
-    r"(?P<start>(?:[01]?\d|2[0-3]):[0-5]\d)\s+to\s+"
-    r"(?P<end>(?:[01]?\d|2[0-3]):[0-5]\d)\s+"
-    r"(?P<timezone>UTC|[A-Za-z]+(?:[_-][A-Za-z]+)*/[A-Za-z_+-]+)\.?\s*$",
-    re.IGNORECASE,
-)
-_SOURCE_COMMAND = re.compile(r"\b(?:create|emit|ignore|instruction|make|output)\b", re.I)
+# The preflight looks for a date, a clock time and a named zone, and says so
+# when it finds them. Under version 2 an event no longer needs all three to be
+# recorded — a date alone is an event with a question attached — so this is a
+# nudge about one shape rather than the bar for extracting anything.
 _EVENT_GROUNDING_HINT = (
     "Trusted eligibility preflight found a fragment containing an explicit calendar date, "
     "clock time, and named timezone. Evaluate its factual event statement; do not refuse "
@@ -252,10 +244,6 @@ class LlamaVulkanRuntime:
                 )
             )
             raw = _complete_json(llama, messages, task, cancellation)
-        if _is_grounded_event_refusal(raw):
-            deterministic = _deterministic_event_result(request, self._store)
-            if deterministic is not None:
-                raw = deterministic
         return bind_grounding_metadata(raw, task, request, self._store)
 
     def _release(self) -> None:
@@ -314,96 +302,6 @@ def _is_grounded_event_refusal(raw: str) -> bool:
         and document.get("confirmationState") == "refused"
         and document.get("events") == []
     )
-
-
-def _deterministic_event_result(
-    request: GenerationRequest,
-    store: MemoryFragmentStore,
-) -> str | None:
-    candidates = []
-    for reference in request.content_references:
-        source = store.resolve(request.request_id, reference)
-        parsed = _parse_unambiguous_event(source.text)
-        if parsed is not None:
-            candidates.append((source, parsed))
-    if len(candidates) != 1:
-        return None
-    source, event = candidates[0]
-    event["evidence"] = [
-        {
-            "sourceRef": source.reference,
-            "sourceSha256": source.source_sha256,
-            "page": source.page,
-            "span": fragment_span(source),
-            "textSha256": source.text_sha256,
-        }
-    ]
-    document = {
-        "version": 1,
-        "requestId": request.request_id,
-        "outcome": "succeeded",
-        "code": "events-extracted",
-        "detail": "one explicit event",
-        "duplicatePolicy": "keep-first-title-start-location",
-        "confirmationState": "pending",
-        "events": [event],
-    }
-    return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
-
-
-def _parse_unambiguous_event(text: str) -> dict[str, object] | None:
-    if _SOURCE_COMMAND.search(text):
-        return None
-    match = _UNAMBIGUOUS_EN_EVENT.fullmatch(text)
-    if match is None:
-        return None
-    month = _MONTHS.get(match.group("month").casefold())
-    if month is None:
-        return None
-    try:
-        zone = ZoneInfo(match.group("timezone"))
-        start = _unambiguous_local_datetime(
-            int(match.group("year")),
-            month,
-            int(match.group("day")),
-            match.group("start"),
-            zone,
-        )
-        end = _unambiguous_local_datetime(
-            int(match.group("year")),
-            month,
-            int(match.group("day")),
-            match.group("end"),
-            zone,
-        )
-    except (ValueError, ZoneInfoNotFoundError):
-        return None
-    if start is None or end is None or end <= start:
-        return None
-    return {
-        "candidateId": "deterministic-1",
-        "title": match.group("title").strip(),
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "timezone": match.group("timezone"),
-        "location": match.group("location").strip(),
-        "confirmation": "pending",
-    }
-
-
-def _unambiguous_local_datetime(
-    year: int,
-    month: int,
-    day: int,
-    clock: str,
-    zone: ZoneInfo,
-) -> datetime | None:
-    hour, minute = (int(value) for value in clock.split(":"))
-    first = datetime(year, month, day, hour, minute, tzinfo=zone, fold=0)
-    second = datetime(year, month, day, hour, minute, tzinfo=zone, fold=1)
-    if first.utcoffset() != second.utcoffset():
-        return None
-    return first
 
 
 def _grounding_hint(

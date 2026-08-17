@@ -27,6 +27,13 @@ class EventClientError(ValueError):
         super().__init__(f"{code}: {detail}")
 
 
+def _place(event) -> str | None:
+    if event.where is None:
+        return None
+    stated = event.where.address.full if event.where.address else event.where.venue
+    return stated or event.where.url
+
+
 def preview_document(document: object) -> dict:
     """Return editable preview metadata without source paths or source text."""
     result = parse_grounded_event_result(document)
@@ -38,11 +45,16 @@ def preview_document(document: object) -> dict:
         "events": [
             {
                 "candidateId": event.candidate_id,
-                "title": event.title,
-                "start": event.start.isoformat(),
-                "end": None if event.end is None else event.end.isoformat(),
-                "timezone": event.timezone,
-                "location": event.location,
+                "label": event.label.text,
+                "date": event.when.date,
+                "time": event.when.time,
+                "timezone": None if event.when.timezone is None else event.when.timezone.name,
+                "place": _place(event),
+                # What a person still has to supply before a calendar can place
+                # this. Shown rather than resolved: the calendar application is
+                # where they answer it.
+                "needs": list(event.when.needs),
+                "status": event.status,
                 "evidenceCount": len(event.evidence),
             }
             for event in result.events

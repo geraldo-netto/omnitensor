@@ -84,9 +84,17 @@
     {
       "name": "event-workload",
       "selectors": [
+        "omnitensor.plugins.event_workload.x__contact_document",
+        "omnitensor.plugins.event_workload.x__event_document",
+        "omnitensor.plugins.event_workload.x__people_document",
+        "omnitensor.plugins.event_workload.x__person_document",
+        "omnitensor.plugins.event_workload.x__place_document",
         "omnitensor.plugins.event_workload.x__read_exact_file",
+        "omnitensor.plugins.event_workload.x__recurrence_document",
+        "omnitensor.plugins.event_workload.x__registration_document",
         "omnitensor.plugins.event_workload.x__selected_source",
         "omnitensor.plugins.event_workload.x__valid_request_id",
+        "omnitensor.plugins.event_workload.x__when_document",
         "omnitensor.plugins.event_workload.x_confirmed_ics",
         "omnitensor.plugins.event_workload.x_event_generation_task",
         "omnitensor.plugins.event_workload.x_grounded_event_document",
