@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
 from omnitensor.plugins.event_passes import merge, plan_passes
 from omnitensor.plugins.events import (
     EventCandidate,
     EventPlace,
+    EventResultError,
     EventWhen,
     GroundedEventResult,
     Stated,
@@ -97,6 +100,12 @@ class TestAccumulatingWhatThePassesFound:
 
         assert merged.outcome == "succeeded"
         assert len(merged.events) == 1
+
+    def test_no_pass_at_all_is_not_a_refusal(self):
+        # A refusal states that the sources hold no event. With no pass run,
+        # that is a verdict about material nobody read.
+        with pytest.raises(EventResultError, match="no extraction pass"):
+            merge([], "job-1")
 
     def test_every_pass_refusing_is_a_refusal(self):
         merged = merge([result(outcome="refused"), result(outcome="refused")], "job-1")

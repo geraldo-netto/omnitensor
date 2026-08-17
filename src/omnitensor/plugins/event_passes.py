@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .events import EventCandidate, GroundedEventResult
+from .events import EventCandidate, EventResultError, GroundedEventResult
 from .spans import estimate_tokens
 
 # What is left for the sources after the prompt and the answer. An event costs
@@ -24,10 +24,6 @@ from .spans import estimate_tokens
 # so a pass that filled the context with input would have nowhere to put its
 # output and would stop mid-object.
 SOURCE_SHARE = 0.4
-
-# A pass always carries at least one fragment. A source too large to share a
-# pass still gets one to itself rather than being dropped or trimmed.
-MINIMUM_PER_PASS = 1
 
 
 def plan_passes(
@@ -64,6 +60,11 @@ def merge(results: Sequence[GroundedEventResult], request_id: str) -> GroundedEv
     erase what another source held. ``partial`` survives from any pass, since
     it means some material could not be read at all.
     """
+    if not results:
+        # No pass ran, so there is nothing to conclude. Returning a refusal
+        # here would state that the sources hold no event, which is a verdict
+        # about material nobody read.
+        raise EventResultError("source-invalid", "no extraction pass was run")
     events: list[EventCandidate] = []
     seen: set[tuple] = set()
     ids: set[str] = set()
@@ -113,4 +114,4 @@ def _with_unique_id(event: EventCandidate, taken: set[str]) -> EventCandidate:
     return replace(event, candidate_id=identity)
 
 
-__all__ = ["MINIMUM_PER_PASS", "SOURCE_SHARE", "merge", "plan_passes"]
+__all__ = ["SOURCE_SHARE", "merge", "plan_passes"]
