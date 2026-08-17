@@ -119,6 +119,28 @@ def require_match(
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class CaseScore:
+    """What one observation earned, with each number named.
+
+    Both acceptance modules returned five positional numbers from their
+    scorers — one of them six — so a call site could not be read without
+    opening the callee, and the two shapes had quietly diverged.
+
+    `matched`, `extra` and `missing` are the counts the precision and recall
+    gates divide; the modules differ in what they count, which is why this
+    holds counts rather than ratios.
+    """
+
+    matched: int
+    extra: int
+    missing: int
+    latency_ms: int
+    peak_memory_bytes: int
+    matched_terms: int = 0
+
+
+
 # What a digest and an identifier are does not vary by workload, and both
 # acceptance modules had defined these identically. A second copy of a regular
 # expression is a second place for it to drift.

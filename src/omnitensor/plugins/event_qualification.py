@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..atomicio import JsonTooLargeError
 from .acceptance_kit import (
+    CaseScore,
     NativeLoadReport,
     discover_resource,
     read_bounded_json,
@@ -156,7 +157,9 @@ def _score_observations(
     peak_memory = 0
     for case_id, case in expected_by_id.items():
         observation = observed_by_id[case_id]
-        positive, extra, missing, latency, memory = _score_observation(case, observation)
+        score = _score_observation(case, observation)
+        positive, extra, missing = score.matched, score.extra, score.missing
+        latency, memory = score.latency_ms, score.peak_memory_bytes
         true_positive += positive
         false_positive += extra
         false_negative += missing
@@ -168,7 +171,7 @@ def _score_observations(
 def _score_observation(
     case: FrozenEventCase,
     observation: EventProviderObservation,
-) -> tuple[int, int, int, int, int]:
+) -> CaseScore:
     try:
         result = parse_grounded_event_result(observation.result)
     except EventResultError as error:
@@ -185,12 +188,12 @@ def _score_observation(
     memory = bounded_positive_integer(
         observation.peak_memory_bytes, "peak memory", "evidence-invalid"
     )
-    return (
-        len(actual & expected),
-        len(actual - expected),
-        len(expected - actual),
-        latency,
-        memory,
+    return CaseScore(
+        matched=len(actual & expected),
+        extra=len(actual - expected),
+        missing=len(expected - actual),
+        latency_ms=latency,
+        peak_memory_bytes=memory,
     )
 
 

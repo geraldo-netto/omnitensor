@@ -12,6 +12,7 @@ from .generation_contracts import (
     ModelCatalog,
     ModelEvaluation,
     ModelSource,
+    ProviderTemplate,
     bounded_mapping,
     bounded_positive_integer,
     bounded_sequence,
@@ -69,13 +70,13 @@ def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
         _provider_template(item)
         for item in bounded_sequence(document["providers"], "providers", "catalog-invalid")
     )
-    if len(providers) != 2 or {(item[1], item[2]) for item in providers} != {
+    if len(providers) != 2 or {(item.accelerator, item.runtime) for item in providers} != {
         ("gpu", "llama.cpp-vulkan"),
         ("npu", "openvino-genai-npu"),
     }:
         raise GenerationProviderError("catalog-invalid", "catalog provider lanes are incomplete")
-    defaults = [item for item in providers if item[3]]
-    if len(defaults) != 1 or defaults[0][1] != "gpu":
+    defaults = [item for item in providers if item.default]
+    if len(defaults) != 1 or defaults[0].accelerator != "gpu":
         raise GenerationProviderError("catalog-invalid", "GPU must be the sole default provider")
     evaluation = _evaluation(document["evaluation"])
     model_id = bounded_text(document["id"], "catalog model id", "catalog-invalid", 120)
@@ -155,18 +156,18 @@ def _source(document: object) -> ModelSource:
     return ModelSource(role, uri, revision, filename, digest, size)
 
 
-def _provider_template(document: object) -> tuple[str, str, str, bool, str]:
+def _provider_template(document: object) -> ProviderTemplate:
     value = bounded_mapping(document, "provider template", "catalog-invalid")
     if set(value) != {"providerId", "accelerator", "runtime", "default", "status"}:
         raise GenerationProviderError("catalog-invalid", "provider template fields are invalid")
     if not isinstance(value["default"], bool):
         raise GenerationProviderError("catalog-invalid", "provider default must be boolean")
-    return (
-        bounded_text(value["providerId"], "provider id", "catalog-invalid", 120),
-        bounded_text(value["accelerator"], "accelerator", "catalog-invalid", 20),
-        bounded_text(value["runtime"], "runtime", "catalog-invalid", 120),
-        value["default"],
-        bounded_text(value["status"], "status", "catalog-invalid", 120),
+    return ProviderTemplate(
+        provider_id=bounded_text(value["providerId"], "provider id", "catalog-invalid", 120),
+        accelerator=bounded_text(value["accelerator"], "accelerator", "catalog-invalid", 20),
+        runtime=bounded_text(value["runtime"], "runtime", "catalog-invalid", 120),
+        default=value["default"],
+        status=bounded_text(value["status"], "status", "catalog-invalid", 120),
     )
 
 

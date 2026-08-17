@@ -85,9 +85,12 @@ def copy_selected_source(
             "selected-file-unavailable", "selected source cannot be opened"
         ) from error
     resolved = canonical_selected_source(candidate)
-    descriptor = open_selected_source(resolved)
+    # Everything that can raise happens before the descriptor exists: the name
+    # is derived from an attacker-influenced filename, and until `os.fdopen`
+    # adopts it below there is nobody to close what `open` returned.
     destination = staged / f"{index:02d}" / staged_source_name(candidate)
     changed = change_detector or selected_source_changed
+    descriptor = open_selected_source(resolved)
     try:
         with os.fdopen(descriptor, "rb") as reader:
             before = os.fstat(reader.fileno())

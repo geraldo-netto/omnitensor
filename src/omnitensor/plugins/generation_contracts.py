@@ -38,13 +38,29 @@ class ModelSource:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderTemplate:
+    """One declared lane: who runs the model, on what, and whether by default.
+
+    Five positional fields used to travel as a bare tuple, so `item[3]` was
+    "is it the default" only in the reader's head, and a test asserted
+    `providers[0][4]` to reach a status string.
+    """
+
+    provider_id: str
+    accelerator: str
+    runtime: str
+    default: bool
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
 class ModelCatalog:
     model_id: str
     version: str
     upstream_revision: str
     license_spdx: str
     sources: tuple[ModelSource, ...]
-    providers: tuple[tuple[str, str, str, bool, str], ...]
+    providers: tuple[ProviderTemplate, ...]
     evaluation: ModelEvaluation
 
 
@@ -194,6 +210,7 @@ __all__ = [
     "FrozenEventCorpus",
     "NativeGenerationRuntime",
     "ModelCatalog",
+    "ProviderTemplate",
     "ModelEvaluation",
     "GenerationProviderError",
     "ModelSource",

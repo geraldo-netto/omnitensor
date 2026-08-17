@@ -34,6 +34,7 @@ from omnitensor.plugins.generation_contracts import (
     EventProviderObservation,
     EventQualificationPolicy,
     GenerationProviderError,
+    ProviderTemplate,
 )
 from omnitensor.plugins.generation_workers import (
     LlamaCppVulkanWorker,
@@ -233,12 +234,22 @@ def test_catalog_pins_license_sources_and_gpu_default():
             1354162912,
         ),
     ]
-    assert [item[:4] for item in catalog.providers] == [
-        ("qwen-events-gpu", "gpu", "llama.cpp-vulkan", True),
-        ("qwen-events-npu", "npu", "openvino-genai-npu", False),
-    ]
-    assert catalog.providers[0][4] == "unqualified"
-    assert catalog.providers[1][4] == "requires-explicit-local-qualification"
+    assert catalog.providers == (
+        ProviderTemplate(
+            provider_id="qwen-events-gpu",
+            accelerator="gpu",
+            runtime="llama.cpp-vulkan",
+            default=True,
+            status="unqualified",
+        ),
+        ProviderTemplate(
+            provider_id="qwen-events-npu",
+            accelerator="npu",
+            runtime="openvino-genai-npu",
+            default=False,
+            status="requires-explicit-local-qualification",
+        ),
+    )
     assert catalog.evaluation.corpus == "event-extraction-v1.json"
     assert catalog.evaluation.policy == EventQualificationPolicy()
 

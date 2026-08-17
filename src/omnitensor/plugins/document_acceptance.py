@@ -20,6 +20,7 @@ from pathlib import Path
 from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
 from ..registry import validate_document
 from .acceptance_kit import (
+    CaseScore,
     JsonDigestMismatchError,
     NativeLoadReport,
     discover_resource,
@@ -374,7 +375,9 @@ def _acceptance_metrics(
     latencies: list[int] = []
     peak_memory = 0
     for case_id, case in expected.items():
-        retrieval, grounded, citations, latency, memory = _score_observation(case, actual[case_id])
+        score = _score_observation(case, actual[case_id])
+        retrieval, grounded, citations = score.matched, score.matched_terms, score.extra
+        latency, memory = score.latency_ms, score.peak_memory_bytes
         totals[0] += retrieval
         totals[1] += len(case.expected_file_ids)
         totals[2] += grounded
@@ -394,7 +397,7 @@ def _acceptance_metrics(
 
 def _score_observation(
     case: DocumentAcceptanceCase, observation: DocumentAcceptanceObservation
-) -> tuple[int, int, int, int, int]:
+) -> CaseScore:
     if observation.case_id != case.case_id:
         raise DocumentAcceptanceError("evidence-invalid", "observation identity disagrees")
     violations = validate_document("document-question-result.schema.json", observation.result)
@@ -421,12 +424,15 @@ def _score_observation(
     if citation_ids - expected_ids:
         raise DocumentAcceptanceError("quality-failed", "answer cited an unsupported file")
     _validate_citations(case, citations)
-    return (
-        len(expected_ids & retrieved),
-        sum(term.casefold() in answer for term in case.expected_terms),
-        len(expected_ids & citation_ids),
-        _integer(observation.latency_ms, "observation latency", 1, 600_000),
-        _integer(observation.peak_memory_bytes, "observation memory", 1, 64 * 1024**3),
+    return CaseScore(
+        matched=len(expected_ids & retrieved),
+        matched_terms=sum(term.casefold() in answer for term in case.expected_terms),
+        extra=len(expected_ids & citation_ids),
+        missing=0,
+        latency_ms=_integer(observation.latency_ms, "observation latency", 1, 600_000),
+        peak_memory_bytes=_integer(
+            observation.peak_memory_bytes, "observation memory", 1, 64 * 1024**3
+        ),
     )
 
 
