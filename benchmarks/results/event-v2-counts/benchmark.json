@@ -1,0 +1,404 @@
+{
+ "version": 1,
+ "runs": [
+  {
+   "workload": "event-extraction",
+   "modelId": "qwen3-5-9b-iq4-xs",
+   "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+   "contextTokens": 32768,
+   "cache": "q8_0",
+   "layersOffloaded": 33,
+   "loadSeconds": 2.26,
+   "accuracy": 0.125,
+   "ruleScore": 0.037,
+   "correct": 2,
+   "cases": 16,
+   "errors": 0,
+   "secondsPerCase": 7.34,
+   "charactersPerSecond": 33.8,
+   "failures": {
+    "answers-rather-than-refusing": 14,
+    "at_least": 14,
+    "event_starts": 12,
+    "contains": 8,
+    "event_needs": 4
+   },
+   "outcomes": [
+    {
+     "caseId": "event-explicit-date-time",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 5.45,
+     "outputCharacters": 249,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-explicit-date-time",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-written-month",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.37,
+     "outputCharacters": 244,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-written-month",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-two-in-one-document",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.58,
+     "outputCharacters": 250,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-two-in-one-document",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-with-location",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.43,
+     "outputCharacters": 244,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-with-location",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-ics-like",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.34,
+     "outputCharacters": 239,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-ics-like",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-afternoon-24h",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.69,
+     "outputCharacters": 244,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-afternoon-24h",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-named-activity",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.48,
+     "outputCharacters": 245,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-named-activity",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-date-without-time",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts",
+      "event_needs"
+     ],
+     "seconds": 7.37,
+     "outputCharacters": 248,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-date-without-time",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-time-without-date",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "at_least",
+      "event_starts",
+      "event_needs"
+     ],
+     "seconds": 7.38,
+     "outputCharacters": 248,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-time-without-date",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-recurring-weekly",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_needs"
+     ],
+     "seconds": 7.56,
+     "outputCharacters": 247,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-recurring-weekly",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-banner-no-year",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_needs"
+     ],
+     "seconds": 7.35,
+     "outputCharacters": 245,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-banner-no-year",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-online-meeting",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.5,
+     "outputCharacters": 235,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "No event found",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-online-meeting",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-cancelled",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.12,
+     "outputCharacters": 240,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-cancelled",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-with-registration",
+     "correct": false,
+     "passed": [],
+     "failed": [
+      "answers-rather-than-refusing",
+      "contains",
+      "at_least",
+      "event_starts"
+     ],
+     "seconds": 7.29,
+     "outputCharacters": 248,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "Sources contain no event",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-with-registration",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-no-activity-refuses",
+     "correct": true,
+     "passed": [
+      "refuses"
+     ],
+     "failed": [],
+     "seconds": 7.72,
+     "outputCharacters": 279,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "No calendar events found in the provided source text.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-no-activity-refuses",
+      "version": 2
+     }
+    },
+    {
+     "caseId": "event-prose-without-event",
+     "correct": true,
+     "passed": [
+      "refuses"
+     ],
+     "failed": [],
+     "seconds": 7.82,
+     "outputCharacters": 263,
+     "error": "",
+     "document": {
+      "code": "no-event-found",
+      "confirmationState": "refused",
+      "detail": "No events found in the provided text.",
+      "duplicatePolicy": "keep-first-label-date-time-place",
+      "events": [],
+      "outcome": "refused",
+      "requestId": "bench-event-prose-without-event",
+      "version": 2
+     }
+    }
+   ]
+  }
+ ]
+}
