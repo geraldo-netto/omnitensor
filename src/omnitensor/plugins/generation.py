@@ -22,7 +22,6 @@ from .protocol import CancellationToken, ProgressReporter
 MAX_PROMPT_CHARACTERS = 32_768
 MAX_OUTPUT_SCHEMA_BYTES = 64 * 1024
 MAX_CONTEXT_TOKENS = 262_144
-MAX_OUTPUT_TOKENS = 16_384
 MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_CONTENT_REFERENCES = 32
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -444,8 +443,13 @@ def _parse_limits(value: object) -> GenerationLimits:
     context_tokens = _bounded_integer(
         value["contextTokens"], "context token limit", 1, MAX_CONTEXT_TOKENS
     )
+    # Bounded by the context this task declares, not by a policy number. The
+    # ceiling here was 16,384, so a task that wanted a longer answer than that
+    # could not ask for one however large its context — a rule about answers
+    # wearing the shape of a hardware limit. An answer still has to fit in the
+    # context it shares with the prompt, and that is arithmetic.
     output_tokens = (
-        _bounded_integer(value["outputTokens"], "output token limit", 1, MAX_OUTPUT_TOKENS)
+        _bounded_integer(value["outputTokens"], "output token limit", 1, context_tokens)
         if "outputTokens" in value
         else None
     )

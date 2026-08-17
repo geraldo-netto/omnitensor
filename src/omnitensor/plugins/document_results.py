@@ -24,14 +24,16 @@ from .document_index import (
 from .search import IndexQueryService, ResultPage, ResultState
 
 DOCUMENT_CLASSIFY_PERMISSION = "write:document-intelligence-labels"
-MAX_SUMMARY_LABELS = 200
 
 
 @dataclass(frozen=True, slots=True)
 class ClassificationSummary:
     """How many documents carry each label, and whether that can be trusted."""
 
-    counts: dict[str, int]
+    # Pairs, in the order they are meant to be read — commonest first, ties by
+    # label. A dict field made a `frozen=True` value mutable and unhashable,
+    # and left the ordering an implicit property of insertion.
+    counts: tuple[tuple[str, int], ...]
     state: ResultState
     revision: int
     total: int
@@ -85,14 +87,17 @@ class DocumentIntelligenceResults(IndexQueryService):
         state = self._store.load()
         result_state = self._state_of(state)
         if result_state is not ResultState.READY:
-            return ClassificationSummary({}, result_state, state.revision, 0)
+            return ClassificationSummary((), result_state, state.revision, 0)
         counts: dict[str, int] = {}
         for entry in state.entries:
             for label in entry.tags:
                 counts[label] = counts.get(label, 0) + 1
+        # Every label, not the first two hundred. The list was truncated after
+        # sorting by descending count, so what a person lost was always the
+        # rarest labels — the ones worth seeing — and nothing said so.
         ordered = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
         return ClassificationSummary(
-            dict(ordered[:MAX_SUMMARY_LABELS]),
+            tuple(ordered),
             result_state,
             state.revision,
             len(state.entries),

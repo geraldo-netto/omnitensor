@@ -44,8 +44,18 @@ class RepositoryProfile:
     root: str
     file_count: int
     total_bytes: int
-    suffix_counts: dict[str, int]
+    # Pairs rather than a dict, in suffix order. `frozen=True` promises a value
+    # that can be hashed and shared, and a dict field silently withdraws both:
+    # the counts stayed mutable through the "immutable" profile, and `hash()`
+    # raised on a type declared frozen. This is the same shape
+    # `ArtifactReference.companions` already uses for the same reason.
+    suffix_counts: tuple[tuple[str, int], ...]
     truncated: bool
+
+    @property
+    def counts_by_suffix(self) -> dict[str, int]:
+        """A fresh mapping for callers that want to look one up."""
+        return dict(self.suffix_counts)
 
 
 class BuildMetadataIngestor:
@@ -91,7 +101,7 @@ class BuildMetadataIngestor:
                     root,
                     len(items),
                     sum(item.size_bytes for item in items),
-                    dict(sorted(suffixes.items())),
+                    tuple(sorted(suffixes.items())),
                     scan.truncated,
                 )
             )

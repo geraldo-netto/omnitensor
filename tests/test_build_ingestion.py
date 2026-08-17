@@ -52,7 +52,11 @@ def test_a_repository_is_profiled_from_metadata_alone(tmp_path):
 
     assert profile.file_count == 3
     assert profile.total_bytes == 35
-    assert profile.suffix_counts == {".md": 1, ".py": 2}
+    assert profile.suffix_counts == ((".md", 1), (".py", 2))
+    assert profile.counts_by_suffix == {".md": 1, ".py": 2}
+    # `frozen=True` is a promise the dict field used to withdraw: this raised
+    # TypeError on a type declared immutable.
+    assert hash(profile) == hash(profile)
 
 
 def test_no_file_content_appears_in_a_profile(tmp_path):

@@ -14,7 +14,6 @@ from omnitensor.plugins.generation import (
     MAX_CONTEXT_TOKENS,
     MAX_OUTPUT_BYTES,
     MAX_OUTPUT_SCHEMA_BYTES,
-    MAX_OUTPUT_TOKENS,
     ArtifactProvenance,
     GenerationError,
     GenerationProviderDescriptor,
@@ -198,7 +197,7 @@ def test_task_contract_preserves_versioned_prompt_schema_and_limits():
         (("modalities",), ["text", "text"], "modalities"),
         (("modalities",), ["audio"], "modalities"),
         (("limits", "contextTokens"), MAX_CONTEXT_TOKENS + 1, "context token"),
-        (("limits", "outputTokens"), MAX_OUTPUT_TOKENS + 1, "output token"),
+        (("limits", "outputTokens"), 32_769, "output token"),
         (("limits", "outputBytes"), MAX_OUTPUT_BYTES + 1, "output byte"),
         (("limits", "contextTokens"), 2048, "below context"),
     ],
@@ -214,6 +213,29 @@ def test_task_contract_rejects_every_bounded_field_defect(path, value, detail):
         parse_generation_task(document)
 
     assert excinfo.value.code in {"contract-invalid", "task-invalid"}
+
+
+def test_a_task_may_ask_for_an_answer_as_long_as_its_own_context():
+    """The ceiling was a policy number, not a limit of anything real.
+
+    Output tokens were bounded at 16,384 regardless of the context declared,
+    so a task with a 32,768-token context could not ask for a longer answer
+    than half of it. What an answer genuinely has to fit in is the context it
+    shares with the prompt, and that is arithmetic rather than policy.
+    """
+    document = task_document()
+    document["limits"]["contextTokens"] = 32_768
+    document["limits"]["outputTokens"] = 32_767
+
+    task = parse_generation_task(document)
+
+    assert task.limits.output_tokens == 32_767
+
+    # The one real bound stays: the answer shares the context with the prompt,
+    # so it cannot claim all of it.
+    document["limits"]["outputTokens"] = 32_768
+    with pytest.raises(GenerationError, match="below context"):
+        parse_generation_task(document)
 
 
 def test_task_identifier_accepts_its_exact_boundary_and_rejects_other_types():

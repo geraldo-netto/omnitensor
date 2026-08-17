@@ -125,7 +125,7 @@ def test_a_classification_summary_counts_each_label(tmp_path):
 
     summary = subject.classification_summary()
 
-    assert summary.counts == {"invoice": 2, "contract": 1, "scanned": 1}
+    assert summary.counts == (("invoice", 2), ("contract", 1), ("scanned", 1))
     assert summary.total == 3
     assert summary.usable
     assert summary.document()["state"] == "ready"
@@ -138,7 +138,7 @@ def test_a_summary_over_a_stale_index_counts_nothing_and_says_why(tmp_path):
 
     summary = DocumentIntelligenceResults(other, permissions()).classification_summary()
 
-    assert summary.counts == {}
+    assert summary.counts == ()
     assert summary.state is ResultState.STALE
     assert not summary.usable
 
@@ -167,7 +167,7 @@ def test_a_document_can_be_classified_and_is_then_listed(tmp_path):
     subject.classify("doc-" + "a" * 64, ("invoice",))
 
     assert subject.classified_as("invoice").total == 1
-    assert subject.classification_summary().counts == {"invoice": 1}
+    assert subject.classification_summary().counts == (("invoice", 1),)
 
 
 def test_a_label_the_index_refuses_surfaces_as_a_query_error(tmp_path):
@@ -216,3 +216,25 @@ def test_the_store_must_be_a_document_index(tmp_path):
 
 def test_the_plugin_is_named(tmp_path):
     assert service(tmp_path).plugin_id == "document-intelligence"
+
+
+def test_every_label_is_summarised_however_many_there_are(tmp_path):
+    """The summary was truncated at two hundred labels, rarest lost first.
+
+    It is sorted by descending count, so the labels a person stopped being told
+    about were exactly the uncommon ones, and nothing in the result said
+    anything had been dropped.
+    """
+    subject = service(
+        tmp_path,
+        [
+            entry(f"{index}.pdf", f"{index:064d}", (1.0, 0, 0, 0), (f"label-{index:03d}",))
+            for index in range(250)
+        ],
+    )
+
+    summary = subject.classification_summary()
+
+    assert len(summary.counts) == 250
+    assert summary.total == 250
+    assert len(summary.document()["counts"]) == 250
