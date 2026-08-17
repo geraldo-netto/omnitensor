@@ -175,6 +175,7 @@
       "selectors": [
         "omnitensor.plugins.document_qa.x__embedding_vector",
         "omnitensor.plugins.document_qa.x__validate_embedding_provider",
+        "omnitensor.plugins.document_qa.x_answer_passes",
         "omnitensor.plugins.document_qa.x_document_question_task",
         "omnitensor.plugins.document_qa.x_failure_detail",
         "omnitensor.plugins.document_qa.x_grounded_answer_document",

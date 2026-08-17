@@ -107,20 +107,22 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # fragment store moved to `fragments`, which no workload owns, and its
     # selectors moved with it — the shard is a batch, not an owner. The pass
     # merger's dedup key went the other way: it was a copy of the parser's and
-    # was removed rather than kept in sync.
+    # was removed rather than kept in sync. `grounded-answer` gained the pass
+    # planner that replaced the top-eight span cut, which is arithmetic over
+    # the context window and worth mutating.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         44,
         3,
         53,
         21,
-        16,
+        17,
         2,
         5,
         24,
         10,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 190
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 191
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

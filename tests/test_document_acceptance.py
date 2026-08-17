@@ -174,8 +174,12 @@ def test_manifest_declares_the_same_operational_thresholds_and_answer_bound():
     }
     private_schema = json.loads((ROOT / "schemas/document-question-answer.schema.json").read_text())
     public_schema = json.loads((ROOT / "schemas/document-question-result.schema.json").read_text())
-    assert private_schema["properties"]["answer"]["maxLength"] == 1024
-    assert public_schema["properties"]["answer"]["maxLength"] == 16384
+    # Neither contract bounds the answer. A ceiling here refused the whole
+    # reply for being long — 1,024 characters was not enough to summarise a
+    # long selection, and the person got "invalid output" rather than the
+    # answer. What bounds a generation is the context window.
+    assert "maxLength" not in private_schema["properties"]["answer"]
+    assert "maxLength" not in public_schema["properties"]["answer"]
 
 
 def test_cli_writes_the_exact_validated_report(tmp_path, capsys):

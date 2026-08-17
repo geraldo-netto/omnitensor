@@ -119,7 +119,13 @@ def test_event_result_guide_keeps_evidence_private_and_writes_confirmed():
         "opaque `private:` source",
         "Public snapshots, logs, and general control",
         "explicitly `succeeded`, `partial`, or `refused`",
-        "offset that does not describe that local wall time",
+        # Version 2 states the rule the domain actually enforces: an offset
+        # depends on the date, so `events._validate_when` refuses one that
+        # arrives without it. The version 1 guarantee this line used to name —
+        # refusing an offset that disagrees with the zone's local wall time —
+        # is not implemented, and asserting the prose kept it made the guide
+        # promise something the code stopped doing.
+        "a UTC offset is accepted only alongside a known date",
         "cannot mark its own output confirmed or rejected",
         "one explicit human decision for every candidate",
         "calendar sink is invoked only for confirmed candidates",

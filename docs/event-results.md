@@ -13,7 +13,7 @@ present (the literal `unknown` when the source states none) with optional
 time, end, and timezone, a `needs` list naming what still blocks calendar
 placement (`date`, `time`, `timezone`), optional `what`, `where`, `repeats`,
 people and status fields, and one or more source evidence records. Evidence
-contains an opaque source reference, source digest, page, character span,
+contains an opaque `private:` source reference, source digest, page, character span,
 digest of the supporting text, and `readAs` (`text` or `ocr`). It never
 carries source text or a filesystem path.
 
