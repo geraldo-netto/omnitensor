@@ -161,6 +161,18 @@ def _read_archive_entry(
     return content
 
 
+def _require_image():
+    """Pillow, or a refusal that names the install rather than the slide."""
+    from importlib import import_module
+
+    try:
+        return import_module("PIL.Image")
+    except ImportError as error:
+        raise MediaTranscriptionError(
+            "presentation-runtime-unavailable", "install the Pillow image decoder"
+        ) from error
+
+
 def _xml_root(content: bytes):
     """Parse presentation XML with the hardened parser, or say which failed.
 
@@ -314,12 +326,11 @@ def _write_presentation_image(
     suffix = PurePosixPath(entry).suffix.lower()
     path = root / f"slide-{slide_number:02d}-image-{image_number:02d}{suffix}"
     path.write_bytes(content)
+    images = _require_image()
     try:
-        from PIL import Image
-
-        with Image.open(path) as image:
+        with images.open(path) as image:
             image.verify()
-        with Image.open(path) as image:
+        with images.open(path) as image:
             if image.width * image.height > 50_000_000:
                 raise ValueError("image is too large")
     except Exception as error:

@@ -107,13 +107,12 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
 
     @staticmethod
     def _image_info(source: Path) -> MediaInfo:
+        images = _require("PIL.Image", "install the Pillow image decoder")
         try:
-            from PIL import Image
-
             content = _svg_png(source) if source.suffix.lower() == ".svg" else source
-            with Image.open(content) as image:
+            with images.open(content) as image:
                 image.verify()
-            with Image.open(content) as image:
+            with images.open(content) as image:
                 width, height = image.size
         except Exception as error:
             raise MediaTranscriptionError(
@@ -249,14 +248,13 @@ def _svg_png(source: Path) -> io.BytesIO:
 
 
 def _visual_payload(source: Path) -> bytes:
+    images = _require("PIL.Image", "install the Pillow image decoder")
     try:
-        from PIL import Image
-
-        with Image.open(source) as image:
+        with images.open(source) as image:
             image.load()
             image.thumbnail(
                 (MAX_INFERENCE_DIMENSION, MAX_INFERENCE_DIMENSION),
-                Image.Resampling.LANCZOS,
+                images.Resampling.LANCZOS,
                 reducing_gap=2,
             )
             stream = io.BytesIO()
