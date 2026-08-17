@@ -56,7 +56,7 @@ def load_model_qualification(model_id: str, model_sha256: str) -> Qualification:
 
 
 def _qualification_document() -> dict:
-    resource = importlib.resources.files("omnitensor_qwen_runtime").joinpath("qualification.json")
+    resource = importlib.resources.files("omnitensor_vulkan_runtime").joinpath("qualification.json")
     raw = resource.read_bytes()
     if len(raw) > _MAX_RECEIPT_BYTES:
         raise RuntimeError("Qwen qualification receipt is oversized")

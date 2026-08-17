@@ -266,13 +266,13 @@ def test_production_callers_use_new_owners_without_bypassing_the_facade_contract
             "plugins.qwen_catalog",
             "plugins.qwen_contracts",
         },
-        "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/factories.py": {
+        "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/factories.py": {
             "omnitensor.plugins.qwen_providers"
         },
-        "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/hebrew.py": {
+        "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/hebrew.py": {
             "omnitensor.plugins.generation"
         },
-        "providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/runtime.py": {
+        "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/runtime.py": {
             "omnitensor.plugins.acceptance_kit",
             "omnitensor.plugins.generation",
         },

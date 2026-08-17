@@ -124,7 +124,7 @@ def trial(
     """Load the model once and run every selected case on one wording."""
     import os  # noqa: PLC0415 - set before the runtime initialises Vulkan
 
-    from omnitensor_qwen_runtime.runtime import (  # noqa: PLC0415
+    from omnitensor_vulkan_runtime.runtime import (  # noqa: PLC0415
         MAX_RUNTIME_CONTEXT_TOKENS,
         LlamaVulkanRuntime,
     )

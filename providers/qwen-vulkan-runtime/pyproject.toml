@@ -18,10 +18,10 @@ documents = ["ncnn>=1.0.20260526", "numpy>=1.24", "tokenizers>=0.22"]
 media = ["pymupdf>=1.24"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/omnitensor_qwen_runtime"]
+packages = ["src/omnitensor_vulkan_runtime"]
 
 [tool.mutmut]
-source_paths = ["src/omnitensor_qwen_runtime/"]
+source_paths = ["src/omnitensor_vulkan_runtime/"]
 pytest_add_cli_args_test_selection = ["tests/"]
 
 [tool.pytest.ini_options]

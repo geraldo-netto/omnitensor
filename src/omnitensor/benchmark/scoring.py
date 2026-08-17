@@ -20,7 +20,7 @@ from dataclasses import dataclass
 HEBREW = re.compile(r"[֐-׿]")
 # Cyrillic and Arabic, the two scripts a Hebrew translation leaks into. Kept
 # identical to the check the shipped Hebrew runtime already applies
-# (`omnitensor_qwen_runtime.hebrew._DISALLOWED_SCRIPT`): a benchmark that
+# (`omnitensor_vulkan_runtime.hebrew._DISALLOWED_SCRIPT`): a benchmark that
 # accepts what production refuses is measuring a workload nobody ships.
 FOREIGN_SCRIPT = re.compile(r"[\u0400-\u052f\u0600-\u06ff]")
 

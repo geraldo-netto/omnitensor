@@ -362,7 +362,9 @@ def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
         "sizeBytes": installation.QWEN_SIZE_BYTES,
     }
     assert catalog["qualification"] == {
-        "receipt": ("providers/qwen-vulkan-runtime/src/omnitensor_qwen_runtime/qualification.json"),
+        "receipt": (
+            "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json"
+        ),
         "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
         "cpuFallback": "forbidden",
         "workloads": [

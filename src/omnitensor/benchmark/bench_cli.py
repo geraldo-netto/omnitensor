@@ -60,7 +60,7 @@ def model_path(artifact_root: Path, model_id: str) -> Path:
 
 def tasks() -> dict:
     """The task factories the provider itself runs, by workload id."""
-    from omnitensor_qwen_runtime import factories  # noqa: PLC0415 - provider is optional
+    from omnitensor_vulkan_runtime import factories  # noqa: PLC0415 - provider is optional
 
     return dict(factories._TASKS)
 
@@ -75,7 +75,7 @@ def run_model(
     say,
 ) -> tuple[Run, ...]:
     """Load one model once, then every case of every workload on it."""
-    from omnitensor_qwen_runtime.runtime import (  # noqa: PLC0415
+    from omnitensor_vulkan_runtime.runtime import (  # noqa: PLC0415
         MAX_RUNTIME_CONTEXT_TOKENS,
         LlamaVulkanRuntime,
     )

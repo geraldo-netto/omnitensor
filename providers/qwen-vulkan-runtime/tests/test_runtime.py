@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from omnitensor_qwen_runtime import (
+from omnitensor_vulkan_runtime import (
     bge,
     factories,
     grammar,
@@ -88,7 +88,7 @@ def _qualification(*, device=bge.QUALIFIED_DEVICE, layers=4):
 
 
 def _receipt():
-    path = Path(__file__).parents[1] / "src" / "omnitensor_qwen_runtime" / "qualification.json"
+    path = Path(__file__).parents[1] / "src" / "omnitensor_vulkan_runtime" / "qualification.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
