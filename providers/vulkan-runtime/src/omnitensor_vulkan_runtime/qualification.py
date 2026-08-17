@@ -7,7 +7,7 @@ import importlib.metadata
 import importlib.resources
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from omnitensor.plugins.generation import GenerationTask
@@ -31,6 +31,10 @@ class Qualification:
     model_layers: int
     runtime_version: str
     runtime_binaries: tuple[tuple[str, str], ...]
+    # Empty when a frozen acceptance run covers this exact workload, model and
+    # task; otherwise the reason it does not. Carried so the answer can say so,
+    # never consulted to decide whether the work may run.
+    covers: str = ""
 
 
 def task_sha256(task: GenerationTask) -> str:
@@ -44,10 +48,44 @@ def load_qualification(
     model_sha256: str,
     task: GenerationTask,
 ) -> Qualification:
+    """The receipt's record for this pair, and whether it covers this workload.
+
+    Not a gate. It used to raise when the receipt did not list the pair, so a
+    person who chose an unmeasured model got a worker that refused to start —
+    and a task digest that moved without the receipt being reissued did the
+    same to a model that had been measured, which is how event extraction was
+    briefly unable to start at all. Choosing a model is the person's to make
+    and theirs to own; what the receipt knows is reported, never enforced.
+    """
     document = _qualification_document()
     qualification = _model_qualification(document, model_id, model_sha256)
-    _workload(document["workloads"], plugin_id, model_id, task_sha256(task))
-    return qualification
+    return replace(
+        qualification,
+        covers=_covers(document["workloads"], plugin_id, model_id, task_sha256(task)),
+    )
+
+
+def _covers(value: object, plugin_id: str, model_id: str, task_digest: str) -> str:
+    """Empty when the receipt covers this exactly; otherwise why it does not.
+
+    A malformed receipt still raises. That is not an unmeasured pair, it is a
+    broken install — the same class as a missing dependency — and reporting it
+    as "nobody measured this" would send a person off to run an acceptance
+    pass against a file the reader cannot even parse.
+    """
+    if not isinstance(value, dict):
+        raise RuntimeError("workload qualification is invalid")
+    if plugin_id not in value:
+        return f"{plugin_id} has no measured models"
+    workload = _workload_entry(value, plugin_id)
+    record = workload["models"].get(model_id)
+    if record is None:
+        return f"{model_id} was not measured for {plugin_id}"
+    if record["result"] != PASSED:
+        return f"{model_id} did not pass {plugin_id}: {record.get('reason', '')}".strip()
+    if record["taskSha256"] != task_digest:
+        return f"{plugin_id} has changed since {model_id} was measured"
+    return ""
 
 
 def load_model_qualification(model_id: str, model_sha256: str) -> Qualification:

@@ -87,12 +87,42 @@ class ArtifactProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class MeasuredEvidence:
+    """What a frozen acceptance run showed, for the pair and device it ran on.
+
+    Separate from admission on purpose. One boolean used to answer both "may
+    this run" and "was this measured", and the router refuses anything it says
+    no to — so making it truthful about evidence would have forbidden every
+    combination nobody had got round to measuring, which is most of them. A
+    person who moves work to the second GPU because the first is busy is not
+    asking for a claim about accuracy; they are asking for their work to run.
+    """
+
+    measured: bool
+    device: str = ""
+    detail: str = ""
+
+    @property
+    def summary(self) -> str:
+        if self.measured:
+            return f"measured on {self.device}" if self.device else "measured"
+        return self.detail or "not covered by a frozen acceptance run"
+
+
+UNMEASURED = MeasuredEvidence(False)
+
+
+@dataclass(frozen=True, slots=True)
 class GenerationProviderDescriptor:
     provider_id: str
     accelerator: str
     runtime: str
+    # May this worker run. Admission, not accuracy: the lane is a GPU or an
+    # NPU, the artifacts are mounted, and the person chose this. What was
+    # actually measured is `evidence`, which never gates anything.
     qualified: bool
     provenance: ArtifactProvenance
+    evidence: MeasuredEvidence = UNMEASURED
 
 
 @dataclass(frozen=True, slots=True)

@@ -444,7 +444,14 @@ def test_receipt_binds_the_operation_specific_hebrew_model_without_replacing_qwe
     assert qwen.model_layers == 37
 
 
-def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path):
+def test_a_tampered_model_identity_still_refuses(monkeypatch, tmp_path):
+    """Model identity is not a preference: the digest names the exact bytes.
+
+    Coverage of a workload became a report rather than a refusal, but which
+    file this is did not. A receipt entry that names other bytes is a broken
+    install, and running against it would attribute somebody else's
+    measurements to a model nobody measured.
+    """
     document = _receipt()
     _load_receipt(monkeypatch, tmp_path, document)
     task = event_generation_task()
@@ -452,19 +459,38 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
     digest = document["models"][model]["sha256"]
 
     with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification(
-            "event-extraction", model, digest, replace(task, task_version=2)
-        )
-    assert str(excinfo.value) == "workload differs from qualification"
-    with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("event-extraction", model, "0" * 64, task)
     assert str(excinfo.value) == "model differs from qualification"
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("event-extraction", "unknown-model", digest, task)
     assert str(excinfo.value) == "model has no qualification"
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification("unknown-workload", model, digest, task)
-    assert str(excinfo.value) == "workload has no qualification"
+
+
+def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp_path):
+    """The three cases that used to refuse startup now say so and carry on.
+
+    A task digest that moved without the receipt being reissued is the failure
+    that briefly left event extraction unable to start at all; a workload
+    nobody measured, and a model measured for something else, did the same to
+    anyone who chose one.
+    """
+    document = _receipt()
+    _load_receipt(monkeypatch, tmp_path, document)
+    task = event_generation_task()
+    model = "qwen3-8b-q4-k-m"
+    digest = document["models"][model]["sha256"]
+
+    moved = qualification.load_qualification(
+        "event-extraction", model, digest, replace(task, task_version=2)
+    )
+    assert moved.covers == "event-extraction has changed since qwen3-8b-q4-k-m was measured"
+
+    unmeasured = qualification.load_qualification("unknown-workload", model, digest, task)
+    assert unmeasured.covers == "unknown-workload has no measured models"
+
+    # And the record itself is still the receipt's, so what is reported about
+    # the run stays true even when nobody measured this combination.
+    assert moved.device == unmeasured.device == document["device"]
 
 
 @pytest.mark.parametrize(
@@ -589,9 +615,14 @@ def test_a_second_model_that_passed_is_offered_and_runs(tmp_path, monkeypatch):
     )
 
 
-def test_a_pair_that_failed_is_neither_offered_nor_run(tmp_path, monkeypatch):
-    """An unqualified model is not a slower answer, it is a worker that
-    refuses to start. Better refused here, with the reason recorded."""
+def test_a_pair_that_failed_is_not_offered_but_may_still_be_chosen(tmp_path, monkeypatch):
+    """A recorded failure is not offered, and does not forbid.
+
+    `qualified_models` is what a client puts in front of somebody, so a pair
+    that failed stays out of it. Choosing it anyway is theirs to own: the
+    reason travels with the run instead of becoming a worker that will not
+    start.
+    """
     digest = qualification.task_sha256(event_generation_task())
     document = _with_second_model(
         _receipt(),
@@ -604,28 +635,31 @@ def test_a_pair_that_failed_is_neither_offered_nor_run(tmp_path, monkeypatch):
         "qwen3-5-9b-iq4-xs",
         "qwen3-8b-q4-k-m",
     )
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification(
-            "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
-        )
+    chosen = qualification.load_qualification(
+        "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
+    )
 
-    assert str(excinfo.value) == "model did not pass qualification for this workload"
+    assert chosen.covers == "qwen3-4b-q4-k-m did not pass event-extraction: drops half the events"
 
 
-def test_a_model_nobody_qualified_for_this_workload_is_refused(tmp_path, monkeypatch):
-    """Qualified *as a model* is not qualified *for this task*: DictaLM has
-    been the first for months and never the second."""
+def test_a_model_measured_for_another_workload_reports_rather_than_refuses(tmp_path, monkeypatch):
+    """Qualified *as a model* is not qualified *for this task*.
+
+    DictaLM has been the first for months and never the second. That is worth
+    saying on the answer; it is not grounds for refusing to run.
+    """
     _load_receipt(monkeypatch, tmp_path, _receipt())
 
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification(
-            "event-extraction",
-            factories.HEBREW_ARTIFACT_ID,
-            _receipt()["models"][factories.HEBREW_ARTIFACT_ID]["sha256"],
-            event_generation_task(),
-        )
+    elsewhere = qualification.load_qualification(
+        "event-extraction",
+        factories.HEBREW_ARTIFACT_ID,
+        _receipt()["models"][factories.HEBREW_ARTIFACT_ID]["sha256"],
+        event_generation_task(),
+    )
 
-    assert str(excinfo.value) == "model has no qualification for this workload"
+    assert elsewhere.covers == (
+        f"{factories.HEBREW_ARTIFACT_ID} was not measured for event-extraction"
+    )
 
 
 def test_the_default_model_is_the_one_a_job_that_chose_nothing_runs(tmp_path, monkeypatch):
@@ -2759,9 +2793,19 @@ def test_qualified_workload_start_failure_terminates_and_stops(monkeypatch):
 
 @pytest.mark.parametrize(
     ("physical_device", "layers"),
-    [("different GPU", 4), (bge.QUALIFIED_DEVICE, 3)],
+    [("AMD Radeon 610M (RADV GFX1103_R1)", 4), (bge.QUALIFIED_DEVICE, 3)],
 )
-def test_qualified_workload_refuses_device_or_layer_drift(monkeypatch, physical_device, layers):
+def test_a_workload_starts_on_a_device_the_receipt_never_measured(
+    monkeypatch, physical_device, layers
+):
+    """Both of these used to be startup refusals, and neither should be.
+
+    A different card is the case the person asked for: the 6600 XT is busy, so
+    the work goes to the 610M. A different layer count is a different model or
+    a different build of the same one, which is theirs to choose too. The rule
+    that stays is full GPU offload — no CPU path, ever — and that is checked
+    against the load report rather than against one past measurement.
+    """
     calls = []
 
     class Plugin:
@@ -2789,7 +2833,41 @@ def test_qualified_workload_refuses_device_or_layer_drift(monkeypatch, physical_
         Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
     )
 
-    with pytest.raises(RuntimeError, match="load differs from qualification"):
+    asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
+
+    assert calls == ["__startup__"], "started, and released the card afterwards"
+
+
+def test_a_load_that_falls_back_to_the_cpu_is_still_refused(monkeypatch):
+    """The no-CPU rule is about this service, not about one measurement."""
+    calls = []
+
+    class Plugin:
+        plugin_id = "sample"
+
+        async def start(self, _context):
+            return None
+
+        async def stop(self):
+            calls.append("stop")
+
+    class Native:
+        async def load(self, _paths, _accelerator):
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", 4, 2, True)
+
+        @property
+        def physical_device(self):
+            return "AMD Radeon 610M (RADV GFX1103_R1)"
+
+        async def terminate(self, request_id):
+            calls.append(request_id)
+
+    monkeypatch.setattr(factories, "verify_native_runtime", lambda _value: None)
+    wrapper = factories.QualifiedWorkload(
+        Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
+    )
+
+    with pytest.raises(Exception):
         asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
 
     assert calls == ["__startup__", "stop"]

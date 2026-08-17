@@ -20,6 +20,7 @@ from omnitensor.plugins.generation import (
     GenerationProviderDescriptor,
     GenerationRouter,
     GenerationTask,
+    MeasuredEvidence,
 )
 from omnitensor.plugins.generation_workers import LlamaCppVulkanWorker
 from omnitensor.plugins.protocol import (
@@ -101,11 +102,14 @@ class QualifiedWorkload:
                 runtime_version = verify_native_runtime(qualification)
                 report = await runtime.load((model_path,), "gpu")
                 validate_gpu_load(report)
-                if (
-                    report.total_model_layers != qualification.model_layers
-                    or runtime.physical_device != qualification.device
-                ):
-                    raise RuntimeError("native model load differs from qualification")
+                # What actually loaded is recorded, not compared. This used to
+                # refuse when the device or the layer count differed from the
+                # receipt, so moving work to the second GPU because the first
+                # was busy produced a worker that would not start at all. The
+                # receipt says where the numbers came from; it does not say
+                # what a person is allowed to run. Full GPU offload is still
+                # required above — that is the no-CPU rule, which is a rule
+                # about this service rather than about one measurement.
                 if self._load_receipt_path is not None:
                     _role, digest = self._load_receipt_models[index]
                     measured.append(
@@ -184,6 +188,13 @@ async def _capture_async_failure(
     return failure
 
 
+def _evidence(qualification: Qualification) -> MeasuredEvidence:
+    """What the receipt says about this pair, as a statement rather than a gate."""
+    if qualification.covers:
+        return MeasuredEvidence(False, qualification.device, qualification.covers)
+    return MeasuredEvidence(True, qualification.device)
+
+
 def _provenance(artifact) -> ArtifactProvenance:
     """What ran, said from the artifact the host mounted.
 
@@ -228,8 +239,12 @@ def _generation(plugin_id: str):
         provider_id="qwen3-workloads-gpu",
         accelerator="gpu",
         runtime="llama.cpp-vulkan",
+        # Admission: a GPU lane the host granted, with the artifact a person
+        # chose mounted. Whether anybody measured this exact pair is the
+        # separate statement below, and it decides nothing.
         qualified=True,
         provenance=_provenance(model),
+        evidence=_evidence(qualification),
     )
     worker = LlamaCppVulkanWorker(descriptor, runtime, (model.path,))
     return bootstrap, store, runtime, model, qualification, GenerationRouter((worker,))
@@ -304,6 +319,7 @@ def create_selected_text_tools() -> QualifiedWorkload:
         runtime="llama.cpp-vulkan",
         qualified=True,
         provenance=_provenance(hebrew_model),
+        evidence=_evidence(hebrew_qualification),
     )
     hebrew_worker = LlamaCppVulkanWorker(hebrew_descriptor, hebrew_runtime, (hebrew_model.path,))
     plugin = SelectedTextPlugin(
