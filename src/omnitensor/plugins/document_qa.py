@@ -400,12 +400,11 @@ def page_spans(
 ) -> tuple[IndexedSpan, ...]:
     """Index every page span, with exact page offsets.
 
-    ``remaining`` is how many spans this call may still add, for the one
-    caller that deliberately samples a file rather than reading it — the file
-    organiser, which classifies by the opening of a document. ``None``, the
-    default, reads all of it: a question about a selected file is answered
-    from the whole file, and the ceiling that used to live here stopped at 512
-    spans and returned what it had without telling anybody the rest existed.
+    ``remaining`` is how many spans this call may still add. No caller passes
+    it any more — the file organiser did, and classified every document from
+    its first two spans — so every path reads the whole file. ``None``, the
+    default, is that: the ceiling that used to live here stopped at 512 spans
+    and returned what it had without telling anybody the rest existed.
     """
     if (
         not isinstance(request_id, str)
