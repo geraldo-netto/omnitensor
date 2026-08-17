@@ -299,12 +299,27 @@ def build_selected_text_worker_load_receipt(
     primary: ModelEvidence,
     hebrew: ModelEvidence,
 ) -> SelectedTextWorkerLoadReceipt:
-    """Build a receipt only from the exact qualified live model loads."""
+    """Build a receipt from the live model loads exactly as they happened.
+
+    The receipt records; it does not gate. It used to re-run the frozen
+    acceptance identity check — pinned model bytes, one runtime version, one
+    GPU's marketing name, two literal layer counts — so a worker on any other
+    GPU, or any model a person chose, died at start with nothing but a
+    truncated handshake to show for it. Which model to run is the person's
+    decision; whether the acceptance evidence matches the frozen identity is
+    the acceptance run's, checked where evidence is judged. The only rule a
+    live load must satisfy here is full GPU offload — the no-CPU rule, which
+    is about this service, not about one measurement.
+    """
     if not isinstance(primary, ModelEvidence) or not isinstance(hebrew, ModelEvidence):
         raise SelectedTextAcceptanceError(
             "receipt-invalid", "worker load receipt models are invalid"
         )
-    _validate_selected_text_models(primary, hebrew, identity_code="receipt-invalid")
+    for model in (primary, hebrew):
+        try:
+            validate_gpu_load(model.load)
+        except ProviderGenerationError as error:
+            raise SelectedTextAcceptanceError("device-unqualified", error.detail) from error
     return SelectedTextWorkerLoadReceipt(primary, hebrew)
 
 

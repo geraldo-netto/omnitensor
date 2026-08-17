@@ -142,22 +142,6 @@ def test_worker_load_receipt_round_trips_the_exact_evidence_models():
             "receipt-invalid",
         ),
         (
-            lambda value: value["models"]["primary"].update(modelSha256="0" * 64),
-            "receipt-invalid",
-        ),
-        (
-            lambda value: value["models"]["hebrewTranslation"].update(modelSha256="0" * 64),
-            "receipt-invalid",
-        ),
-        (
-            lambda value: value["models"]["primary"].update(runtimeVersion="other"),
-            "receipt-invalid",
-        ),
-        (
-            lambda value: value["models"]["primary"].update(deviceName="different GPU"),
-            "device-unqualified",
-        ),
-        (
             lambda value: value["models"]["primary"]["load"].update(backend="wrong"),
             "device-unqualified",
         ),
@@ -167,24 +151,6 @@ def test_worker_load_receipt_round_trips_the_exact_evidence_models():
         ),
         (
             lambda value: value["models"]["primary"]["load"].update(cpuFallback=True),
-            "device-unqualified",
-        ),
-        (
-            lambda value: value["models"]["primary"]["load"].update(
-                totalModelLayers=36, acceleratorLayers=36
-            ),
-            "device-unqualified",
-        ),
-        (
-            lambda value: value["models"]["hebrewTranslation"]["load"].update(
-                totalModelLayers=32, acceleratorLayers=32
-            ),
-            "device-unqualified",
-        ),
-        (
-            lambda value: value["models"]["primary"]["load"].update(
-                totalModelLayers=38, acceleratorLayers=38
-            ),
             "device-unqualified",
         ),
         (
