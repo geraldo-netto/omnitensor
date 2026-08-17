@@ -17,7 +17,6 @@ from omnitensor.plugins.event_workload import (
 )
 from omnitensor.plugins.extraction import AdapterKind
 from omnitensor.plugins.file_organizer import (
-    MAX_SPANS_PER_FILE,
     PLUGIN_ID,
     READ_PERMISSION,
     FileOrganizerError,
@@ -621,4 +620,3 @@ def test_error_contract_and_constructor_boundaries():
         isinstance(plugin._adapters[suffix], PyMuPdfAdapter)
         for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")
     )
-    assert MAX_SPANS_PER_FILE == 2

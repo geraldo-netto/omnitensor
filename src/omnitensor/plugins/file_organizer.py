@@ -54,7 +54,6 @@ from .protocol import (
 
 PLUGIN_ID = "file-organizer"
 READ_PERMISSION = "files:read-selected"
-MAX_SPANS_PER_FILE = 2
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -217,13 +216,15 @@ class FileOrganizerPlugin(ManagedPlugin):
                 raise FileOrganizerError(
                     "extraction-failed", "selected source could not be extracted"
                 )
+            # Every span, no ``remaining``. Two spans is the first ~4 KB, and a
+            # report whose subject only appears on page three was filed from
+            # its cover sheet with nothing saying the rest went unread.
             source_spans = page_spans(
                 request.job_id,
                 index + 1,
                 Path(source.item.path).name,
                 source.item.digest,
                 extraction.pages,
-                remaining=MAX_SPANS_PER_FILE,
             )
             if not source_spans:
                 raise FileOrganizerError(
@@ -461,7 +462,6 @@ def file_organizer_task():
 __all__ = [
     "FileOrganizerError",
     "FileOrganizerPlugin",
-    "MAX_SPANS_PER_FILE",
     "PLUGIN_ID",
     "READ_PERMISSION",
     "file_organizer_task",
