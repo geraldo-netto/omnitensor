@@ -44,3 +44,20 @@
 [2026-08-17 02:20:44]   what failed: {"at_least": 10, "contains": 2}
 [2026-08-17 02:20:44] qwen3-8b-q4-k-m · selected-text-tools: 10 cases
 [2026-08-17 02:22:12]   text-summarize                     ok     87.6s
+[2026-08-17 02:23:38]   text-summarize-keeps-the-name      ok     86.5s
+[2026-08-17 02:24:54]   text-explain                       ok     75.6s
+[2026-08-17 02:26:06]   text-rewrite                       ok     72.3s
+[2026-08-17 02:27:42]   text-extract-tasks                 ok     95.9s
+[2026-08-17 02:28:55]   text-extract-single-task           ok     73.2s
+[2026-08-17 02:30:16]   text-translate-hebrew              ok     80.4s
+[2026-08-17 02:31:35]   text-translate-hebrew-names        ok     79.8s
+[2026-08-17 02:33:02]   text-translate-hebrew-paragraph    ok     86.9s
+[2026-08-17 02:34:21]   text-translate-portuguese          ok     78.3s
+[2026-08-17 02:34:21] qwen3-8b-q4-k-m · selected-text-tools: 10/10 correct (100%), rules 100%, 81.6s per case
+[2026-08-17 02:34:21] results written to /backups/disk2/projects/cinnamon/omnitensor/benchmarks/results/benchmark.md
+[2026-08-17 02:34:21] qwen3-4b-q4-k-m: 2.33 GiB weights + 2.39 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 02:34:21] loading qwen3-4b-q4-k-m from model.gguf on Vulkan device 0
+[2026-08-17 02:34:26] loaded in 5.2s — 37/37 layers on Vulkan
+[2026-08-17 02:34:26] qwen3-4b-q4-k-m · ask-selected-files: 10 cases
+[2026-08-17 02:35:03]   ask-invoice-total                  ok     37.3s
+[2026-08-17 02:35:39]   ask-who-signed                     ok     35.9s

@@ -546,3 +546,47 @@ class TestAskingForWhatTheModelActuallyEmits:
 
         assert answer.correct is True
         assert result.correct is True
+
+
+class TestScriptLeaks:
+    """A Hebrew translation that is partly Arabic.
+
+    Found by reading output these rules had already passed: the 8B produced
+    "אם הדוח متأخر" — the Arabic for "late" inside a Hebrew sentence — and the
+    Hebrew rule saw Hebrew and said yes. The shipped Hebrew runtime refuses
+    exactly this, so a benchmark that accepts it is measuring a workload nobody
+    ships.
+    """
+
+    def judged(self, text):
+        return judge(
+            case(expect={"hebrew": True, "no_foreign_script": True}),
+            {"result": text, "operation": "translate"},
+            SOURCES,
+        )
+
+    def test_clean_hebrew_passes(self):
+        assert self.judged("הפגישה תתקיים בליסבון ב-3 בספטמבר 2026.").correct is True
+
+    def test_an_arabic_word_inside_hebrew_fails(self):
+        judgement = self.judged("אם הדוח متأخر, ריבית של 3.5 אחוז לשנה תחול.")
+
+        assert judgement.failed == ("no_foreign_script",)
+
+    def test_cyrillic_fails_the_same_way(self):
+        assert self.judged("הפגישה תתקיים במוסקבה Москва.").failed == ("no_foreign_script",)
+
+    def test_latin_is_not_a_leak(self):
+        """Numbers, currency codes and proper names in Latin script are normal
+        in Hebrew text; refusing them would fail correct translations."""
+        assert self.judged("מארטה אישרה 42,000 EUR לשלב השני.").correct is True
+
+    def test_the_rule_matches_what_production_refuses(self):
+        """Kept in step deliberately: this is the same character range the
+        shipped Hebrew runtime rejects."""
+        from omnitensor.benchmark.scoring import FOREIGN_SCRIPT
+
+        for character in ("Ѐ", "ԯ", "؀", "ۿ"):
+            assert FOREIGN_SCRIPT.search(character)
+        for character in ("א", "A", "1", "€"):
+            assert not FOREIGN_SCRIPT.search(character)

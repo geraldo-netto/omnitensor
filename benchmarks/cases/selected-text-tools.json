@@ -92,7 +92,8 @@
     "hebrew": true,
     "contains": [
      "2026"
-    ]
+    ],
+    "no_foreign_script": true
    }
   },
   {
@@ -106,7 +107,8 @@
     "hebrew": true,
     "contains": [
      "42,000"
-    ]
+    ],
+    "no_foreign_script": true
    }
   },
   {
@@ -120,7 +122,8 @@
     "hebrew": true,
     "contains": [
      "3.5"
-    ]
+    ],
+    "no_foreign_script": true
    }
   },
   {

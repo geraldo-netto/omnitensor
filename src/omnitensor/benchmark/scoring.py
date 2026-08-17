@@ -18,6 +18,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 HEBREW = re.compile(r"[֐-׿]")
+# Cyrillic and Arabic, the two scripts a Hebrew translation leaks into. Kept
+# identical to the check the shipped Hebrew runtime already applies
+# (`omnitensor_qwen_runtime.hebrew._DISALLOWED_SCRIPT`): a benchmark that
+# accepts what production refuses is measuring a workload nobody ships.
+FOREIGN_SCRIPT = re.compile(r"[\u0400-\u052f\u0600-\u06ff]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +219,17 @@ def _in_hebrew(document: dict, wanted: object, _sources) -> bool:
     return bool(HEBREW.search(text)) is bool(wanted)
 
 
+def _no_foreign_script(document: dict, _wanted, _given) -> bool:
+    """No Cyrillic or Arabic in the answer.
+
+    Found by reading output the rules had passed: the 8B translated "if the
+    report is late" into Hebrew with the Arabic word متأخر sitting in the
+    middle of the sentence. The Hebrew script rule saw Hebrew and said yes.
+    Production would have refused that answer outright, so this refuses it too.
+    """
+    return not FOREIGN_SCRIPT.search(_text_of(document))
+
+
 def _operation_is(document: dict, wanted: object, _sources) -> bool:
     return str(document.get("operation", "")) == str(wanted)
 
@@ -254,6 +270,7 @@ RULES: dict[str, Callable[[dict, object, Given], bool]] = {
     "at_least": _at_least,
     "cites_supplied_sources": _cites_only_supplied_sources,
     "hebrew": _in_hebrew,
+    "no_foreign_script": _no_foreign_script,
     "no_invented_numbers": _no_invented_numbers,
     "no_invented_names": _no_invented_names,
     "operation": _operation_is,

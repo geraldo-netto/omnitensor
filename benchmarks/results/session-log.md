@@ -76,6 +76,20 @@ rewritten after each model, so an interrupted run still leaves findings.
   collections against the schema its task declares, so the third instance of
   this mistake fails in a second rather than after 28 minutes of GPU time.
 
+- **`selected-text-tools` scored 10/10 on the 8B, and the Hebrew is still not
+  good.** Reading what the rules had passed:
+  `בליסון` (Lisbon mistransliterated), `42,000 אירופי` ("European" rather than
+  euros), and — the decisive one — `אם הדוח متأخر`, with the **Arabic** word
+  for "late" sitting inside a Hebrew sentence. The shipped Hebrew runtime
+  already refuses foreign script, so production would have rejected that
+  answer; my harness bypassed the check by calling the base runtime. There is
+  now a rule mirroring production's exact character range, and the Hebrew
+  comparison against DictaLM is queued.
+
+  Worth saying plainly: automated rules are necessary and not sufficient here.
+  They cannot see that "אירופי" is the wrong word. Somebody who reads Hebrew
+  should look at `benchmark.json` before this decides anything.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
@@ -85,6 +99,9 @@ rewritten after each model, so an interrupted run still leaves findings.
 3. `ask-selected-files` and `file-organizer`, both models, with the corrected
    cases, into `benchmarks/results/corrected/`. Those rows supersede the ones
    in the first table.
+4. `selected-text-tools` on DictaLM against the 8B, into
+   `benchmarks/results/hebrew/` — the comparison the Hebrew work exists for,
+   now that the 8B has been seen to produce Hebrew with Arabic in it.
 
 ## Still to do
 
