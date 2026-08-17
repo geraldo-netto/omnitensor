@@ -220,7 +220,7 @@ def test_task_is_closed_grounded_contract():
                 / "schemas/event-extraction-result.schema.json"
             ).read_text()
         ),
-        "limits": {"context_tokens": 32768, "output_tokens": 1024, "output_bytes": 262144},
+        "limits": {"context_tokens": 32768, "output_tokens": None, "output_bytes": None},
     }
     assert task.output_schema["additionalProperties"] is False
 

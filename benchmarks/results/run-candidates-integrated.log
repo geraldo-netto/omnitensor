@@ -13,3 +13,10 @@
 [2026-08-17 13:34:45]   ask-percentage                     ok     67.5s
 [2026-08-17 13:35:59]   ask-role-and-name                  ok     73.8s
 [2026-08-17 13:37:19]   ask-language-portuguese            ok     80.5s
+[2026-08-17 13:39:08]   ask-absent-fact                    FAIL  108.9s  failed: no_invented_numbers
+[2026-08-17 13:40:36]   ask-absent-person                  ok     88.4s
+[2026-08-17 13:40:36] qwen3-5-35b-a3b-q4-k-m · ask-selected-files: 9/10 correct (90%), rules 97%, 86.1s per case
+[2026-08-17 13:40:36]   what failed: {"no_invented_numbers": 1}
+[2026-08-17 13:40:36] qwen3-5-35b-a3b-q4-k-m · event-extraction: 10 cases
+[2026-08-17 13:41:21]   event-explicit-date-time           FAIL   45.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 13:42:12]   event-written-month                FAIL   50.8s  failed: answers-rather-than-refusing, at_least, event_starts

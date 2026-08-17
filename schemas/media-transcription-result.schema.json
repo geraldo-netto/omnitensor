@@ -14,7 +14,6 @@
     "speech": {"$ref": "#/$defs/speech"},
     "visuals": {
       "type": "array",
-      "maxItems": 64,
       "items": {"$ref": "#/$defs/visual"}
     }
   },
@@ -39,7 +38,6 @@
         "language": {"type": ["string", "null"], "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$", "maxLength": 35},
         "segments": {
           "type": "array",
-          "maxItems": 2048,
           "items": {"$ref": "#/$defs/speechSegment"}
         }
       }

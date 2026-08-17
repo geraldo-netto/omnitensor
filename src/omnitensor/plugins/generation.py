@@ -51,7 +51,13 @@ class ProviderGenerationError(GenerationError):
 @dataclass(frozen=True, slots=True)
 class GenerationLimits:
     context_tokens: int
-    output_tokens: int
+    # No ceiling by default. An output budget is a wrong answer waiting for a
+    # long enough one: the generation stops mid-object and the truncation
+    # surfaces as an unexplained invalid reply rather than as "there was more".
+    # ``None`` means the only bound is the context window — what is left of it
+    # after the prompt, which is arithmetic rather than a number somebody
+    # chose. A task may still declare a budget; nothing requires one.
+    output_tokens: int | None = None
     # No ceiling by default: a reply is bounded by the token budget that
     # produced it and by host pressure, not by a byte count nobody can predict
     # from the question. A task may still declare one; ``None`` means it did
@@ -424,26 +430,31 @@ def _parse_output_schema(value: object) -> dict:
 
 
 def _parse_limits(value: object) -> GenerationLimits:
-    # ``outputBytes`` is optional: the byte ceiling was dropped, and a task
-    # written before that is still valid rather than being rejected for
-    # carrying a limit this no longer requires.
-    if not isinstance(value, Mapping) or not {
+    # ``outputTokens`` and ``outputBytes`` are both optional, and both being
+    # absent is the ordinary case: a task states the context it needs and lets
+    # the answer be as long as the answer is. A task written when they were
+    # required stays valid rather than being rejected for carrying a ceiling
+    # this no longer asks for.
+    if not isinstance(value, Mapping) or not {"contextTokens"} <= set(value) <= {
         "contextTokens",
         "outputTokens",
-    } <= set(value) <= {"contextTokens", "outputTokens", "outputBytes"}:
+        "outputBytes",
+    }:
         raise GenerationError("task-invalid", "generation limits do not match version 1")
     context_tokens = _bounded_integer(
         value["contextTokens"], "context token limit", 1, MAX_CONTEXT_TOKENS
     )
-    output_tokens = _bounded_integer(
-        value["outputTokens"], "output token limit", 1, MAX_OUTPUT_TOKENS
+    output_tokens = (
+        _bounded_integer(value["outputTokens"], "output token limit", 1, MAX_OUTPUT_TOKENS)
+        if "outputTokens" in value
+        else None
     )
     output_bytes = (
         _bounded_integer(value["outputBytes"], "output byte limit", 2, MAX_OUTPUT_BYTES)
         if "outputBytes" in value
         else None
     )
-    if output_tokens >= context_tokens:
+    if output_tokens is not None and output_tokens >= context_tokens:
         raise GenerationError("task-invalid", "output token limit must be below context limit")
     return GenerationLimits(context_tokens, output_tokens, output_bytes)
 

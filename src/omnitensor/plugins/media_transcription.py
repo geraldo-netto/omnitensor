@@ -36,7 +36,6 @@ MAX_IMAGE_PIXELS = 50_000_000
 MAX_VISUALS = 12
 MAX_PRESENTATION_SLIDES = 64
 MAX_DOCUMENT_PAGES = 64
-MAX_SPEECH_SEGMENTS = 2048
 MAX_TEXT_CHARACTERS = 16_384
 MAX_SPEECH_TEXT_CHARACTERS = 4096
 MAX_LANGUAGE_CHARACTERS = 35
@@ -442,7 +441,10 @@ def _bounded_content(value: object, *, required: bool, maximum: int = MAX_TEXT_C
 
 
 def _validated_speech(value: object, media: MediaInfo) -> SpeechTranscript:
-    if not isinstance(value, SpeechTranscript) or len(value.segments) > MAX_SPEECH_SEGMENTS:
+    # No segment ceiling. A three-hour recording has more than 2,048 segments,
+    # and calling its transcript "invalid" discards everything said after about
+    # forty minutes.
+    if not isinstance(value, SpeechTranscript):
         raise MediaTranscriptionError("speech-invalid", "speech transcript is invalid")
     language = value.language
     if language is not None and (

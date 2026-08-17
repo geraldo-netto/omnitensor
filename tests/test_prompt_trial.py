@@ -34,11 +34,14 @@ def test_a_variant_replaces_only_what_it_states(tmp_path):
 
 
 def test_the_output_budget_is_part_of_the_wording_being_tried(tmp_path):
+    # The shipped task states no budget, so a trial that imposes one is itself
+    # a change worth naming — that is how the only variant which produced any
+    # event at all was recognised.
     tried = varied(SHIPPED, load_variant(write(tmp_path, {"outputTokens": 2048})))
 
     assert tried.limits.output_tokens == 2048
     assert tried.limits.context_tokens == SHIPPED.limits.context_tokens
-    assert differences(SHIPPED, tried) == ("outputTokens 1024 to 2048",)
+    assert differences(SHIPPED, tried) == ("outputTokens None to 2048",)
 
 
 def test_a_variant_that_changes_nothing_is_visible_as_such(tmp_path):

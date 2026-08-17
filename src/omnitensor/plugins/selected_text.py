@@ -331,8 +331,8 @@ def selected_text_task():
             "outputSchema": load_schema("selected-text-answer.schema.json"),
             "limits": {
                 "contextTokens": 32_768,
-                "outputTokens": 1_024,
-                "outputBytes": 262_144,
+                # No output ceiling: a translation is as long as the text is,
+                # and a summary that stops early is worse than a slow one.
             },
         }
     )

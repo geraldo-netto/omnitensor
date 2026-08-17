@@ -527,15 +527,13 @@ def test_manifest_task_schemas_and_source_have_no_action_capability():
     assert task.output_schema == json.loads(
         (root / "schemas/file-organizer-answer.schema.json").read_text()
     )
+    # No ceiling on the answer: a plan for forty files is longer than a plan
+    # for four, and the context after the prompt is the only real bound.
     assert (
         task.limits.context_tokens,
         task.limits.output_tokens,
         task.limits.output_bytes,
-    ) == (
-        32768,
-        1024,
-        262144,
-    )
+    ) == (32768, None, None)
     source = (root / "src/omnitensor/plugins/file_organizer.py").read_text()
     forbidden_calls = ("shutil.move(", "os.rename(", ".unlink(", "subprocess.", "os.system(")
     assert all(call not in source for call in forbidden_calls)

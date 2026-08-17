@@ -458,8 +458,8 @@ def file_organizer_task():
             "outputSchema": load_schema("file-organizer-answer.schema.json"),
             "limits": {
                 "contextTokens": 32_768,
-                "outputTokens": 1_024,
-                "outputBytes": 262_144,
+                # No output ceiling: a plan for forty files is longer than a
+                # plan for four, and truncating it loses the files at the end.
             },
         }
     )

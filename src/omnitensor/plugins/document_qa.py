@@ -584,16 +584,15 @@ def document_question_task():
             },
             "modalities": ["text"],
             "outputSchema": load_schema("document-question-answer.schema.json"),
-            "limits": {
-                "contextTokens": 32_768,
-                # 1,024 was not enough for the ordinary case of summarising a
-                # long selection: the answer plus its citations ran past the
-                # budget and the JSON was cut off mid-object, which surfaced as
-                # an unexplained invalid-output failure.
-                "outputTokens": 2_048,
-                # No byte ceiling: the token budget above is what bounds an
-                # answer, and host pressure is what protects the machine.
-            },
+            # No output ceiling at all. 1,024 was not enough for the ordinary
+            # case of summarising a long selection — the answer plus its
+            # citations ran past the budget, the JSON was cut off mid-object,
+            # and it surfaced as an unexplained invalid-output failure. Raising
+            # it to 2,048 moved that cliff rather than removing it; sixteen
+            # documents can always ask for more than any number chosen here.
+            # What bounds a generation is the context after the prompt, and
+            # what protects the machine is host pressure.
+            "limits": {"contextTokens": 32_768},
         }
     )
 

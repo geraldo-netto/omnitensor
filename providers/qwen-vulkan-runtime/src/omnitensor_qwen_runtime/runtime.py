@@ -25,7 +25,6 @@ from .grammar import grammar_schema
 from .grounding import bind_grounding_metadata, fragment_span
 
 MAX_RUNTIME_CONTEXT_TOKENS = 32_768
-MAX_RUNTIME_OUTPUT_TOKENS = 4_096
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)
 _DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.IGNORECASE)
 _NUMERIC_CALENDAR_DATE = re.compile(
@@ -538,13 +537,15 @@ def _private_content(store: MemoryFragmentStore, request: GenerationRequest) -> 
     return json.dumps(fragments, ensure_ascii=False, separators=(",", ":"))
 
 
-def _output_token_limit(requested: int) -> int:
-    if requested > MAX_RUNTIME_OUTPUT_TOKENS:
-        raise ProviderGenerationError(
-            "admission-refused",
-            f"Qwen Vulkan output limit is {MAX_RUNTIME_OUTPUT_TOKENS} tokens",
-            generation_started=False,
-        )
+def _output_token_limit(requested: int | None) -> int | None:
+    """What to ask llama.cpp for, which is nothing when nothing was asked.
+
+    ``None`` lets generation run to the model's own stop token or to the edge
+    of the context, whichever comes first. That is the only real bound: a
+    smaller one refuses or truncates an answer somebody needed, and this
+    provider used to refuse outright above 4,096 tokens — a policy number
+    wearing the shape of a hardware limit.
+    """
     return requested
 
 

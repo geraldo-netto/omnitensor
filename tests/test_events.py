@@ -9,8 +9,6 @@ from hypothesis import strategies as st
 
 from omnitensor.plugins.events import (
     DUPLICATE_POLICY,
-    MAX_EVENTS,
-    MAX_EVIDENCE_PER_EVENT,
     EventResultError,
     confirm_event_candidates,
     parse_grounded_event_result,
@@ -210,38 +208,20 @@ def test_closed_schema_rejects_extra_fields_and_unbounded_evidence():
         parse_grounded_event_result(document)
 
 
-def test_event_and_evidence_bounds_accept_the_exact_maximum():
+def test_a_long_programme_is_parsed_whole():
+    # There was a ceiling here: 64 events and 16 evidence entries, refused as
+    # "result-invalid" above that. A conference programme with a hundred talks
+    # is not an invalid result, and telling somebody it is loses the talks.
     events = [
-        candidate(f"event-{index}", title=f"Bounded event {index}")
-        for index in range(MAX_EVENTS)
+        candidate(f"event-{index}", title=f"Talk {index}")
+        for index in range(250)
     ]
-    events[0]["evidence"] = [evidence() for _ in range(MAX_EVIDENCE_PER_EVENT)]
+    events[0]["evidence"] = [evidence() for _ in range(64)]
 
     parsed = parse_grounded_event_result(result_document(*events))
 
-    assert len(parsed.events) == MAX_EVENTS
-    assert len(parsed.events[0].evidence) == MAX_EVIDENCE_PER_EVENT
-
-
-@pytest.mark.parametrize("overflow", ["events", "evidence"])
-def test_event_and_evidence_bounds_refuse_max_plus_one(overflow):
-    document = result_document(candidate())
-    if overflow == "events":
-        document["events"] = [
-            candidate(f"event-{index}", title=f"Bounded event {index}")
-            for index in range(MAX_EVENTS + 1)
-        ]
-        expected = f"event result exceeds {MAX_EVENTS} events"
-    else:
-        document["events"][0]["evidence"] = [
-            evidence() for _ in range(MAX_EVIDENCE_PER_EVENT + 1)
-        ]
-        expected = f"event evidence exceeds {MAX_EVIDENCE_PER_EVENT} entries"
-
-    with pytest.raises(EventResultError) as caught:
-        parse_grounded_event_result(document)
-
-    assert (caught.value.code, caught.value.detail) == ("result-invalid", expected)
+    assert len(parsed.events) == 250
+    assert len(parsed.events[0].evidence) == 64
 
 
 def test_refused_and_partial_outcomes_are_explicit_and_consistent():

@@ -659,16 +659,13 @@ def test_native_runtime_verification_refuses_missing_distribution(monkeypatch):
     assert str(excinfo.value) == "qualified llama.cpp runtime is not installed"
 
 
-def test_output_token_limit_honors_boundary_and_refuses_oversized_generation():
-    assert runtime._output_token_limit(runtime.MAX_RUNTIME_OUTPUT_TOKENS) == 4_096
-
-    with pytest.raises(ProviderGenerationError) as excinfo:
-        runtime._output_token_limit(runtime.MAX_RUNTIME_OUTPUT_TOKENS + 1)
-
-    assert (excinfo.value.code, excinfo.value.generation_started) == (
-        "admission-refused",
-        False,
-    )
+def test_a_task_that_states_no_output_budget_is_not_given_one():
+    # This provider used to refuse above 4,096 tokens, which is a policy number
+    # wearing the shape of a hardware limit: it turned a long answer into a
+    # refused job. None asks llama.cpp for no ceiling, so generation ends at the
+    # model's stop token or the edge of the context.
+    assert runtime._output_token_limit(None) is None
+    assert runtime._output_token_limit(8_192) == 8_192
 
 
 def test_runtime_constructor_and_load_fail_closed_at_gpu_model_boundary(tmp_path):
@@ -2028,6 +2025,11 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
     model = BootstrapArtifact("qwen3-8b-q4-k-m", "1.0.0", "gguf", "a" * 64, tmp_path / "m")
 
     class Bootstrap:
+        model_choice = ""
+
+        def chosen_or(self, default_artifact_id):
+            return self.require_artifact(self.model_choice or default_artifact_id)
+
         accelerator_lease_path = lease
         state_path = None
 
@@ -2052,6 +2054,11 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
     )
 
     class DocumentBootstrap:
+        model_choice = ""
+
+        def chosen_or(self, default_artifact_id):
+            return self.require_artifact(self.model_choice or default_artifact_id)
+
         accelerator_lease_path = lease
         state_path = tmp_path
 
@@ -2080,6 +2087,11 @@ def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
     )
 
     class Bootstrap:
+        model_choice = ""
+
+        def chosen_or(self, default_artifact_id):
+            return self.require_artifact(self.model_choice or default_artifact_id)
+
         accelerator_lease_path = lease
         state_path = None
 
@@ -2101,6 +2113,11 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
     qualified = []
 
     class Bootstrap:
+        model_choice = ""
+
+        def chosen_or(self, default_artifact_id):
+            return self.require_artifact(self.model_choice or default_artifact_id)
+
         accelerator_lease_path = lease
         state_path = tmp_path
 
@@ -2192,6 +2209,11 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
     )
 
     class Bootstrap:
+        model_choice = ""
+
+        def chosen_or(self, default_artifact_id):
+            return self.require_artifact(self.model_choice or default_artifact_id)
+
         accelerator_lease_path = lease
         state_path = state
 

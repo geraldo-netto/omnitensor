@@ -11,6 +11,9 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
 - Do not create duplicate rows; update the existing row when a finding changes.
 - Move findings that cannot progress without external input, hardware, credentials, or a
   dependency into the `Blocked` table; move them back to `Findings` when they become actionable.
+- State a dependency in the description, where it can say *why*, rather than as a bare
+  list of ids: the ids column carried information nothing read, and a third of the rows
+  cited ids that no longer had rows.
 - Once a finding is fully resolved and verified, remove its row in the same scoped commit as
   the resolution. `done` is transitional only; no completed row may remain after its
   resolution is committed.
@@ -21,11 +24,10 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
 - Status in `Blocked`: `blocked`.
   Statuses in `Rejected / Won't fix`: `rejected`, `wont_fix`.
 - Severities: `critical`, `high`, `medium`, `low`. Efforts: `xs`, `s`, `m`, `l`, `xl`.
-- `related ids` holds comma-separated IDs, `—` when none.
 - Keep descriptions concise, actionable, and specific.
 - All three tables use exactly this schema:
 
-  `| id | status | severity | effort | related ids | description |`
+  `| id | status | severity | effort | description |`
 
 ## Software design and architecture
 
@@ -38,6 +40,16 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
 - The canonical JSON schemas in `schemas/` are the contract with the Cinnamon applet.
   Never emit a document that has not been validated against them; never weaken a schema
   without coordinating both repositories.
+- **Never cap or bound a resource unless explicitly asked to**, and never cap input or
+  output tokens. They exist to deliver the expected answer; time and performance are the
+  correct price. Every ceiling is a wrong answer waiting for a large enough input — a
+  programme with 65 events against `maxItems: 64`, an answer truncated mid-object by a
+  token budget and surfaced as "invalid output". Solve size by splitting the work (one
+  generation per span, extraction in passes that accumulate), never by bounding the
+  answer, and remove a ceiling rather than raising it. The only legitimate bound on a
+  generation is the context window itself, which is arithmetic rather than policy.
+  Bounds on what a person *selected* (how many files, how large) and protocol frame
+  limits are not this; ceilings on what they are told back always are.
 - There is deliberately NO CPU backend anywhere (tpu > npu > gpu only). Never add CPU
   execution paths or fallbacks, however convenient.
 - Keep architecture proportional; record unavoidable compromises in `TODO.md`.

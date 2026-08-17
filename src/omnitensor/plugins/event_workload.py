@@ -498,7 +498,10 @@ def event_generation_task():
             },
             "modalities": ["text", "image"],
             "outputSchema": load_schema("event-extraction-result.schema.json"),
-            "limits": {"contextTokens": 32768, "outputTokens": 1024, "outputBytes": 262144},
+            # No output ceiling. Events carry two 64-character digests each,
+            # so any budget is a document that stops mid-object and reports
+            # itself as invalid rather than as incomplete.
+            "limits": {"contextTokens": 32768},
         }
     )
 

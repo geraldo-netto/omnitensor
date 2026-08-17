@@ -455,8 +455,9 @@ def test_task_manifest_schemas_health_and_constructor_contracts():
         2,
         ("text",),
         32_768,
-        1_024,
-        262_144,
+        # No ceiling: a translation is as long as the text is.
+        None,
+        None,
     )
     assert task.system_prompt == (
         "Apply exactly the operation in the closed control fragment to the explicit selection. "
