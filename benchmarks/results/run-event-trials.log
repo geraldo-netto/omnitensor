@@ -1,0 +1,65 @@
+########## shipped baseline
+[13:25:48] no variant: measuring the shipped task as it is
+[13:25:49] loading qwen3-4b-q4-k-m on AMD Radeon RX 6600 XT (RADV NAVI23)
+[13:25:50] 7 cases
+[13:25:53]   event-explicit-date-time         FAIL    2.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:25:56]   event-written-month              FAIL    3.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:00]   event-two-in-one-document        FAIL    3.5s  failed: answers-rather-than-refusing, at_least
+[13:26:03]   event-with-location              FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:08]   event-ics-like                   FAIL    4.6s  failed: answers-rather-than-refusing, at_least
+[13:26:12]   event-afternoon-24h              FAIL    3.9s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:15]   event-named-activity             FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:15] 0/7 correct (0%), rules 0%, 3.6s per case
+[13:26:15] what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+########## benchmarks/trials/event-timezone-rule.json
+[13:26:16] variant timezone-rule: changed instructionTemplate
+[13:26:17] loading qwen3-4b-q4-k-m on AMD Radeon RX 6600 XT (RADV NAVI23)
+[13:26:18] 7 cases
+[13:26:21]   event-explicit-date-time         FAIL    2.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:24]   event-written-month              FAIL    3.2s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:27]   event-two-in-one-document        FAIL    3.5s  failed: answers-rather-than-refusing, at_least
+[13:26:31]   event-with-location              FAIL    3.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:34]   event-ics-like                   FAIL    3.5s  failed: answers-rather-than-refusing, at_least
+[13:26:38]   event-afternoon-24h              FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:41]   event-named-activity             FAIL    3.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:41] 0/7 correct (0%), rules 0%, 3.2s per case
+[13:26:41] what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+########## benchmarks/trials/event-fields-named.json
+[13:26:41] variant fields-named: changed instructionTemplate
+[13:26:42] loading qwen3-4b-q4-k-m on AMD Radeon RX 6600 XT (RADV NAVI23)
+[13:26:43] 7 cases
+[13:26:45]   event-explicit-date-time         FAIL    2.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:48]   event-written-month              FAIL    3.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:52]   event-two-in-one-document        FAIL    3.4s  failed: answers-rather-than-refusing, at_least
+[13:26:55]   event-with-location              FAIL    3.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:26:58]   event-ics-like                   FAIL    3.5s  failed: answers-rather-than-refusing, at_least
+[13:27:01]   event-afternoon-24h              FAIL    3.1s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:05]   event-named-activity             FAIL    3.0s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:05] 0/7 correct (0%), rules 0%, 3.0s per case
+[13:27:05] what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+########## benchmarks/trials/event-plain-system.json
+[13:27:05] variant plain-system: changed system
+[13:27:06] loading qwen3-4b-q4-k-m on AMD Radeon RX 6600 XT (RADV NAVI23)
+[13:27:07] 7 cases
+[13:27:09]   event-explicit-date-time         FAIL    2.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:13]   event-written-month              FAIL    3.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:16]   event-two-in-one-document        FAIL    3.4s  failed: answers-rather-than-refusing, at_least
+[13:27:19]   event-with-location              FAIL    3.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:23]   event-ics-like                   FAIL    3.5s  failed: answers-rather-than-refusing, at_least
+[13:27:26]   event-afternoon-24h              FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:30]   event-named-activity             FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:30] 0/7 correct (0%), rules 0%, 3.2s per case
+[13:27:30] what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
+########## benchmarks/trials/event-both.json
+[13:27:30] variant both: changed system, instructionTemplate, outputTokens 1024 to 2048
+[13:27:31] loading qwen3-4b-q4-k-m on AMD Radeon RX 6600 XT (RADV NAVI23)
+[13:27:32] 7 cases
+[13:27:35]   event-explicit-date-time         FAIL    2.7s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:27:58]   event-written-month              ok     23.3s
+[13:28:02]   event-two-in-one-document        FAIL    3.6s  failed: answers-rather-than-refusing, at_least
+[13:28:13]   event-with-location              ok     11.0s
+[13:28:16]   event-ics-like                   FAIL    3.6s  failed: answers-rather-than-refusing, at_least
+[13:28:20]   event-afternoon-24h              FAIL    3.6s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:28:23]   event-named-activity             FAIL    3.5s  failed: answers-rather-than-refusing, at_least, event_starts
+[13:28:23] 2/7 correct (29%), rules 32%, 7.3s per case
+[13:28:23] what failed: {"answers-rather-than-refusing": 5, "at_least": 5, "event_starts": 3}

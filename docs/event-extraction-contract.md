@@ -37,6 +37,44 @@ measurement: `events.items` is a `$ref` to `$defs/event`, which specifies all
 eight fields and requires them. The schema is not vague about what an event is.
 It is precise about it in a way no source can satisfy.
 
+## Measured, not guessed
+
+Five wordings against the seven answerable cases on `qwen3-4b`, 2026-08-17:
+
+| wording | correct | what it changed |
+| --- | --- | --- |
+| shipped | 0/7 | — |
+| timezone rule | 0/7 | told the model what to put in `timezone` when the source is silent |
+| fields named | 0/7 | listed every event field the plugin needs |
+| plain system | 0/7 | removed the "never confirm events" ambiguity |
+| **all three, and 2,048 output tokens** | **2/7** | the above together |
+
+So no single wording moves it, and the combination barely does. Two further
+findings explain why, and both are worse than a prompt problem.
+
+**The deterministic fallback matches one sentence nobody writes.** When the
+model refuses, the provider retries with a reconsideration prompt, and if that
+also refuses it falls back to a regular expression. That expression requires
+exactly:
+
+    <title> is in <location> on <day> <Month> <year> from HH:MM to HH:MM <Zone>.
+
+An end time, an explicit IANA zone, exactly one source, and no occurrence of
+the words *create, emit, ignore, instruction, make* or *output* anywhere in the
+text — a prompt-injection guard that also discards "Team meeting to make the
+plan". *"Project review with Ana on 2026-09-03 at 14:00 in Lisbon"* matches
+nothing.
+
+**The qualification corpus was written to that shape.** `evaluation-corpora/
+event-extraction-v1.json` holds four cases, and the English one reads *"Release
+planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 Europe/Rome."* —
+the regular expression's own sentence. That is how a workload that cannot read
+an ordinary calendar invitation holds a passing receipt.
+
+**And 1,024 output tokens is too few.** The only wording that produced any
+event at all was also the only one that raised the budget. One valid event
+carries two 64-character digests before anything else is said.
+
 ## Principles
 
 1. **Capture everything stated; invent nothing.** Where more detail exists in
