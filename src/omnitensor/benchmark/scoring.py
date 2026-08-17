@@ -104,7 +104,9 @@ def _text_of(document: dict) -> str:
         document.get("summary"),
         document.get("detail"),
     ]
-    for key in ("tasks", "events", "suggestions", "citations"):
+    # Both the answer shape a model emits and the result shape a plugin maps it
+    # to: a rule should work on whichever document it is handed.
+    for key in ("tasks", "events", "suggestions", "plan", "citations"):
         value = document.get(key)
         if isinstance(value, list):
             parts.extend(_flatten(item) for item in value)

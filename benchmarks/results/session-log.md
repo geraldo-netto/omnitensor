@@ -68,15 +68,23 @@ rewritten after each model, so an interrupted run still leaves findings.
   perfectly stable and perfectly useless. This is OMNI-0354, sharpened, and it
   is a known defect rather than anything this work caused.
 
+- **`file-organizer` scored 0/10, and that too was my cases.** They counted
+  `plan`, which is the shape the *plugin* maps an answer into; the model emits
+  `suggestions`. Every case asked about a field that is never present, so
+  nothing could pass — the 56% rule score is what the model actually did. Fixed,
+  re-measurement queued, and there is now a test pairing every case's
+  collections against the schema its task declares, so the third instance of
+  this mistake fails in a second rather than after 28 minutes of GPU time.
+
 ## Queued, in order
 
 1. Discrete card (RX 6600 XT), 8B then 4B, all four workloads — running.
 2. Integrated 610M, same models and cases — starts automatically when the
    first finishes, into `benchmarks/results/integrated/`. This is OMNI-0364's
    measurement. Serialised because both take the same accelerator lease.
-3. `ask-selected-files` only, both models, with the corrected cases, into
-   `benchmarks/results/ask-corrected/`. Those two rows supersede the ones in
-   the first table.
+3. `ask-selected-files` and `file-organizer`, both models, with the corrected
+   cases, into `benchmarks/results/corrected/`. Those rows supersede the ones
+   in the first table.
 
 ## Still to do
 

@@ -479,3 +479,70 @@ class TestCatchingAnInvention:
         )
 
         assert judgement.correct is True
+
+
+class TestAskingForWhatTheModelActuallyEmits:
+    """A case must name the shape the model produces, not the one a plugin
+    maps it to afterwards.
+
+    Both mistakes in this file's first version were this: a refusal state that
+    only the plugin result has, and `plan` when the answer schema says
+    `suggestions`. Neither could ever pass, and each cost a workload's worth of
+    GPU time to discover. This pins the pairing so the next one is caught here.
+    """
+
+    # Workload, the schema its task declares, and the collections that schema
+    # holds. The names differ from the workload ids, which is part of why this
+    # went wrong twice.
+    ANSWER_SCHEMAS = {
+        "ask-selected-files": ("document-question-answer", {"answer", "citations"}),
+        "file-organizer": ("file-organizer-answer", {"suggestions"}),
+        "selected-text-tools": (
+            "selected-text-answer",
+            {"operation", "result", "tasks", "evidence"},
+        ),
+    }
+
+    def collections_named_by(self, workload):
+        named = set()
+        for loaded in case_files.load(workload):
+            named |= set(loaded.expect.get("at_least", {}))
+        return named
+
+    @pytest.mark.parametrize("workload", sorted(ANSWER_SCHEMAS))
+    def test_every_collection_a_case_counts_is_one_the_answer_holds(self, workload):
+        _schema, keys = self.ANSWER_SCHEMAS[workload]
+        named = self.collections_named_by(workload)
+
+        assert named <= keys, (
+            f"{workload} cases count {named - keys}, "
+            "which the task's answer schema does not hold"
+        )
+
+    def test_the_answer_shapes_here_are_the_ones_the_schemas_declare(self):
+        """So this test fails if a schema moves, rather than quietly agreeing
+        with a stale copy of it."""
+        from omnitensor.registry import load_schema
+
+        for workload, (name, expected) in self.ANSWER_SCHEMAS.items():
+            declared = set(load_schema(f"{name}.schema.json").get("properties", {}))
+            declared -= {"version", "requestId"}
+
+            assert expected <= declared, f"{workload}: {expected - declared} is not declared"
+
+    def test_a_rule_reads_both_the_answer_shape_and_the_result_shape(self):
+        """The same rule is useful on either document, and which one it gets
+        depends on whether a plugin has run."""
+        answer = judge(
+            case(expect={"contains": ["deploy.sh"]}),
+            {"suggestions": [{"fileName": "deploy.sh"}]},
+            SOURCES,
+        )
+        result = judge(
+            case(expect={"contains": ["deploy.sh"]}),
+            {"plan": [{"fileName": "deploy.sh"}]},
+            SOURCES,
+        )
+
+        assert answer.correct is True
+        assert result.correct is True

@@ -30,3 +30,17 @@
 [2026-08-17 01:52:39] qwen3-8b-q4-k-m · event-extraction: 3/10 correct (30%), rules 14%, 31.7s per case
 [2026-08-17 01:52:39]   what failed: {"answers-rather-than-refusing": 7, "at_least": 7, "event_starts": 5}
 [2026-08-17 01:52:39] qwen3-8b-q4-k-m · file-organizer: 10 cases
+[2026-08-17 01:55:29]   organize-two-invoices              FAIL  169.8s  failed: at_least
+[2026-08-17 01:58:16]   organize-mixed-kinds               FAIL  167.1s  failed: contains, at_least
+[2026-08-17 01:59:35]   organize-single-file               FAIL   78.7s  failed: at_least
+[2026-08-17 02:02:22]   organize-duplicates                FAIL  167.1s  failed: at_least
+[2026-08-17 02:06:51]   organize-three-mixed               FAIL  269.0s  failed: at_least
+[2026-08-17 02:09:34]   organize-photos                    FAIL  163.3s  failed: at_least
+[2026-08-17 02:12:15]   organize-code-and-docs             FAIL  160.7s  failed: contains, at_least
+[2026-08-17 02:13:39]   organize-keeps-names               FAIL   84.0s  failed: at_least
+[2026-08-17 02:18:13]   organize-four-files                FAIL  273.9s  failed: at_least
+[2026-08-17 02:20:44]   organize-ambiguous-name            FAIL  151.5s  failed: at_least
+[2026-08-17 02:20:44] qwen3-8b-q4-k-m · file-organizer: 0/10 correct (0%), rules 56%, 168.5s per case
+[2026-08-17 02:20:44]   what failed: {"at_least": 10, "contains": 2}
+[2026-08-17 02:20:44] qwen3-8b-q4-k-m · selected-text-tools: 10 cases
+[2026-08-17 02:22:12]   text-summarize                     ok     87.6s

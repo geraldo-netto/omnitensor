@@ -1,6 +1,6 @@
 {
  "workload": "file-organizer",
- "note": "One fragment per file: its name, then what it contains. The plan must name only these files.",
+ "note": "One fragment per file: its name, then what it contains. Expectations name the task's own answer shape — `suggestions` — not the `plan` the plugin maps it to afterwards; this harness measures the model, so it asks for what the model emits.",
  "cases": [
   {
    "id": "organize-two-invoices",
@@ -10,7 +10,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 2
+     "suggestions": 2
     },
     "absent": [
      "invoice-0419"
@@ -25,7 +25,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 2
+     "suggestions": 2
     },
     "contains": [
      "contract-nordwind.pdf"
@@ -39,7 +39,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 1
+     "suggestions": 1
     },
     "contains": [
      "quarterly-report-q2.pdf"
@@ -54,7 +54,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 2
+     "suggestions": 2
     }
    }
   },
@@ -67,7 +67,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 3
+     "suggestions": 3
     },
     "absent": [
      "budget-2025"
@@ -82,7 +82,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 2
+     "suggestions": 2
     }
    }
   },
@@ -94,7 +94,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 2
+     "suggestions": 2
     },
     "contains": [
      "deploy.sh"
@@ -109,7 +109,7 @@
    "note": "A plan that renames a file it was not asked about, or invents one, is the failure.",
    "expect": {
     "at_least": {
-     "plan": 1
+     "suggestions": 1
     },
     "contains": [
      "acordo-nordwind-2026.pdf"
@@ -126,7 +126,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 4
+     "suggestions": 4
     }
    }
   },
@@ -137,7 +137,7 @@
    ],
    "expect": {
     "at_least": {
-     "plan": 1
+     "suggestions": 1
     },
     "contains": [
      "scan001.pdf"
