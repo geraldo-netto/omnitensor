@@ -272,20 +272,30 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("directory", "plugin_id", "module", "artifact_ids"),
     [
-        ("event-extraction", "event-extraction", "omnitensor_qwen_event", ["qwen3-8b-q4-k-m"]),
+        (
+            "event-extraction",
+            "event-extraction",
+            "omnitensor_qwen_event",
+            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
+        ),
         (
             "ask-selected-files",
             "ask-selected-files",
             "omnitensor_qwen_ask",
-            ["qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
+            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
         ),
         (
             "selected-text-tools",
             "selected-text-tools",
             "omnitensor_qwen_selected_text",
-            ["qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
+            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
         ),
-        ("file-organizer", "file-organizer", "omnitensor_qwen_file_organizer", ["qwen3-8b-q4-k-m"]),
+        (
+            "file-organizer",
+            "file-organizer",
+            "omnitensor_qwen_file_organizer",
+            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
+        ),
     ],
 )
 def test_provider_distribution_manifest_and_entry_point_identity_agree(

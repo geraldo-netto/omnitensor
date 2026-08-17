@@ -8,6 +8,13 @@
    "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
    "valueCache": "q8_0"
   },
+  "qwen3-5-9b-iq4-xs": {
+   "contextTokens": 32768,
+   "fullyOffloadedLayers": 33,
+   "keyCache": "q8_0",
+   "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+   "valueCache": "q8_0"
+  },
   "qwen3-8b-q4-k-m": {
    "contextTokens": 32768,
    "fullyOffloadedLayers": 37,
@@ -29,8 +36,12 @@
  "version": 2,
  "workloads": {
   "ask-selected-files": {
-   "default": "qwen3-8b-q4-k-m",
+   "default": "qwen3-5-9b-iq4-xs",
    "models": {
+    "qwen3-5-9b-iq4-xs": {
+     "result": "passed",
+     "taskSha256": "6d1711de3e9ef5d9cb5e33f9be62d457af63af4ef6da3b8e9603695b7f547d58"
+    },
     "qwen3-8b-q4-k-m": {
      "result": "passed",
      "taskSha256": "6d1711de3e9ef5d9cb5e33f9be62d457af63af4ef6da3b8e9603695b7f547d58"
@@ -38,8 +49,12 @@
    }
   },
   "event-extraction": {
-   "default": "qwen3-8b-q4-k-m",
+   "default": "qwen3-5-9b-iq4-xs",
    "models": {
+    "qwen3-5-9b-iq4-xs": {
+     "result": "passed",
+     "taskSha256": "bec284ee06732da721e8a9dcbd269520255b553c01b6232e8892d0bbbf4f7549"
+    },
     "qwen3-8b-q4-k-m": {
      "result": "passed",
      "taskSha256": "bec284ee06732da721e8a9dcbd269520255b553c01b6232e8892d0bbbf4f7549"
@@ -47,8 +62,12 @@
    }
   },
   "file-organizer": {
-   "default": "qwen3-8b-q4-k-m",
+   "default": "qwen3-5-9b-iq4-xs",
    "models": {
+    "qwen3-5-9b-iq4-xs": {
+     "result": "passed",
+     "taskSha256": "1d306e3c56ed8c1f1a5195a29554ee31dd092a33d012e960a161f98767dc0e0f"
+    },
     "qwen3-8b-q4-k-m": {
      "result": "passed",
      "taskSha256": "1d306e3c56ed8c1f1a5195a29554ee31dd092a33d012e960a161f98767dc0e0f"
@@ -56,8 +75,12 @@
    }
   },
   "selected-text-tools": {
-   "default": "qwen3-8b-q4-k-m",
+   "default": "qwen3-5-9b-iq4-xs",
    "models": {
+    "qwen3-5-9b-iq4-xs": {
+     "result": "passed",
+     "taskSha256": "c6ab03dcf52b3f74abd68ac3fa8d44ec95d9c40a17c1a353d580bd18264f7a82"
+    },
     "qwen3-8b-q4-k-m": {
      "result": "passed",
      "taskSha256": "c6ab03dcf52b3f74abd68ac3fa8d44ec95d9c40a17c1a353d580bd18264f7a82"

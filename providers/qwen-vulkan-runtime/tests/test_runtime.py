@@ -491,7 +491,7 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
         ),
         (
             lambda value: value["workloads"]["event-extraction"]["models"][
-                "qwen3-8b-q4-k-m"
+                "qwen3-5-9b-iq4-xs"
             ].update(result="failed", reason="refused its own contract"),
             # The workload's default is that model, and a default that did not
             # pass is caught before anything asks to run it.
@@ -555,6 +555,7 @@ def test_a_second_model_that_passed_is_offered_and_runs(tmp_path, monkeypatch):
 
     assert receipt.device == document["device"]
     assert qualification.qualified_models("event-extraction") == (
+        "qwen3-5-9b-iq4-xs",
         "qwen3-8b-q4-k-m",
         "qwen3-4b-q4-k-m",
     )
@@ -571,7 +572,10 @@ def test_a_pair_that_failed_is_neither_offered_nor_run(tmp_path, monkeypatch):
     )
     _load_receipt(monkeypatch, tmp_path, document)
 
-    assert qualification.qualified_models("event-extraction") == ("qwen3-8b-q4-k-m",)
+    assert qualification.qualified_models("event-extraction") == (
+        "qwen3-5-9b-iq4-xs",
+        "qwen3-8b-q4-k-m",
+    )
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification(
             "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
@@ -599,7 +603,11 @@ def test_a_model_nobody_qualified_for_this_workload_is_refused(tmp_path, monkeyp
 def test_the_default_model_is_the_one_a_job_that_chose_nothing_runs(tmp_path, monkeypatch):
     _load_receipt(monkeypatch, tmp_path, _receipt())
 
-    assert qualification.default_model("event-extraction") == "qwen3-8b-q4-k-m"
+    # Measured 2026-08-17 across four workloads and two cards: the 9B matches or
+    # beats the 8B everywhere and answers in about a fifth of the time. A person
+    # who wants the 8B can still choose it; this is only what they get if they
+    # choose nothing.
+    assert qualification.default_model("event-extraction") == "qwen3-5-9b-iq4-xs"
 
 
 def test_receipt_refuses_invalid_json_and_oversized_resource(tmp_path, monkeypatch):

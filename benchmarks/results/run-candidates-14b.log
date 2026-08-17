@@ -1,0 +1,11 @@
+[2026-08-17 14:52:00] measuring on 0: AMD Radeon 610M (RADV RAPHAEL_MENDOCINO) (integrated)
+[2026-08-17 14:52:00] models: qwen3-14b-ud-iq3-xxs, qwen3-14b-q4-k-m
+[2026-08-17 14:52:00] workloads: ask-selected-files, event-extraction, file-organizer, selected-text-tools
+[2026-08-17 14:52:00] qwen3-14b-ud-iq3-xxs: 5.60 GiB weights + 2.66 GiB cache at 32,768 tokens against 44.50 GiB free on gpu-renderD129 — expected to fit
+[2026-08-17 14:52:00] loading qwen3-14b-ud-iq3-xxs from model.gguf on AMD Radeon 610M (RADV RAPHAEL_MENDOCINO)
+[2026-08-17 14:52:13] loaded in 12.8s — 41/41 layers on Vulkan
+[2026-08-17 14:52:13] qwen3-14b-ud-iq3-xxs · ask-selected-files: 10 cases
+[2026-08-17 14:55:23]   ask-invoice-total                  ok    189.6s
+[2026-08-17 14:59:21]   ask-who-signed                     ok    237.9s
+[2026-08-17 15:02:36]   ask-deadline                       ok    195.5s
+[2026-08-17 15:07:51]   ask-warranty-length                ok    314.3s

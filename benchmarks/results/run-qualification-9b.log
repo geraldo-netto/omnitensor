@@ -1,0 +1,11 @@
+[2026-08-17 14:57:24] measuring on 1: AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 14:57:24] models: qwen3-5-9b-iq4-xs
+[2026-08-17 14:57:24] workloads: ask-selected-files, event-extraction, file-organizer, selected-text-tools
+[2026-08-17 14:57:25] qwen3-5-9b-iq4-xs: 4.81 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.88 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 14:57:25] loading qwen3-5-9b-iq4-xs from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 14:57:37] loaded in 12.0s — 33/33 layers on Vulkan
+[2026-08-17 14:57:37] qwen3-5-9b-iq4-xs · ask-selected-files: 10 cases
+[2026-08-17 14:57:52]   ask-invoice-total                  ok     15.6s
+[2026-08-17 14:58:11]   ask-who-signed                     ok     19.0s
+[2026-08-17 14:58:29]   ask-deadline                       ok     17.4s
+[2026-08-17 14:58:46]   ask-warranty-length                ok     17.6s

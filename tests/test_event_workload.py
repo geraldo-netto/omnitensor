@@ -175,13 +175,21 @@ def test_manifest_is_closed_and_coordinates_manual_private_workload():
         "progress",
     ]
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
+    # More than one generation model is declared so a person can choose between
+    # them; the first is only the default.
     assert manifest["plugin"]["artifacts"] == [
+        {
+            "id": "qwen3-5-9b-iq4-xs",
+            "version": "1.0.0",
+            "format": "gguf",
+            "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+        },
         {
             "id": "qwen3-8b-q4-k-m",
             "version": "1.0.0",
             "format": "gguf",
             "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
-        }
+        },
     ]
 
 

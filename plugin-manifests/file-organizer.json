@@ -21,6 +21,12 @@
     "triggers": ["manual"],
     "artifacts": [
       {
+        "id": "qwen3-5-9b-iq4-xs",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429"
+      },
+      {
         "id": "qwen3-8b-q4-k-m",
         "version": "1.0.0",
         "format": "gguf",
