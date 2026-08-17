@@ -14,7 +14,6 @@ from .acceptance_contracts import (
     ControlProbe,
     InstallationReport,
     ServiceProbe,
-    legacy_acceptance_value,
 )
 from .acceptance_probes import _runtime_verdict
 from .registry import (
@@ -88,8 +87,8 @@ def check_service(probe: ServiceProbe) -> Check:
 def check_schemas(names: Sequence[str] = REQUIRED_SCHEMAS) -> Check:
     missing: list[str] = []
     invalid: list[str] = []
-    schema_path = legacy_acceptance_value("_schema_path", _schema_path)
-    schema_loader = legacy_acceptance_value("load_schema", load_schema)
+    schema_path = _schema_path
+    schema_loader = load_schema
     for name in names:
         try:
             schema_path(name)
@@ -112,12 +111,12 @@ def check_schemas(names: Sequence[str] = REQUIRED_SCHEMAS) -> Check:
 
 def check_workload_catalog(root: Path | None = None) -> Check:
     try:
-        workload_root = legacy_acceptance_value("bundled_workloads_path", bundled_workloads_path)
+        workload_root = bundled_workloads_path
         resolved = root or workload_root()
     except FileNotFoundError as error:
         return Check("workloads", False, str(error))
     try:
-        loader = legacy_acceptance_value("load_workloads", load_workloads)
+        loader = load_workloads
         workloads = loader(resolved)
     except ManifestError as error:
         return Check("workloads", False, f"bundled catalog is invalid: {error}")
@@ -176,7 +175,7 @@ def check_bus(probe: ControlProbe) -> Check:
         acknowledgement = json.loads(reply)
     except ValueError:
         return Check("control", False, "apply-command did not return JSON")
-    validator = legacy_acceptance_value("validate_document", validate_document)
+    validator = validate_document
     violations = validator("runtime-acknowledgement.schema.json", acknowledgement)
     if violations:
         return Check("control", False, f"acknowledgement violates contract: {violations[0]}")
@@ -199,7 +198,7 @@ def check_snapshot(
         return Check("snapshot", False, f"no snapshot at {path}")
     except (OSError, ValueError) as error:
         return Check("snapshot", False, f"snapshot is unreadable: {error}")
-    validator = legacy_acceptance_value("validate_document", validate_document)
+    validator = validate_document
     violations = validator("runtime-snapshot.schema.json", document)
     if violations:
         return Check("snapshot", False, f"snapshot violates contract: {violations[0]}")
@@ -349,7 +348,7 @@ def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) 
     usable: list[str] = []
     present: list[str] = []
     reasons: list[str] = []
-    verdict_for = legacy_acceptance_value("_runtime_verdict", _runtime_verdict)
+    verdict_for = _runtime_verdict
     for backend, module, _remedy in runtimes:
         try:
             if importlib.util.find_spec(module) is None:
@@ -381,21 +380,3 @@ def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) 
 
 def verify_installation(checks: Sequence[Check]) -> InstallationReport:
     return InstallationReport(tuple(checks))
-
-
-for _legacy_function in (
-    check_executable,
-    check_service,
-    check_schemas,
-    check_workload_catalog,
-    check_plugin_discovery,
-    check_isolation,
-    check_bus,
-    check_snapshot,
-    check_applet,
-    check_confinement,
-    check_applet_contract,
-    check_backends,
-    verify_installation,
-):
-    _legacy_function.__module__ = "omnitensor.acceptance"

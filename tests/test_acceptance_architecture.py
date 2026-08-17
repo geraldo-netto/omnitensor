@@ -62,31 +62,35 @@ def test_facade_exports_the_exact_owner_objects():
         assert getattr(facade, name) is getattr(cli, name)
 
 
-def test_moved_values_keep_legacy_repr_and_pickle_globals():
+def test_acceptance_values_pickle_through_the_module_that_defines_them():
+    # These used to claim `omnitensor.acceptance` as their `__module__` so that
+    # pickle resolved them through the facade. They now say where they live,
+    # which is what pickle needs and what a traceback should show.
     outcome = facade.Check("service", True, "active")
     report = facade.InstallationReport((outcome,))
 
-    assert type(outcome).__module__ == "omnitensor.acceptance"
-    assert type(report).__module__ == "omnitensor.acceptance"
-    assert facade.SystemdUserServiceProbe.__module__ == "omnitensor.acceptance"
-    assert facade.SocketApplyCommandProbe.__module__ == "omnitensor.acceptance"
+    assert type(outcome).__module__ == "omnitensor.acceptance_contracts"
+    assert type(report).__module__ == "omnitensor.acceptance_contracts"
+    assert facade.SystemdUserServiceProbe.__module__ == "omnitensor.acceptance_probes"
+    assert facade.SocketApplyCommandProbe.__module__ == "omnitensor.acceptance_probes"
     assert pickle.loads(pickle.dumps(outcome)) == outcome
     assert pickle.loads(pickle.dumps(report)) == report
 
-    for name in (
-        "check_executable",
-        "check_schemas",
-        "check_backends",
-        "verify_installation",
-        "_executor_for",
-        "_runtime_verdict",
-        "_run_command",
-        "load_applet_checksums",
-        "build_default_report",
-        "main",
-    ):
+    owners = {
+        "check_executable": "omnitensor.acceptance_checks",
+        "check_schemas": "omnitensor.acceptance_checks",
+        "check_backends": "omnitensor.acceptance_checks",
+        "verify_installation": "omnitensor.acceptance_checks",
+        "_executor_for": "omnitensor.acceptance_probes",
+        "_runtime_verdict": "omnitensor.acceptance_probes",
+        "_run_command": "omnitensor.acceptance_probes",
+        "load_applet_checksums": "omnitensor.acceptance_cli",
+        "build_default_report": "omnitensor.acceptance_cli",
+        "main": "omnitensor.acceptance_cli",
+    }
+    for name, owner in owners.items():
         value = getattr(facade, name)
-        assert value.__module__ == "omnitensor.acceptance"
+        assert value.__module__ == owner
         assert pickle.loads(pickle.dumps(value)) is value
 
 
@@ -126,10 +130,10 @@ def test_a_leaf_import_does_not_load_the_facade():
     assert completed.returncode == 0, completed.stderr
 
 
-def test_backend_and_executor_private_facade_seams_are_live(monkeypatch):
+def test_backend_and_executor_private_seams_are_live(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        facade,
+        checks,
         "_runtime_verdict",
         lambda module: calls.append(module) or None,
     )
@@ -138,14 +142,14 @@ def test_backend_and_executor_private_facade_seams_are_live(monkeypatch):
 
     available = SimpleNamespace(available=False, code="runtime-unusable", reason="broken")
     executor = SimpleNamespace(availability=lambda: available)
-    monkeypatch.setattr(facade, "_executor_for", lambda module: executor)
+    monkeypatch.setattr(probes, "_executor_for", lambda module: executor)
     assert probes._runtime_verdict("sample-runtime") == "broken"
 
     def explode():
         raise OSError
 
     exploding = SimpleNamespace(availability=explode)
-    monkeypatch.setattr(facade, "_executor_for", lambda module: exploding)
+    monkeypatch.setattr(probes, "_executor_for", lambda module: exploding)
     assert probes._runtime_verdict("sample-runtime") == "OSError"
 
 
@@ -153,20 +157,20 @@ def test_workload_root_failure_stays_a_failed_check(monkeypatch):
     def missing():
         raise FileNotFoundError("bundled workload catalog is absent")
 
-    monkeypatch.setattr(facade, "bundled_workloads_path", missing)
+    monkeypatch.setattr(checks, "bundled_workloads_path", missing)
     assert checks.check_workload_catalog() == facade.Check(
         "workloads", False, "bundled workload catalog is absent"
     )
 
 
-def test_systemd_default_runner_resolves_the_facade_at_construction(monkeypatch):
+def test_systemd_default_runner_resolves_its_runner_at_construction(monkeypatch):
     calls = []
 
     def run(argv):
         calls.append(argv)
         return 0, "active\n"
 
-    monkeypatch.setattr(facade, "_run_command", run)
+    monkeypatch.setattr(probes, "_run_command", run)
     assert probes.SystemdUserServiceProbe().unit_state() == (
         True,
         "omnitensor.service is active",
@@ -202,7 +206,7 @@ def test_socket_probe_exhaustion_preserves_last_error_and_cancellation_is_not_re
     assert cancelled_attempts == ["not-json"]
 
 
-def test_cli_facade_builder_seam_preserves_arguments_and_exact_output(
+def test_cli_builder_seam_preserves_arguments_and_exact_output(
     monkeypatch, capsys, tmp_path,
 ):
     captured = []
@@ -212,7 +216,7 @@ def test_cli_facade_builder_seam_preserves_arguments_and_exact_output(
         captured.append(kwargs)
         return report
 
-    monkeypatch.setattr(facade, "build_default_report", build)
+    monkeypatch.setattr(cli, "build_default_report", build)
     snapshot = tmp_path / "state.json"
     assert cli.main(["--snapshot", str(snapshot)]) == 0
     assert captured[0]["snapshot_path"] == snapshot
@@ -229,7 +233,7 @@ def test_cli_preserves_environment_default_help_and_parse_errors(
     report = facade.InstallationReport(())
     monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "from-env.json"))
     monkeypatch.setattr(
-        facade,
+        cli,
         "build_default_report",
         lambda **kwargs: captured.append(kwargs) or report,
     )

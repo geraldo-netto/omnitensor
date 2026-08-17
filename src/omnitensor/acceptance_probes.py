@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from .acceptance_contracts import legacy_acceptance_value
-
 
 def _executor_for(module: str):
     """The executor that would actually run this runtime."""
@@ -28,7 +26,7 @@ def _runtime_verdict(module: str) -> str | None:
     """Why this runtime cannot be used, or ``None`` when it can."""
     from .executors.base import DEVICE_ABSENT  # noqa: PLC0415 - probe-only import
 
-    executor_for = legacy_acceptance_value("_executor_for", _executor_for)
+    executor_for = _executor_for
     executor = executor_for(module)
     if executor is None:
         return None
@@ -46,7 +44,7 @@ class SystemdUserServiceProbe:
 
     def __init__(self, unit: str = "omnitensor.service", *, runner=None):
         self._unit = unit
-        self._runner = runner or legacy_acceptance_value("_run_command", _run_command)
+        self._runner = runner or _run_command
 
     def unit_state(self) -> tuple[bool, str]:
         code, output = self._runner(["systemctl", "--user", "is-active", self._unit])
@@ -150,11 +148,3 @@ def _run_command(
         # A probe reports; it does not raise into the report it is filling.
         return 1, f"{argv[0]} did not answer within {timeout_s:g}s"
     return completed.returncode, completed.stdout
-
-
-for _legacy_function in (_executor_for, _runtime_verdict, _run_command):
-    _legacy_function.__module__ = "omnitensor.acceptance"
-
-
-for _legacy_type in (SystemdUserServiceProbe, SocketApplyCommandProbe):
-    _legacy_type.__module__ = "omnitensor.acceptance"

@@ -401,10 +401,10 @@ def test_a_malformed_checksum_line_is_rejected(tmp_path):
 
 
 def test_the_cli_reports_failures_and_exits_non_zero(monkeypatch, capsys, tmp_path):
-    import omnitensor.acceptance as acceptance
+    from omnitensor import acceptance_cli
 
     monkeypatch.setattr(
-        acceptance,
+        acceptance_cli,
         "build_default_report",
         lambda **_kwargs: InstallationReport(
             (Check("service", True, "active"), Check("control", False, "no reply"))
@@ -420,10 +420,10 @@ def test_the_cli_reports_failures_and_exits_non_zero(monkeypatch, capsys, tmp_pa
 
 
 def test_the_cli_exits_zero_when_everything_passes(monkeypatch, capsys, tmp_path):
-    import omnitensor.acceptance as acceptance
+    from omnitensor import acceptance_cli
 
     monkeypatch.setattr(
-        acceptance,
+        acceptance_cli,
         "build_default_report",
         lambda **_kwargs: InstallationReport((Check("service", True, "active"),)),
     )

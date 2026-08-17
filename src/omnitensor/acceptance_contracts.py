@@ -2,17 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
-
-_LEGACY_MODULE = "omnitensor.acceptance"
-
-
-def legacy_acceptance_value(name: str, fallback):
-    """Resolve a facade override without importing the facade from an owner."""
-    facade = sys.modules.get(_LEGACY_MODULE)
-    return getattr(facade, name, fallback) if facade is not None else fallback
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +46,3 @@ class ControlProbe(Protocol):
     """Whether the D-Bus surface answers with a contract-valid reply."""
 
     def apply_command(self, text: str) -> str: ...
-
-
-for _legacy_type in (Check, InstallationReport, ServiceProbe, ControlProbe):
-    _legacy_type.__module__ = _LEGACY_MODULE
