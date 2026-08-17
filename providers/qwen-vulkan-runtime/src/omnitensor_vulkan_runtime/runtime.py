@@ -163,7 +163,15 @@ class LlamaVulkanRuntime:
     def _acquire_and_load(self) -> NativeLoadReport:
         self._lease_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lease = self._lease_path.open("a+b")
-        fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
+        try:
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
+        except BaseException:
+            # `_release` closes `self._lease`, which is not set until the lock
+            # is held — so an interrupted acquisition used to leave the file
+            # open with nobody able to close it, and the lease held until the
+            # process exited.
+            lease.close()
+            raise
         self._lease = lease
         try:
             from llama_cpp import Llama, llama_cpp  # type: ignore[import-not-found]

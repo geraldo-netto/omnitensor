@@ -36,10 +36,28 @@ def test_document_model_facade_preserves_type_identity_name_and_pickle_globals(t
         "ProducerCpuBgeReferenceRunner": cpu_reference.ProducerCpuBgeReferenceRunner,
         "VulkanBgeRunner": runners.VulkanBgeRunner,
     }
+    # Each says where it is defined. They used to claim
+    # `omnitensor.training.document_model`, which stopped being true when the
+    # trainers became their own distribution: a service-only machine has no
+    # such module, so a pickle written by the serving path could not be read
+    # back and a traceback named a file that was not installed.
+    homes = {
+        "DocumentModelError": "omnitensor.document_model_types",
+        "TokenizedText": "omnitensor.document_model_types",
+        "DocumentModelEvidence": "omnitensor.document_model_types",
+        "InstalledDocumentModel": "omnitensor.document_model_types",
+        "BgeTokenizer": "omnitensor.document_model_runners",
+        "VulkanBgeRunner": "omnitensor.document_model_runners",
+        "PortableBgeRunner": "omnitensor.training.document_model_cpu_reference",
+        "ProducerCpuBgeReferenceRunner": "omnitensor.training.document_model_cpu_reference",
+    }
     for name, owner in owners.items():
         assert getattr(facade, name) is owner
-        assert owner.__module__ == LEGACY_MODULE
+        assert owner.__module__ == homes[name]
         assert pickle.loads(pickle.dumps(owner)) is owner
+    assert "omnitensor.training" not in pickle.dumps(types.TokenizedText((1,), (1,), (0,))).decode(
+        "latin-1"
+    )
     assert facade.PortableBgeRunner.__name__ == "PortableBgeRunner"
     assert facade.PortableBgeRunner is facade.ProducerCpuBgeReferenceRunner
 

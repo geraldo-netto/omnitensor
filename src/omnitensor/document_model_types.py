@@ -22,7 +22,6 @@ DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
 PRODUCER_CPU_REFERENCE_BACKEND = "producer-cpu-reference"
 
-_LEGACY_MODULE = "omnitensor.training.document_model"
 _PORTABLE_INPUT_NAMES = ("input_ids", "attention_mask", "token_type_ids")
 _NATIVE_DTYPES = {
     "input_ids": "int32",
@@ -133,12 +132,3 @@ def native_tensor_contract(recipe) -> dict:
             }
         )
     return {"inputs": converted}
-
-
-for _legacy_type in (
-    DocumentModelError,
-    TokenizedText,
-    DocumentModelEvidence,
-    InstalledDocumentModel,
-):
-    _legacy_type.__module__ = _LEGACY_MODULE

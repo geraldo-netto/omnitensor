@@ -679,6 +679,38 @@ def test_native_runtime_verification_refuses_missing_distribution(monkeypatch):
     assert str(excinfo.value) == "qualified llama.cpp runtime is not installed"
 
 
+def test_an_interrupted_lease_acquisition_closes_the_file(tmp_path, monkeypatch):
+    """`_release` closes `self._lease`, which is only set once the lock is held.
+
+    An acquisition interrupted before that left the file open with nobody able
+    to close it, and the GPU lease held until the process exited.
+    """
+    store = MemoryFragmentStore()
+    lease_path = tmp_path / "generation.lock"
+    lease_path.touch()
+    adapter = runtime.LlamaVulkanRuntime(store, lease_path)
+    opened = []
+    real_open = type(lease_path).open
+
+    def tracking_open(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(type(lease_path), "open", tracking_open)
+    monkeypatch.setattr(runtime.fcntl, "flock", _raise_interrupted)
+
+    with pytest.raises(InterruptedError):
+        adapter._acquire_and_load()
+
+    assert opened and all(handle.closed for handle in opened)
+    assert adapter._lease is None
+
+
+def _raise_interrupted(*_args, **_kwargs):
+    raise InterruptedError("interrupted while waiting for the lease")
+
+
 def test_a_task_that_states_no_output_budget_is_not_given_one():
     # This provider used to refuse above 4,096 tokens, which is a policy number
     # wearing the shape of a hardware limit: it turned a long answer into a

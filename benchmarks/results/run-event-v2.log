@@ -1,0 +1,18 @@
+[2026-08-17 17:51:46] measuring on 1: AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 17:51:46] models: qwen3-5-9b-iq4-xs
+[2026-08-17 17:51:46] workloads: event-extraction
+[2026-08-17 17:51:46] qwen3-5-9b-iq4-xs: 4.81 GiB weights + 2.12 GiB cache at 32,768 tokens against 7.92 GiB free on gpu-renderD128 — expected to fit
+[2026-08-17 17:51:46] loading qwen3-5-9b-iq4-xs from model.gguf on AMD Radeon RX 6600 XT (RADV NAVI23)
+[2026-08-17 17:51:49] loaded in 2.3s — 33/33 layers on Vulkan
+[2026-08-17 17:51:49] qwen3-5-9b-iq4-xs · event-extraction: 16 cases
+[2026-08-17 17:52:11]   event-explicit-date-time           FAIL   22.6s  failed: event_starts
+[2026-08-17 17:52:19]   event-written-month                FAIL    7.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 17:52:26]   event-two-in-one-document          FAIL    7.3s  failed: answers-rather-than-refusing, at_least, event_starts
+[2026-08-17 17:52:50]   event-with-location                FAIL   24.1s  failed: event_starts
+[2026-08-17 17:53:18]   event-ics-like                     FAIL   28.4s  failed: event_starts
+[2026-08-17 17:54:07]   event-afternoon-24h                FAIL   48.8s  failed: event_starts
+[2026-08-17 17:54:41]   event-named-activity               FAIL   33.6s  failed: event_starts
+[2026-08-17 17:55:16]   event-date-without-time            FAIL   35.1s  failed: event_needs
+[2026-08-17 17:55:49]   event-time-without-date            FAIL   33.2s  failed: answers-rather-than-refusing, at_least, event_starts, event_needs
+[2026-08-17 17:56:44]   event-recurring-weekly             FAIL   54.5s  failed: event_needs
+[2026-08-17 17:58:27]   event-banner-no-year               FAIL  103.5s  output was not JSON  failed: produced-a-usable-document

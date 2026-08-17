@@ -14,8 +14,6 @@ from .document_model_types import (
     TokenizedText,
 )
 
-_LEGACY_MODULE = "omnitensor.training.document_model"
-
 
 class BgeTokenizer:
     """Pinned one-shot tokenizer; it never reads or watches the clipboard."""
@@ -144,6 +142,3 @@ def select_document_vulkan_device(runtime, requested: int | None) -> tuple[int, 
         raise DocumentModelError("device-unavailable", detail) from error
     return selected.index, selected.name
 
-
-for _legacy_type in (BgeTokenizer, VulkanBgeRunner):
-    _legacy_type.__module__ = _LEGACY_MODULE

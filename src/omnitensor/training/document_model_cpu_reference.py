@@ -10,7 +10,6 @@ from ..document_model_types import (
     DocumentModelError,
 )
 
-_LEGACY_MODULE = "omnitensor.training.document_model"
 _PRODUCER_CAPABILITY = object()
 
 
@@ -76,5 +75,4 @@ def _producer_cpu_reference_runner(model: Path, tokenizer: BgeTokenizer) -> Port
     )
 
 
-PortableBgeRunner.__module__ = _LEGACY_MODULE
 ProducerCpuBgeReferenceRunner = PortableBgeRunner
