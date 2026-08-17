@@ -2,17 +2,11 @@ from __future__ import annotations
 
 import ast
 import asyncio
-import json
 import os
 import pickle
-import re
-import shutil
-import stat
 import subprocess
 import sys
-import tempfile
 import threading
-from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -21,8 +15,8 @@ import omnitensor.job_ports as job_ports
 from omnitensor.plugins import loading, worker_specs
 from omnitensor.plugins import loading_accelerator as accelerator
 from omnitensor.plugins import loading_staging as staging
-from omnitensor.plugins.sandbox import SELECTED_FILES_PERMISSION, FilesystemSandbox
-from omnitensor.plugins.supervisor import PluginWorkerError
+from omnitensor.plugins.sandbox import SELECTED_FILES_PERMISSION
+from omnitensor.plugins.supervisor_session import PluginWorkerError
 
 ROOT = Path(__file__).parents[1]
 LEGACY_MODULE = "omnitensor.plugins.loading"
@@ -59,17 +53,6 @@ def test_loading_facade_keeps_exact_contract_and_new_owner_identities():
     ):
         assert contract.__module__ == LEGACY_MODULE
         assert pickle.loads(pickle.dumps(contract)) is contract
-
-
-def test_loading_facade_retains_legacy_import_visible_names():
-    assert loading.json is json
-    assert loading.os is os
-    assert loading.re is re
-    assert loading.shutil is shutil
-    assert loading.stat is stat
-    assert loading.tempfile is tempfile
-    assert loading.Collection is Collection
-    assert loading.FilesystemSandbox is FilesystemSandbox
 
 
 def test_loading_leaves_import_before_facade_without_cycles():

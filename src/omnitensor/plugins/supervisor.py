@@ -1,15 +1,7 @@
-"""Ordered process supervision for identity-validated plugin workers."""
-
 from __future__ import annotations
 
-import asyncio as asyncio
-import math as math
-from collections.abc import Sequence as Sequence
-from contextlib import suppress as suppress
-from dataclasses import dataclass as dataclass
-from dataclasses import field as field
-from enum import StrEnum as StrEnum
-from typing import Protocol as Protocol
+import asyncio
+from collections.abc import Sequence
 
 from . import supervisor_process as _process
 from . import supervisor_recovery as _recovery
@@ -17,71 +9,50 @@ from . import supervisor_session as _session
 from .budgets import WorkerBudgetCode as _WorkerBudgetCode
 from .budgets import WorkerBudgetEnforcer as _WorkerBudgetEnforcer
 from .budgets import WorkerBudgetExceededError as _WorkerBudgetExceededError
-from .ipc import FRAME_FORMAT_VERSION as FRAME_FORMAT_VERSION
-from .ipc import HandshakeAgreement as HandshakeAgreement
-from .ipc import HandshakeOffer as HandshakeOffer
-from .ipc import IPCFrame as IPCFrame
-from .ipc import IPCProtocolError as IPCProtocolError
-from .ipc import WorkerMessageType as WorkerMessageType
-from .ipc import await_worker_ready as await_worker_ready
-from .ipc import execute_frame as execute_frame
-from .ipc import handshake_frame as handshake_frame
-from .ipc import parse_progress as parse_progress
-from .ipc import parse_result as parse_result
-from .ipc import perform_service_handshake as perform_service_handshake
-from .ipc import read_frame as read_frame
-from .ipc import write_frame as write_frame
-from .protocol import PluginRequest as PluginRequest
-from .protocol import PluginResult as PluginResult
-from .protocol import ProgressReporter as ProgressReporter
-from .sandbox import FilesystemSandbox as FilesystemSandbox
-from .supervisor_diagnostics import MAX_WORKER_DIAGNOSTICS as MAX_WORKER_DIAGNOSTICS
-from .supervisor_diagnostics import WorkerDiagnostic as WorkerDiagnostic
-from .supervisor_diagnostics import WorkerDiagnosticCode as WorkerDiagnosticCode
-from .supervisor_diagnostics import WorkerState as WorkerState
-from .supervisor_diagnostics import WorkerStatus as WorkerStatus
+from .ipc import (
+    HandshakeAgreement,
+    IPCProtocolError,
+    await_worker_ready,
+    execute_frame,
+    handshake_frame,
+    parse_progress,
+    parse_result,
+    perform_service_handshake,
+    read_frame,
+    write_frame,
+)
+from .protocol import PluginRequest, PluginResult, ProgressReporter
+from .supervisor_diagnostics import (
+    MAX_WORKER_DIAGNOSTICS,
+    WorkerDiagnostic,
+    WorkerDiagnosticCode,
+    WorkerState,
+    WorkerStatus,
+)
 from .supervisor_diagnostics import diagnostics_for as _diagnostics_for
 from .supervisor_diagnostics import failed_status as _failed_status
 from .supervisor_diagnostics import record_diagnostic as _record_bounded_diagnostic
 from .supervisor_process import (
-    DEFAULT_CANCEL_TIMEOUT_SECONDS as DEFAULT_CANCEL_TIMEOUT_SECONDS,
+    DEFAULT_CANCEL_TIMEOUT_SECONDS,
+    DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
+    DEFAULT_STARTUP_TIMEOUT_SECONDS,
+    DEFAULT_STOP_TIMEOUT_SECONDS,
+    MAX_SUPERVISED_WORKERS,
+    MAX_WORKER_ARGUMENT_CHARS,
+    MAX_WORKER_ARGUMENTS,
+    AsyncioSubprocessLauncher,
+    WorkerLauncher,
+    WorkerProcess,
+    WorkerSpec,
 )
-from .supervisor_process import (
-    DEFAULT_HANDSHAKE_TIMEOUT_SECONDS as DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
-)
-from .supervisor_process import (
-    DEFAULT_STARTUP_TIMEOUT_SECONDS as DEFAULT_STARTUP_TIMEOUT_SECONDS,
-)
-from .supervisor_process import DEFAULT_STOP_TIMEOUT_SECONDS as DEFAULT_STOP_TIMEOUT_SECONDS
-from .supervisor_process import MAX_SUPERVISED_WORKERS as MAX_SUPERVISED_WORKERS
-from .supervisor_process import MAX_WORKER_ARGUMENT_CHARS as MAX_WORKER_ARGUMENT_CHARS
-from .supervisor_process import MAX_WORKER_ARGUMENTS as MAX_WORKER_ARGUMENTS
-from .supervisor_process import AsyncioSubprocessLauncher as AsyncioSubprocessLauncher
-from .supervisor_process import WorkerLauncher as WorkerLauncher
-from .supervisor_process import WorkerProcess as WorkerProcess
-from .supervisor_process import WorkerSpec as WorkerSpec
-from .supervisor_process import _SubprocessWorker as _SubprocessWorker
 from .supervisor_process import cancel_monitor as _cancel_monitor
 from .supervisor_process import close_writer as _close_writer
 from .supervisor_process import terminate_after_timeout as _terminate_after_timeout
 from .supervisor_process import validate_specs as _validate_specs_owner
 from .supervisor_process import validate_timeout as _validate_timeout
-from .supervisor_recovery import DEFAULT_MAX_RESTARTS as DEFAULT_MAX_RESTARTS
-from .supervisor_recovery import (
-    DEFAULT_RESTART_BACKOFF_MULTIPLIER as DEFAULT_RESTART_BACKOFF_MULTIPLIER,
-)
-from .supervisor_recovery import DEFAULT_RESTART_DECAY_SECONDS as DEFAULT_RESTART_DECAY_SECONDS
-from .supervisor_recovery import (
-    DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS as DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS,
-)
-from .supervisor_recovery import (
-    DEFAULT_RESTART_MAX_BACKOFF_SECONDS as DEFAULT_RESTART_MAX_BACKOFF_SECONDS,
-)
-from .supervisor_recovery import MAX_RESTARTS as MAX_RESTARTS
 from .supervisor_recovery import NullWorkerFailureObserver as _NullWorkerFailureObserver
-from .supervisor_recovery import WorkerFailureObserver as WorkerFailureObserver
-from .supervisor_recovery import WorkerRecoveryPolicy as WorkerRecoveryPolicy
-from .supervisor_session import PluginWorkerError as PluginWorkerError
+from .supervisor_recovery import WorkerFailureObserver, WorkerRecoveryPolicy
+from .supervisor_session import PluginWorkerError
 from .supervisor_session import WorkerSlot as _WorkerSlot
 from .supervisor_session import WorkerStartError as _WorkerStartError
 from .supervisor_session import with_protocol as _with_protocol

@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json as json
 import logging
 import os
-import re as re
 import shutil
-import stat as stat
 import sys
-import tempfile as tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from collections.abc import Collection as Collection
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -33,7 +28,6 @@ from .manifest_compatibility import resolve_plugin_compatibility
 from .offloop import run_off_loop as _run_off_loop
 from .protocol import PluginProgress, PluginRequest, PluginResultStatus
 from .sandbox import SELECTED_FILES_PERMISSION
-from .sandbox import FilesystemSandbox as FilesystemSandbox
 from .supervisor import PluginWorkerSupervisor
 from .supervisor_diagnostics import WorkerState, WorkerStatus
 from .supervisor_process import AsyncioSubprocessLauncher

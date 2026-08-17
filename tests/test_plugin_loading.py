@@ -55,6 +55,7 @@ from omnitensor.plugins.protocol import (
     PluginHealthStatus,
     WorkloadPlugin,
 )
+from omnitensor.plugins.sandbox import FilesystemSandbox
 from omnitensor.plugins.worker import (
     ExternalPluginLoadError,
     _read_exact,
@@ -2559,7 +2560,7 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(
     # enforcement has dedicated integration tests and nested bwrap is not
     # available in every test runner (including the managed CI sandbox).
     monkeypatch.setattr(
-        loading_module.FilesystemSandbox,
+        FilesystemSandbox,
         "wrap",
         lambda _sandbox, argv: tuple(argv),
     )

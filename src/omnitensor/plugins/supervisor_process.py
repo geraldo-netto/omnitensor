@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import sys
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -30,11 +29,6 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 0.5
 DEFAULT_CANCEL_TIMEOUT_SECONDS = 0.25
 
 
-def _facade_value(name: str, fallback):
-    facade = sys.modules.get("omnitensor.plugins.supervisor")
-    return getattr(facade, name, fallback) if facade is not None else fallback
-
-
 @dataclass(frozen=True, slots=True)
 class WorkerSpec:
     """Validated launch and protocol offer for one active plugin."""
@@ -48,8 +42,7 @@ class WorkerSpec:
     budget_limits: WorkerBudgetLimits = field(default_factory=WorkerBudgetLimits)
 
     def offer(self) -> HandshakeOffer:
-        offer_type = _facade_value("HandshakeOffer", HandshakeOffer)
-        return offer_type(
+        return HandshakeOffer(
             self.plugin_id,
             self.minimum_protocol,
             self.maximum_protocol,
@@ -149,9 +142,8 @@ class AsyncioSubprocessLauncher:
             close_fds=True,
             start_new_session=True,
         )
-        wrapper = _facade_value("_SubprocessWorker", _SubprocessWorker)
         probe = ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
-        return wrapper(process, probe, None)
+        return _SubprocessWorker(process, probe, None)
 
 
 def validate_specs(

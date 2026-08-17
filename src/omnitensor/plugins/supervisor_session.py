@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -24,11 +23,6 @@ from .ipc import (
 )
 from .protocol import PluginResult, ProgressReporter
 from .supervisor_process import WorkerLauncher, WorkerProcess, WorkerSpec
-
-
-def _facade_value(name: str, fallback):
-    facade = sys.modules.get("omnitensor.plugins.supervisor")
-    return getattr(facade, name, fallback) if facade is not None else fallback
 
 
 class PluginWorkerError(RuntimeError):
@@ -59,8 +53,7 @@ class WorkerStartError(Exception):
 
 
 def with_protocol(frame: IPCFrame, protocol_version: int) -> IPCFrame:
-    frame_type = _facade_value("IPCFrame", IPCFrame)
-    return frame_type(protocol_version, frame.type, frame.request_id, frame.payload)
+    return IPCFrame(protocol_version, frame.type, frame.request_id, frame.payload)
 
 
 def handshake_failure(
@@ -100,11 +93,10 @@ async def launch_authenticated(
     handshake_failure_of: Callable[[Exception], str] = handshake_failure,
     startup_failure_of: Callable[[Exception], str] = startup_failure,
 ) -> tuple[WorkerProcess, HandshakeAgreement]:
-    start_error = _facade_value("_WorkerStartError", WorkerStartError)
     try:
         process = await launcher.launch(spec)
     except Exception as error:
-        raise start_error(f"worker launch failed: {type(error).__name__}", None) from error
+        raise WorkerStartError(f"worker launch failed: {type(error).__name__}", None) from error
     try:
         agreement = await asyncio.wait_for(
             handshake(process.reader, process.writer, spec.offer()),
@@ -115,7 +107,7 @@ async def launch_authenticated(
         raise
     except Exception as error:
         await force_stop(process, stop_timeout)
-        raise start_error(handshake_failure_of(error), process.pid) from error
+        raise WorkerStartError(handshake_failure_of(error), process.pid) from error
     try:
         await asyncio.wait_for(
             await_ready(process.reader, spec.plugin_id),
@@ -126,7 +118,7 @@ async def launch_authenticated(
         raise
     except Exception as error:
         await force_stop(process, stop_timeout)
-        raise start_error(
+        raise WorkerStartError(
             startup_failure_of(error),
             process.pid,
             charges_restart=not isinstance(error, TimeoutError),
@@ -143,30 +135,28 @@ async def read_result(
     progress_parser: Callable[[IPCFrame], object] = parse_progress,
     result_parser: Callable[[IPCFrame], PluginResult] = parse_result,
 ) -> PluginResult:
-    message_type = _facade_value("WorkerMessageType", WorkerMessageType)
-    error_type = _facade_value("PluginWorkerError", PluginWorkerError)
     while True:
         frame = await read(slot.process.reader)
         if frame.request_id != request_id:
-            raise error_type(
+            raise PluginWorkerError(
                 "worker-protocol-failed", "worker response names another request"
             )
-        if frame.type is message_type.PROGRESS:
+        if frame.type is WorkerMessageType.PROGRESS:
             observed = progress_parser(frame)
             if progress is not None:
                 await progress.report(observed)
             continue
-        if frame.type is message_type.RESULT:
+        if frame.type is WorkerMessageType.RESULT:
             return result_parser(frame)
-        if frame.type is message_type.ERROR:
+        if frame.type is WorkerMessageType.ERROR:
             code = frame.payload.get("code")
             detail = frame.payload.get("detail")
             if not isinstance(code, str) or not code or not isinstance(detail, str):
-                raise error_type(
+                raise PluginWorkerError(
                     "worker-protocol-failed", "worker error response is invalid"
                 )
-            raise error_type(code, detail)
-        raise error_type(
+            raise PluginWorkerError(code, detail)
+        raise PluginWorkerError(
             "worker-protocol-failed", f"unexpected worker message: {frame.type}"
         )
 
@@ -181,14 +171,12 @@ async def cancel_request(
     write: Callable[..., Awaitable[object]] = write_frame,
     force_stop: Callable[[WorkerProcess, float], Awaitable[bool]],
 ) -> None:
-    frame_type = _facade_value("IPCFrame", IPCFrame)
-    message_type = _facade_value("WorkerMessageType", WorkerMessageType)
     try:
         await write(
             slot.process.writer,
-            frame_type(
+            IPCFrame(
                 slot.agreement.protocol_version,
-                message_type.CANCEL,
+                WorkerMessageType.CANCEL,
                 request_id,
                 {"reason": "job cancelled"},
             ),
@@ -211,16 +199,14 @@ async def stop_process(
 ) -> bool:
     if slot.process.returncode is not None:
         return True
-    frame_type = _facade_value("IPCFrame", IPCFrame)
-    message_type = _facade_value("WorkerMessageType", WorkerMessageType)
-    protocol_error = _facade_value("IPCProtocolError", IPCProtocolError)
-    frame_version = _facade_value("FRAME_FORMAT_VERSION", FRAME_FORMAT_VERSION)
+    protocol_error = IPCProtocolError
+    frame_version = FRAME_FORMAT_VERSION
     with suppress(ConnectionError, protocol_error, RuntimeError):
         await write(
             slot.process.writer,
-            frame_type(
+            IPCFrame(
                 frame_version,
-                message_type.CANCEL,
+                WorkerMessageType.CANCEL,
                 None,
                 {"reason": "shutdown"},
             ),

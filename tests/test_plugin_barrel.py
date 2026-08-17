@@ -25,7 +25,10 @@ KERNEL_EXPORTS = (
     "parse_aggregate",
     "scheduler_features",
 )
-EXPORT_MAP_SHA256 = "47aa70da66d11280cb7bfe92221c4ab096c2c8ab0cdacdd481f9033dbd17752b"
+# Covers the targets as well as the names, so retargeting an export at its owning
+# module moves it. The surface itself — which names, in which order — is asserted
+# above and did not move when the supervisor facade was retired.
+EXPORT_MAP_SHA256 = "2d7c272183e9e19d22ab8979cb2b7f06eb32896aad5a92ba19c08c2d717409b1"
 
 
 def test_export_map_preserves_the_locked_public_surface_and_order():

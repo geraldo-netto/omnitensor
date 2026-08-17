@@ -624,7 +624,7 @@ def test_cancellation_deadline_is_bounded_and_job_remains_accounted():
 
 
 def test_default_cancellation_budget_contains_worker_drain_and_escalation():
-    from omnitensor.plugins.supervisor import (
+    from omnitensor.plugins.supervisor_process import (
         DEFAULT_CANCEL_TIMEOUT_SECONDS,
         DEFAULT_STOP_TIMEOUT_SECONDS,
     )

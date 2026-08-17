@@ -23,20 +23,10 @@ PUBLIC_FACADE_NAMES = (
     "AsyncioSubprocessLauncher",
     "DEFAULT_CANCEL_TIMEOUT_SECONDS",
     "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
-    "DEFAULT_MAX_RESTARTS",
-    "DEFAULT_RESTART_BACKOFF_MULTIPLIER",
-    "DEFAULT_RESTART_DECAY_SECONDS",
-    "DEFAULT_RESTART_INITIAL_BACKOFF_SECONDS",
-    "DEFAULT_RESTART_MAX_BACKOFF_SECONDS",
     "DEFAULT_STARTUP_TIMEOUT_SECONDS",
     "DEFAULT_STOP_TIMEOUT_SECONDS",
-    "FRAME_FORMAT_VERSION",
-    "FilesystemSandbox",
     "HandshakeAgreement",
-    "HandshakeOffer",
-    "IPCFrame",
     "IPCProtocolError",
-    "MAX_RESTARTS",
     "MAX_SUPERVISED_WORKERS",
     "MAX_WORKER_ARGUMENTS",
     "MAX_WORKER_ARGUMENT_CHARS",
@@ -46,14 +36,11 @@ PUBLIC_FACADE_NAMES = (
     "PluginWorkerError",
     "PluginWorkerSupervisor",
     "ProgressReporter",
-    "Protocol",
     "Sequence",
-    "StrEnum",
     "WorkerDiagnostic",
     "WorkerDiagnosticCode",
     "WorkerFailureObserver",
     "WorkerLauncher",
-    "WorkerMessageType",
     "WorkerProcess",
     "WorkerRecoveryPolicy",
     "WorkerSpec",
@@ -62,21 +49,20 @@ PUBLIC_FACADE_NAMES = (
     "annotations",
     "asyncio",
     "await_worker_ready",
-    "dataclass",
     "execute_frame",
-    "field",
     "handshake_frame",
-    "math",
     "parse_progress",
     "parse_result",
     "perform_service_handshake",
     "read_frame",
-    "suppress",
     "write_frame",
 )
 
 
-def test_supervisor_facade_preserves_exact_public_surface_and_owner_identity():
+def test_supervisor_exposes_only_what_it_uses_and_keeps_owner_identity():
+    # The coordinator imports what its own body needs and nothing else. Anything
+    # a caller wants comes from the owning module or from the package barrel,
+    # which routes each name at its owner rather than through here.
     assert tuple(name for name in dir(supervisor) if not name.startswith("_")) == (
         PUBLIC_FACADE_NAMES
     )
@@ -195,11 +181,11 @@ def test_supervisor_coordinator_resolves_facade_defaults_and_callbacks(monkeypat
     ]
 
 
-def test_process_and_session_leaves_resolve_legacy_facade_types(monkeypatch):
+def test_process_and_session_leaves_build_frames_through_their_owners(monkeypatch):
     offer = object()
     offer_calls = []
     monkeypatch.setattr(
-        supervisor,
+        process,
         "HandshakeOffer",
         lambda *values: offer_calls.append(values) or offer,
     )
@@ -215,7 +201,7 @@ def test_process_and_session_leaves_resolve_legacy_facade_types(monkeypatch):
 
     frame_calls = []
     monkeypatch.setattr(
-        supervisor,
+        session,
         "IPCFrame",
         lambda *values: frame_calls.append(values) or ("frame", values),
     )
