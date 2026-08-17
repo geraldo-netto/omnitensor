@@ -174,18 +174,29 @@ def test_manifest_is_closed_and_coordinates_manual_private_workload():
     assert manifest["requirements"]["acceleratorPreference"] == ["gpu"]
     # More than one generation model is declared so a person can choose between
     # them; the first is only the default.
+    # Each states where it came from and under what licence, because the worker
+    # reports provenance for whichever of them a person chose.
     assert manifest["plugin"]["artifacts"] == [
         {
             "id": "qwen3-5-9b-iq4-xs",
             "version": "1.0.0",
             "format": "gguf",
             "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+            "sourceUri": (
+                "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf"
+            ),
+            "licenseSpdx": "Apache-2.0",
         },
         {
             "id": "qwen3-8b-q4-k-m",
             "version": "1.0.0",
             "format": "gguf",
             "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+            "sourceUri": (
+                "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/"
+                "7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
+            ),
+            "licenseSpdx": "Apache-2.0",
         },
     ]
 

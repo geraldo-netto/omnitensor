@@ -35,19 +35,25 @@
         "id": "qwen3-5-9b-iq4-xs",
         "version": "1.0.0",
         "format": "gguf",
-        "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429"
+        "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+        "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf",
+        "licenseSpdx": "Apache-2.0"
       },
       {
         "id": "qwen3-8b-q4-k-m",
         "version": "1.0.0",
         "format": "gguf",
-        "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"
+        "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+        "sourceUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+        "licenseSpdx": "Apache-2.0"
       },
       {
         "id": "bge-small-en-v1-5-ask-gpu",
         "version": "1.0.0",
         "format": "ncnn",
         "sha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
+        "sourceUri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx",
+        "licenseSpdx": "MIT",
         "companions": {
           "model.bin": "44034070d5e86e6be4829dc4a69c1e959ee895b07877d89b34c98d2adcf9e994",
           "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"

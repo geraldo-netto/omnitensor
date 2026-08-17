@@ -477,6 +477,8 @@ def test_external_worker_mounts_exact_verified_artifacts_state_and_gpu_lease(
         "sha256": "a" * 64,
         "companions": {"tokenizer.json": "b" * 64},
         "path": str(primary),
+        "sourceUri": "",
+        "licenseSpdx": "",
     }
     plugin_state = (state / plugin.plugin_id).resolve()
     lease = (state / "_accelerator-gpu.lock").resolve()
@@ -786,11 +788,11 @@ def test_provider_worker_bootstrap_helpers_preserve_exact_contracts(tmp_path):
     assert loading_module._artifact_bootstrap(reference, resolution) == (
         '{"companions":{"tokenizer.json":"'
         + "b" * 64
-        + '"},"format":"gguf","id":"qwen-model","path":"'
+        + '"},"format":"gguf","id":"qwen-model","licenseSpdx":"","path":"'
         + str(resolution.path)
         + '","sha256":"'
         + "a" * 64
-        + '","version":"1.0.0"}'
+        + '","sourceUri":"","version":"1.0.0"}'
     )
 
 
@@ -2842,6 +2844,8 @@ def test_worker_bootstrap_accepts_only_exact_absolute_resources(tmp_path):
                     "sha256": "a" * 64,
                     "companions": {"tokenizer.json": "b" * 64},
                     "path": str(artifact),
+                    "sourceUri": "https://example.invalid/qwen-model.gguf",
+                    "licenseSpdx": "Apache-2.0",
                 }
             )
         ],
@@ -2858,6 +2862,10 @@ def test_worker_bootstrap_accepts_only_exact_absolute_resources(tmp_path):
     assert bootstrap.artifacts[0].id == "qwen-model"
     assert bootstrap.artifacts[0].path == artifact
     assert bootstrap.artifacts[0].companions == (("tokenizer.json", "b" * 64),)
+    # Provenance reaches the worker as data. A provider that had to hardcode it
+    # cited whichever model shipped first, whatever the person actually chose.
+    assert bootstrap.artifacts[0].source_uri == "https://example.invalid/qwen-model.gguf"
+    assert bootstrap.artifacts[0].license_spdx == "Apache-2.0"
 
 
 @pytest.mark.parametrize(

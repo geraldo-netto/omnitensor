@@ -474,7 +474,13 @@ def declared_artifact_reference(workload: Workload, model: dict) -> ArtifactRefe
             and entry["format"] == model["format"]
         ):
             return ArtifactReference(
-                entry["id"], entry["version"], entry["format"], entry["sha256"], companions
+                entry["id"],
+                entry["version"],
+                entry["format"],
+                entry["sha256"],
+                companions,
+                entry.get("sourceUri", ""),
+                entry.get("licenseSpdx", ""),
             )
     digest = model.get("sha256")
     if digest:

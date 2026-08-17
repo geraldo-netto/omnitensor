@@ -435,6 +435,8 @@ def _bootstrap(arguments) -> PluginBootstrap:
             "sha256",
             "companions",
             "path",
+            "sourceUri",
+            "licenseSpdx",
         }:
             raise SystemExit("plugin artifact bootstrap fields are invalid")
         companions = item["companions"]
@@ -449,6 +451,8 @@ def _bootstrap(arguments) -> PluginBootstrap:
                 item["sha256"],
                 path,
                 tuple(sorted(companions.items())),
+                item["sourceUri"],
+                item["licenseSpdx"],
             )
         )
     state_path = Path(arguments.state_path) if arguments.state_path else None

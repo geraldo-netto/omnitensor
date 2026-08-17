@@ -26,6 +26,10 @@ QWEN_REFERENCE = ArtifactReference(
     "1.0.0",
     "gguf",
     "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    (),
+    "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/"
+    "7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+    "Apache-2.0",
 )
 BGE_REFERENCE = ArtifactReference(
     "bge-small-en-v1-5-ask-gpu",
@@ -42,6 +46,9 @@ BGE_REFERENCE = ArtifactReference(
             "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
         ),
     ),
+    "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/"
+    "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx",
+    "MIT",
 )
 
 

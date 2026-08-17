@@ -42,6 +42,8 @@
         "version": "1.0.0",
         "format": "gguf",
         "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
+        "sourceUri": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/508edd0afaa66bb9e9f40587acc2184f02daf1f6/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+        "licenseSpdx": "Apache-2.0",
         "companions": {
           "mmproj.gguf": "c24a7f5fcfc68286f0a217023b6738e73bea4f11787a43e8238d4bb1b8604cde"
         }
@@ -50,7 +52,9 @@
         "id": "whisper-small-multilingual",
         "version": "1.0.0",
         "format": "ggml-whisper",
-        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        "sourceUri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+        "licenseSpdx": "MIT"
       }
     ],
     "permissions": ["accelerator:gpu", "files:read-selected"]

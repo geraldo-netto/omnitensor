@@ -170,6 +170,17 @@
                 "type": "string",
                 "pattern": "^[a-f0-9]{64}$"
               },
+              "sourceUri": {
+                "description": "Where this exact file came from. Stated per artifact because the worker reports provenance for whichever model a person chose, and a provider that hardcodes one URI cites the wrong model the moment somebody chooses another.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "licenseSpdx": {
+                "description": "The licence of this artifact, not of the provider that loads it.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.+-]{1,64}$"
+              },
               "companions": {
                 "$ref": "#/$defs/model/properties/companions"
               }

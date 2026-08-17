@@ -186,6 +186,8 @@ def artifact_bootstrap(
             "sha256": reference.sha256,
             "companions": reference.declared_companions,
             "path": str(resolution.path),
+            "sourceUri": reference.source_uri,
+            "licenseSpdx": reference.license_spdx,
         },
         sort_keys=True,
         separators=(",", ":"),

@@ -121,6 +121,8 @@ def declared_reference(
                     entry["format"],
                     entry["sha256"],
                     tuple(sorted((entry.get("companions") or {}).items())),
+                    entry.get("sourceUri", ""),
+                    entry.get("licenseSpdx", ""),
                 )
     return None
 

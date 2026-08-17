@@ -56,14 +56,6 @@ from .runtime import LlamaVulkanRuntime
 SHIPPED_ARTIFACT_ID = "qwen3-8b-q4-k-m"
 BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
 HEBREW_ARTIFACT_ID = "dictalm2-hebrew-q4-k-m"
-QWEN_SOURCE = (
-    "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/"
-    "7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
-)
-HEBREW_SOURCE = (
-    "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/"
-    "9ed3346a1440643825287abf86e28800005ec9b3/dictalm2.0-instruct-Q4_K_M.gguf"
-)
 
 
 class QualifiedWorkload:
@@ -192,6 +184,27 @@ async def _capture_async_failure(
     return failure
 
 
+def _provenance(artifact) -> ArtifactProvenance:
+    """What ran, said from the artifact the host mounted.
+
+    This used to be built from two module constants — one source URL and the
+    literal `"Apache-2.0"` — so every answer cited the model that shipped
+    first. A person who chose the 9B was told the 8B's URL, and one who chose
+    a model under another licence was told Apache-2.0 either way. The runtime
+    loads whatever GGUF it is handed; it is in no position to know where that
+    file came from, so it now refuses rather than guesses.
+    """
+    if not artifact.source_uri or not artifact.license_spdx:
+        raise RuntimeError(f"artifact {artifact.id} states no source or licence")
+    return ArtifactProvenance(
+        artifact.id,
+        artifact.version,
+        artifact.sha256,
+        artifact.source_uri,
+        artifact.license_spdx,
+    )
+
+
 def _generation(plugin_id: str):
     bootstrap = current_plugin_bootstrap(plugin_id)
     if bootstrap.accelerator_lease_path is None:
@@ -216,13 +229,7 @@ def _generation(plugin_id: str):
         accelerator="gpu",
         runtime="llama.cpp-vulkan",
         qualified=True,
-        provenance=ArtifactProvenance(
-            model.id,
-            model.version,
-            model.sha256,
-            QWEN_SOURCE,
-            "Apache-2.0",
-        ),
+        provenance=_provenance(model),
     )
     worker = LlamaCppVulkanWorker(descriptor, runtime, (model.path,))
     return bootstrap, store, runtime, model, qualification, GenerationRouter((worker,))
@@ -296,13 +303,7 @@ def create_selected_text_tools() -> QualifiedWorkload:
         accelerator="gpu",
         runtime="llama.cpp-vulkan",
         qualified=True,
-        provenance=ArtifactProvenance(
-            hebrew_model.id,
-            hebrew_model.version,
-            hebrew_model.sha256,
-            HEBREW_SOURCE,
-            "Apache-2.0",
-        ),
+        provenance=_provenance(hebrew_model),
     )
     hebrew_worker = LlamaCppVulkanWorker(hebrew_descriptor, hebrew_runtime, (hebrew_model.path,))
     plugin = SelectedTextPlugin(

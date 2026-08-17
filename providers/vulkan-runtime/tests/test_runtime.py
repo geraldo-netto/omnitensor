@@ -46,7 +46,7 @@ from omnitensor.plugins.protocol import PluginContext, PluginProgress
 from omnitensor.plugins.selected_text import selected_text_task
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
-    QWEN_MODEL_SHA256,
+    PRIMARY_MODEL_SHA256,
     SELECTED_TEXT_WORKER_LOAD_RECEIPT,
     SelectedTextAcceptanceError,
     parse_selected_text_worker_load_receipt,
@@ -455,16 +455,16 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
         qualification.load_qualification(
             "event-extraction", model, digest, replace(task, task_version=2)
         )
-    assert str(excinfo.value) == "Qwen workload differs from qualification"
+    assert str(excinfo.value) == "workload differs from qualification"
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("event-extraction", model, "0" * 64, task)
-    assert str(excinfo.value) == "Qwen model differs from qualification"
+    assert str(excinfo.value) == "model differs from qualification"
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("event-extraction", "unknown-model", digest, task)
-    assert str(excinfo.value) == "Qwen model has no qualification"
+    assert str(excinfo.value) == "model has no qualification"
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("unknown-workload", model, digest, task)
-    assert str(excinfo.value) == "Qwen workload has no qualification"
+    assert str(excinfo.value) == "workload has no qualification"
 
 
 @pytest.mark.parametrize(
@@ -472,52 +472,52 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
     [
         (
             lambda value: value.update(extra=True),
-            "Qwen qualification receipt fields are invalid",
+            "qualification receipt fields are invalid",
         ),
         (
             lambda value: value.update(version=1),
-            "Qwen qualification receipt version is invalid",
+            "qualification receipt version is invalid",
         ),
         (
             lambda value: value.update(recordedAt="moving"),
-            "Qwen qualification receipt date is invalid",
+            "qualification receipt date is invalid",
         ),
         (
             lambda value: value.update(device=""),
-            "Qwen qualification device is invalid",
+            "qualification device is invalid",
         ),
-        (lambda value: value.update(runtime=[]), "Qwen qualification runtime is invalid"),
+        (lambda value: value.update(runtime=[]), "qualification runtime is invalid"),
         (
             lambda value: value["runtime"].update(version="moving"),
-            "Qwen qualification runtime identity is invalid",
+            "qualification runtime identity is invalid",
         ),
         (
             lambda value: value["runtime"].update(wheelSha256="bad"),
-            "Qwen qualification wheel digest is invalid",
+            "qualification wheel digest is invalid",
         ),
         (
             lambda value: value["runtime"].update(binaries={}),
-            "Qwen qualification native inventory is invalid",
+            "qualification native inventory is invalid",
         ),
         (
             lambda value: value["runtime"]["binaries"].update({"libllama.so": "bad"}),
-            "Qwen qualification native digest is invalid",
+            "qualification native digest is invalid",
         ),
         (
             lambda value: value["models"]["qwen3-8b-q4-k-m"].update(extra=True),
-            "Qwen model qualification is invalid",
+            "model qualification is invalid",
         ),
         (
             lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=0),
-            "Qwen layer qualification is invalid",
+            "layer qualification is invalid",
         ),
         (
             lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=True),
-            "Qwen model differs from qualification",
+            "model differs from qualification",
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(extra=True),
-            "Qwen workload qualification is invalid",
+            "workload qualification is invalid",
         ),
         (
             lambda value: value["workloads"]["event-extraction"]["models"][
@@ -525,22 +525,22 @@ def test_receipt_refuses_task_model_and_workload_tampering(monkeypatch, tmp_path
             ].update(result="failed", reason="refused its own contract"),
             # The workload's default is that model, and a default that did not
             # pass is caught before anything asks to run it.
-            "Qwen workload default is not a passing model",
+            "workload default is not a passing model",
         ),
         (
             # A failure recorded without its reason is a note saying only "no".
             lambda value: value["workloads"]["event-extraction"]["models"][
                 "qwen3-8b-q4-k-m"
             ].update(result="failed"),
-            "Qwen workload failure has no reason",
+            "workload failure has no reason",
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(default="qwen3-4b-q4-k-m"),
-            "Qwen workload default is not a passing model",
+            "workload default is not a passing model",
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(models={}),
-            "Qwen workload qualification lists no model",
+            "workload qualification lists no model",
         ),
     ],
 )
@@ -609,7 +609,7 @@ def test_a_pair_that_failed_is_neither_offered_nor_run(tmp_path, monkeypatch):
             "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
         )
 
-    assert str(excinfo.value) == "Qwen model did not pass qualification for this workload"
+    assert str(excinfo.value) == "model did not pass qualification for this workload"
 
 
 def test_a_model_nobody_qualified_for_this_workload_is_refused(tmp_path, monkeypatch):
@@ -625,7 +625,7 @@ def test_a_model_nobody_qualified_for_this_workload_is_refused(tmp_path, monkeyp
             event_generation_task(),
         )
 
-    assert str(excinfo.value) == "Qwen model has no qualification for this workload"
+    assert str(excinfo.value) == "model has no qualification for this workload"
 
 
 def test_the_default_model_is_the_one_a_job_that_chose_nothing_runs(tmp_path, monkeypatch):
@@ -645,11 +645,11 @@ def test_receipt_refuses_invalid_json_and_oversized_resource(tmp_path, monkeypat
     path.write_bytes(b"not-json")
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("p", "m", "0" * 64, _task())
-    assert str(excinfo.value) == "Qwen qualification receipt is invalid"
+    assert str(excinfo.value) == "qualification receipt is invalid"
     path.write_bytes(b"x" * (qualification._MAX_RECEIPT_BYTES + 1))
     with pytest.raises(RuntimeError) as excinfo:
         qualification.load_qualification("p", "m", "0" * 64, _task())
-    assert str(excinfo.value) == "Qwen qualification receipt is oversized"
+    assert str(excinfo.value) == "qualification receipt is oversized"
 
 
 def test_native_runtime_verification_binds_version_and_binary_bytes(tmp_path, monkeypatch):
@@ -761,21 +761,21 @@ def test_runtime_constructor_and_load_fail_closed_at_gpu_model_boundary(tmp_path
         wrong_accelerator.value.code,
         wrong_accelerator.value.detail,
         wrong_accelerator.value.generation_started,
-    ) == ("model-load-failed", "Qwen Vulkan requires one GPU GGUF", False)
+    ) == ("model-load-failed", "Vulkan generation requires one GPU GGUF", False)
     with pytest.raises(ProviderGenerationError) as too_many_models:
         asyncio.run(adapter.load((model, model), "gpu"))
     assert (
         too_many_models.value.code,
         too_many_models.value.detail,
         too_many_models.value.generation_started,
-    ) == ("model-load-failed", "Qwen Vulkan requires one GPU GGUF", False)
+    ) == ("model-load-failed", "Vulkan generation requires one GPU GGUF", False)
     with pytest.raises(ProviderGenerationError) as missing_model:
         asyncio.run(adapter.load((tmp_path / "missing.gguf",), "gpu"))
     assert (
         missing_model.value.code,
         missing_model.value.detail,
         missing_model.value.generation_started,
-    ) == ("model-load-failed", "Qwen GGUF is unavailable", False)
+    ) == ("model-load-failed", "generation GGUF is unavailable", False)
 
 
 def test_runtime_load_caches_valid_report_and_wraps_native_failure(tmp_path, monkeypatch):
@@ -846,7 +846,7 @@ def test_runtime_generate_refuses_unloaded_and_wraps_native_error(tmp_path, monk
         asyncio.run(adapter.generate(_task(), request, CancellationController(), Progress()))
     assert (unloaded.value.code, unloaded.value.detail, unloaded.value.generation_started) == (
         "model-load-failed",
-        "Qwen model was not loaded",
+        "generation model was not loaded",
         False,
     )
 
@@ -2024,6 +2024,9 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
         "gguf",
         "a" * 64,
         tmp_path / "m",
+        (),
+        "https://example.invalid/model.gguf",
+        "Apache-2.0",
     )
 
     class Bootstrap:
@@ -2053,6 +2056,8 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
         "c" * 64,
         tmp_path / "model.param",
         (("model.bin", "d" * 64),),
+        "https://example.invalid/bge.param",
+        "MIT",
     )
 
     class DocumentBootstrap:
@@ -2084,8 +2089,11 @@ def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
         qualification.default_model("selected-text-tools"),
         "1.0.0",
         "gguf",
-        QWEN_MODEL_SHA256,
+        PRIMARY_MODEL_SHA256,
         tmp_path / "qwen.gguf",
+        (),
+        "https://example.invalid/model.gguf",
+        "Apache-2.0",
     )
 
     class Bootstrap:
@@ -2131,6 +2139,9 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
                 "gguf",
                 "a" * 64,
                 tmp_path / f"{artifact_id}.gguf",
+                (),
+                "https://example.invalid/model.gguf",
+                "Apache-2.0",
             )
 
     monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
@@ -2156,7 +2167,7 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
         assert descriptor.qualified is True
         assert descriptor.provenance.model_version == "1.0.0"
         assert descriptor.provenance.sha256 == "a" * 64
-        assert descriptor.provenance.source_uri == factories.QWEN_SOURCE
+        assert descriptor.provenance.source_uri == "https://example.invalid/model.gguf"
         assert descriptor.provenance.license_spdx == "Apache-2.0"
         assert receipt == _qualification()
 
@@ -2202,6 +2213,9 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         "gguf",
         "a" * 64,
         tmp_path / "model.gguf",
+        (),
+        "https://example.invalid/model.gguf",
+        "Apache-2.0",
     )
     hebrew_model = BootstrapArtifact(
         factories.HEBREW_ARTIFACT_ID,
@@ -2209,6 +2223,9 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         "gguf",
         "b" * 64,
         tmp_path / "dictalm.gguf",
+        (),
+        "https://example.invalid/dictalm.gguf",
+        "Apache-2.0",
     )
     bge_artifact = BootstrapArtifact(
         factories.BGE_ARTIFACT_ID,
@@ -2217,6 +2234,8 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         "c" * 64,
         tmp_path / "bge" / "model.param",
         (("model.bin", "d" * 64), ("tokenizer.json", "e" * 64)),
+        "https://example.invalid/bge.param",
+        "MIT",
     )
 
     class Bootstrap:
@@ -2420,7 +2439,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
         additional_runtimes=((hebrew_runtime, Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
-            ("primary", QWEN_MODEL_SHA256),
+            ("primary", PRIMARY_MODEL_SHA256),
             ("hebrewTranslation", HEBREW_MODEL_SHA256),
         ),
     )
@@ -2521,7 +2540,7 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
         ),
         load_receipt_path=receipt_path,
         load_receipt_models=(
-            ("primary", QWEN_MODEL_SHA256),
+            ("primary", PRIMARY_MODEL_SHA256),
             ("hebrewTranslation", hebrew_digest),
         ),
     )
@@ -2577,7 +2596,7 @@ def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(tmp_pat
         additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
-            ("primary", QWEN_MODEL_SHA256),
+            ("primary", PRIMARY_MODEL_SHA256),
             ("hebrewTranslation", HEBREW_MODEL_SHA256),
         ),
     )
@@ -2645,7 +2664,7 @@ def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
         additional_runtimes=((HebrewNative(), Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
-            ("primary", QWEN_MODEL_SHA256),
+            ("primary", PRIMARY_MODEL_SHA256),
             ("hebrewTranslation", HEBREW_MODEL_SHA256),
         ),
     )
@@ -2699,7 +2718,7 @@ def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(tmp_p
         additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
-            ("primary", QWEN_MODEL_SHA256),
+            ("primary", PRIMARY_MODEL_SHA256),
             ("hebrewTranslation", HEBREW_MODEL_SHA256),
         ),
     )
@@ -2895,3 +2914,38 @@ def test_bge_refuses_missing_lease_wrong_device_and_invalid_vector(tmp_path, mon
     monkeypatch.setattr(bge, "VulkanBgeRunner", InvalidVector)
     with pytest.raises(ValueError, match="invalid embedding"):
         embedder._embed_sync(("text",), False, CancellationController())
+
+
+def test_provenance_is_read_from_the_artifact_and_refused_when_unstated(tmp_path):
+    """A runtime that loads any GGUF cannot know where that GGUF came from.
+
+    It used to answer from two module constants, so every result cited the
+    model that shipped first: choose the 9B and be told the 8B's URL, choose a
+    model under another licence and be told Apache-2.0 regardless.
+    """
+    stated = BootstrapArtifact(
+        "some-model",
+        "1.0.0",
+        "gguf",
+        "a" * 64,
+        tmp_path / "model.gguf",
+        (),
+        "https://example.invalid/some-model.gguf",
+        "MIT",
+    )
+
+    provenance = factories._provenance(stated)
+
+    assert provenance.model_id == "some-model"
+    assert provenance.source_uri == "https://example.invalid/some-model.gguf"
+    assert provenance.license_spdx == "MIT"
+
+    for missing in (
+        BootstrapArtifact("m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf", (), "", "MIT"),
+        BootstrapArtifact(
+            "m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf", (), "https://example.invalid/m", ""
+        ),
+        BootstrapArtifact("m", "1.0.0", "gguf", "a" * 64, tmp_path / "m.gguf"),
+    ):
+        with pytest.raises(RuntimeError, match="states no source or licence"):
+            factories._provenance(missing)

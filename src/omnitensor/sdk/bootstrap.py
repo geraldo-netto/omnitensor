@@ -22,6 +22,11 @@ class BootstrapArtifact:
     sha256: str
     path: Path
     companions: tuple[tuple[str, str], ...] = ()
+    # Stated by the manifest, empty when it stated nothing. A provider builds
+    # its provenance from these rather than from a constant of its own: a
+    # constant describes the model that shipped first, not the model that ran.
+    source_uri: str = ""
+    license_spdx: str = ""
 
 
 @dataclass(frozen=True, slots=True)

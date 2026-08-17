@@ -320,6 +320,8 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(
             "version": QWEN_REFERENCE.version,
             "format": QWEN_REFERENCE.format,
             "sha256": QWEN_REFERENCE.sha256,
+            "sourceUri": QWEN_REFERENCE.source_uri,
+            "licenseSpdx": QWEN_REFERENCE.license_spdx,
         }
     ]
     assert "accelerator:gpu" in manifest["plugin"]["permissions"]

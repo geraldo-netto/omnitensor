@@ -73,6 +73,12 @@ class ArtifactReference:
     format: str
     sha256: str
     companions: tuple[tuple[str, str], ...] = ()
+    # Where this file came from and under what licence. Empty when the manifest
+    # states neither, which is the honest answer for a bundled v1 workload whose
+    # model was never published anywhere. A worker that is told nothing must
+    # report nothing rather than assert a plausible default.
+    source_uri: str = ""
+    license_spdx: str = ""
 
     @property
     def declared_companions(self) -> dict[str, str]:
