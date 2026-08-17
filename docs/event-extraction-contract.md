@@ -298,16 +298,31 @@ naming it is the point:
 
 - One fully populated event is roughly 400–600 tokens, most of it the two
   64-character digests each evidence entry carries.
-- The task declares 1,024 output tokens. Even raised to 4,096 that is about
-  seven events, and a generation that runs out mid-object produces truncated
-  JSON — which surfaces as an unexplained invalid output, not as "there were
-  more".
+- The task declares 1,024 output tokens and 262,144 output bytes, and the
+  provider refuses outright above 4,096 tokens.
 
-So the answer is the same one translation reached: **split the work, never the
-answer**. Extraction runs in passes over the source fragments, each pass
-bounded by the output budget rather than by a count, and the passes accumulate.
-The dedup key below is what makes accumulation safe, since a recurring meeting
-mentioned on three pages is one event.
+None of those three is a fact about the machine; they are policy numbers, and
+every one of them is a wrong answer waiting for a long enough document. They
+go. The only real bound is the context window: a generation can emit at most
+what is left of the context after the prompt, which is arithmetic rather than
+a choice. So:
+
+- **`outputBytes` goes**, following `document_qa.py`, which dropped its byte
+  ceiling with the note that the token budget bounds an answer and host
+  pressure protects the machine.
+- **`outputTokens` stops being a budget.** The task states the largest value
+  the contract permits below its context, and the runtime asks for what remains
+  of the context rather than a constant — generation ends at the model's own
+  stop token or at the edge of the context, never at a number somebody picked.
+- **`MAX_RUNTIME_OUTPUT_TOKENS` rises to the context.** It is a refusal, not a
+  truncation, so a task that asks for more is rejected before it runs.
+
+Passes exist because the context is finite, not because a budget was chosen.
+When the remaining sources cannot fit alongside what has already been
+extracted, the work splits and continues; the answer never does. That is the
+same rule translation reached with spans. The dedup key below is what makes
+accumulation safe, since a recurring meeting mentioned on three pages is one
+event.
 
 Two ceilings that stay, because they bound *input* rather than an answer:
 `MAX_SOURCES` (32 selected files) and `MAX_SOURCE_BYTES` (128 MiB each). Those
@@ -368,6 +383,34 @@ missing — *"Jazz night · 3 September · needs a time"*. No dialog, no round
 trip, no second copy of a calendar UI. Its `limits.events` display cap goes at
 the same time, for the same reason the schema's did.
 
+## Where the calendar file is written
+
+Asked, and answered no: the writer stays in the runtime.
+
+It is not presentation. `plugins/events.py` says so in its first line —
+*"Generation workers may propose dates, but they do not own calendar effects…
+Only a new result created by `confirm_event_candidates` can reach an ICS
+renderer or calendar sink."* The single path to a calendar file runs through a
+function that resets every model-supplied confirmation to `pending` and demands
+an explicit decision per candidate. Move the writer into a client and that
+guarantee moves with it, into whichever client happens to implement it; the
+runtime could no longer say that no model ever put an event in somebody's
+calendar.
+
+RFC 5545 is also a specification rather than a view: line folding at 75 octets,
+escaping, stable UIDs, `VEVENT` against `VTODO`, floating time. Written twice,
+two clients disagree about the same event.
+
+What is actually missing is a **route**, not a relocation. `confirmed_ics` is
+reachable today only through the `omnitensor-import-events` command line, which
+is why the client tells a person "nothing is written to a calendar until you
+export" and then offers no export. The runtime needs a method that takes the
+result document with the confirmed and rejected candidate ids and returns the
+calendar text; the client chooses which events and where to save the file.
+
+Three more ceilings live in that module and go with the others: `MAX_EVENTS`
+(64), `MAX_EVIDENCE_PER_EVENT` (16) and `MAX_SOURCE_FRAGMENTS` (2,000).
+
 ## Deduplication
 
 The current key is title + start + location, which breaks as soon as a start may
@@ -382,11 +425,10 @@ merging them would silently choose one time over none.
   grammar able to express a success at all.
 - **The prompt** states the success path with the precision the refusal already
   has, and the refusal rule shrinks to "no event at all".
-- **The output budget** must rise and the event count must lose its ceiling.
-  One fully populated event is roughly 400–600 tokens; the task still declares
-  1,024 for the whole answer. `ask-selected-files` already had to go from 1,024
-  to 2,048 for the same reason — truncation that surfaced as an unexplained
-  invalid output. 4,096 per pass, and as many passes as the sources need.
+- **Three answer ceilings go**: the task's `outputTokens` and `outputBytes`,
+  and the provider's `MAX_RUNTIME_OUTPUT_TOKENS` refusal. What bounds a
+  generation afterwards is the context window, and what bounds the answer is
+  nothing — the work splits into passes instead.
 - **The benchmark cases** are rewritten against the new shape, and gain the ones
   this design exists for: a date without a time, a time without a date, a place
   without a zone, a recurrence, a cancellation, a banner read through OCR.
