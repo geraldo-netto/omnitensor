@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "omnitensor-qwen-vulkan-runtime"
+name = "omnitensor-vulkan-runtime"
 version = "0.2.0"
 description = "GPU-only Qwen and BGE runtime wiring for OmniTensor workloads"
 requires-python = ">=3.11"

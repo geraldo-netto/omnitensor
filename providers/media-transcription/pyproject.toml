@@ -13,7 +13,7 @@ dependencies = [
   "CairoSVG>=2.7,<3",
   "defusedxml>=0.7.1,<1",
   "omnitensor>=0.1,<1",
-  "omnitensor-qwen-vulkan-runtime==0.2.0",
+  "omnitensor-vulkan-runtime==0.2.0",
   "Pillow>=11,<13",
   "PyMuPDF>=1.24,<2",
   "pywhispercpp==1.5.0",
@@ -31,7 +31,7 @@ packages = ["src/omnitensor_media_transcription"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "../../src", "../qwen-vulkan-runtime/src"]
+pythonpath = ["src", "../../src", "../vulkan-runtime/src"]
 asyncio_mode = "auto"
 
 [tool.mutmut]

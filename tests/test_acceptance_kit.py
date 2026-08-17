@@ -438,7 +438,7 @@ def test_native_load_report_codec_round_trips_and_injects_family_errors():
 def test_external_provider_factory_imports_only_the_public_load_validator():
     root = Path(__file__).parents[1]
     source = (
-        root / "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/factories.py"
+        root / "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/factories.py"
     ).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = {

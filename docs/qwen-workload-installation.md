@@ -62,7 +62,7 @@ wheel. All four depend on one implementation wheel:
 
 | Wheel | Responsibility | Pinned model |
 | --- | --- | --- |
-| `omnitensor-qwen-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the four factories | runtime only |
+| `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the four factories | runtime only |
 | `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3-8B Q4_K_M |
 | `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3-8B Q4_K_M plus BGE-small-en-v1.5 |
 | `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3-8B Q4_K_M plus operation-specific DictaLM2 Hebrew |
@@ -214,7 +214,7 @@ mkdir -p "$OMNI_WHEELS"
 
 "$OMNI_BUILDER/pip" install --upgrade pip build hatchling wheel
 
-for provider in qwen-vulkan-runtime event-extraction ask-selected-files \
+for provider in vulkan-runtime event-extraction ask-selected-files \
   selected-text-tools file-organizer; do
   "$OMNI_BUILDER/pip" wheel --no-deps \
     "$OMNI_SOURCE/providers/$provider" --wheel-dir "$OMNI_WHEELS"
@@ -235,7 +235,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
-  "$OMNI_WHEELS"/omnitensor_qwen_vulkan_runtime-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_vulkan_runtime-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_event_extraction_extraction-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_ask_selected_files_selected_files-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_selected_text_tools_tools-0.2.0-*.whl \
@@ -538,7 +538,7 @@ or model identities from different releases:
 systemctl --user stop omnitensor.service
 "$OMNI_SERVICE/pip" install --force-reinstall --no-deps \
   /absolute/path/to/previous/llama_cpp_python-0.3.34-*.whl \
-  /absolute/path/to/previous/omnitensor_qwen_vulkan_runtime-*.whl \
+  /absolute/path/to/previous/omnitensor_vulkan_runtime-*.whl \
   /absolute/path/to/previous/omnitensor_event_extraction_extraction-*.whl \
   /absolute/path/to/previous/omnitensor_ask_selected_files_selected_files-*.whl \
   /absolute/path/to/previous/omnitensor_selected_text_tools_tools-*.whl \
@@ -586,7 +586,7 @@ systemctl --user stop omnitensor.service
 
 # Optional, only when nothing else depends on the shared provider runtime:
 "$OMNI_SERVICE/pip" uninstall -y \
-  omnitensor-qwen-vulkan-runtime llama-cpp-python
+  omnitensor-vulkan-runtime llama-cpp-python
 systemctl --user start omnitensor.service
 ```
 

@@ -42,7 +42,7 @@
     "maximumRevocationLatencyMs": 500
   },
   "qualification": {
-    "receipt": "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json",
+    "receipt": "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json",
     "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
     "cpuFallback": "forbidden",
     "workloads": ["ask-selected-files", "event-extraction", "file-organizer", "selected-text-tools"],

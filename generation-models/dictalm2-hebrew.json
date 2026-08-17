@@ -36,7 +36,7 @@
     "maximumCancellationLatencyMs": 2000
   },
   "qualification": {
-    "receipt": "providers/qwen-vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json",
+    "receipt": "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json",
     "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
     "fullyOffloadedLayers": 33,
     "cpuFallback": "forbidden",
