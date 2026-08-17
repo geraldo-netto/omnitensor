@@ -164,7 +164,10 @@ def test_cli_leaves_import_before_facade_without_backedges():
 
 
 def test_console_targets_stay_on_facade_and_numeric_promotion_stays_separate():
-    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    # The trainer entry points ship with the trainers, in their own distribution.
+    project = (
+        ROOT / "packaging" / "omnitensor-training" / "pyproject.toml"
+    ).read_text(encoding="utf-8")
     targets = (
         "record_main",
         "snapshot_record_main",

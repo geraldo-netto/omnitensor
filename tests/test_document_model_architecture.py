@@ -134,7 +134,9 @@ def test_cpu_reference_owner_is_absent_from_runtime_and_native_modules():
 
 
 def test_document_model_cli_entrypoint_remains_on_stable_facade():
-    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project = (ROOT / "packaging" / "omnitensor-training" / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
     assert (
         'omnitensor-install-document-model = "omnitensor.training.document_model:main"' in project
     )

@@ -277,7 +277,11 @@ def test_model_tooling_guide_covers_every_reviewed_license_and_target_stage():
 
 
 def test_document_model_guide_keeps_opsets_one_contract_and_native_gate_explicit():
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = tomllib.loads(
+        (ROOT / "packaging" / "omnitensor-training" / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )
     guide = LOCAL_TRAINING.read_text(encoding="utf-8")
     normalized = " ".join(guide.split())
 

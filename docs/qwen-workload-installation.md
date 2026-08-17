@@ -152,7 +152,7 @@ Keep these out of the service environment:
 - a C/C++ toolchain, Python development headers, CMake, Ninja, Vulkan headers,
   and a GLSL compiler to build the Vulkan llama.cpp wheel;
 - Hatchling/build tooling to build the five provider wheels; and
-- `omnitensor[document-producers]` (PyTorch, Transformers, safetensors, ONNX,
+- `omnitensor-training[document-producers]` (PyTorch, Transformers, safetensors, ONNX,
   ONNX Runtime, pnnx, ncnn, NumPy, and tokenizers) to reproduce and qualify the
   BGE native artifact.
 

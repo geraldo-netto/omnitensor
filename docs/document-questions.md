@@ -30,7 +30,7 @@ qualification; it may fall back to GPU only before generation starts. There is
 no CPU lane. Install producer-only dependencies only where models are built:
 
 ```sh
-pip install 'omnitensor[document-producers,events]'
+pip install 'omnitensor[events]' 'omnitensor-training[document-producers]'
 ```
 
 The base service does not import PyTorch, Transformers, ncnn, llama.cpp,

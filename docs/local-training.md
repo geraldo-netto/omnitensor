@@ -33,9 +33,16 @@ artifact; it never falls back to CPU execution.
 Use a dedicated producer environment. Do not add producer dependencies to the
 service environment.
 
+The trainers ship as their own distribution, `omnitensor-training`, built from
+`packaging/omnitensor-training` in this repository. It installs into the same
+`omnitensor` package as the service and pins the exact service version it was
+built with, because model recipes travel with the trainers while the schemas
+validating them travel with the service.
+
 | Package or extra | Requirement | Purpose |
 | --- | --- | --- |
-| OmniTensor base dependencies | Mandatory | Bounded recorder, fitting baseline, report and artifact contracts |
+| `omnitensor-training` | Mandatory | The trainers, recipes, exporters, and their CLIs |
+| `omnitensor` (pinned) | Mandatory | Bounded recorder, fitting baseline, report and artifact contracts |
 | `[train]` (`onnx`) | Mandatory for export | Validate and write canonical ONNX |
 | `[model-producers]` (`torch`, `onnx`, `numpy`) | Optional | Export reviewed neural sources such as CLIP in an isolated producer environment |
 | `[document-producers]` (`torch`, `transformers`, `safetensors`, `tokenizers`, `onnx`, `onnxruntime`, `pnnx`, `ncnn`, `numpy`) | Required only for the BGE GPU installer | Reconstruct the pinned BGE-small encoder, compile its ncnn graph, and compare it with the portable reference on a named Vulkan device |
@@ -52,7 +59,17 @@ Example producer environment for portable source plus GPU and NPU variants:
 ```sh
 python3 -m venv ~/.local/share/omnitensor-training/venv
 ~/.local/share/omnitensor-training/venv/bin/pip install \
-  '/path/to/omnitensor[train,convert,convert-npu]'
+  '/path/to/omnitensor[convert,convert-npu]' \
+  '/path/to/omnitensor/packaging/omnitensor-training[train]'
+```
+
+`[convert]` and `[convert-npu]` stay with `omnitensor`: they are packaging-time
+converters for the service's own artifact lanes, not trainers. Build both
+wheels with:
+
+```sh
+python -m build --wheel --outdir dist .
+python -m build --wheel --outdir dist packaging/omnitensor-training
 ```
 
 Installing `[train]` does not install PyTorch or TensorFlow. The current

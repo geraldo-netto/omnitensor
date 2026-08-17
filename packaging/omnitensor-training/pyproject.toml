@@ -1,0 +1,102 @@
+# The producer half of this repository, built as its own distribution.
+#
+# Nothing in the serving runtime imports `omnitensor.training`; the dependency
+# runs the other way, onto leaf utilities (atomicio, registry, preparation,
+# telemetry_types, executors.vulkan). Shipping it with the service put 9,500
+# lines and fifteen trainer CLIs on every desktop that only wanted inference,
+# and pulled torch-sized extras into the same dependency namespace.
+#
+# It installs into the same `omnitensor` package directory, alongside the
+# service rather than instead of it, and pins the exact version it was built
+# with: model recipes travel in this wheel while the schemas they validate
+# against travel in the service wheel, so the two must never be installed at
+# different versions.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-training"
+version = "0.1.0"
+description = "Model production and local training for OmniTensor: recipes, trainers, exporters, and the forecast producers."
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+]
+license = "MIT"
+license-files = ["../../LICENSE"]
+authors = [{name = "Geraldo Netto", email = "geraldonetto@gmail.com"}]
+dependencies = [
+    "omnitensor==0.1.0",
+]
+
+[project.optional-dependencies]
+# Mandatory for export: writes the canonical portable graph fitted from local
+# numeric history.
+train = ["onnx>=1.16"]
+# Producer-only neural-model export, separate from small deterministic numeric
+# fitting.
+model-producers = ["onnx>=1.16", "numpy>=1.24", "torch>=2.2"]
+# Explicit one-shot Document Intelligence production: reconstructs the pinned
+# BGE encoder, compiles it to ncnn, and runs source/native parity on a named
+# Vulkan device.
+document-producers = [
+    "ncnn>=1.0.20260526",
+    "numpy>=1.24",
+    "onnx>=1.16",
+    "onnxruntime>=1.17",
+    "pnnx>=20260526",
+    "safetensors>=0.4",
+    "tokenizers>=0.22",
+    "torch>=2.2",
+    "transformers>=4.40",
+]
+# Producer-only adapters for pinned foundation forecasters. The family-specific
+# loader remains explicit because Chronos and TTM use distinct reviewed APIs.
+foundation-producers = [
+    "onnx>=1.16",
+    "numpy>=1.24",
+    "torch>=2.2",
+    "safetensors>=0.4",
+    "transformers>=4.40",
+]
+# Producer-only reconstruction of the verified upstream architecture and
+# checkpoint. `einops` is imported by that pinned architecture.
+retinexformer-producers = [
+    "onnx>=1.16",
+    "numpy>=1.24",
+    "torch>=2.2",
+    "einops>=0.7",
+]
+
+[project.scripts]
+omnitensor-record-training-sample = "omnitensor.training.cli:record_main"
+omnitensor-record-runtime-snapshot = "omnitensor.training.cli:snapshot_record_main"
+omnitensor-train-model = "omnitensor.training.cli:train_main"
+omnitensor-train-storage-model = "omnitensor.training.cli:storage_train_main"
+omnitensor-train-network-model = "omnitensor.training.cli:network_train_main"
+omnitensor-train-build-model = "omnitensor.training.cli:build_train_main"
+omnitensor-train-hardware-model = "omnitensor.training.cli:hardware_train_main"
+omnitensor-train-desktop-model = "omnitensor.training.cli:desktop_train_main"
+omnitensor-revoke-desktop-training-history = "omnitensor.training.cli:desktop_revoke_main"
+omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
+omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
+omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
+omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
+omnitensor-install-document-model = "omnitensor.training.document_model:main"
+
+[tool.uv.sources]
+omnitensor = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+# The source lives in the repository it was always in; only the wheel is
+# separate. Nothing here may name a file outside `training/` or the recipes.
+packages = []
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../src/omnitensor/training" = "omnitensor/training"
+"../../model-recipes" = "omnitensor/model-recipes"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["pyproject.toml", "README.md"]

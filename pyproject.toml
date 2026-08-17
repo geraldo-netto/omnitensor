@@ -45,49 +45,10 @@ convert = ["pnnx>=20240101"]
 # Packaging-time only: converts ONNX into OpenVINO IR for the NPU lane. Kept
 # separate from [npu], which is the runtime installed with the service.
 convert-npu = ["openvino>=2024.0"]
-# Producer-only: writes the canonical portable graph fitted from local numeric
-# history. Training is never imported by or installed into the service unless
-# the operator explicitly selects this extra in a separate environment.
-train = ["onnx>=1.16"]
 # Optional document/image parsing inside the isolated event workload. PyMuPDF
 # can use its Tesseract integration for OCR; neither package is imported by the
 # long-running service process.
 events = ["pymupdf>=1.24"]
-# Producer-only neural-model export. This is intentionally separate from the
-# service and from small deterministic numeric fitting.
-model-producers = ["onnx>=1.16", "numpy>=1.24", "torch>=2.2"]
-# Explicit one-shot Document Intelligence production. These dependencies are
-# never imported by the service; they reconstruct the pinned BGE encoder,
-# compile it to ncnn, and run source/native parity on a named Vulkan device.
-document-producers = [
-    "ncnn>=1.0.20260526",
-    "numpy>=1.24",
-    "onnx>=1.16",
-    "onnxruntime>=1.17",
-    "pnnx>=20260526",
-    "safetensors>=0.4",
-    "tokenizers>=0.22",
-    "torch>=2.2",
-    "transformers>=4.40",
-]
-# Producer-only adapters for pinned foundation forecasters. The family-specific
-# loader remains explicit because Chronos and TTM use distinct reviewed APIs;
-# neither dependency is imported by the service or permits CPU fallback there.
-foundation-producers = [
-    "onnx>=1.16",
-    "numpy>=1.24",
-    "torch>=2.2",
-    "safetensors>=0.4",
-    "transformers>=4.40",
-]
-# Producer-only reconstruction of the verified upstream architecture/checkpoint.
-# `einops` is imported by that pinned architecture, never by the service.
-retinexformer-producers = [
-    "onnx>=1.16",
-    "numpy>=1.24",
-    "torch>=2.2",
-    "einops>=0.7",
-]
 dev = [
     "build>=1.2",
     "hatchling>=1.25",
@@ -106,20 +67,6 @@ omnitensor-plugin-smoke = "omnitensor.sdk.smoke:main"
 omnitensor-verify-install = "omnitensor.acceptance:main"
 omnitensor-prepare-artifact = "omnitensor.preparation:main"
 omnitensor-convert-model = "omnitensor.conversion:main"
-omnitensor-record-training-sample = "omnitensor.training.cli:record_main"
-omnitensor-record-runtime-snapshot = "omnitensor.training.cli:snapshot_record_main"
-omnitensor-train-model = "omnitensor.training.cli:train_main"
-omnitensor-train-storage-model = "omnitensor.training.cli:storage_train_main"
-omnitensor-train-network-model = "omnitensor.training.cli:network_train_main"
-omnitensor-train-build-model = "omnitensor.training.cli:build_train_main"
-omnitensor-train-hardware-model = "omnitensor.training.cli:hardware_train_main"
-omnitensor-train-desktop-model = "omnitensor.training.cli:desktop_train_main"
-omnitensor-revoke-desktop-training-history = "omnitensor.training.cli:desktop_revoke_main"
-omnitensor-install-trained-model = "omnitensor.training.cli:install_main"
-omnitensor-run-forecast = "omnitensor.training.cli:forecast_main"
-omnitensor-fetch-model-source = "omnitensor.training.recipe_cli:fetch_main"
-omnitensor-list-model-recipes = "omnitensor.training.recipe_cli:list_main"
-omnitensor-install-document-model = "omnitensor.training.document_model:main"
 omnitensor-qualify-document-questions = "omnitensor.plugins.document_acceptance:main"
 omnitensor-qualify-selected-text = "omnitensor.plugins.selected_text_acceptance:main"
 omnitensor-install-qwen-artifacts = "omnitensor.qwen_installation:main"
@@ -132,13 +79,22 @@ omnitensor-mutmut = "omnitensor.mutation_engine:main"
 omnitensor-grant = "omnitensor.consent:main"
 omnitensor-import-events = "omnitensor.event_cli:main"
 
+# The producer half is a second distribution in this repository, so one lock
+# describes both and a producer environment is reproducible from it:
+#   uv sync --package omnitensor-training --extra document-producers
+[tool.uv.workspace]
+members = ["packaging/omnitensor-training"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/omnitensor"]
+# `omnitensor.training` is a separate distribution built from
+# `packaging/omnitensor-training`. It installs into this same package
+# directory; it is excluded here so the service wheel does not also carry it.
+exclude = ["src/omnitensor/training"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "omnitensor/schemas"
 "workloads" = "omnitensor/workloads"
-"model-recipes" = "omnitensor/model-recipes"
 "generation-models" = "omnitensor/generation-models"
 "evaluation-corpora" = "omnitensor/evaluation-corpora"
 "plugin-manifests" = "omnitensor/plugin-manifests"
@@ -160,6 +116,8 @@ only_mutate = [
     "src/omnitensor/scheduler.py",
     "src/omnitensor/snapshot.py",
     "src/omnitensor/tensorcontract.py",
+    # Still mutated: the campaign reads this source tree, which holds both
+    # distributions. Only the wheel boundary moved.
     "src/omnitensor/training/binding.py",
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
