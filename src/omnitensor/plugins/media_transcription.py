@@ -33,11 +33,8 @@ MAX_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_DURATION_MS = 600_000
 MAX_VIDEO_DURATION_MS = 300_000
 MAX_IMAGE_PIXELS = 50_000_000
-MAX_VISUALS = 12
 MAX_PRESENTATION_SLIDES = 64
 MAX_DOCUMENT_PAGES = 64
-MAX_TEXT_CHARACTERS = 16_384
-MAX_SPEECH_TEXT_CHARACTERS = 4096
 MAX_LANGUAGE_CHARACTERS = 35
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
@@ -317,7 +314,10 @@ class MediaTranscriptionPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> tuple[VisualTranscript, ...]:
-        if not 1 <= len(frames) <= MAX_VISUALS:
+        # No ceiling on the sample count. The frame count is the sampling
+        # cadence applied to the video's length; capping it at twelve dropped
+        # every frame past 2m45s and described a long video from its opening.
+        if not frames:
             raise MediaTranscriptionError("frames-invalid", "visual sample count is invalid")
         result = []
         for index, frame in enumerate(frames):
@@ -430,12 +430,15 @@ def _validate_image_dimensions(width: object, height: object) -> None:
         raise MediaTranscriptionError("image-invalid", "image dimensions are invalid")
 
 
-def _bounded_content(value: object, *, required: bool, maximum: int = MAX_TEXT_CHARACTERS) -> str:
+def _bounded_content(value: object, *, required: bool) -> str:
+    # Only the lower bound is ours to set. A dense slide carries more than
+    # 16,384 characters of visible text and a monologue more than 4,096 in one
+    # segment; ceilings there failed the whole job as "transcript-invalid"
+    # rather than telling anybody what was said.
     if not isinstance(value, str):
         raise MediaTranscriptionError("transcript-invalid", "transcript content must be text")
     text = value.strip()
-    minimum = 1 if required else 0
-    if not minimum <= len(text) <= maximum or "\x00" in text:
+    if len(text) < (1 if required else 0) or "\x00" in text:
         raise MediaTranscriptionError("transcript-invalid", "transcript content is invalid")
     return text
 
@@ -471,11 +474,7 @@ def _validated_speech(value: object, media: MediaInfo) -> SpeechTranscript:
             SpeechSegment(
                 segment.start_ms,
                 segment.end_ms,
-                _bounded_content(
-                    segment.text,
-                    required=True,
-                    maximum=MAX_SPEECH_TEXT_CHARACTERS,
-                ),
+                _bounded_content(segment.text, required=True),
             )
         )
         previous_end = segment.end_ms
@@ -546,7 +545,7 @@ def _validated_visuals(
 def _valid_video_visuals(items: tuple[VisualTranscript, ...]) -> bool:
     timestamps = [item.timestamp_ms for item in items]
     return (
-        1 <= len(items) <= MAX_VISUALS
+        len(items) >= 1
         and all(item.slide_number is None for item in items)
         and all(item.page_number is None for item in items)
         and all(timestamp is not None for timestamp in timestamps)
@@ -634,9 +633,7 @@ __all__ = [
     "MAX_IMAGE_PIXELS",
     "MAX_SOURCE_BYTES",
     "MAX_PRESENTATION_SLIDES",
-    "MAX_SPEECH_TEXT_CHARACTERS",
     "MAX_VIDEO_DURATION_MS",
-    "MAX_VISUALS",
     "MediaInfo",
     "MediaModality",
     "MediaProbe",

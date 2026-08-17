@@ -49,7 +49,7 @@
       "properties": {
         "startMs": {"type": "integer", "minimum": 0, "maximum": 600000},
         "endMs": {"type": "integer", "minimum": 1, "maximum": 600000},
-        "text": {"type": "string", "minLength": 1, "maxLength": 4096}
+        "text": {"type": "string", "minLength": 1}
       }
     },
     "visual": {
@@ -60,8 +60,8 @@
         "timestampMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
         "slideNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
         "pageNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
-        "visibleText": {"type": "string", "maxLength": 16384},
-        "description": {"type": "string", "minLength": 1, "maxLength": 16384}
+        "visibleText": {"type": "string"},
+        "description": {"type": "string", "minLength": 1}
       }
     }
   }

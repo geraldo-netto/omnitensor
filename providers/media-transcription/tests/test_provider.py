@@ -566,7 +566,7 @@ def test_duration_sampling_frame_and_audio_helpers_enforce_bounds():
 
     assert provider._sample_timestamps(1) == (0,)
     assert provider._sample_timestamps(30_000) == (0, 29_999)
-    assert len(provider._sample_timestamps(MAX_VIDEO_DURATION_MS)) == 12
+    assert len(provider._sample_timestamps(MAX_VIDEO_DURATION_MS)) == 20
     for duration in (0, MAX_VIDEO_DURATION_MS + 1):
         with pytest.raises(MediaTranscriptionError, match="video duration is invalid"):
             provider._sample_timestamps(duration)

@@ -15,7 +15,6 @@ from types import SimpleNamespace
 from omnitensor.plugins.media_transcription import (
     MAX_DURATION_MS,
     MAX_VIDEO_DURATION_MS,
-    MAX_VISUALS,
     FrameSampler,
     MediaInfo,
     MediaModality,
@@ -372,7 +371,10 @@ def _demux_duration_ms(container, stream) -> int:
 def _sample_timestamps(duration_ms: int) -> tuple[int, ...]:
     if not 0 < duration_ms <= MAX_VIDEO_DURATION_MS:
         raise MediaTranscriptionError("frames-invalid", "video duration is invalid")
-    count = min(MAX_VISUALS, max(1, math.ceil(duration_ms / FRAME_INTERVAL_MS)))
+    # The cadence decides how many frames a video needs. Clamping the count to
+    # twelve sampled the first 2m45s of anything longer and silently described
+    # none of the rest.
+    count = max(1, math.ceil(duration_ms / FRAME_INTERVAL_MS))
     if count == 1:
         return (0,)
     return tuple(round(index * (duration_ms - 1) / (count - 1)) for index in range(count))

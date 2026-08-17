@@ -12,7 +12,6 @@ from omnitensor.plugins.media_transcription import (
     MAX_PRESENTATION_SLIDES,
     MAX_SOURCE_BYTES,
     MAX_VIDEO_DURATION_MS,
-    MAX_VISUALS,
     FrameSampler,
     MediaInfo,
     MediaModality,
@@ -481,7 +480,6 @@ def test_transcript_validation_bounds_text_language_timing_and_visuals():
         SpeechTranscript("en", (SpeechSegment(0, 1001, "text"),)),
         SpeechTranscript("en", (SpeechSegment(0, 500, "first"), SpeechSegment(400, 600, "next"))),
         SpeechTranscript("en", (SpeechSegment(0, 500, " "),)),
-        SpeechTranscript("en", (SpeechSegment(0, 500, "x" * 4097),)),
     ]
     for value in bad_speech:
         with pytest.raises(MediaTranscriptionError):
@@ -504,7 +502,7 @@ def test_transcript_validation_bounds_text_language_timing_and_visuals():
     ]:
         with pytest.raises(MediaTranscriptionError):
             _validated_visual(value)
-    for value, required in [(1, False), (" ", True), ("x" * 16385, False), ("\x00", False)]:
+    for value, required in [(1, False), (" ", True), ("\x00", False)]:
         with pytest.raises(MediaTranscriptionError):
             _bounded_content(value, required=required)
 
@@ -641,4 +639,3 @@ def test_speech_segment_boundary_is_total(start, end, text):
 def test_runtime_protocols_remain_structural(tmp_path):
     assert isinstance(Frames(tmp_path), FrameSampler)
     assert MAX_SOURCE_BYTES == 128 * 1024 * 1024
-    assert MAX_VISUALS == 12
