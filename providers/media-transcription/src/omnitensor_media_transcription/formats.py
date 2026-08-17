@@ -57,9 +57,8 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
             return static
         if suffix not in _AUDIO_SUFFIXES | _VIDEO_SUFFIXES:
             raise MediaTranscriptionError("media-unsupported", "selected media type is unsupported")
+        av = _require("av", "install the av media decoder")
         try:
-            import av
-
             with av.open(str(source), mode="r") as container:
                 audio = next(iter(container.streams.audio), None)
                 video = next(iter(container.streams.video), None)
@@ -127,10 +126,9 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
 
     @staticmethod
     def _decode_audio_sync(source: Path, cancellation: CancellationToken):
+        av = _require("av", "install the av media decoder")
+        np = _require("numpy", "install numpy")
         try:
-            import av
-            import numpy as np
-
             chunks = []
             samples = 0
             with av.open(str(source), mode="r") as container:
@@ -187,9 +185,8 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
         root = Path(tempfile.mkdtemp(prefix="omnitensor-media-frames-"))
         self._owned_roots.add(root)
         frames = []
+        av = _require("av", "install the av media decoder")
         try:
-            import av
-
             with av.open(str(source), mode="r") as container:
                 stream = next(iter(container.streams.video), None)
                 if stream is None:
@@ -232,14 +229,13 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
 
 
 def _svg_png(source: Path) -> io.BytesIO:
+    surfaces = _require("cairosvg.surface", "install the CairoSVG rasterizer")
     try:
         content = source.read_bytes()
         if not 0 < len(content) <= MAX_SVG_BYTES:
             raise ValueError("SVG size is invalid")
-        from cairosvg.surface import PNGSurface
-
         width, height = _svg_output_size(content)
-        rendered = PNGSurface.convert(
+        rendered = surfaces.PNGSurface.convert(
             bytestring=content,
             output_width=width,
             output_height=height,
@@ -272,11 +268,30 @@ def _visual_payload(source: Path) -> bytes:
         ) from error
 
 
-def _svg_output_size(content: bytes) -> tuple[int, int]:
-    from cairosvg.helpers import size
-    from cairosvg.parser import Tree
 
-    tree = Tree(bytestring=content, unsafe=False, url_fetcher=_svg_url_fetcher)
+def _require(module: str, detail: str):
+    """Import a declared dependency, or refuse as a broken install.
+
+    These imports used to sit inside the same broad `except Exception` as the
+    decoding they enable, so a machine missing `av` or `cairosvg` — both
+    declared dependencies of this distribution — told the person their media
+    could not be decoded. That is a statement about their file, and it sent
+    them to re-encode something that was never the problem.
+    """
+    from importlib import import_module
+
+    try:
+        return import_module(module)
+    except ImportError as error:
+        raise MediaTranscriptionError("media-runtime-unavailable", detail) from error
+
+
+def _svg_output_size(content: bytes) -> tuple[int, int]:
+    helpers = _require("cairosvg.helpers", "install the CairoSVG rasterizer")
+    parser = _require("cairosvg.parser", "install the CairoSVG rasterizer")
+    size = helpers.size
+
+    tree = parser.Tree(bytestring=content, unsafe=False, url_fetcher=_svg_url_fetcher)
     surface = SimpleNamespace(dpi=96, context_width=0, context_height=0, font_size=12)
     width = size(surface, tree.get("width", ""), "x")
     height = size(surface, tree.get("height", ""), "y")

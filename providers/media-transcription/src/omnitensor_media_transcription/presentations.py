@@ -162,9 +162,22 @@ def _read_archive_entry(
 
 
 def _xml_root(content: bytes):
+    """Parse presentation XML with the hardened parser, or say which failed.
+
+    The import used to sit inside the same `except Exception` as the parse, so
+    an installation missing `defusedxml` told the person their presentation was
+    invalid. It is a declared dependency of this distribution, so its absence
+    is a broken install rather than a fact about their file — and reporting it
+    as one sends them off to re-export a document that was fine.
+    """
     try:
         from defusedxml import ElementTree
-
+    except ImportError as error:
+        raise MediaTranscriptionError(
+            "presentation-runtime-unavailable",
+            "install the defusedxml presentation parser",
+        ) from error
+    try:
         return ElementTree.fromstring(content)
     except Exception as error:
         raise MediaTranscriptionError(
