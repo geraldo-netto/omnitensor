@@ -65,7 +65,6 @@ def _document() -> dict:
             "onlyMutate": ["src/omnitensor/subject.py"],
             "expansionPriority": [
                 "src/omnitensor/training/",
-                "src/omnitensor/plugins/qwen.py",
                 "src/omnitensor/plugins/document_acceptance.py",
             ],
         },
@@ -142,7 +141,6 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     assert manifest.scope.blocked_by == "OMNI-0297"
     assert manifest.scope.expansion_priority == (
         "src/omnitensor/training/",
-        "src/omnitensor/plugins/qwen.py",
         "src/omnitensor/plugins/document_acceptance.py",
     )
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))

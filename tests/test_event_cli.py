@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from omnitensor import event_cli
-from omnitensor.plugins.qwen import QwenCatalog, QwenEvaluation, QwenSource
+from omnitensor.plugins.qwen_contracts import QwenCatalog, QwenEvaluation, QwenSource
 
 
 def result_document():

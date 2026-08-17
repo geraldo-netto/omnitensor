@@ -15,9 +15,7 @@ from .generation import (
     ProviderGenerationError,
 )
 from .protocol import CancellationToken, ProgressReporter
-from .qwen_contracts import NativeQwenRuntime, QwenProviderError, legacy_qwen_callback
-
-_LEGACY_MODULE = "omnitensor.plugins.qwen"
+from .qwen_contracts import NativeQwenRuntime, QwenProviderError
 
 
 class _QwenWorker:
@@ -120,7 +118,7 @@ class LlamaCppVulkanQwenWorker(_QwenWorker):
     runtime_name = "llama.cpp-vulkan"
 
     def _validate_load(self, report: NativeLoadReport) -> None:
-        legacy_qwen_callback("_validate_gpu_load", validate_gpu_load)(report)
+        validate_gpu_load(report)
 
 
 class OpenVinoNpuQwenWorker(_QwenWorker):
@@ -137,11 +135,7 @@ class OpenVinoNpuQwenWorker(_QwenWorker):
         super().__init__(*args, **kwargs)
 
     def _validate_load(self, report: NativeLoadReport) -> None:
-        legacy_qwen_callback("_validate_npu_load", validate_npu_load)(report)
-
-
-for _legacy_type in (_QwenWorker, LlamaCppVulkanQwenWorker, OpenVinoNpuQwenWorker):
-    _legacy_type.__module__ = _LEGACY_MODULE
+        validate_npu_load(report)
 
 
 __all__ = [

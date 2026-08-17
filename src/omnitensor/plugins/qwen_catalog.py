@@ -12,7 +12,6 @@ from .qwen_contracts import (
     QwenEvaluation,
     QwenProviderError,
     QwenSource,
-    legacy_qwen_callback,
     qwen_mapping,
     qwen_positive_integer,
     qwen_sequence,
@@ -182,7 +181,7 @@ def _evaluation(document: object) -> QwenEvaluation:
         maximum_peak_memory_bytes=value["maximumPeakMemoryBytes"],
         maximum_cancellation_latency_ms=value["maximumCancellationLatencyMs"],
     )
-    legacy_qwen_callback("_validate_policy", validate_event_policy)(policy)
+    validate_event_policy(policy)
     return QwenEvaluation(corpus, policy)
 
 

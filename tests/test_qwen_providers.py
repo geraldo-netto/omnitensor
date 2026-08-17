@@ -11,7 +11,10 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-import omnitensor.plugins.qwen as qwen_module
+from omnitensor.plugins import qwen_catalog as catalog_module
+from omnitensor.plugins import qwen_providers as providers_module
+from omnitensor.plugins import qwen_qualification as qualification_module
+from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.cancellation import CancellationReason, JobCancellationToken
 from omnitensor.plugins.generation import (
     GenerationRequest,
@@ -20,18 +23,20 @@ from omnitensor.plugins.generation import (
     ProviderGenerationError,
     parse_provider_descriptor,
 )
-from omnitensor.plugins.qwen import (
-    MAX_CATALOG_BYTES,
-    MAX_CORPUS_BYTES,
+from omnitensor.plugins.qwen_catalog import MAX_CATALOG_BYTES, load_qwen_catalog
+from omnitensor.plugins.qwen_contracts import (
     EventProviderEvidence,
     EventProviderObservation,
     EventQualificationPolicy,
-    LlamaCppVulkanQwenWorker,
-    NativeLoadReport,
-    OpenVinoNpuQwenWorker,
     QwenProviderError,
+)
+from omnitensor.plugins.qwen_providers import (
+    LlamaCppVulkanQwenWorker,
+    OpenVinoNpuQwenWorker,
+)
+from omnitensor.plugins.qwen_qualification import (
+    MAX_CORPUS_BYTES,
     load_event_corpus,
-    load_qwen_catalog,
     qualify_event_provider,
 )
 
@@ -722,7 +727,7 @@ def test_native_provider_errors_before_generation_are_preserved_without_terminat
 
 
 def test_base_worker_load_validator_is_fail_closed(tmp_path):
-    class IncompleteWorker(qwen_module._QwenWorker):
+    class IncompleteWorker(providers_module._QwenWorker):
         accelerator = "gpu"
         runtime_name = "llama.cpp-vulkan"
 
@@ -1111,19 +1116,23 @@ def test_packaged_paths_win_and_source_paths_are_exact(tmp_path, monkeypatch):
     packaged_models.mkdir()
     packaged_corpora.mkdir()
     source_root.mkdir()
-    monkeypatch.setattr(qwen_module, "_PACKAGED_MODELS", packaged_models)
-    monkeypatch.setattr(qwen_module, "_PACKAGED_CORPORA", packaged_corpora)
-    monkeypatch.setattr(qwen_module, "_SOURCE_ROOT", source_root)
+    monkeypatch.setattr(catalog_module, "_PACKAGED_MODELS", packaged_models)
+    monkeypatch.setattr(qualification_module, "_PACKAGED_CORPORA", packaged_corpora)
+    monkeypatch.setattr(catalog_module, "_SOURCE_ROOT", source_root)
+    monkeypatch.setattr(qualification_module, "_SOURCE_ROOT", source_root)
 
-    assert qwen_module._catalog_path() == source_root / "generation-models/qwen2-5-vl-7b.json"
-    assert qwen_module._corpus_path() == source_root / "evaluation-corpora/event-extraction-v1.json"
+    assert catalog_module._catalog_path() == source_root / "generation-models/qwen2-5-vl-7b.json"
+    assert (
+        qualification_module._corpus_path()
+        == source_root / "evaluation-corpora/event-extraction-v1.json"
+    )
 
     packaged_catalog = packaged_models / "qwen2-5-vl-7b.json"
     packaged_corpus = packaged_corpora / "event-extraction-v1.json"
     packaged_catalog.touch()
     packaged_corpus.touch()
-    assert qwen_module._catalog_path() == packaged_catalog
-    assert qwen_module._corpus_path() == packaged_corpus
+    assert catalog_module._catalog_path() == packaged_catalog
+    assert qualification_module._corpus_path() == packaged_corpus
 
 
 def test_packaged_paths_remain_usable_without_a_source_checkout(tmp_path, monkeypatch):
@@ -1135,18 +1144,19 @@ def test_packaged_paths_remain_usable_without_a_source_checkout(tmp_path, monkey
     corpus = packaged_corpora / "event-extraction-v1.json"
     catalog.touch()
     corpus.touch()
-    monkeypatch.setattr(qwen_module, "_PACKAGED_MODELS", packaged_models)
-    monkeypatch.setattr(qwen_module, "_PACKAGED_CORPORA", packaged_corpora)
-    monkeypatch.setattr(qwen_module, "_SOURCE_ROOT", None)
+    monkeypatch.setattr(catalog_module, "_PACKAGED_MODELS", packaged_models)
+    monkeypatch.setattr(qualification_module, "_PACKAGED_CORPORA", packaged_corpora)
+    monkeypatch.setattr(catalog_module, "_SOURCE_ROOT", None)
+    monkeypatch.setattr(qualification_module, "_SOURCE_ROOT", None)
 
-    assert qwen_module._catalog_path() == catalog
-    assert qwen_module._corpus_path() == corpus
+    assert catalog_module._catalog_path() == catalog
+    assert qualification_module._corpus_path() == corpus
     catalog.unlink()
     corpus.unlink()
     with pytest.raises(AssertionError) as missing_catalog:
-        qwen_module._catalog_path()
+        catalog_module._catalog_path()
     with pytest.raises(AssertionError) as missing_corpus:
-        qwen_module._corpus_path()
+        qualification_module._corpus_path()
     assert str(missing_catalog.value) == str(missing_corpus.value) == ""
 
 

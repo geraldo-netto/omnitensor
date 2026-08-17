@@ -13,7 +13,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-import omnitensor.plugins.qwen as qwen
 from omnitensor.atomicio import JsonTooLargeError
 from omnitensor.plugins.acceptance_kit import (
     JsonDigestMismatchError,
@@ -385,13 +384,13 @@ def test_public_npu_validator_preserves_the_existing_layer_agnostic_contract():
     validate_npu_load(NativeLoadReport("openvino-genai", "NPU", 0, -1, False))
 
 
-def test_qwen_reexports_native_report_and_private_validators_by_identity():
+def test_the_native_report_pickles_through_the_module_that_defines_it():
+    # It used to claim `omnitensor.plugins.qwen` as its `__module__` so that
+    # pickle resolved it through a facade named after one model. It says where
+    # it lives, which is what pickle needs and what a traceback should show.
     report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False)
 
-    assert qwen.NativeLoadReport is NativeLoadReport
-    assert qwen._validate_gpu_load is validate_gpu_load
-    assert qwen._validate_npu_load is validate_npu_load
-    assert NativeLoadReport.__module__ == "omnitensor.plugins.qwen"
+    assert NativeLoadReport.__module__ == "omnitensor.plugins.acceptance_kit"
     assert pickle.loads(pickle.dumps(report)) == report
 
 
@@ -450,4 +449,4 @@ def test_external_provider_factory_imports_only_the_public_load_validator():
     }
 
     assert ("omnitensor.plugins.acceptance_kit", "validate_gpu_load") in imports
-    assert ("omnitensor.plugins.qwen", "_validate_gpu_load") not in imports
+    assert ("omnitensor.plugins.qwen_providers", "_validate_gpu_load") not in imports

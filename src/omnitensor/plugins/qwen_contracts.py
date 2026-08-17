@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -17,8 +16,6 @@ from .acceptance_kit import (
 )
 from .generation import GenerationRequest, GenerationTask
 from .protocol import CancellationToken, ProgressReporter
-
-_LEGACY_MODULE = "omnitensor.plugins.qwen"
 
 
 class QwenProviderError(ValueError):
@@ -188,26 +185,6 @@ def validate_event_policy(policy: EventQualificationPolicy) -> None:
         qwen_positive_integer(getattr(policy, name), name, "policy-invalid")
 
 
-def legacy_qwen_callback(name: str, default: Callable[..., object]) -> Callable[..., object]:
-    """Resolve one audited facade monkeypatch without importing the facade."""
-    facade = sys.modules.get(_LEGACY_MODULE)
-    return default if facade is None else getattr(facade, name, default)
-
-
-for _legacy_type in (
-    QwenProviderError,
-    QwenSource,
-    QwenCatalog,
-    NativeQwenRuntime,
-    FrozenEventCase,
-    FrozenEventCorpus,
-    EventProviderObservation,
-    EventProviderEvidence,
-    EventQualificationPolicy,
-    QwenEvaluation,
-    EventQualificationReport,
-):
-    _legacy_type.__module__ = _LEGACY_MODULE
 
 
 __all__ = [

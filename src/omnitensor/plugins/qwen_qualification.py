@@ -23,7 +23,6 @@ from .qwen_contracts import (
     FrozenEventCase,
     FrozenEventCorpus,
     QwenProviderError,
-    legacy_qwen_callback,
     qwen_mapping,
     qwen_positive_integer,
     qwen_sequence,
@@ -85,7 +84,7 @@ def qualify_event_provider(
 ) -> EventQualificationReport:
     policy = policy or EventQualificationPolicy()
     _validate_evidence_identity(descriptor, corpus, evidence)
-    legacy_qwen_callback("_validate_policy", validate_event_policy)(policy)
+    validate_event_policy(policy)
     true_positive, false_positive, false_negative, latencies, peak_memory = _score_observations(
         corpus, evidence
     )
@@ -184,9 +183,9 @@ def _score_observation(
 
 def _validate_lane_load(accelerator: str, report: NativeLoadReport) -> None:
     if accelerator == "gpu":
-        legacy_qwen_callback("_validate_gpu_load", validate_gpu_load)(report)
+        validate_gpu_load(report)
     elif accelerator == "npu":
-        legacy_qwen_callback("_validate_npu_load", validate_npu_load)(report)
+        validate_npu_load(report)
     else:
         raise QwenProviderError("evidence-invalid", "generation lane must be GPU or NPU")
 

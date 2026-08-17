@@ -22,7 +22,6 @@
     ],
     "expansionPriority": [
       "src/omnitensor/training/",
-      "src/omnitensor/plugins/qwen.py",
       "src/omnitensor/plugins/document_acceptance.py"
     ]
   },

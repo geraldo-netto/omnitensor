@@ -23,6 +23,7 @@ from omnitensor_vulkan_runtime import (
     runtime,
 )
 
+from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.document_qa import (
     EmbeddingProvider,
     IndexedSpan,
@@ -35,9 +36,13 @@ from omnitensor.plugins.event_workload import (
 )
 from omnitensor.plugins.events import SourceFragment
 from omnitensor.plugins.file_organizer import file_organizer_task
-from omnitensor.plugins.generation import GenerationLimits, GenerationRequest, GenerationTask
+from omnitensor.plugins.generation import (
+    GenerationLimits,
+    GenerationRequest,
+    GenerationTask,
+    ProviderGenerationError,
+)
 from omnitensor.plugins.protocol import PluginContext, PluginProgress
-from omnitensor.plugins.qwen import NativeLoadReport, ProviderGenerationError
 from omnitensor.plugins.selected_text import selected_text_task
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,

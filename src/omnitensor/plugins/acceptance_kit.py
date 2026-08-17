@@ -40,11 +40,6 @@ class NativeLoadReport:
     cpu_fallback: bool
 
 
-# Preserve the global used by existing serialized reports while Qwen exposes
-# this class as an identity alias during the compatibility release.
-NativeLoadReport.__module__ = "omnitensor.plugins.qwen"
-
-
 def read_bounded_json(
     path: Path | str,
     max_bytes: int,
