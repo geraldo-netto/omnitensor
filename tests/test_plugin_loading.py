@@ -3101,3 +3101,51 @@ class TestCarryingAModelChoiceToTheWorker:
         )
 
         assert bootstrap.chosen_or("qwen3-8b-q4-k-m").id == "qwen3-8b-q4-k-m"
+
+
+def test_off_loop_wait_costs_no_event_loop_wakeups():
+    """A worker waiting on stdin must not poll for the answer.
+
+    Every plugin worker parks its main loop in ``run_off_loop`` while it waits
+    for the next service frame. Polling there kept six idle processes waking
+    roughly a thousand times a second each, which is what an idle machine pays
+    for in power.
+    """
+    loop_class = asyncio.SelectorEventLoop
+    if not hasattr(loop_class, "_run_once"):  # pragma: no cover - CPython private API
+        pytest.skip("this CPython does not expose the event loop iteration hook")
+
+    class CountingLoop(loop_class):
+        wakeups = 0
+
+        def _run_once(self):
+            CountingLoop.wakeups += 1
+            super()._run_once()
+
+    release = threading.Event()
+    counting = threading.Event()
+
+    def block():
+        counting.set()
+        release.wait()
+        return "done"
+
+    async def scenario():
+        pending = asyncio.ensure_future(loading_module._run_off_loop(block))
+        while not counting.is_set():
+            await asyncio.sleep(0)
+        CountingLoop.wakeups = 0
+        # Long enough that a 1 ms poll would show hundreds of iterations.
+        threading.Timer(0.3, release.set).start()
+        return await pending
+
+    loop = CountingLoop()
+    try:
+        result = loop.run_until_complete(scenario())
+    finally:
+        release.set()
+        loop.close()
+
+    assert result == "done"
+    # One wakeup delivers the result; a couple more absorb loop bookkeeping.
+    assert CountingLoop.wakeups <= 5
