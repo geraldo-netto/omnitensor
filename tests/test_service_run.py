@@ -2114,6 +2114,7 @@ def test_idle_publisher_writes_once_and_republishes_after_a_change(tmp_path, mon
     reader watching the file, for as long as the service runs.
     """
     monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 30.0)
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 0.01)
     discovery = FakeDiscovery([tpu_device()])
     publisher = FakePublisher()
 
@@ -2145,6 +2146,7 @@ def test_idle_publisher_writes_once_and_republishes_after_a_change(tmp_path, mon
 def test_idle_publisher_still_heartbeats_so_readers_do_not_call_it_stale(tmp_path, monkeypatch):
     """Readers judge a snapshot stale by age, so proof of life must keep coming."""
     monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 0.02)
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 0.01)
     publisher = FakePublisher()
 
     async def scenario():
@@ -2174,6 +2176,7 @@ def test_idle_publisher_still_heartbeats_so_readers_do_not_call_it_stale(tmp_pat
 def test_publisher_republishes_after_a_retraction(tmp_path, monkeypatch):
     """A retraction removes the document, so the cached copy cannot suppress it."""
     monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 30.0)
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 0.01)
     discovery = FakeDiscovery([tpu_device()])
     publisher = FakePublisher()
 
@@ -2199,3 +2202,106 @@ def test_publisher_republishes_after_a_retraction(tmp_path, monkeypatch):
     asyncio.run(scenario())
     assert publisher.retracted == 1
     assert len(publisher.published) == 2
+
+
+def _count_snapshot_builds(service):
+    """Count publisher ticks by the one thing every tick does."""
+    builds = []
+    original = service._build_runtime_snapshot
+
+    def counted():
+        builds.append(1)
+        return original()
+
+    service._build_runtime_snapshot = counted
+    return builds
+
+
+def test_idle_runtime_backs_its_tick_off_and_a_change_wakes_it_at_once(tmp_path, monkeypatch):
+    """Idle costs a tick every ten seconds; a state change does not wait for it.
+
+    Each tick rereads sysfs, reloads grants, rebuilds the document and
+    revalidates it against the schema. Paying that twice a second on a machine
+    doing nothing is what an idle desktop feels as power.
+    """
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 30.0)
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=30.0,
+        )
+        builds = _count_snapshot_builds(service)
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.1)
+        # Ten fast ticks would have fitted; the loop parked on a 30 s wait
+        # after the first found nothing to say.
+        parked = len(builds)
+        service.request_publish()
+        await asyncio.sleep(0.05)
+        woken = len(builds)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+        return parked, woken
+
+    parked, woken = asyncio.run(scenario())
+    assert parked <= 2
+    assert woken == parked + 1
+
+
+def test_a_job_starting_wakes_the_publisher_out_of_its_idle_wait(tmp_path, monkeypatch):
+    """A reader must see a job start, not wait out the idle interval for it."""
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 30.0)
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=30.0,
+        )
+        builds = _count_snapshot_builds(service)
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.1)
+        parked = len(builds)
+        service.jobs._observer.job_started(sample_manifest()["id"])
+        await asyncio.sleep(0.05)
+        woken = len(builds)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+        return parked, woken
+
+    parked, woken = asyncio.run(scenario())
+    # The wake served a tick, and the change it carried put the loop back on
+    # its fast interval, so more may have followed.
+    assert woken > parked
+
+
+def test_stopping_ends_the_publisher_wait_without_burning_the_idle_interval(tmp_path, monkeypatch):
+    """Shutdown must not block for the idle interval it happens to be inside."""
+    monkeypatch.setattr("omnitensor.service.IDLE_PUBLISH_INTERVAL_S", 30.0)
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=FakePublisher(),
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=30.0,
+        )
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.1)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=1)
+
+    asyncio.run(scenario())
