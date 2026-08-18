@@ -31,6 +31,27 @@ from .snapshot import build_snapshot, input_roots_document
 LOGGER = logging.getLogger("omnitensor.service")
 
 
+class PublishingJobObserver:
+    """Tell a snapshot publisher that a job moved, without changing what it observes.
+
+    The publisher's tick backs off while nothing is happening, so the moments a
+    reader most wants to see — a job starting, a job ending — are exactly the
+    ones a slow tick would hide.
+    """
+
+    def __init__(self, observer, request_publish: Callable[[], None]) -> None:
+        self._observer = observer
+        self._request_publish = request_publish
+
+    def job_started(self, workload_id: str) -> None:
+        self._observer.job_started(workload_id)
+        self._request_publish()
+
+    def job_finished(self, workload_id: str, status: str, detail: str) -> None:
+        self._observer.job_finished(workload_id, status, detail)
+        self._request_publish()
+
+
 class TelemetryJobObserver:
     """Adapter from the job lifecycle onto per-profile telemetry counters."""
 
@@ -305,6 +326,7 @@ def record_artifact_readiness(snapshot, resolve_artifact, telemetry) -> None:
 
 
 __all__ = [
+    "PublishingJobObserver",
     "ResultSummaryObserver",
     "TelemetryJobObserver",
     "artifact_readiness_state",

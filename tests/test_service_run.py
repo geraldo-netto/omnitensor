@@ -28,7 +28,6 @@ from omnitensor.service import (
     FileSnapshotPublisher,
     OmniTensorService,
     SysfsDeviceDiscovery,
-    _without_generated_at,
 )
 
 
@@ -2168,8 +2167,8 @@ def test_idle_publisher_still_heartbeats_so_readers_do_not_call_it_stale(tmp_pat
     assert len(publisher.published) >= 3
     stamps = [snapshot["generatedAt"] for snapshot in publisher.published]
     assert stamps == sorted(stamps)
-    assert [_without_generated_at(snapshot) for snapshot in publisher.published[1:]] == [
-        _without_generated_at(publisher.published[0])
+    assert [OmniTensorService._content_of(snapshot) for snapshot in publisher.published[1:]] == [
+        OmniTensorService._content_of(publisher.published[0])
     ] * (len(publisher.published) - 1)
 
 

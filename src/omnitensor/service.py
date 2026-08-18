@@ -27,7 +27,7 @@ import asyncio
 import logging
 import secrets
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from . import artifact_readiness as artifacts
@@ -67,7 +67,7 @@ from .host import FileSnapshotPublisher as FileSnapshotPublisher
 from .host import SysfsDeviceDiscovery as SysfsDeviceDiscovery
 from .host import build_host_ports
 from .host_pressure import read_pressure
-from .job_ports import JobAdmission, JobDispatcher, JobLifecycleObserver
+from .job_ports import JobAdmission, JobDispatcher
 from .jobs import (
     JobSubmissionService,
     PredicateJobAuthorizer,
@@ -152,32 +152,6 @@ GRANT_REFRESH_INTERVAL_S = 0.25
 # enough that installing an artifact shows up while someone is still looking
 # for it.
 PLUGIN_READINESS_INTERVAL_S = 30.0
-
-
-def _without_generated_at(snapshot: dict) -> dict:
-    """The snapshot's content, apart from when it was built."""
-    return {key: value for key, value in snapshot.items() if key != "generatedAt"}
-
-
-class _PublishingJobObserver:
-    """Tell the publisher that a job moved, without changing what it observes.
-
-    The snapshot's tick backs off while nothing is happening, so the moments a
-    reader most wants to see — a job starting, a job ending — are exactly the
-    ones a slow tick would hide.
-    """
-
-    def __init__(self, observer: JobLifecycleObserver, request_publish: Callable[[], None]) -> None:
-        self._observer = observer
-        self._request_publish = request_publish
-
-    def job_started(self, workload_id: str) -> None:
-        self._observer.job_started(workload_id)
-        self._request_publish()
-
-    def job_finished(self, workload_id: str, status: str, detail: str) -> None:
-        self._observer.job_finished(workload_id, status, detail)
-        self._request_publish()
 
 
 class OmniTensorService:
@@ -325,7 +299,7 @@ class OmniTensorService:
             admission=(
                 self._job_dispatcher if isinstance(self._job_dispatcher, JobAdmission) else None
             ),
-            observer=_PublishingJobObserver(
+            observer=observation.PublishingJobObserver(
                 TelemetryJobObserver(self.plugin_telemetry), self.request_publish
             ),
         )
@@ -524,7 +498,6 @@ class OmniTensorService:
     def _note_job_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         # Late-bound: runners are built before the job service they report to.
         self.jobs.note_progress(job_id, stage, fraction, detail)
-        self.request_publish()
 
     def _deliver_job_output(self, job_id: str, output: dict) -> None:
         self.jobs.note_progress(job_id, "deliver", 1.0, "Result delivered")
@@ -669,6 +642,11 @@ class OmniTensorService:
         self._record_published(snapshot)
         return snapshot
 
+    @staticmethod
+    def _content_of(snapshot: dict) -> dict:
+        """The snapshot's content, apart from when it was built."""
+        return {key: value for key, value in snapshot.items() if key != "generatedAt"}
+
     def _snapshot_changed(self, snapshot: dict) -> bool:
         """Whether this document says anything the last published one did not.
 
@@ -677,9 +655,7 @@ class OmniTensorService:
         """
         if self._last_published_snapshot is None:
             return True
-        return _without_generated_at(snapshot) != _without_generated_at(
-            self._last_published_snapshot
-        )
+        return self._content_of(snapshot) != self._content_of(self._last_published_snapshot)
 
     def _heartbeat_due(self) -> bool:
         return self._monotonic() >= self._next_snapshot_heartbeat
