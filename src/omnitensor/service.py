@@ -134,6 +134,11 @@ LOGGER = logging.getLogger(__name__)
 
 PUBLISH_INTERVAL_S = 2.0
 DISCOVERY_INTERVAL_S = 10.0
+# Readers treat a snapshot older than 15 s as stale, so an idle runtime still
+# owes them proof of life — but only that, not a fresh copy of an unchanged
+# document twice a second. Publishing on change, plus this heartbeat, keeps the
+# staleness verdict correct while an idle machine stops writing to disk.
+SNAPSHOT_HEARTBEAT_INTERVAL_S = 5.0
 GRANT_REFRESH_INTERVAL_S = 0.25
 # Artifact readiness re-reads and re-digests every declared artifact, which is
 # 0.25 ms for a small model and 25 ms at the 64 MiB ceiling — affordable
@@ -141,6 +146,11 @@ GRANT_REFRESH_INTERVAL_S = 0.25
 # enough that installing an artifact shows up while someone is still looking
 # for it.
 PLUGIN_READINESS_INTERVAL_S = 30.0
+
+
+def _without_generated_at(snapshot: dict) -> dict:
+    """The snapshot's content, apart from when it was built."""
+    return {key: value for key, value in snapshot.items() if key != "generatedAt"}
 
 
 class OmniTensorService:
@@ -302,6 +312,8 @@ class OmniTensorService:
             logger=LOGGER,
         )
         self._snapshot_retracted = False
+        self._last_published_snapshot: dict | None = None
+        self._next_snapshot_heartbeat = 0.0
         self._next_grant_refresh = 0.0
         self._next_readiness_refresh = 0.0
         self._stopping = asyncio.Event()
@@ -620,7 +632,33 @@ class OmniTensorService:
         """Synchronously build and publish one snapshot (test/adapter API)."""
         snapshot = self._build_runtime_snapshot()
         self._publisher_port.publish(snapshot)
+        self._record_published(snapshot)
         return snapshot
+
+    def _snapshot_is_due(self, snapshot: dict) -> bool:
+        """Publish what changed, and otherwise only prove the runtime is alive.
+
+        ``generatedAt`` moves on every build, so it is compared out: it is the
+        proof of life the heartbeat carries, never a change in its own right.
+        """
+        if self._last_published_snapshot is None:
+            return True
+        if _without_generated_at(snapshot) != _without_generated_at(self._last_published_snapshot):
+            return True
+        return self._monotonic() >= self._next_snapshot_heartbeat
+
+    def _record_published(self, snapshot: dict) -> None:
+        self._last_published_snapshot = snapshot
+        self._next_snapshot_heartbeat = self._monotonic() + SNAPSHOT_HEARTBEAT_INTERVAL_S
+
+    @staticmethod
+    def _monotonic() -> float:
+        try:
+            return asyncio.get_running_loop().time()
+        except RuntimeError:
+            # ``publish_once`` is a synchronous test/adapter entry point that
+            # can run with no loop; the heartbeat still needs a clock.
+            return time.monotonic()
 
     async def _publisher(self) -> None:
         # Honest-absence decision (OMNI-0011): with zero devices no
@@ -641,10 +679,17 @@ class OmniTensorService:
                         self._snapshot_retracted = False
                     await self._refresh_plugin_readiness()
                     snapshot = await run_off_loop(self._build_runtime_snapshot)
-                    await run_off_loop(self._publisher_port.publish, snapshot)
+                    # An idle runtime rebuilds the same document every tick.
+                    # Rewriting it anyway costs a disk write and wakes every
+                    # reader watching the file, forever, to say nothing changed.
+                    if self._snapshot_is_due(snapshot):
+                        await run_off_loop(self._publisher_port.publish, snapshot)
+                        self._record_published(snapshot)
                 elif not self._snapshot_retracted:
                     await run_off_loop(self._publisher_port.retract)
                     self._snapshot_retracted = True
+                    self._last_published_snapshot = None
+                    self._next_snapshot_heartbeat = 0.0
                     LOGGER.warning(
                         "No accelerator devices present; retracted the runtime snapshot"
                         " so readers observe absence instead of stale data",

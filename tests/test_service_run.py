@@ -28,6 +28,7 @@ from omnitensor.service import (
     FileSnapshotPublisher,
     OmniTensorService,
     SysfsDeviceDiscovery,
+    _without_generated_at,
 )
 
 
@@ -2104,3 +2105,97 @@ def test_the_published_snapshot_carries_the_summary(tmp_path):
 
     assert validate_document("runtime-snapshot.schema.json", snapshot) == []
     assert [alert["title"] for alert in snapshot["alerts"]] == ["class 3"]
+
+
+def test_idle_publisher_writes_once_and_republishes_after_a_change(tmp_path, monkeypatch):
+    """An unchanged runtime must not rewrite its snapshot every tick.
+
+    Republishing an identical document costs a disk write and wakes every
+    reader watching the file, for as long as the service runs.
+    """
+    monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 30.0)
+    discovery = FakeDiscovery([tpu_device()])
+    publisher = FakePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=discovery,
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.12)
+        idle_publishes = len(publisher.published)
+        discovery.devices.append(npu_device())
+        await asyncio.sleep(0.08)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+        return idle_publishes
+
+    idle_publishes = asyncio.run(scenario())
+    assert idle_publishes == 1
+    assert len(publisher.published) == 2
+    assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
+
+
+def test_idle_publisher_still_heartbeats_so_readers_do_not_call_it_stale(tmp_path, monkeypatch):
+    """Readers judge a snapshot stale by age, so proof of life must keep coming."""
+    monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 0.02)
+    publisher = FakePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=FakeDiscovery([tpu_device()]),
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=10.0,
+        )
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.15)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+
+    asyncio.run(scenario())
+    assert len(publisher.published) >= 3
+    stamps = [snapshot["generatedAt"] for snapshot in publisher.published]
+    assert stamps == sorted(stamps)
+    assert [_without_generated_at(snapshot) for snapshot in publisher.published[1:]] == [
+        _without_generated_at(publisher.published[0])
+    ] * (len(publisher.published) - 1)
+
+
+def test_publisher_republishes_after_a_retraction(tmp_path, monkeypatch):
+    """A retraction removes the document, so the cached copy cannot suppress it."""
+    monkeypatch.setattr("omnitensor.service.SNAPSHOT_HEARTBEAT_INTERVAL_S", 30.0)
+    discovery = FakeDiscovery([tpu_device()])
+    publisher = FakePublisher()
+
+    async def scenario():
+        service = build_service(
+            tmp_path,
+            [sample_manifest()],
+            discovery=discovery,
+            publisher=publisher,
+            transport=FakeTransport(),
+            publish_interval_s=0.01,
+            discovery_interval_s=0.01,
+        )
+        runner = asyncio.get_running_loop().create_task(service.run())
+        await asyncio.sleep(0.06)
+        discovery.devices.clear()
+        await asyncio.sleep(0.08)
+        discovery.devices.append(tpu_device())
+        await asyncio.sleep(0.08)
+        service._stopping.set()
+        await asyncio.wait_for(runner, timeout=2)
+
+    asyncio.run(scenario())
+    assert publisher.retracted == 1
+    assert len(publisher.published) == 2
