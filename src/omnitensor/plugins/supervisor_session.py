@@ -103,7 +103,10 @@ async def launch_authenticated(
             timeout=handshake_timeout,
         )
     except asyncio.CancelledError:
-        await force_stop(process, stop_timeout)
+        # Shielded: every await inside force_stop would raise CancelledError
+        # again at its first suspension point, so an unshielded cleanup never
+        # reaches the SIGTERM and leaves the child running as a session leader.
+        await asyncio.shield(force_stop(process, stop_timeout))
         raise
     except Exception as error:
         await force_stop(process, stop_timeout)
@@ -114,7 +117,7 @@ async def launch_authenticated(
             timeout=startup_timeout,
         )
     except asyncio.CancelledError:
-        await force_stop(process, stop_timeout)
+        await asyncio.shield(force_stop(process, stop_timeout))
         raise
     except Exception as error:
         await force_stop(process, stop_timeout)
@@ -186,7 +189,7 @@ async def cancel_request(
             timeout=cancel_timeout,
         )
     except (Exception, asyncio.CancelledError):
-        await force_stop(slot.process, stop_timeout)
+        await asyncio.shield(force_stop(slot.process, stop_timeout))
 
 
 async def stop_process(

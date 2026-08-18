@@ -314,3 +314,113 @@ def test_recovery_catches_the_live_facade_start_error(monkeypatch):
         diagnostics.WorkerDiagnosticCode.RESTART_FAILED,
         diagnostics.WorkerDiagnosticCode.EXHAUSTED,
     ]
+
+
+def test_a_cancelled_launch_still_kills_the_child_it_started():
+    """OMNI-0406: an unshielded cleanup dies at its own first await.
+
+    force_stop closes the writer and waits for the process. Both are awaits,
+    and in an already-cancelled task every await raises CancelledError again,
+    so the child was never terminated and outlived the service holding its
+    GPU. The cleanup must be shielded to run to completion.
+    """
+
+    async def scenario():
+        stopped = []
+        started = asyncio.Event()
+
+        class Process:
+            pid = 41
+            reader = object()
+            writer = object()
+            returncode = None
+
+        process = Process()
+
+        class Launcher:
+            async def launch(self, _spec):
+                return process
+
+        async def never_handshakes(*_args, **_options):
+            started.set()
+            await asyncio.sleep(3600)
+
+        async def force_stop(target, _timeout):
+            # Two suspension points, exactly like the real cleanup chain.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            stopped.append(target)
+            return True
+
+        task = asyncio.ensure_future(
+            session.launch_authenticated(
+                Launcher(),
+                supervisor.WorkerSpec("worker", ("python",)),
+                handshake_timeout=5.0,
+                startup_timeout=5.0,
+                stop_timeout=0.01,
+                handshake=never_handshakes,
+                await_ready=never_handshakes,
+                force_stop=force_stop,
+            )
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert stopped == [process], "the cancelled launch left its child running"
+
+    asyncio.run(scenario())
+
+
+def test_a_cancelled_job_cancellation_still_kills_an_unresponsive_worker():
+    """OMNI-0406: the same shield is needed on the cancel_request path."""
+
+    async def scenario():
+        stopped = []
+        entered = asyncio.Event()
+
+        class Process:
+            pid = 42
+            writer = object()
+            returncode = None
+
+        slot = SimpleNamespace(
+            process=Process(),
+            agreement=SimpleNamespace(protocol_version=1),
+        )
+
+        async def write(*_args, **_options):
+            return None
+
+        async def read_result_of(*_args, **_options):
+            entered.set()
+            await asyncio.sleep(3600)
+
+        async def force_stop(target, _timeout):
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            stopped.append(target)
+            return True
+
+        task = asyncio.ensure_future(
+            session.cancel_request(
+                slot,
+                "job-1",
+                cancel_timeout=5.0,
+                stop_timeout=0.01,
+                read_result_of=read_result_of,
+                write=write,
+                force_stop=force_stop,
+            )
+        )
+        await entered.wait()
+        task.cancel()
+        # cancel_request absorbs the cancellation by design: its caller in
+        # PluginWorkerSupervisor shields it and re-raises.
+        await asyncio.gather(task, return_exceptions=True)
+
+        assert stopped == [slot.process], "the unresponsive worker was never stopped"
+
+    asyncio.run(scenario())

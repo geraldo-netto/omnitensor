@@ -223,7 +223,9 @@ async def recover_worker(
                 return
         finally:
             if not installed:
-                await force_stop(process, host._stop_timeout)
+                # Shielded: stop() cancels in-flight recovery tasks, and this
+                # cleanup runs inside that cancellation.
+                await asyncio.shield(force_stop(process, host._stop_timeout))
     async with host._lock:
         if host._recoveries.get(plugin_id) is not asyncio.current_task():
             return
