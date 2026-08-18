@@ -70,7 +70,7 @@ def test_publish_once_emits_contract_valid_snapshot(fake_nodes, tmp_path):
 
     snapshot = asyncio.run(scenario())
     assert validate_document("runtime-snapshot.schema.json", snapshot) == []
-    assert [device["backend"] for device in snapshot["devices"]] == ["tpu", "npu"]
+    assert [device["backend"] for device in snapshot["devices"]] == ["npu", "tpu"]
     written = json.loads((tmp_path / "state/runtime-snapshot.json").read_text())
     assert written == snapshot
 

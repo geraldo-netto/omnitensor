@@ -165,12 +165,12 @@ def test_promotion_compiles_parity_gates_signs_and_reloads_restricted_binding(
         trust_verifier=verifier,
     )
 
-    assert [variant.accelerator for variant in installed.variants] == ["npu", "gpu"]
+    assert [variant.accelerator for variant in installed.variants] == ["gpu", "npu"]
     assert [variant.artifact_id for variant in installed.variants] == [
-        "local-storage-risk-npu",
         "local-storage-risk-gpu",
+        "local-storage-risk-npu",
     ]
-    assert [variant.model_format for variant in installed.variants] == ["openvino", "ncnn"]
+    assert [variant.model_format for variant in installed.variants] == ["ncnn", "openvino"]
     assert gpu.requests == [
         CompilationRequest(report_path.parent / "model.onnx", "onnx", (1, 2), False)
     ]
@@ -179,8 +179,8 @@ def test_promotion_compiles_parity_gates_signs_and_reloads_restricted_binding(
     manifest = json.loads(installed.binding_path.read_text())
     models = manifest["requirements"]["models"]
     assert writes == [(installed.binding_path, manifest, ".numeric-model-binding-")]
-    assert manifest["requirements"]["acceleratorPreference"] == ["npu", "gpu"]
-    assert [model["version"] for model in models] == ["2.0.0", "3.0.0"]
+    assert manifest["requirements"]["acceleratorPreference"] == ["gpu", "npu"]
+    assert [model["version"] for model in models] == ["3.0.0", "2.0.0"]
     assert all(model["minimumCompilerVersion"] == "0.0.0" for model in models)
     assert all(model["minimumRuntimeVersion"] == "0.0.0" for model in models)
     assert all(

@@ -38,7 +38,9 @@ GPU_VENDOR_NAMES = {
     "0x8086": "Intel GPU",
 }
 
-BACKENDS = ("tpu", "npu", "gpu")
+# Routing hierarchy, most preferred first: a profile that states no
+# preference of its own is offered these lanes in this order.
+BACKENDS = ("gpu", "npu", "tpu")
 
 
 @dataclass(frozen=True)
@@ -219,18 +221,18 @@ def detect_devices(
     paths: DiscoveryPaths | None = None,
     selected_ids: dict[str, str] | None = None,
 ) -> list[Device]:
-    """Detect TPU/NPU defaults and every selectable GPU in preference order."""
+    """Detect every selectable GPU and the TPU/NPU defaults, in preference order."""
     resolved = paths or DiscoveryPaths()
     selectors = selected_ids or {}
-    found = [
-        detect_tpu(resolved, selectors.get("tpu")),
-        detect_npu(resolved, selectors.get("npu")),
-    ]
     gpus = list(detect_gpus(resolved))
     selected_gpu = selectors.get("gpu")
     if selected_gpu is not None:
         gpus.sort(key=lambda device: (device.id != selected_gpu, device.id))
-    return [device for device in found if device is not None] + gpus
+    found = [
+        detect_npu(resolved, selectors.get("npu")),
+        detect_tpu(resolved, selectors.get("tpu")),
+    ]
+    return gpus + [device for device in found if device is not None]
 
 
 def device_utilization(paths: DiscoveryPaths, device: Device) -> float | None:

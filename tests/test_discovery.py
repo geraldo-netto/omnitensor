@@ -76,10 +76,10 @@ def test_runtime_device_ids_are_enumerated_and_can_be_selected(fake_nodes):
     )
 
     assert [device.id for device in devices] == [
-        "tpu-pcie-42",
-        "npu-accel23",
         "gpu-renderD2048",
         "gpu-renderD128",
+        "npu-accel23",
+        "tpu-pcie-42",
     ]
 
 
@@ -141,12 +141,12 @@ def test_a_node_removed_between_enumeration_and_inspection_is_ignored(fake_nodes
     )
 
 
-def test_combined_order_is_tpu_npu_gpu(fake_nodes):
+def test_combined_order_is_gpu_npu_tpu(fake_nodes):
     add_gpu(fake_nodes)
     add_npu(fake_nodes)
     add_pcie_tpu(fake_nodes)
     backends = [device.backend for device in detect_devices(fake_nodes)]
-    assert backends == ["tpu", "npu", "gpu"]
+    assert backends == ["gpu", "npu", "tpu"]
 
 
 def test_snapshot_entry_shape(fake_nodes):

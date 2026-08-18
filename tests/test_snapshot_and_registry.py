@@ -324,7 +324,7 @@ def test_registry_default_preference_when_omitted(tmp_path):
     manifest = sample_manifest()
     del manifest["requirements"]["acceleratorPreference"]
     write_workload(tmp_path, manifest)
-    assert load_workloads(tmp_path)["sample-workload"].preference == ("tpu", "npu", "gpu")
+    assert load_workloads(tmp_path)["sample-workload"].preference == ("gpu", "npu", "tpu")
 
 
 @pytest.mark.parametrize(

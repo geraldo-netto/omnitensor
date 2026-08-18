@@ -62,16 +62,16 @@ key is created, reused, protected, and exposed as public trust metadata.
 
 ## Backend hierarchy
 
-`tpu > npu > gpu` — no CPU backend by design: the CPU is the scarcest shared
+`gpu > npu > tpu` — no CPU backend by design: the CPU is the scarcest shared
 resource on the host and OmniTensor never schedules inference onto it. When no
 accelerator is available a workload reports `unavailable` with a reason instead
 of falling back.
 
 | Backend | Discovery | Runtime |
 | --- | --- | --- |
-| `tpu` | Coral PCIe `/dev/apex_*`, Coral USB `18d1:9302` | `tflite-runtime` + `libedgetpu.so.1` delegate |
-| `npu` | `/dev/accel/accel*` (kernel accel subsystem), sysfs vendor id | OpenVINO (`NPU` device) |
 | `gpu` | `/dev/dri/renderD*`, sysfs vendor id | ncnn Vulkan compute (primary — any Mesa/RADV/ANV/NVIDIA Vulkan driver); ONNX Runtime CUDA/ROCm as optional second lane |
+| `npu` | `/dev/accel/accel*` (kernel accel subsystem), sysfs vendor id | OpenVINO (`NPU` device) |
+| `tpu` | Coral PCIe `/dev/apex_*`, Coral USB `18d1:9302` | `tflite-runtime` + `libedgetpu.so.1` delegate |
 
 A missing runtime library or execution provider marks the backend unavailable
 with an explicit reason; it never crashes the service or blocks snapshot

@@ -953,9 +953,9 @@ def test_sysfs_discovery_adapter_detects_and_reads_utilization(fake_nodes):
     add_npu(fake_nodes)
     adapter = SysfsDeviceDiscovery(fake_nodes, {"tpu": "tpu-pcie-42"})
     devices = adapter.detect()
-    assert [device.backend for device in devices] == ["tpu", "npu"]
-    assert devices[0].id == "tpu-pcie-42"
-    assert adapter.utilization(devices[0]) is None
+    assert [device.backend for device in devices] == ["npu", "tpu"]
+    assert devices[1].id == "tpu-pcie-42"
+    assert adapter.utilization(devices[1]) is None
 
 
 def test_default_sysfs_discovery_probes_the_real_root():

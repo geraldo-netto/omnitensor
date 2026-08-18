@@ -3,7 +3,7 @@
 Loads and validates ``manifest.json`` files against the canonical
 ``workload-manifest.schema.json``.  The manifest's optional ordered
 ``acceleratorPreference`` is the routing intent the scheduler consumes;
-when omitted the global ``tpu > npu > gpu`` default applies.
+when omitted the global ``gpu > npu > tpu`` default applies.
 """
 
 from __future__ import annotations

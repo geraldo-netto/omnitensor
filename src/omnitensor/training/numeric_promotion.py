@@ -348,7 +348,7 @@ def _numeric_binding_manifest(
     return binding_manifest(
         report.profile_id,
         variants,
-        lane_order=("npu", "gpu"),
+        lane_order=("gpu", "npu"),
         plural=True,
         root=bundled_root or bundled_workloads_path(),
         load=load_workloads,

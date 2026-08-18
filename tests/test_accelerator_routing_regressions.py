@@ -54,22 +54,22 @@ def _workload(*models: dict, preference: list[str] | None = None) -> Workload:
     return Workload("routing-regression", {"requirements": requirements})
 
 
-def test_default_preference_chooses_tpu_then_npu_independent_of_model_order():
+def test_default_preference_chooses_gpu_then_npu_independent_of_model_order():
     workload = _workload(_model("ncnn"), _model("openvino"), _model("tflite-edgetpu"))
     tpu = _Lane("tpu", {"tflite-edgetpu"}, Availability(True))
     npu = _Lane("npu", {"openvino"}, Availability(True))
     gpu = _Lane("gpu", {"ncnn"}, Availability(True))
     executors = {"gpu": gpu, "npu": npu, "tpu": tpu}
 
-    assert workload.preference == ("tpu", "npu", "gpu")
-    assert select_backend(workload, executors) == BackendChoice("tpu", "", "")
-    assert runnable_model(workload, "tpu", executors)["format"] == "tflite-edgetpu"
-    assert (tpu.availability_calls, npu.availability_calls, gpu.availability_calls) == (1, 0, 0)
+    assert workload.preference == ("gpu", "npu", "tpu")
+    assert select_backend(workload, executors) == BackendChoice("gpu", "", "")
+    assert runnable_model(workload, "gpu", executors)["format"] == "ncnn"
+    assert (gpu.availability_calls, npu.availability_calls, tpu.availability_calls) == (1, 0, 0)
 
-    tpu._availability = Availability(False, "No Coral device", DEVICE_ABSENT)
+    gpu._availability = Availability(False, "ONNX Runtime is not installed", RUNTIME_MISSING)
     assert select_backend(workload, executors) == BackendChoice("npu", "", "")
     assert runnable_model(workload, "npu", executors)["format"] == "openvino"
-    assert (tpu.availability_calls, npu.availability_calls, gpu.availability_calls) == (2, 1, 0)
+    assert (gpu.availability_calls, npu.availability_calls, tpu.availability_calls) == (2, 1, 0)
 
 
 def test_runtime_model_selection_matches_the_preferred_available_lane():
@@ -108,7 +108,7 @@ def test_refusal_order_actionability_and_tie_breaks_are_stable():
 
     assert select_backend(workload, executors) == BackendChoice(
         None,
-        "tpu: No Coral device; npu: OpenVINO has no NPU plugin; gpu: ONNX Runtime is not installed",
+        "gpu: ONNX Runtime is not installed; npu: OpenVINO has no NPU plugin; tpu: No Coral device",
         RUNTIME_MISSING,
     )
 

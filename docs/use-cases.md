@@ -31,7 +31,7 @@ application action succeeded.
 
 ## Built-in profiles
 
-All profiles prefer `tpu`, then `npu`, then `gpu`, and require at least one
+All profiles prefer `gpu`, then `npu`, then `tpu`, and require at least one
 device selected for the route. A concrete model must still use a format the
 selected executor supports.
 
@@ -161,7 +161,7 @@ documented in [Network and peripheral collection](network-peripherals.md).
 
 ## Accelerator lanes available for qualification
 
-The `tpu > npu > gpu` preference is a routing order, not an availability
+The `gpu > npu > tpu` preference is a routing order, not an availability
 claim. What a given host can actually qualify against decides which acceptance
 gates can run there.
 

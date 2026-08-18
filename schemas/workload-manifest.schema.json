@@ -220,7 +220,7 @@
           ]
         },
         "acceleratorPreference": {
-          "description": "Ordered routing intent. The first entry must be the accelerator the profile was designed for; the rest are fallbacks in order. Omitted means the global tpu > npu > gpu default.",
+          "description": "Ordered routing intent. The first entry must be the accelerator the profile was designed for; the rest are fallbacks in order. Omitted means the global gpu > npu > tpu default.",
           "type": "array",
           "minItems": 1,
           "maxItems": 3,

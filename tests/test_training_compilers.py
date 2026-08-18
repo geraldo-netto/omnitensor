@@ -62,8 +62,8 @@ def test_default_catalog_resolves_every_accelerator_once():
 
     compilers = default_target_compilers(resolve)
 
-    assert [compiler.accelerator for compiler in compilers] == ["tpu", "npu", "gpu"]
-    assert observed == ["edgetpu_compiler", "ovc", "pnnx"]
+    assert [compiler.accelerator for compiler in compilers] == ["gpu", "npu", "tpu"]
+    assert observed == ["pnnx", "ovc", "edgetpu_compiler"]
     assert [compiler.capability().available for compiler in compilers] == [True, True, True]
 
 

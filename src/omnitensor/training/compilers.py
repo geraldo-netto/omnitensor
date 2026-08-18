@@ -25,7 +25,7 @@ from ..conversion import (
     convert_to_openvino,
 )
 
-TARGET_ORDER = ("tpu", "npu", "gpu")
+TARGET_ORDER = ("gpu", "npu", "tpu")
 _EDGE_TPU_COUNT = re.compile(
     r"Number of operations that will run on (?P<lane>Edge TPU|CPU):\s*(?P<count>\d+)",
     re.IGNORECASE,
@@ -251,9 +251,9 @@ def resolve_compiler_tool(
 def default_target_compilers(resolve: ToolResolver) -> tuple[TargetCompiler, ...]:
     """Build the fixed target catalog while injecting host-tool discovery."""
     return (
-        EdgeTpuTargetCompiler(resolve("edgetpu_compiler")),
-        OpenVinoTargetCompiler(resolve("ovc")),
         NcnnTargetCompiler(resolve("pnnx")),
+        OpenVinoTargetCompiler(resolve("ovc")),
+        EdgeTpuTargetCompiler(resolve("edgetpu_compiler")),
     )
 
 

@@ -23,7 +23,7 @@ class DeviceDiscovery(Protocol):
     """Detects accelerator devices and reads their utilization."""
 
     def detect(self) -> list[Device]:
-        """Return present devices in tpu > npu > gpu hierarchy order."""
+        """Return present devices in gpu > npu > tpu hierarchy order."""
 
     def utilization(self, device: Device) -> float | None:
         """Kernel-reported utilization percentage, ``None`` when unavailable."""

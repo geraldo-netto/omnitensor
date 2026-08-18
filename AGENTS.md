@@ -56,7 +56,7 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
   generation is the context window itself, which is arithmetic rather than policy.
   Bounds on what a person *selected* (how many files, how large) and protocol frame
   limits are not this; ceilings on what they are told back always are.
-- There is deliberately NO CPU backend anywhere (tpu > npu > gpu only). Never add CPU
+- There is deliberately NO CPU backend anywhere (gpu > npu > tpu only). Never add CPU
   execution paths or fallbacks, however convenient.
 - Keep architecture proportional; record unavoidable compromises in `TODO.md`.
 

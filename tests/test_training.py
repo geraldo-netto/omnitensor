@@ -145,7 +145,7 @@ def test_target_validation_has_stable_failures(targets, detail):
 
 
 def test_target_validation_returns_canonical_lane_order():
-    assert _validated_targets(("gpu", "tpu", "npu")) == ("tpu", "npu", "gpu")
+    assert _validated_targets(("tpu", "gpu", "npu")) == ("gpu", "npu", "tpu")
 
 
 @given(
@@ -445,8 +445,8 @@ def test_install_reloads_identical_feature_semantics_for_every_native_lane(tmp_p
     from omnitensor.registry import load_workloads
 
     reloaded = load_workloads(tmp_path / "bindings")["resource-scheduler"]
-    assert [variant.accelerator for variant in installed.variants] == ["npu", "gpu"]
-    assert [model["format"] for model in reloaded.models] == ["openvino", "ncnn"]
+    assert [variant.accelerator for variant in installed.variants] == ["gpu", "npu"]
+    assert [model["format"] for model in reloaded.models] == ["ncnn", "openvino"]
     assert all(model["featureContract"] == spec().feature_contract for model in reloaded.models)
 
 
