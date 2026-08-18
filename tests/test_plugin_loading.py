@@ -1362,13 +1362,17 @@ def test_worker_request_dispatch_refuses_mismatches_and_emits_bounded_errors():
             is False
         )
         wrong = execute_frame(PluginRequest("wrong-job", "other-plugin", "manual", {}, 1, None))
-        assert await worker_module._handle_request_frame(plugin, wrong, writer, 1, active, deadlines)
+        assert await worker_module._handle_request_frame(
+            plugin, wrong, writer, 1, active, deadlines
+        )
         token = CancellationController()
         active["duplicate"] = (asyncio.current_task(), token)
         duplicate = execute_frame(
             PluginRequest("duplicate", "external-example", "manual", {}, 1, None)
         )
-        assert await worker_module._handle_request_frame(plugin, duplicate, writer, 1, active, deadlines)
+        assert await worker_module._handle_request_frame(
+            plugin, duplicate, writer, 1, active, deadlines
+        )
         assert await worker_module._handle_request_frame(
             plugin,
             IPCFrame(1, WorkerMessageType.CANCEL, "duplicate", {"reason": "cancel"}),

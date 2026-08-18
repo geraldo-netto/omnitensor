@@ -158,7 +158,6 @@ def test_candidate_ids_are_unique_even_when_event_meanings_differ():
 @pytest.mark.parametrize(
     ("changes", "code", "detail"),
     [
-
         (
             {"when": when(timezone="Mars/Olympus")},
             "timezone-invalid",

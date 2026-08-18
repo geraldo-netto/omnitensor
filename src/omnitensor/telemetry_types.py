@@ -398,4 +398,3 @@ def _network_counter_error(counters: object) -> str:
 
 def _strict_non_negative_integer_error(value: object) -> bool:
     return type(value) is not int or value < 0
-

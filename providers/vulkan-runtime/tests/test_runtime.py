@@ -34,8 +34,8 @@ from omnitensor.plugins.event_workload import (
     MemoryFragmentStore,
     event_generation_task,
 )
-from omnitensor.plugins.fragments import SourceFragment
 from omnitensor.plugins.file_organizer import file_organizer_task
+from omnitensor.plugins.fragments import SourceFragment
 from omnitensor.plugins.generation import (
     GenerationLimits,
     GenerationRequest,
@@ -2867,9 +2867,10 @@ def test_a_load_that_falls_back_to_the_cpu_is_still_refused(monkeypatch):
         Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(ProviderGenerationError) as refused:
         asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
 
+    assert refused.value.code == "model-load-failed"
     assert calls == ["__startup__", "stop"]
 
 
@@ -2881,7 +2882,9 @@ def _ncnn(names):
 
 
 def test_the_named_device_is_used_when_it_is_present(monkeypatch):
-    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("integrated", bge.QUALIFIED_DEVICE, "software")))
+    monkeypatch.setitem(
+        sys.modules, "ncnn", _ncnn(("integrated", bge.QUALIFIED_DEVICE, "software"))
+    )
 
     assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 1
 

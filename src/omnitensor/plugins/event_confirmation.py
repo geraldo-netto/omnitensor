@@ -23,6 +23,7 @@ class CalendarSink(Protocol):
 
     def write(self, event: EventCandidate) -> None: ...
 
+
 def confirm_event_candidates(
     result: GroundedEventResult,
     confirmed_ids: Sequence[str],
@@ -50,6 +51,7 @@ def confirm_event_candidates(
     )
     return replace(result, events=events)
 
+
 def write_confirmed_events(result: GroundedEventResult, sink: CalendarSink) -> int:
     """Write confirmed candidates only; pending model output never reaches a sink."""
     if not isinstance(sink, CalendarSink):
@@ -58,6 +60,7 @@ def write_confirmed_events(result: GroundedEventResult, sink: CalendarSink) -> i
     for event in confirmed:
         sink.write(event)
     return len(confirmed)
+
 
 def _decision_ids(values: Sequence[str], label: str) -> set[str]:
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
@@ -68,6 +71,7 @@ def _decision_ids(values: Sequence[str], label: str) -> set[str]:
     ):
         raise EventResultError("confirmation-invalid", f"{label} are invalid")
     return parsed
+
 
 def _confirmed_events(result: GroundedEventResult) -> tuple[EventCandidate, ...]:
     if not isinstance(result, GroundedEventResult):

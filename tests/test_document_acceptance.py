@@ -558,7 +558,11 @@ def test_evidence_read_is_bounded_and_object_only(tmp_path):
     ("change", "code", "detail"),
     [
         ({"corpus_sha256": "0" * 64}, "evidence-stale", "evidence names another corpus version"),
-        ({"primary_model_sha256": "0" * 64}, "evidence-stale", "evidence names another primary model"),
+        (
+            {"primary_model_sha256": "0" * 64},
+            "evidence-stale",
+            "evidence names another primary model",
+        ),
         ({"generator_device_name": "Vulkan"}, "device-unqualified", "generator GPU must be named"),
         (
             {"generator_device_name": "llvmpipe"},

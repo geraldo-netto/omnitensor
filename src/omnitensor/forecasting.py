@@ -210,4 +210,3 @@ def evaluate_forecast_predictions(
         for previous, target in zip(repeat_last, targets, strict=True)
     )
     return ForecastQuality(len(targets), error / len(targets), baseline / len(targets))
-

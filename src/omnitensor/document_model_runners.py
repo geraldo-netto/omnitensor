@@ -141,4 +141,3 @@ def select_document_vulkan_device(runtime, requested: int | None) -> tuple[int, 
             detail = "no hardware Vulkan device is available"
         raise DocumentModelError("device-unavailable", detail) from error
     return selected.index, selected.name
-

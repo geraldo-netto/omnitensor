@@ -43,9 +43,7 @@ def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
         }
         or document["catalogVersion"] != 1
     ):
-        raise GenerationProviderError(
-            "catalog-invalid", "catalog fields or version are invalid"
-        )
+        raise GenerationProviderError("catalog-invalid", "catalog fields or version are invalid")
     license_document = bounded_mapping(document["license"], "catalog license", "catalog-invalid")
     upstream = bounded_mapping(document["upstream"], "catalog upstream", "catalog-invalid")
     if set(license_document) != {"spdx", "termsUri", "attribution"} or set(upstream) != {

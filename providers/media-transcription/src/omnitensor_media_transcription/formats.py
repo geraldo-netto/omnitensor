@@ -265,7 +265,6 @@ def _visual_payload(source: Path) -> bytes:
         ) from error
 
 
-
 def _require(module: str, detail: str):
     """Import a declared dependency, or refuse as a broken install.
 

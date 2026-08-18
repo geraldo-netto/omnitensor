@@ -140,7 +140,6 @@ class CaseScore:
     matched_terms: int = 0
 
 
-
 # What a digest and an identifier are does not vary by workload, and both
 # acceptance modules had defined these identically. A second copy of a regular
 # expression is a second place for it to drift.

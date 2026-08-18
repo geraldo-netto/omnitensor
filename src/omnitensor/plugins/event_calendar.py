@@ -60,6 +60,7 @@ def calendar_component(event: EventCandidate) -> tuple[str, ...]:
     lines.append("END:VEVENT")
     return tuple(lines)
 
+
 def _ics_common(event: EventCandidate) -> tuple[str, ...]:
     """The parts a task and an event describe the same way."""
     lines = []
@@ -86,6 +87,7 @@ def _ics_common(event: EventCandidate) -> tuple[str, ...]:
         lines.append(f"STATUS:{mapped[event.status]}")
     return tuple(lines)
 
+
 def _ics_moment(name: str, date: str, time: str | None, timezone: EventTimezone | None) -> str:
     stamp = date.replace("-", "")
     if time is None:
@@ -99,6 +101,7 @@ def _ics_moment(name: str, date: str, time: str | None, timezone: EventTimezone 
     if timezone.name == "UTC":
         return f"{name}:{stamp}T{clock}Z"
     return f"{name};TZID={timezone.name}:{stamp}T{clock}"
+
 
 def _ics_rrule(repeats: Recurrence) -> str:
     parts = [f"FREQ={repeats.freq}"]
@@ -117,6 +120,7 @@ def _ics_rrule(repeats: Recurrence) -> str:
     if repeats.until is not None:
         parts.append(f"UNTIL={repeats.until.replace('-', '')}")
     return ";".join(parts)
+
 
 def _ics_text(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")

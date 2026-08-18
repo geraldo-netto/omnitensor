@@ -237,8 +237,6 @@ class GroundedEventResult:
         return tuple(event for event in self.events if not event.when.placeable)
 
 
-
-
 def parse_grounded_event_result(document: object) -> GroundedEventResult:
     """Validate one model reply and reset all candidates to pending.
 
@@ -277,12 +275,6 @@ def parse_grounded_event_result(document: object) -> GroundedEventResult:
         tuple(events),
         duplicates,
     )
-
-
-
-
-
-
 
 
 def source_fragments(
@@ -572,20 +564,6 @@ def duplicate_key(event: EventCandidate) -> tuple:
         stated = stated or event.where.url
         place = () if stated is None else tuple(stated.casefold().split())
     return label, event.when.date, event.when.time, place
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 __all__ = [
