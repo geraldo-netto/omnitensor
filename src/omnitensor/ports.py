@@ -29,6 +29,28 @@ class DeviceDiscovery(Protocol):
         """Kernel-reported utilization percentage, ``None`` when unavailable."""
 
 
+@runtime_checkable
+class DeviceChangeSource(Protocol):
+    """Optional :class:`DeviceDiscovery` capability: say when to look again.
+
+    A discovery adapter that the kernel can wake costs an idle machine
+    nothing: no timer, no sysfs read, no wakeup at all while the hardware is
+    not changing.  Adapters without it are polled, which is a real cost the
+    service states rather than absorbs.
+    """
+
+    async def wait_for_change(self) -> bool:
+        """Block until devices may have changed.
+
+        Returns ``True`` when something happened and ``False`` when the event
+        source is unavailable or has closed, which is the caller's instruction
+        to fall back to polling.
+        """
+
+    async def aclose(self) -> None:
+        """Release the event source; safe to call when never opened."""
+
+
 class SnapshotPublisher(Protocol):
     """Publishes a contract-valid snapshot document atomically."""
 

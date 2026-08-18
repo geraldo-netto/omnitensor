@@ -1,7 +1,8 @@
 """OmniTensor service wiring: discovery, scheduling, publishing, control.
 
 Entry point ``omnitensor`` runs an asyncio loop that
-- rediscovers accelerators every ``DISCOVERY_INTERVAL_S``,
+- rediscovers accelerators when the kernel reports a device change, falling
+  back to polling every ``DISCOVERY_INTERVAL_S`` where no event source exists,
 - publishes a schema-valid snapshot atomically every ``PUBLISH_INTERVAL_S``,
 - serves the control socket (framed msgpack over a unix-domain socket,
   default ``$XDG_RUNTIME_DIR/omnitensor/control.sock``) and answers
@@ -91,6 +92,7 @@ from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
     AcceleratorReloadableRuntime,
     ControlTransport,
+    DeviceChangeSource,
     DeviceDiscovery,
     PluginIdentitySource,
     PluginRuntime,
@@ -133,6 +135,9 @@ from .telemetry_observation import TelemetryJobObserver as TelemetryJobObserver
 LOGGER = logging.getLogger(__name__)
 
 PUBLISH_INTERVAL_S = 2.0
+# Only the fallback: a host whose discovery port can be woken by the kernel
+# never reaches this timer, and one that cannot says so in the log with the
+# wakeups it is spending.
 DISCOVERY_INTERVAL_S = 10.0
 # A runtime with nothing to report has nothing to gain from a fast tick: each
 # one rereads sysfs, reloads grants, rebuilds the document and revalidates it
@@ -760,22 +765,95 @@ class OmniTensorService:
         self._next_grant_refresh = now + GRANT_REFRESH_INTERVAL_S
 
     async def _rediscover(self) -> None:
+        """Rediscover when the kernel says so, and only poll when it cannot.
+
+        Hardware that is not changing has nothing to rediscover, so with an
+        event source this loop is asleep on a socket: an idle machine spends
+        no wakeups, no sysfs reads, and no CPU on it at all.  Polling remains
+        the fallback, and it is announced with what it costs rather than
+        quietly resumed.
+        """
+        changes = self._discovery if isinstance(self._discovery, DeviceChangeSource) else None
+        polling = changes is None
+        if polling:
+            self._warn_discovery_polling("this host exposes no device-change events")
         while not self._stopping.is_set():
+            if polling:
+                if await self._sleep_until_stopping(self._discovery_interval_s):
+                    return
+            else:
+                if await self._await_device_change(changes):
+                    if self._stopping.is_set():
+                        return
+                else:
+                    if self._stopping.is_set():
+                        return
+                    polling = True
+                    self._warn_discovery_polling("the kernel event source closed")
+                    continue
+            self._apply_discovery()
+
+    def _warn_discovery_polling(self, reason: str) -> None:
+        interval = self._discovery_interval_s
+        LOGGER.warning(
+            "Device discovery is polling sysfs every %.1f s because %s."
+            " That is about %d wakeups a day on a machine whose hardware never"
+            " changes; event-driven discovery costs none of them.",
+            interval,
+            reason,
+            int(86400 // interval) if interval > 0 else 0,
+        )
+
+    async def _await_device_change(self, changes: DeviceChangeSource) -> bool:
+        """Wait for a device event or shutdown; ``False`` means fall back."""
+        change = asyncio.ensure_future(changes.wait_for_change())
+        stopping = asyncio.ensure_future(self._stopping.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                (change, stopping), return_when=asyncio.FIRST_COMPLETED
+            )
+            if change not in done:
+                return True
             try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=self._discovery_interval_s)
-            except TimeoutError:
-                devices = self._discovery.detect()
-                devices_changed = devices != self._devices
-                self._executors = build_executors(
-                    devices,
-                    previous_devices=self._devices,
-                    previous_executors=self._executors,
-                )
-                self._devices = devices
-                self._scheduler.update_executors(self._executors.scheduler_executors())
-                if devices_changed:
-                    self.request_publish()
-                    self._schedule_plugin_reload()
+                return bool(change.result())
+            except Exception:  # noqa: BLE001 - event adapters are host code
+                LOGGER.exception("Kernel device-event source failed")
+                return False
+        finally:
+            for task in (change, stopping):
+                task.cancel()
+            await asyncio.gather(change, stopping, return_exceptions=True)
+
+    async def _sleep_until_stopping(self, timeout: float) -> bool:
+        """Sleep ``timeout`` seconds; ``True`` when shutdown arrived first."""
+        try:
+            await asyncio.wait_for(self._stopping.wait(), timeout=timeout)
+        except TimeoutError:
+            return False
+        return True
+
+    def _apply_discovery(self) -> None:
+        devices = self._discovery.detect()
+        devices_changed = devices != self._devices
+        self._executors = build_executors(
+            devices,
+            previous_devices=self._devices,
+            previous_executors=self._executors,
+        )
+        self._devices = devices
+        self._scheduler.update_executors(self._executors.scheduler_executors())
+        if devices_changed:
+            self.request_publish()
+            self._schedule_plugin_reload()
+
+    async def _close_discovery(self) -> None:
+        """Release the discovery event source, when the adapter holds one."""
+        if not isinstance(self._discovery, DeviceChangeSource):
+            return
+        try:
+            await self._discovery.aclose()
+        except Exception:  # noqa: BLE001 - host adapters are external
+            LOGGER.exception("Could not close the device-event source")
 
     async def run(self) -> None:
         try:
@@ -817,6 +895,7 @@ class OmniTensorService:
                 await asyncio.gather(reload_task, return_exceptions=True)
             await self._stop_plugin_runtime()
             await self._transport.stop()
+            await self._close_discovery()
 
     async def _start_plugin_runtime(self) -> None:
         async with self._plugin_lifecycle_lock:

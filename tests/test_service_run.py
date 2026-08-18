@@ -1337,6 +1337,7 @@ def test_the_artifact_root_defaults_to_the_user_share_directory(monkeypatch, tmp
 
 
 def test_accelerator_device_ids_are_configurable_from_the_environment(monkeypatch, tmp_path):
+    from omnitensor.host import EventDrivenDeviceDiscovery
     from omnitensor.service import SysfsDeviceDiscovery, build_service_from_env
 
     monkeypatch.setenv("OMNITENSOR_STATE_PATH", str(tmp_path / "state.json"))
@@ -1348,8 +1349,11 @@ def test_accelerator_device_ids_are_configurable_from_the_environment(monkeypatc
 
     service = build_service_from_env()
 
-    assert isinstance(service._discovery, SysfsDeviceDiscovery)
-    assert service._discovery._selected_ids == {
+    # Production discovery is the sysfs adapter behind a kernel-event source,
+    # so an idle host is woken by udev rather than polled.
+    assert isinstance(service._discovery, EventDrivenDeviceDiscovery)
+    assert isinstance(service._discovery._discovery, SysfsDeviceDiscovery)
+    assert service._discovery._discovery._selected_ids == {
         "gpu": "gpu-renderD902",
         "npu": "npu-accel23",
         "tpu": "tpu-pcie-42",

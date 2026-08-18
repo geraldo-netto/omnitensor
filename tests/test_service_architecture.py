@@ -38,6 +38,7 @@ from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.executors.vulkan import VulkanGpuExecutor
 from omnitensor.host import (
+    EventDrivenDeviceDiscovery,
     FileSnapshotPublisher,
     SysfsDeviceDiscovery,
     build_host_ports,
@@ -607,9 +608,12 @@ def test_host_port_composition_owns_the_production_adapter_choices(tmp_path):
         accelerator_device_ids={"gpu": "gpu-renderD129"},
     )
 
-    assert isinstance(ports.discovery, SysfsDeviceDiscovery)
-    assert ports.discovery._paths is discovery_paths
-    assert ports.discovery._selected_ids == {"gpu": "gpu-renderD129"}
+    # The sysfs adapter stays the detector; the wrapper only adds the kernel
+    # event source that lets an idle runtime stop polling it.
+    assert isinstance(ports.discovery, EventDrivenDeviceDiscovery)
+    assert isinstance(ports.discovery._discovery, SysfsDeviceDiscovery)
+    assert ports.discovery._discovery._paths is discovery_paths
+    assert ports.discovery._discovery._selected_ids == {"gpu": "gpu-renderD129"}
     assert isinstance(ports.publisher, FileSnapshotPublisher)
     assert ports.publisher._path == tmp_path / "snapshot.json"
     assert isinstance(ports.transport, SocketControlTransport)
