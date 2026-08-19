@@ -10,3 +10,4 @@ ForecastQuality = _forecasting.ForecastQuality
 LinearForecaster = _forecasting.LinearForecaster
 evaluate_forecast_predictions = _forecasting.evaluate_forecast_predictions
 fit_forecaster = _forecasting.fit_forecaster
+fit_forecaster_async = _forecasting.fit_forecaster_async

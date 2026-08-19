@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -38,6 +39,20 @@ class ForecastTrainer:
 
     def __init__(self, exporter: PortableModelExporter | None = None) -> None:
         self._exporter = exporter or OnnxLinearExporter()
+
+    async def train_async(
+        self,
+        spec: TrainingSpec,
+        records_root: Path | str,
+        output_dir: Path | str,
+    ) -> TrainingReport:
+        """:meth:`train` off the event loop.
+
+        The fit is a synchronous least-squares solve over every recorded
+        window, and the export writes a file; both stall a loop they are
+        called on.  An async caller must come through here.
+        """
+        return await asyncio.to_thread(self.train, spec, records_root, output_dir)
 
     def train(
         self,

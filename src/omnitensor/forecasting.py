@@ -26,6 +26,7 @@ disagrees produces a confident number with no relationship to the input.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Sequence
 
@@ -73,6 +74,34 @@ def fit_forecaster(
     weights, intercept = _solve(train_inputs, train_targets, ridge)
     quality = _score(test_inputs, test_targets, weights, intercept, len(feature_names))
     return LinearForecaster(tuple(feature_names), window, tuple(weights), intercept, quality)
+
+
+async def fit_forecaster_async(
+    inputs: Sequence[Sequence[float]],
+    targets: Sequence[float],
+    feature_names: Sequence[str],
+    window: int,
+    *,
+    ridge: float = DEFAULT_RIDGE,
+    holdout: float = 0.25,
+) -> LinearForecaster:
+    """:func:`fit_forecaster`, off the event loop.
+
+    The fit is pure Python arithmetic that scales with the number of recorded
+    windows times the square of the feature width, and solves a matrix of that
+    width; at the 512-feature ceiling it runs long enough to stall every other
+    task sharing the loop.  Any caller inside an event loop must come through
+    here rather than calling :func:`fit_forecaster` directly.
+    """
+    return await asyncio.to_thread(
+        fit_forecaster,
+        inputs,
+        targets,
+        feature_names,
+        window,
+        ridge=ridge,
+        holdout=holdout,
+    )
 
 
 def _validate_shape(
@@ -126,10 +155,22 @@ def _solve(
     normal = [[0.0] * width for _ in range(width)]
     right = [0.0] * width
     for row, target in zip(rows, targets, strict=True):
+        scaled = float(target)
+        # X'X is symmetric, so only the upper triangle is accumulated and the
+        # lower half is mirrored once at the end.  At the 512-feature ceiling
+        # that is half the multiplications per row, and the whole loop is the
+        # dominant cost of a fit.
         for i in range(width):
-            right[i] += row[i] * float(target)
-            for j in range(width):
-                normal[i][j] += row[i] * row[j]
+            value = row[i]
+            if not value:
+                continue
+            right[i] += value * scaled
+            normal_row = normal[i]
+            for j in range(i, width):
+                normal_row[j] += value * row[j]
+    for i in range(width):
+        for j in range(i + 1, width):
+            normal[j][i] = normal[i][j]
     for i in range(1, width):
         # The intercept is deliberately not penalised: shrinking it would bias
         # every prediction toward zero rather than toward the mean.

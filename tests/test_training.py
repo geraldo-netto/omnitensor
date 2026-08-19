@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
@@ -250,6 +251,18 @@ def test_training_freezes_model_report_and_quality(tmp_path):
     assert frozen["tensorContract"] == {
         "inputs": [{"shape": [1, 6], "dtype": "float32", "layout": "NC"}]
     }
+
+
+def test_training_off_the_event_loop_produces_the_same_report(tmp_path):
+    """The solve and the export both block; an async caller gets a thread."""
+    record_history(tmp_path / "records")
+
+    report = asyncio.run(
+        ForecastTrainer(FakeExporter()).train_async(spec(), tmp_path / "records", tmp_path / "fit")
+    )
+
+    assert report.samples == 37
+    assert (tmp_path / "fit/model.onnx").is_file()
 
 
 def test_forecast_recipe_refuses_profiles_needing_different_models(tmp_path):

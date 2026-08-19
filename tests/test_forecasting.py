@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import math
+import threading
 
 import pytest
 from hypothesis import given
@@ -12,6 +14,7 @@ from omnitensor.plugins.forecasting import (
     ForecastQuality,
     evaluate_forecast_predictions,
     fit_forecaster,
+    fit_forecaster_async,
 )
 from omnitensor.plugins.recorder import TelemetryRecorder, feature_matrix
 
@@ -33,6 +36,40 @@ def test_a_forecaster_learns_a_trend_it_can_extrapolate():
 
     assert model.quality.mean_absolute_error < 1e-6
     assert model.predict((0.10, 0.11, 0.12)) == pytest.approx(0.13, abs=1e-4)
+
+
+def test_the_async_fit_returns_the_same_model_from_another_thread():
+    """The solve is long enough to stall a loop, so an async caller gets a
+    thread; what it gets back must be the same fit, not a different one."""
+    inputs, targets = ramp()
+    loop_thread = None
+
+    async def fit():
+        nonlocal loop_thread
+        loop_thread = threading.get_ident()
+        return await fit_forecaster_async(inputs, targets, ("cpu",), 3)
+
+    model = asyncio.run(fit())
+
+    assert model == fit_forecaster(inputs, targets, ("cpu",), 3)
+    assert loop_thread is not None
+
+
+def test_a_symmetric_normal_matrix_is_still_solved_over_both_halves():
+    """Only the upper triangle is accumulated; the mirrored half has to be
+    there, or every coefficient past the first is fitted against zeros."""
+    inputs, targets = [], []
+    for start in range(20):
+        first = 0.01 * start
+        second = 0.1 * ((start * 3) % 7)
+        third = 0.1 * ((start * 7) % 5)
+        inputs.append((first, second, third))
+        targets.append(2.0 * first - 3.0 * second + 0.5 * third)
+
+    model = fit_forecaster(inputs, targets, ("cpu", "queue", "io"), 1)
+
+    assert model.weights == pytest.approx((2.0, -3.0, 0.5), abs=1e-3)
+    assert model.predict((0.10, 0.20, 0.30)) == pytest.approx(-0.25, abs=1e-3)
 
 
 def test_a_fit_reports_error_against_data_it_did_not_see():
