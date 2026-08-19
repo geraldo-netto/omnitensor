@@ -178,7 +178,11 @@ def check_bus(probe: ControlProbe) -> Check:
     validator = validate_document
     violations = validator("runtime-acknowledgement.schema.json", acknowledgement)
     if violations:
-        return Check("control", False, f"acknowledgement violates contract: {violations[0]}")
+        return Check(
+            "control",
+            False,
+            f"acknowledgement violates contract: {'; '.join(sorted(violations))}",
+        )
     if acknowledgement.get("status") != "rejected":
         return Check("control", False, "invalid command was not rejected")
     return Check(
@@ -201,7 +205,11 @@ def check_snapshot(
     validator = validate_document
     violations = validator("runtime-snapshot.schema.json", document)
     if violations:
-        return Check("snapshot", False, f"snapshot violates contract: {violations[0]}")
+        return Check(
+            "snapshot",
+            False,
+            f"snapshot violates contract: {'; '.join(sorted(violations))}",
+        )
     generated_at = document["generatedAt"]
     if generated_at - now_ms > FUTURE_TOLERANCE_MS:
         return Check(
@@ -233,9 +241,9 @@ def check_applet(root: Path, checksums: dict[str, str]) -> Check:
     if missing or altered:
         parts = []
         if missing:
-            parts.append(f"missing {len(missing)} file(s): {missing[0]}")
+            parts.append(f"missing {len(missing)} file(s): {', '.join(sorted(missing))}")
         if altered:
-            parts.append(f"altered {len(altered)} file(s): {altered[0]}")
+            parts.append(f"altered {len(altered)} file(s): {', '.join(sorted(altered))}")
         return Check("applet", False, "; ".join(parts))
     return Check("applet", True, f"{len(checksums)} applet files match their checksums")
 
@@ -309,7 +317,8 @@ def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
                 "applet-contract",
                 False,
                 "the installed applet cannot read the snapshot this service publishes "
-                f"({violations[0]}); install the applet built from these contracts",
+                f"({'; '.join(sorted(violations))}); "
+                "install the applet built from these contracts",
             )
         return Check(
             "applet-contract",

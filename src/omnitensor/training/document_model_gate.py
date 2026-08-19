@@ -102,6 +102,6 @@ def write_document_model_report(
     if violations:
         raise DocumentModelError(
             "report-invalid",
-            f"document model report violates schema: {violations[0]}",
+            f"document model report violates schema: {'; '.join(sorted(violations))}",
         )
     writer(path, document, prefix=".document-model-report-")

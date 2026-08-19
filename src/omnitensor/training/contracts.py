@@ -39,7 +39,9 @@ def validate_training_report_document(document: object, *, numeric: bool = False
     violations = validate_document(schema, document)
     if violations:
         label = "numeric training report" if numeric else "training report"
-        raise TrainingError("report-invalid", f"{label} violates schema: {violations[0]}")
+        raise TrainingError(
+            "report-invalid", f"{label} violates schema: {'; '.join(sorted(violations))}"
+        )
 
 
 def write_training_report(

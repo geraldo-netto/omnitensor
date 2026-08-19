@@ -374,7 +374,7 @@ def test_applet_check_reports_all_missing_and_altered_categories_exactly(tmp_pat
     assert check_applet(root, checksums) == Check(
         "applet",
         False,
-        "missing 2 file(s): a.js; altered 1 file(s): c.js",
+        "missing 2 file(s): a.js, b.js; altered 1 file(s): c.js",
     )
 
 
