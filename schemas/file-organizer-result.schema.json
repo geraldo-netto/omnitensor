@@ -19,8 +19,8 @@
       "additionalProperties": false,
       "required": ["start", "end"],
       "properties": {
-        "start": {"type": "integer", "minimum": 0, "maximum": 5000000},
-        "end": {"type": "integer", "minimum": 1, "maximum": 5000000}
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 1}
       }
     },
     "evidence": {
@@ -31,7 +31,7 @@
         "fileId": {"type": "string", "pattern": "^selected-file-[1-9][0-9]*$"},
         "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
         "sourceSha256": {"$ref": "#/$defs/digest"},
-        "page": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "page": {"type": "integer", "minimum": 1},
         "span": {"$ref": "#/$defs/span"},
         "textSha256": {"$ref": "#/$defs/digest"}
       }

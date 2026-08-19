@@ -17,8 +17,8 @@
       "additionalProperties": false,
       "required": ["start", "end"],
       "properties": {
-        "start": {"type": "integer", "minimum": 0, "maximum": 5000000},
-        "end": {"type": "integer", "minimum": 1, "maximum": 5000000}
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 1}
       }
     },
     "evidence": {
@@ -28,7 +28,7 @@
       "properties": {
         "sourceRef": {"type": "string", "pattern": "^private:[A-Za-z0-9._:-]{1,220}$"},
         "sourceSha256": {"$ref": "#/$defs/digest"},
-        "page": {"type": "integer", "minimum": 1, "maximum": 2000},
+        "page": {"type": "integer", "minimum": 1},
         "span": {"$ref": "#/$defs/span"},
         "textSha256": {"$ref": "#/$defs/digest"}
       }
