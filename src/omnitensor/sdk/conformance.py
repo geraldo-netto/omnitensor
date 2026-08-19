@@ -24,7 +24,6 @@ from ..plugins.protocol import (
 from .helpers import CancellationController
 
 DEFAULT_CONTRACT_TIMEOUT_SECONDS = 1.0
-DEFAULT_MAX_CONFORMANCE_PROGRESS = 128
 DEFAULT_FUZZ_CASES = 64
 DEFAULT_FUZZ_DEPTH = 4
 DEFAULT_FUZZ_WIDTH = 8
@@ -43,17 +42,23 @@ class ContractReport:
 
 
 class ProgressProbe:
-    """Bounded `ProgressReporter` fixture validating every observation."""
+    """`ProgressReporter` fixture validating every observation.
+
+    No contract in ``plugins.protocol`` bounds how many updates a plugin may
+    report, and one per page of a 200-page document is correct, so ``limit``
+    is ``None`` — unbounded — unless a caller deliberately asks for a ceiling.
+    """
 
     def __init__(
         self,
         job_id: str,
         *,
-        limit: int = DEFAULT_MAX_CONFORMANCE_PROGRESS,
+        limit: int | None = None,
     ) -> None:
         if not isinstance(job_id, str) or not job_id:
             raise ValueError("job_id must be a non-empty string")
-        _positive_integer(limit, "limit")
+        if limit is not None:
+            _positive_integer(limit, "limit")
         self._job_id = job_id
         self._limit = limit
         self._fraction = 0.0
@@ -72,7 +77,7 @@ class ProgressProbe:
             or progress.fraction > 1
         ):
             raise ConformanceError("progress fraction is invalid or moved backward")
-        if len(self.items) >= self._limit:
+        if self._limit is not None and len(self.items) >= self._limit:
             raise ConformanceError(f"plugin emitted more than {self._limit} progress updates")
         self._fraction = float(progress.fraction)
         self.items.append(progress)
@@ -84,7 +89,7 @@ async def run_plugin_contract(
     request: PluginRequest,
     *,
     timeout: float = DEFAULT_CONTRACT_TIMEOUT_SECONDS,
-    max_progress: int = DEFAULT_MAX_CONFORMANCE_PROGRESS,
+    max_progress: int | None = None,
 ) -> ContractReport:
     """Exercise one normal request and always release plugin lifecycle state."""
     _positive_number(timeout, "timeout")

@@ -207,6 +207,16 @@ def test_progress_probe_enforces_identity_order_bounds_and_type():
         sdk.ProgressProbe("job", limit=0)
 
 
+def test_progress_probe_retains_every_update_when_no_limit_is_asked_for():
+    async def scenario():
+        probe = sdk.ProgressProbe("job")
+        for index in range(500):
+            await probe.report(sdk.PluginProgress("job", "stage", index / 1000, "", 0))
+        assert len(probe.items) == 500
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("fraction", [-1, 1.1, float("nan"), float("inf"), True, "1"])
 def test_progress_probe_rejects_invalid_fractions(fraction):
     async def scenario():
