@@ -17,7 +17,6 @@ from omnitensor.plugins import (
     DEFAULT_MAX_DESCRIPTORS,
     DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_MAX_PROCESSES,
-    DEFAULT_RESOURCE_POLL_SECONDS,
     MAX_CALL_TIMEOUT_SECONDS,
     MAX_CONCURRENCY_LIMIT,
     MAX_DESCRIPTORS_LIMIT,
@@ -62,7 +61,6 @@ def test_default_limits_are_explicit_and_bounded():
         DEFAULT_MAX_MEMORY_BYTES,
         DEFAULT_MAX_DESCRIPTORS,
         DEFAULT_MAX_CONCURRENCY,
-        DEFAULT_RESOURCE_POLL_SECONDS,
     )
 
 
@@ -80,11 +78,6 @@ def test_default_limits_are_explicit_and_bounded():
         ({"max_descriptors": 0}, "max_descriptors"),
         ({"max_descriptors": MAX_DESCRIPTORS_LIMIT + 1}, "max_descriptors"),
         ({"max_concurrency": MAX_CONCURRENCY_LIMIT + 1}, "max_concurrency"),
-        ({"resource_poll_seconds": 0}, "resource_poll_seconds"),
-        (
-            {"call_timeout_seconds": 0.5, "resource_poll_seconds": 0.6},
-            "resource_poll_seconds",
-        ),
     ],
 )
 def test_limits_reject_invalid_values(changes, detail):
@@ -106,19 +99,12 @@ def test_resource_usage_requires_non_negative_integers(values, detail):
         WorkerResourceUsage(*values)
 
 
-def test_successful_call_checks_resources_output_and_accounting():
+def test_successful_call_reports_its_output_and_accounting():
     async def scenario():
-        probes = []
-
-        def probe():
-            probes.append(True)
-            return usage()
-
-        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), probe)
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits())
         result = await enforcer.run(lambda: asyncio.sleep(0, result={"ok": True}))
 
         assert result == {"ok": True}
-        assert len(probes) == 2
         assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 1, 0)
 
     run_scenario(scenario())
@@ -127,17 +113,9 @@ def test_successful_call_checks_resources_output_and_accounting():
 # Workers run unbounded. These ceilings refused real work: a Qwen worker that
 # had already loaded its model and was answering was killed for holding 831 MB
 # against a 512 MiB limit, and the cgroup meant to enforce the same numbers
-# could never be created in the first place. Usage is still observed, because
-# telemetry reports the figures; nothing rejects on them.
-@pytest.mark.parametrize(
-    "observed",
-    [
-        usage(processes=2, memory_bytes=1),
-        usage(memory_bytes=11),
-        usage(memory_bytes=1, descriptors=5),
-    ],
-)
-def test_resource_usage_is_observed_without_bounding_the_call(observed):
+# could never be created in the first place. They now describe the worker's
+# cgroup and nothing else; the enforcer never reads them.
+def test_declared_ceilings_do_not_bound_the_call():
     async def scenario():
         called = False
 
@@ -147,43 +125,12 @@ def test_resource_usage_is_observed_without_bounding_the_call(observed):
             return "answer"
 
         enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(
-                max_processes=1,
-                max_memory_bytes=10,
-                max_descriptors=4,
-            ),
-            lambda: observed,
+            WorkerBudgetLimits(max_processes=1, max_memory_bytes=10, max_descriptors=4)
         )
 
         assert await enforcer.run(operation) == "answer"
         assert called is True
         assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 1, 0)
-
-    run_scenario(scenario())
-
-
-def test_a_growing_worker_is_no_longer_cancelled_mid_call():
-    """Usage that climbs during a call is observed, not fatal.
-
-    A model that allocates as it loads crossed the ceiling after the call had
-    already started, which killed work that was about to succeed.
-    """
-
-    async def scenario():
-        probes = iter((usage(memory_bytes=1), usage(memory_bytes=20), usage(memory_bytes=99)))
-        released = asyncio.Event()
-
-        async def operation():
-            released.set()
-            return "answer"
-
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(max_memory_bytes=10, resource_poll_seconds=0.01),
-            lambda: next(probes, usage(memory_bytes=99)),
-        )
-        assert await enforcer.run(operation) == "answer"
-        assert released.is_set()
-        assert enforcer.snapshot().rejected_calls == 0
 
     run_scenario(scenario())
 
@@ -198,13 +145,7 @@ def test_deadline_cancels_inflight_call_with_stable_failure():
             finally:
                 cancelled.set()
 
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(
-                call_timeout_seconds=0.005,
-                resource_poll_seconds=0.001,
-            ),
-            usage,
-        )
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(call_timeout_seconds=0.005))
         with pytest.raises(WorkerBudgetExceededError) as error:
             await enforcer.run(operation)
 
@@ -232,10 +173,7 @@ def test_concurrency_rejects_without_constructing_an_operation():
             second_called = True
             return asyncio.sleep(0)
 
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(call_timeout_seconds=1, resource_poll_seconds=0.01),
-            usage,
-        )
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(call_timeout_seconds=1))
         running = asyncio.create_task(enforcer.run(first))
         await entered.wait()
         with pytest.raises(WorkerBudgetExceededError) as error:
@@ -263,40 +201,16 @@ def test_no_answer_is_refused_for_its_size(value):
     )
 
     async def scenario():
-        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), usage)
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits())
         assert await enforcer.run(lambda: asyncio.sleep(0, result=result)) == result
         assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 1, 0)
 
     run_scenario(scenario())
 
 
-def test_a_probe_that_fails_cannot_fail_the_call():
-    """The probe reports figures for telemetry; it is not a gate.
-
-    It used to fail closed, so an unreadable /proc entry refused work the
-    worker could have completed.
-    """
-
-    def fail():
-        raise OSError(13, "permission denied", "/proc/self/status")
-
-    async def scenario():
-        async def operation():
-            return "answer"
-
-        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), fail)
-        assert await enforcer.run(operation) == "answer"
-        assert enforcer.snapshot().rejected_calls == 0
-
-    run_scenario(scenario())
-
-
 def test_call_contract_and_caller_cancellation_cleanup():
-    with pytest.raises(TypeError, match="usage_probe must be callable"):
-        WorkerBudgetEnforcer(WorkerBudgetLimits(), object())
-
     async def scenario():
-        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), usage)
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits())
         with pytest.raises(TypeError, match="operation must be callable"):
             await enforcer.run(object())
 
@@ -360,10 +274,7 @@ def test_cancelling_a_call_does_not_leak_its_concurrency_slot():
     """The decrement sat behind two awaits, so cancellation there leaked a slot."""
 
     async def scenario():
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(max_concurrency=1),
-            lambda: WorkerResourceUsage(1, 0, 0),
-        )
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(max_concurrency=1))
         started = asyncio.Event()
 
         async def slow_to_cancel():

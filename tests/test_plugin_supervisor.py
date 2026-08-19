@@ -303,7 +303,10 @@ def test_supervisor_executes_and_forwards_correlated_progress():
         progress = Progress()
         request = PluginRequest("job-1", "events", "manual", {"sources": []}, 10, None)
         pending = asyncio.create_task(supervisor.execute(request, progress))
-        await asyncio.sleep(0)
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if decode_frame(process.writer.writes[-1]).type is WorkerMessageType.EXECUTE:
+                break
         sent = decode_frame(process.writer.writes[-1])
         assert sent.type is WorkerMessageType.EXECUTE
         assert sent.request_id == "job-1"
@@ -450,6 +453,36 @@ def test_supervisor_executes_a_worker_over_the_former_resource_ceilings():
     run_scenario(scenario())
 
 
+def test_a_worker_without_a_usage_probe_still_has_a_deadline():
+    """The budget used to exist only if the launcher offered a usage probe.
+
+    A process object with no `usage_probe` attribute got no enforcer at all, so
+    neither its call deadline nor its concurrency limit applied to it.
+    """
+
+    async def scenario():
+        events = []
+        offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
+        process = FakeProcess("events", offer, events)
+        assert not hasattr(process, "usage_probe")
+        supervisor = PluginWorkerSupervisor(FakeLauncher({"events": process}))
+        spec = WorkerSpec(
+            "events",
+            ("python", "worker.py"),
+            capabilities=frozenset({"execute"}),
+            budget_limits=WorkerBudgetLimits(call_timeout_seconds=0.01),
+        )
+        await supervisor.start((spec,))
+
+        with pytest.raises(PluginWorkerError) as rejected:
+            await supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
+
+        assert rejected.value.code == "deadline-exceeded"
+        await supervisor.stop()
+
+    run_scenario(scenario())
+
+
 def test_supervisor_enforces_the_call_deadline_and_reassembles_split_results():
     async def deadline_scenario():
         events = []
@@ -461,10 +494,7 @@ def test_supervisor_enforces_the_call_deadline_and_reassembles_split_results():
             "events",
             ("python", "worker.py"),
             capabilities=frozenset({"execute"}),
-            budget_limits=WorkerBudgetLimits(
-                call_timeout_seconds=0.01,
-                resource_poll_seconds=0.005,
-            ),
+            budget_limits=WorkerBudgetLimits(call_timeout_seconds=0.01),
         )
         await supervisor.start((spec,))
 

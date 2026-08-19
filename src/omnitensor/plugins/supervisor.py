@@ -437,13 +437,12 @@ class PluginWorkerSupervisor:
         agreement: HandshakeAgreement,
         restart_attempts: int,
     ) -> None:
-        usage_probe = getattr(process, "usage_probe", None)
-        budget = (
-            _WorkerBudgetEnforcer(spec.budget_limits, usage_probe)
-            if callable(usage_probe)
-            else None
+        # Every ready worker gets its budget. It used to depend on the process
+        # exposing a usage probe, so a launcher that offered none left the call
+        # deadline and the concurrency limit unenforced for that worker.
+        slot = _WorkerSlot(
+            spec, process, agreement, budget=_WorkerBudgetEnforcer(spec.budget_limits)
         )
-        slot = _WorkerSlot(spec, process, agreement, budget=budget)
         self._slots[spec.plugin_id] = slot
         self._ready_since[spec.plugin_id] = asyncio.get_running_loop().time()
         if spec.plugin_id not in self._startup_order:

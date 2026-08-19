@@ -24,7 +24,6 @@ DEFAULT_MAX_PROCESSES = None
 DEFAULT_MAX_MEMORY_BYTES = None
 DEFAULT_MAX_DESCRIPTORS = None
 DEFAULT_MAX_CONCURRENCY = 1
-DEFAULT_RESOURCE_POLL_SECONDS = 0.05
 MAX_CALL_TIMEOUT_SECONDS = 3600.0
 MAX_PROCESSES_LIMIT = 128
 MAX_MEMORY_BYTES_LIMIT = 64 * 1024 * 1024 * 1024
@@ -39,12 +38,16 @@ CGROUP_KILL_FILE = "cgroup.kill"
 
 
 class WorkerBudgetCode(StrEnum):
+    """Why a call was refused. Every member here is raised by this module.
+
+    The resource codes that once lived beside these — process, memory,
+    descriptor, usage-unavailable — were never raised after the ceilings became
+    observe-only, and a refusal code nothing can produce is a branch every
+    client has to carry for nothing.
+    """
+
     DEADLINE = "deadline-exceeded"
-    PROCESS = "process-budget-exceeded"
-    MEMORY = "memory-budget-exceeded"
-    DESCRIPTOR = "descriptor-budget-exceeded"
     CONCURRENCY = "concurrency-budget-exceeded"
-    USAGE_UNAVAILABLE = "usage-unavailable"
 
 
 class WorkerBudgetExceededError(RuntimeError):
@@ -63,7 +66,6 @@ class WorkerBudgetLimits:
     max_memory_bytes: int | None = DEFAULT_MAX_MEMORY_BYTES
     max_descriptors: int | None = DEFAULT_MAX_DESCRIPTORS
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY
-    resource_poll_seconds: float = DEFAULT_RESOURCE_POLL_SECONDS
 
     def __post_init__(self) -> None:
         _bounded_number(
@@ -75,11 +77,6 @@ class WorkerBudgetLimits:
         _optional_bounded_integer(self.max_memory_bytes, "max_memory_bytes", MAX_MEMORY_BYTES_LIMIT)
         _optional_bounded_integer(self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT)
         _bounded_integer(self.max_concurrency, "max_concurrency", MAX_CONCURRENCY_LIMIT)
-        _bounded_number(
-            self.resource_poll_seconds,
-            "resource_poll_seconds",
-            min(1.0, self.call_timeout_seconds),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,17 +101,19 @@ class WorkerBudgetSnapshot:
 
 
 class WorkerBudgetEnforcer:
-    """Run one async operation while polling all declared worker limits."""
+    """Run one async operation under this worker's call deadline and concurrency.
 
-    def __init__(
-        self,
-        limits: WorkerBudgetLimits,
-        usage_probe: Callable[[], WorkerResourceUsage],
-    ) -> None:
-        if not callable(usage_probe):
-            raise TypeError("usage_probe must be callable")
+    It takes no usage probe. Resource ceilings became observe-only when they
+    started killing work that was about to succeed, and the observation that
+    replaced them sampled the whole process tree every 50 ms for the life of
+    every call — 12,000 walks of ``/proc`` for one 600-second generative call —
+    and dropped every sample on the floor. What accounts for a worker's
+    resources now is its cgroup, which the kernel maintains whether or not
+    anything reads it.
+    """
+
+    def __init__(self, limits: WorkerBudgetLimits) -> None:
         self._limits = limits
-        self._usage_probe = usage_probe
         self._active = 0
         self._peak = 0
         self._completed = 0
@@ -135,10 +134,8 @@ class WorkerBudgetEnforcer:
         await self._enter()
         task = None
         try:
-            self._sample_usage()
             task = asyncio.create_task(operation())
             result = await self._wait(task)
-            self._sample_usage()
             # Nothing here inspects the size of the answer. A result too large
             # for one IPC frame is split across frames by the transport; it was
             # refused here once, which discarded a whole document-QA answer and
@@ -169,35 +166,20 @@ class WorkerBudgetEnforcer:
             self._peak = max(self._peak, self._active)
 
     async def _wait(self, task: asyncio.Task) -> object:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._limits.call_timeout_seconds
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                self._rejected += 1
-                raise WorkerBudgetExceededError(
-                    WorkerBudgetCode.DEADLINE,
-                    f"call exceeded {self._limits.call_timeout_seconds:g} seconds",
-                )
-            done, _pending = await asyncio.wait(
-                (task,),
-                timeout=min(remaining, self._limits.resource_poll_seconds),
-            )
-            if done:
-                return await task
-            self._sample_usage()
+        """The call's answer, or its deadline — one sleep, no polling.
 
-    def _sample_usage(self) -> None:
-        """Observe usage without bounding it.
-
-        Workers run unbounded: the ceilings here refused real work — a Qwen
-        worker legitimately holding 831 MB was killed against a 512 MiB limit
-        after the model had already loaded — and the cgroup that was supposed
-        to enforce the same numbers could never be created. The probe is kept
-        because telemetry reports the figures; nothing rejects on them.
+        The event loop wakes this exactly twice: once when the call answers and
+        once if it does not answer in time. An idle worker costs no wakeups at
+        all, which is what an idle runtime is required to cost.
         """
-        with contextlib.suppress(Exception):
-            self._usage_probe()
+        done, _pending = await asyncio.wait((task,), timeout=self._limits.call_timeout_seconds)
+        if not done:
+            self._rejected += 1
+            raise WorkerBudgetExceededError(
+                WorkerBudgetCode.DEADLINE,
+                f"call exceeded {self._limits.call_timeout_seconds:g} seconds",
+            )
+        return await task
 
 
 class ProcfsWorkerUsageProbe:

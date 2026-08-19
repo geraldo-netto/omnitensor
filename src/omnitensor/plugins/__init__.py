@@ -54,7 +54,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "DEFAULT_MAX_MEMORY_BYTES": (".budgets", "DEFAULT_MAX_MEMORY_BYTES"),
     "DEFAULT_MAX_PROCESSES": (".budgets", "DEFAULT_MAX_PROCESSES"),
     "DEFAULT_MAX_RESTARTS": (".supervisor_recovery", "DEFAULT_MAX_RESTARTS"),
-    "DEFAULT_RESOURCE_POLL_SECONDS": (".budgets", "DEFAULT_RESOURCE_POLL_SECONDS"),
     "DEFAULT_RESTART_BACKOFF_MULTIPLIER": (
         ".supervisor_recovery",
         "DEFAULT_RESTART_BACKOFF_MULTIPLIER",
