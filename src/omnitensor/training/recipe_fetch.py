@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -22,7 +23,10 @@ from .recipe_model import (
 from .recipe_registry import MAX_RECIPE_BYTES, load_model_recipe
 from .recipe_transport import DOWNLOAD_CHUNK_BYTES, HttpsSourceTransport
 
-MAX_SOURCE_BYTES = 2 * 1024 * 1024 * 1024
+# A directory rename onto an existing directory reports EEXIST when the
+# destination is empty and ENOTEMPTY when it is not; both mean another
+# fetch published this version first.
+_DESTINATION_EXISTS = frozenset({errno.EEXIST, errno.ENOTEMPTY})
 
 
 def fetch_model_sources(
@@ -79,18 +83,37 @@ def _fetch_model_sources(
             receipt_document(recipe),
             prefix=".source-receipt-",
         )
-        try:
-            rename(stage, destination)
-        except FileExistsError:
-            if installed_matcher(destination, recipe):
-                return FetchedModelSource(recipe, destination, destination / RECEIPT_FILENAME)
-            raise ModelRecipeError(
-                "source-conflict", f"source version appeared concurrently: {destination}"
-            ) from None
+        _publish_stage(stage, destination, recipe, rename=rename, matcher=installed_matcher)
     finally:
         if stage.exists():
             shutil.rmtree(stage)
     return FetchedModelSource(recipe, destination, destination / RECEIPT_FILENAME)
+
+
+def _publish_stage(
+    stage: Path,
+    destination: Path,
+    recipe: ModelRecipe,
+    *,
+    rename: Callable[[Path, Path], None],
+    matcher: Callable[[Path, ModelRecipe], bool],
+) -> None:
+    """Publish the staged version, tolerating a concurrent fetch that matches."""
+    try:
+        rename(stage, destination)
+    except OSError as error:
+        if not _destination_already_exists(error):
+            raise
+        if matcher(destination, recipe):
+            return
+        raise ModelRecipeError(
+            "source-conflict", f"source version appeared concurrently: {destination}"
+        ) from None
+
+
+def _destination_already_exists(error: OSError) -> bool:
+    """True when a rename failed because the version directory is already there."""
+    return isinstance(error, FileExistsError) or error.errno in _DESTINATION_EXISTS
 
 
 def open_fetched_model_source(
@@ -128,7 +151,7 @@ def fetch_one(source: ModelSource, destination: Path, transport: SourceTransport
     size = 0
     try:
         with destination.open("xb") as handle:
-            for chunk in transport.chunks(source.uri, min(source.size_bytes, MAX_SOURCE_BYTES)):
+            for chunk in transport.chunks(source.uri, source.size_bytes):
                 if not isinstance(chunk, bytes) or not chunk:
                     raise ModelRecipeError("source-invalid", "transport returned an invalid chunk")
                 size += len(chunk)

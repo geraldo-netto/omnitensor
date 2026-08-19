@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import io
 import json
+import os
 import tempfile
 import urllib.error
 from dataclasses import replace
@@ -14,10 +16,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.training.recipe_cli import fetch_main, list_main
+from omnitensor.training.recipe_fetch import _fetch_model_sources
 from omnitensor.training.recipes import (
     HttpsSourceTransport,
     ModelRecipeError,
     ModelSource,
+    _installed_source_matches,
     _source_download_uri,
     _source_file_matches,
     _validate_download_response_uri,
@@ -949,6 +953,74 @@ def test_concurrent_source_publish_rechecks_the_winner(tmp_path, monkeypatch, ma
         )
     assert checked == [(tmp_path / "sources/example-embedding/1.2.3", "example-embedding")]
     assert not list((tmp_path / "sources/example-embedding").glob(".model-source-*"))
+
+
+def test_concurrent_publish_of_a_non_empty_version_directory_is_a_source_conflict(tmp_path):
+    """A real rename onto a populated directory raises ENOTEMPTY, not EEXIST."""
+    payload = b"portable-model"
+    document = recipe_document(payload)
+    path = write_recipe(tmp_path, document)
+    uri = document["sources"][0]["uri"]
+    destination = tmp_path / "sources/example-embedding/1.2.3"
+    real_rename = os.rename
+
+    def publish_a_rival_first(stage, target):
+        Path(target).mkdir(parents=True, exist_ok=True)
+        (Path(target) / "model.onnx").write_bytes(b"rival")
+        real_rename(stage, target)
+
+    with pytest.raises(ModelRecipeError) as conflict:
+        _fetch_model_sources(
+            path,
+            tmp_path / "sources",
+            accepted_license="Apache-2.0",
+            transport=FakeTransport({uri: (payload,)}),
+            recipe_loader=load_model_recipe,
+            installed_matcher=_installed_source_matches,
+            rename=publish_a_rival_first,
+        )
+    assert conflict.value.code == "source-conflict"
+    assert conflict.value.detail == f"source version appeared concurrently: {destination}"
+    assert not list((tmp_path / "sources/example-embedding").glob(".model-source-*"))
+
+
+def test_rename_failures_that_are_not_a_published_version_are_not_disguised(tmp_path):
+    payload = b"portable-model"
+    document = recipe_document(payload)
+    path = write_recipe(tmp_path, document)
+    uri = document["sources"][0]["uri"]
+
+    def refuse(_stage, _target):
+        raise OSError(errno.EACCES, "permission denied")
+
+    with pytest.raises(OSError) as refused:
+        _fetch_model_sources(
+            path,
+            tmp_path / "sources",
+            accepted_license="Apache-2.0",
+            transport=FakeTransport({uri: (payload,)}),
+            recipe_loader=load_model_recipe,
+            installed_matcher=_installed_source_matches,
+            rename=refuse,
+        )
+    assert refused.value.errno == errno.EACCES
+
+
+def test_transport_bound_is_the_pinned_size_not_a_second_smaller_ceiling(tmp_path):
+    payload = b"portable-model"
+    document = recipe_document(payload)
+    path = write_recipe(tmp_path, document)
+    uri = document["sources"][0]["uri"]
+    transport = FakeTransport({uri: (payload,)})
+
+    fetch_model_sources(
+        path,
+        tmp_path / "sources",
+        accepted_license="Apache-2.0",
+        transport=transport,
+    )
+
+    assert transport.calls == [(uri, len(payload))]
 
 
 @pytest.mark.parametrize("tamper", ["receipt", "size", "digest"])
