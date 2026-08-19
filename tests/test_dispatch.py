@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from omnitensor.dispatch import (
     InferenceJobDispatcher,
     _executor_snapshot,
     declared_artifact_reference,
+    encode_tensor,
     inference_result_payload,
 )
 from omnitensor.dispatch_lane import PreparedDispatchLane
@@ -1396,3 +1398,28 @@ def test_model_path_refuses_a_reference_changed_after_preparation():
         f"{target.id}: prepared model reference changed before dispatch"
     )
     assert artifacts.resolved == []
+
+
+def test_a_tensor_nested_past_the_stack_is_a_payload_error_not_an_internal_one():
+    """OMNI-0439: the caller must be able to tell its own mistake from a broken daemon."""
+    tensor = [1]
+    for _ in range(sys.getrecursionlimit() + 100):
+        tensor = [tensor]
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        submit({"inputs": [tensor]})
+
+    assert excinfo.value.code == "payload-invalid"
+    assert "nested too deeply" in excinfo.value.message
+
+
+def test_a_result_nested_past_the_stack_is_named_rather_than_raised_raw():
+    outputs = [1]
+    for _ in range(sys.getrecursionlimit() + 100):
+        outputs = [outputs]
+
+    with pytest.raises(JobDispatchError) as excinfo:
+        encode_tensor(outputs)
+
+    assert excinfo.value.code == "executor-result-invalid"
+    assert "nested too deeply" in excinfo.value.message

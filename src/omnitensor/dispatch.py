@@ -432,7 +432,20 @@ def validate_input_tensor(value: object, budget: _ElementBudget) -> object:
     Ragged nesting is rejected because every backend expects a rectangular
     buffer: accepting it here would turn a caller's mistake into an error
     raised deep inside a native library, mid-inference, on a shared device.
+
+    Nesting is walked recursively, so a deeply nested payload exhausts the
+    interpreter stack.  That is still a malformed payload and is answered as
+    one: letting the RecursionError escape reaches the blanket handler in
+    ``job_lifecycle`` and tells the caller ``internal-error``, which it cannot
+    tell apart from a broken daemon.
     """
+    try:
+        return _validate_input_tensor(value, budget)
+    except RecursionError as error:
+        raise JobDispatchError("payload-invalid", "Input tensors are nested too deeply") from error
+
+
+def _validate_input_tensor(value: object, budget: _ElementBudget) -> object:
     if isinstance(value, bool):
         raise JobDispatchError("payload-invalid", "Input tensors must contain numbers")
     if isinstance(value, (int, float)):
@@ -445,7 +458,7 @@ def validate_input_tensor(value: object, budget: _ElementBudget) -> object:
             "payload-invalid",
             f"Input tensors must be numbers or nested arrays, not {type(value).__name__}",
         )
-    encoded = [validate_input_tensor(item, budget) for item in value]
+    encoded = [_validate_input_tensor(item, budget) for item in value]
     shapes = {_tensor_shape(item) for item in encoded}
     if len(shapes) > 1:
         raise JobDispatchError("payload-invalid", "Input tensors must be rectangular")
@@ -548,9 +561,19 @@ def encode_tensor(value: object, budget: _ElementBudget | None = None) -> object
 
     Rejects rather than coerces anything unrecognised: silently stringifying a
     tensor would put an unusable value on the wire that only fails much later,
-    in the consumer.
+    in the consumer.  A result nested deeper than the interpreter stack allows
+    is refused the same way, rather than escaping as a RecursionError the
+    caller reads as a broken daemon.
     """
-    budget = budget or _ElementBudget(MAX_TENSOR_ELEMENTS)
+    try:
+        return _encode_tensor(value, budget or _ElementBudget(MAX_TENSOR_ELEMENTS))
+    except RecursionError as error:
+        raise JobDispatchError(
+            "executor-result-invalid", "Inference result is nested too deeply"
+        ) from error
+
+
+def _encode_tensor(value: object, budget: _ElementBudget) -> object:
     if isinstance(value, bool):
         budget.spend()
         return value
@@ -567,12 +590,12 @@ def encode_tensor(value: object, budget: _ElementBudget | None = None) -> object
         return value
     # numpy, torch, and anything else exposing the array protocol.
     if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
-        return encode_tensor(value.tolist(), budget)
+        return _encode_tensor(value.tolist(), budget)
     # ncnn Mat exposes numpy() rather than tolist().
     if hasattr(value, "numpy"):
-        return encode_tensor(value.numpy().tolist(), budget)
+        return _encode_tensor(value.numpy().tolist(), budget)
     if isinstance(value, (list, tuple)):
-        return [encode_tensor(item, budget) for item in value]
+        return [_encode_tensor(item, budget) for item in value]
     raise JobDispatchError(
         "executor-result-invalid",
         f"Inference result contains an unencodable {type(value).__name__}",
