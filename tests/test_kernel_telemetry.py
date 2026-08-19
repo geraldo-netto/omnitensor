@@ -636,6 +636,37 @@ def test_scheduler_features_summarize_both_latency_histograms_without_identity()
     }
 
 
+def test_a_nanosecond_histogram_is_converted_before_it_becomes_a_feature():
+    """The parser defaults `unit` to ns; the feature names promise us."""
+    aggregate = parse_aggregate(
+        document(histograms=[{"name": "runq_latency_us", "buckets": [1, 1, 8]}])
+    )
+
+    assert aggregate.histograms[0].unit == "ns"
+    assert aggregate.scheduler_features() == {
+        "kernelRunQueueSamples": 10.0,
+        "kernelRunQueueP50UpperUs": 0.008,
+        "kernelRunQueueP95UpperUs": 0.008,
+    }
+
+
+def test_an_unconvertible_unit_yields_no_feature_rather_than_a_wrong_one():
+    aggregate = parse_aggregate(
+        document(
+            histograms=[
+                {"name": "runq_latency_us", "unit": "ticks", "buckets": [1, 1, 8]},
+                {"name": "block_latency_us", "unit": "ms", "buckets": [5, 5]},
+            ]
+        )
+    )
+
+    assert aggregate.scheduler_features() == {
+        "kernelBlockIoSamples": 10.0,
+        "kernelBlockIoP50UpperUs": 2000.0,
+        "kernelBlockIoP95UpperUs": 4000.0,
+    }
+
+
 @given(st.lists(st.integers(min_value=0, max_value=10_000), max_size=64))
 def test_scheduler_percentiles_are_bounded_for_every_valid_histogram(buckets):
     aggregate = parse_aggregate(

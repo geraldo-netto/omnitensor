@@ -41,6 +41,9 @@ MAX_BUCKETS = 64
 MAX_NAME_LENGTH = 64
 MAX_DETAIL_LENGTH = 240
 MAX_COUNT = 2**53 - 1
+# Scale from a histogram's declared unit to the microseconds the feature
+# names promise. A unit absent here cannot be converted and yields no feature.
+MICROSECONDS_PER_UNIT = {"ns": 0.001, "us": 1.0, "ms": 1000.0, "s": 1000000.0}
 
 # Anything that could identify a process, a user, or a file. eBPF can read all
 # of it, so the reader refuses it rather than trusting the helper not to send it.
@@ -143,7 +146,13 @@ class KernelAggregate:
 
 
 def scheduler_features(aggregate: KernelAggregate) -> dict[str, float]:
-    """Summarize the two declared log2 histograms into stable model inputs."""
+    """Summarize the two declared log2 histograms into stable model inputs.
+
+    The feature names assert microseconds, so a histogram's declared ``unit``
+    decides the scale. A helper exporting nanoseconds — the parser's own
+    default — would otherwise produce inputs wrong by 1000x. A unit this
+    module cannot convert yields no feature at all rather than a wrong one.
+    """
     if not aggregate.usable:
         return {}
     histograms = {item.name: item for item in aggregate.histograms}
@@ -155,9 +164,12 @@ def scheduler_features(aggregate: KernelAggregate) -> dict[str, float]:
         histogram = histograms.get(name)
         if histogram is None:
             continue
+        scale = MICROSECONDS_PER_UNIT.get(histogram.unit)
+        if scale is None:
+            continue
         features[f"{prefix}Samples"] = float(min(histogram.total, MAX_COUNT))
-        features[f"{prefix}P50UpperUs"] = float(_percentile_upper(histogram, 50))
-        features[f"{prefix}P95UpperUs"] = float(_percentile_upper(histogram, 95))
+        features[f"{prefix}P50UpperUs"] = _percentile_upper(histogram, 50) * scale
+        features[f"{prefix}P95UpperUs"] = _percentile_upper(histogram, 95) * scale
     return features
 
 
