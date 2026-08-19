@@ -22,7 +22,6 @@ from .protocol import CancellationToken, ProgressReporter
 MAX_PROMPT_CHARACTERS = 32_768
 MAX_OUTPUT_SCHEMA_BYTES = 64 * 1024
 MAX_CONTEXT_TOKENS = 262_144
-MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_CONTENT_REFERENCES = 32
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -489,14 +488,22 @@ def _parse_limits(value: object) -> GenerationLimits:
         if "outputTokens" in value
         else None
     )
+    # A task that still declares `outputBytes` is held to exactly what it
+    # declared, and to nothing else: the 1 MiB ceiling that used to sit here was
+    # a policy number of the kind the contract document says has gone, and it
+    # refused a task for asking to be allowed a longer answer.
     output_bytes = (
-        _bounded_integer(value["outputBytes"], "output byte limit", 2, MAX_OUTPUT_BYTES)
-        if "outputBytes" in value
-        else None
+        _at_least(value["outputBytes"], "output byte limit", 2) if "outputBytes" in value else None
     )
     if output_tokens is not None and output_tokens >= context_tokens:
         raise GenerationError("task-invalid", "output token limit must be below context limit")
     return GenerationLimits(context_tokens, output_tokens, output_bytes)
+
+
+def _at_least(value: object, label: str, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise GenerationError("contract-invalid", f"{label} must be at least {minimum}")
+    return value
 
 
 def _bounded_integer(value: object, label: str, minimum: int, maximum: int) -> int:

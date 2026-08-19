@@ -12,7 +12,6 @@ from omnitensor.plugins.cancellation import CancellationReason, JobCancellationT
 from omnitensor.plugins.generation import (
     MAX_CONTENT_REFERENCES,
     MAX_CONTEXT_TOKENS,
-    MAX_OUTPUT_BYTES,
     MAX_OUTPUT_SCHEMA_BYTES,
     ArtifactProvenance,
     GenerationError,
@@ -198,7 +197,7 @@ def test_task_contract_preserves_versioned_prompt_schema_and_limits():
         (("modalities",), ["audio"], "modalities"),
         (("limits", "contextTokens"), MAX_CONTEXT_TOKENS + 1, "context token"),
         (("limits", "outputTokens"), 32_769, "output token"),
-        (("limits", "outputBytes"), MAX_OUTPUT_BYTES + 1, "output byte"),
+        (("limits", "outputBytes"), 1, "output byte"),
         (("limits", "contextTokens"), 2048, "below context"),
     ],
 )
@@ -756,6 +755,12 @@ def test_a_task_without_a_byte_ceiling_accepts_any_size_its_tokens_produced():
     huge = '{"events":[' + ",".join([f'"{long_event}"'] * 8) + "]}"
     assert validate_structured_output(task, huge)["events"][0] == long_event
     assert len(huge.encode("utf-8")) > 2 * task_document()["limits"]["outputBytes"] // 1000
+
+
+def test_a_task_may_declare_a_byte_limit_of_any_size():
+    document = task_document()
+    document["limits"]["outputBytes"] = 8 * 1024 * 1024
+    assert parse_generation_task(document).limits.output_bytes == 8 * 1024 * 1024
 
 
 def test_a_task_that_still_declares_a_ceiling_is_still_held_to_it():

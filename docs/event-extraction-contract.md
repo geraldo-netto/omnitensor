@@ -311,9 +311,13 @@ go. The only real bound is the context window: a generation can emit at most
 what is left of the context after the prompt, which is arithmetic rather than
 a choice. So:
 
-- **`outputBytes` goes**, following `document_qa.py`, which dropped its byte
-  ceiling with the note that the token budget bounds an answer and host
-  pressure protects the machine.
+- **`outputBytes` stops being asked for**, following `document_qa.py`, which
+  dropped its byte ceiling with the note that the token budget bounds an answer
+  and host pressure protects the machine. No task in `generation-models/`
+  declares one, and none should; a task written before it became optional stays
+  valid and is held to exactly the number it declares, so the field is still
+  parsed and still enforced when present. What has gone is the 1 MiB ceiling on
+  what a task was permitted to declare.
 - **`outputTokens` stops being a budget.** The task states the largest value
   the contract permits below its context, and the runtime asks for what remains
   of the context rather than a constant — generation ends at the model's own
@@ -429,8 +433,10 @@ merging them would silently choose one time over none.
   grammar able to express a success at all.
 - **The prompt** states the success path with the precision the refusal already
   has, and the refusal rule shrinks to "no event at all".
-- **Three answer ceilings go**: the task's `outputTokens` and `outputBytes`,
-  and the provider's `MAX_RUNTIME_OUTPUT_TOKENS` refusal. What bounds a
+- **Three answer ceilings go**: the task's `outputTokens` and `outputBytes`
+  (both now optional and declared by no shipped task, with the 1 MiB bound on
+  `outputBytes` removed), and the provider's `MAX_RUNTIME_OUTPUT_TOKENS`
+  refusal. What bounds a
   generation afterwards is the context window, and what bounds the answer is
   nothing — the work splits into passes instead.
 - **The benchmark cases** are rewritten against the new shape, and gain the ones
