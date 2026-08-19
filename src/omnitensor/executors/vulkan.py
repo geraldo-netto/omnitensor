@@ -36,8 +36,17 @@ class VulkanDevice:
     index: int
     name: str
     kind: int
-    vendor_id: int = -1
-    device_id: int = -1
+    # None means ncnn reported no id for this device, not "id zero" and not
+    # the unmatchable sentinel a request carries: an unknown identity must
+    # match nothing rather than match everything else that is also unknown.
+    vendor_id: int | None = None
+    device_id: int | None = None
+
+
+# A request whose ids could not be read from sysfs. It is deliberately
+# unmatchable: a selected render node that cannot be tied to a Vulkan identity
+# must be refused, never quietly served by ncnn's preferred GPU.
+UNMATCHABLE_DEVICE_ID = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +56,10 @@ class VulkanDeviceRequest:
     vendor_id: int
     device_id: int
     occurrence: int = 0
+
+    @property
+    def unmatchable(self) -> bool:
+        return UNMATCHABLE_DEVICE_ID in (self.vendor_id, self.device_id)
 
 
 class VulkanSelectionError(RuntimeError):
@@ -58,16 +71,21 @@ class VulkanSelectionError(RuntimeError):
         super().__init__(reason)
 
 
-def _numeric_info(info, name: str) -> int:
+def _numeric_info(info, name: str) -> int | None:
     getter = getattr(info, name, None)
     if not callable(getter):
-        return -1
+        return None
     value = getter()
-    return value if isinstance(value, int) and not isinstance(value, bool) else -1
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _requested_device(candidates, requested):
     if isinstance(requested, VulkanDeviceRequest):
+        if requested.unmatchable:
+            raise VulkanSelectionError(
+                "requested",
+                "Selected DRM GPU has no hardware identity to match against",
+            )
         matching = [
             item[2]
             for item in candidates

@@ -5,6 +5,7 @@ import pytest
 from omnitensor.executors.base import Availability, InferenceResult
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
 from omnitensor.executors.vulkan import (
+    UNMATCHABLE_DEVICE_ID,
     VulkanDevice,
     VulkanDeviceRequest,
     VulkanGpuExecutor,
@@ -546,3 +547,23 @@ def test_vulkan_model_cache_is_bounded_and_least_recently_used(tmp_path):
 def test_vulkan_model_cache_bound_must_be_a_positive_integer(bad):
     with pytest.raises(ValueError, match="max_entries"):
         VulkanGpuExecutor(True, runtime=FakeNcnn([DISCRETE]), max_cached_models=bad)
+
+
+def test_a_request_with_no_hardware_identity_matches_nothing():
+    """An unreadable sysfs identity is a refusal, not a wildcard.
+
+    `_numeric_info` answered -1 for a device whose ids ncnn does not report,
+    and `execution._vulkan_request` builds a request of -1/-1 when the selected
+    render node's identity could not be read — so the unmatchable request
+    matched any device whose ids were also unknown, which is exactly the
+    fall-through to ncnn's preferred GPU that the request exists to prevent.
+    """
+    runtime = FakeNcnn([DISCRETE])
+
+    with pytest.raises(VulkanSelectionError) as refused:
+        select_vulkan_device(
+            runtime, VulkanDeviceRequest(UNMATCHABLE_DEVICE_ID, UNMATCHABLE_DEVICE_ID, 0)
+        )
+
+    assert refused.value.kind == "requested"
+    assert "no hardware identity" in refused.value.reason

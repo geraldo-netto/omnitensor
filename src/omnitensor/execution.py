@@ -7,7 +7,7 @@ from .executors.base import DEVICE_ABSENT, Availability
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
-from .executors.vulkan import VulkanDeviceRequest, VulkanGpuExecutor
+from .executors.vulkan import UNMATCHABLE_DEVICE_ID, VulkanDeviceRequest, VulkanGpuExecutor
 
 
 class _UnavailableSelectedGpuExecutor:
@@ -89,7 +89,7 @@ def _vulkan_request(device) -> VulkanDeviceRequest:
     except (TypeError, ValueError):
         # A selected render node that cannot be matched to a Vulkan identity
         # must not fall through to ncnn's preferred (possibly other) GPU.
-        vendor_id = hardware_id = -1
+        vendor_id = hardware_id = UNMATCHABLE_DEVICE_ID
     return VulkanDeviceRequest(vendor_id, hardware_id, device.identity_index)
 
 
