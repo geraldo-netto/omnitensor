@@ -1235,6 +1235,7 @@ def test_start_is_single_use_until_stopped_and_empty_catalog_is_valid():
 class StubSubprocess:
     stdout: object = None
     stdin: object = None
+    stderr: object = None
     pid: int = 77
     returncode: int | None = None
     terminate_calls: int = 0

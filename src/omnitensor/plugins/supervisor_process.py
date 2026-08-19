@@ -27,6 +27,11 @@ DEFAULT_HANDSHAKE_TIMEOUT_SECONDS = 5.0
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
 DEFAULT_STOP_TIMEOUT_SECONDS = 0.5
 DEFAULT_CANCEL_TIMEOUT_SECONDS = 0.25
+# How much of a dying worker's stderr is carried into the failure a person
+# sees, and how long the service waits for it. A traceback's tail names the
+# import or assertion that killed the worker; the head is boilerplate.
+WORKER_DIAGNOSTIC_TAIL_BYTES = 4096
+WORKER_DIAGNOSTIC_DRAIN_SECONDS = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +58,9 @@ class WorkerSpec:
 class WorkerProcess(Protocol):
     reader: asyncio.StreamReader
     writer: asyncio.StreamWriter
+    # Whatever the worker wrote on stderr. A worker that dies on import or on
+    # a startup assertion explains itself here and nowhere else.
+    diagnostics: asyncio.StreamReader | None
     pid: int
     usage_probe: Callable[[], WorkerResourceUsage]
 
@@ -82,6 +90,7 @@ class _SubprocessWorker:
         self._process = process
         self.reader = process.stdout
         self.writer = process.stdin
+        self.diagnostics = process.stderr
         self.pid = process.pid
         self.usage_probe = usage_probe
         self._cgroup = cgroup
@@ -144,6 +153,36 @@ class AsyncioSubprocessLauncher:
         )
         probe = ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
         return _SubprocessWorker(process, probe, None)
+
+
+async def drain_worker_diagnostics(
+    process: WorkerProcess,
+    *,
+    limit: int = WORKER_DIAGNOSTIC_TAIL_BYTES,
+    timeout: float = WORKER_DIAGNOSTIC_DRAIN_SECONDS,
+) -> str:
+    """Return the tail of what a worker wrote on stderr; never raise, never hang.
+
+    Bounded twice over: at most `limit` bytes are retained however much the
+    worker wrote, and the read is abandoned after `timeout` seconds so a child
+    that will not close its pipe cannot hold up the failure report.
+    """
+    stream = getattr(process, "diagnostics", None)
+    if stream is None:
+        return ""
+    tail = b""
+
+    async def pump() -> None:
+        nonlocal tail
+        while True:
+            chunk = await stream.read(limit)
+            if not chunk:
+                return
+            tail = (tail + chunk)[-limit:]
+
+    with suppress(TimeoutError, OSError, ValueError):
+        await asyncio.wait_for(pump(), timeout=timeout)
+    return tail.decode("utf-8", "replace").strip()
 
 
 def validate_specs(

@@ -24,7 +24,12 @@ from .ipc import (
     write_frame,
 )
 from .protocol import PluginResult, ProgressReporter
-from .supervisor_process import WorkerLauncher, WorkerProcess, WorkerSpec
+from .supervisor_process import (
+    WorkerLauncher,
+    WorkerProcess,
+    WorkerSpec,
+    drain_worker_diagnostics,
+)
 
 
 class PluginWorkerError(RuntimeError):
@@ -82,6 +87,13 @@ def startup_failure(
     return f"worker startup failed: {type(error).__name__}"
 
 
+def with_worker_diagnostics(detail: str, output: str) -> str:
+    """Carry what the worker said on stderr into the detail a person reads."""
+    if not output:
+        return detail
+    return f"{detail}; worker stderr: {output}"
+
+
 async def launch_authenticated(
     launcher: WorkerLauncher,
     spec: WorkerSpec,
@@ -94,6 +106,7 @@ async def launch_authenticated(
     force_stop: Callable[[WorkerProcess, float], Awaitable[bool]],
     handshake_failure_of: Callable[[Exception], str] = handshake_failure,
     startup_failure_of: Callable[[Exception], str] = startup_failure,
+    drain_diagnostics: Callable[[WorkerProcess], Awaitable[str]] = drain_worker_diagnostics,
 ) -> tuple[WorkerProcess, HandshakeAgreement]:
     try:
         process = await launcher.launch(spec)
@@ -112,7 +125,10 @@ async def launch_authenticated(
         raise
     except Exception as error:
         await force_stop(process, stop_timeout)
-        raise WorkerStartError(handshake_failure_of(error), process.pid) from error
+        raise WorkerStartError(
+            with_worker_diagnostics(handshake_failure_of(error), await drain_diagnostics(process)),
+            process.pid,
+        ) from error
     try:
         await asyncio.wait_for(
             await_ready(process.reader, spec.plugin_id),
@@ -124,7 +140,7 @@ async def launch_authenticated(
     except Exception as error:
         await force_stop(process, stop_timeout)
         raise WorkerStartError(
-            startup_failure_of(error),
+            with_worker_diagnostics(startup_failure_of(error), await drain_diagnostics(process)),
             process.pid,
             charges_restart=not isinstance(error, TimeoutError),
         ) from error

@@ -424,3 +424,78 @@ def test_a_cancelled_job_cancellation_still_kills_an_unresponsive_worker():
         assert stopped == [slot.process], "the unresponsive worker was never stopped"
 
     asyncio.run(scenario())
+
+
+def test_a_dead_worker_carries_its_stderr_into_the_failure_detail():
+    """OMNI-0381: the traceback that names the cause reached only a closed pipe.
+
+    A worker that dies on import writes a complete traceback to stderr and then
+    fails the handshake. Reporting only `worker handshake rejected:
+    truncated-frame` hides the ImportError behind the transport symptom.
+    """
+
+    async def scenario():
+        traceback_text = (
+            "Traceback (most recent call last):\nImportError: cannot import name 'MAX_VISUALS'\n"
+        )
+        stderr = asyncio.StreamReader()
+        stderr.feed_data(traceback_text.encode())
+        stderr.feed_eof()
+
+        class Process:
+            pid = 41
+            reader = object()
+            writer = object()
+            diagnostics = stderr
+            returncode = None
+
+        class Launcher:
+            async def launch(self, _spec):
+                return Process()
+
+        async def rejects(*_args, **_options):
+            raise supervisor.IPCProtocolError("truncated-frame", "short read")
+
+        async def force_stop(_target, _timeout):
+            return True
+
+        with pytest.raises(session.WorkerStartError) as error:
+            await session.launch_authenticated(
+                Launcher(),
+                supervisor.WorkerSpec("worker", ("python",)),
+                handshake_timeout=5.0,
+                startup_timeout=5.0,
+                stop_timeout=0.01,
+                handshake=rejects,
+                await_ready=rejects,
+                force_stop=force_stop,
+            )
+
+        assert "worker handshake rejected: truncated-frame" in error.value.detail
+        assert "ImportError: cannot import name 'MAX_VISUALS'" in error.value.detail
+
+    asyncio.run(scenario())
+
+
+def test_draining_worker_stderr_is_bounded_in_bytes_and_in_time():
+    """A chatty or silent worker must not blow up or hold up the report."""
+
+    async def scenario():
+        loud = asyncio.StreamReader()
+        loud.feed_data(b"a" * 40 + b"b" * 40)
+        loud.feed_eof()
+        tail = await process.drain_worker_diagnostics(SimpleNamespace(diagnostics=loud), limit=16)
+        assert tail == "b" * 16
+
+        never_closes = asyncio.StreamReader()
+        never_closes.feed_data(b"partial")
+        assert (
+            await process.drain_worker_diagnostics(
+                SimpleNamespace(diagnostics=never_closes), timeout=0.01
+            )
+            == "partial"
+        )
+
+        assert await process.drain_worker_diagnostics(SimpleNamespace()) == ""
+
+    asyncio.run(scenario())
