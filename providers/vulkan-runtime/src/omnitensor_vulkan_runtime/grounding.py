@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from omnitensor.plugins.fragments import FragmentStoreError, PrivateFragmentStore
@@ -21,44 +23,79 @@ def bind_grounding_metadata(
     store: PrivateFragmentStore,
 ) -> str:
     """Bind trusted metadata only after the model selects an exact private source."""
-    evidence_groups = _model_evidence(task, request)
-    if evidence_groups is None:
+    binding = TASK_BINDINGS.get(task.task_id)
+    if binding is None or not binding.accepts(request.content_references):
         return raw
     try:
         document = json.loads(raw)
     except (UnicodeError, json.JSONDecodeError):
         return raw
-    evidence_items = evidence_groups(document)
+    evidence_items = binding.evidence(document)
     if not evidence_items:
         return raw
-    allowed = set(request.content_references)
-    if task.task_id == "ask-selected-files":
-        allowed.discard(request.content_references[0])
-    elif task.task_id == "file-organizer":
-        allowed = {reference for reference in allowed if ":metadata:" not in reference}
+    allowed = set(binding.bindable(request.content_references))
     if not all(
-        _bind_evidence(evidence, task.task_id, request.request_id, allowed, store)
+        _bind_evidence(evidence, binding, request.request_id, allowed, store)
         for evidence in evidence_items
     ):
         return raw
-    _normalize_bound_document(document, task.task_id)
-    if task.task_id == "file-organizer":
-        _normalize_organizer_name_extensions(document, request, store)
+    for normalize in binding.normalize:
+        normalize(document)
+    if binding.finalize is not None:
+        binding.finalize(document, request, store)
     return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
 
 
-def _model_evidence(task: GenerationTask, request: GenerationRequest):
-    invalid_reference_count = (
-        task.task_id == "selected-text-tools" and len(request.content_references) != 2
-    ) or (task.task_id == "ask-selected-files" and len(request.content_references) < 2)
-    if invalid_reference_count:
-        return None
-    return {
-        "selected-text-tools": _selected_evidence,
-        "ask-selected-files": _citation_evidence,
-        "event-extraction": _event_evidence,
-        "file-organizer": _organizer_evidence,
-    }.get(task.task_id)
+def citable_references(task_id: str, references: tuple[str, ...]) -> tuple[str, ...]:
+    """The opaque references this task may be told to cite, and no others.
+
+    Narrower than what may be *bound*: a selected-text control fragment is a
+    legitimate binding target but is never something the model should cite.
+    """
+    binding = TASK_BINDINGS.get(task_id)
+    return () if binding is None else binding.citable(references)
+
+
+def _every_reference(references: tuple[str, ...]) -> tuple[str, ...]:
+    return references
+
+
+def _no_reference(references: tuple[str, ...]) -> tuple[str, ...]:
+    return ()
+
+
+def _after_the_control_fragment(references: tuple[str, ...]) -> tuple[str, ...]:
+    return references[1:]
+
+
+def _content_references(references: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(reference for reference in references if ":metadata:" not in reference)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskBinding:
+    """One workload's grounded-output policy, declared once.
+
+    Adding a workload used to mean editing four dispatch tables in this module
+    and three more beside the loader; it now means adding one entry here and,
+    if the task says anything extra to the model, one in :mod:`hints`.
+    """
+
+    evidence: Callable[[object], tuple[object, ...]]
+    exact_references: int | None = None
+    minimum_references: int = 0
+    citable: Callable[[tuple[str, ...]], tuple[str, ...]] = _no_reference
+    bindable: Callable[[tuple[str, ...]], tuple[str, ...]] = _every_reference
+    normalize: tuple[Callable[[object], None], ...] = ()
+    finalize: Callable[[object, GenerationRequest, PrivateFragmentStore], None] | None = None
+    span_must_match: bool = False
+    binds_page: bool = True
+
+    def accepts(self, references: tuple[str, ...]) -> bool:
+        """Whether this request carries the fragments the task is defined for."""
+        if self.exact_references is not None and len(references) != self.exact_references:
+            return False
+        return len(references) >= self.minimum_references
 
 
 def _selected_evidence(document: object) -> tuple[object, ...]:
@@ -93,16 +130,6 @@ def _organizer_evidence(document: object) -> tuple[object, ...]:
             return ()
         groups.extend(suggestion["evidence"])
     return tuple(groups)
-
-
-def _normalize_bound_document(document: object, task_id: str) -> None:
-    if task_id == "selected-text-tools":
-        _normalize_selected_text_tasks(document)
-    elif task_id == "ask-selected-files":
-        _deduplicate_document_citations(document)
-    elif task_id == "file-organizer":
-        _merge_organizer_suggestions(document)
-        _normalize_organizer_tags(document)
 
 
 def _normalize_selected_text_tasks(document: object) -> None:
@@ -262,7 +289,7 @@ def _deduplicate_document_citations(document: object) -> None:
 
 def _bind_evidence(
     evidence: object,
-    task_id: str,
+    binding: TaskBinding,
     request_id: str,
     allowed: set[str],
     store: PrivateFragmentStore,
@@ -274,10 +301,10 @@ def _bind_evidence(
         return False
     source = store.resolve(request_id, reference)
     span = fragment_span(source)
-    if task_id == "selected-text-tools" and evidence.get("span") != span:
+    if binding.span_must_match and evidence.get("span") != span:
         return False
     evidence["sourceSha256"] = source.source_sha256
-    if task_id != "selected-text-tools":
+    if binding.binds_page:
         evidence["page"] = source.page
     evidence["span"] = span
     evidence["textSha256"] = source.text_sha256
@@ -301,3 +328,30 @@ def fragment_span(source) -> dict[str, int]:
         if match is not None
         else {"start": 0, "end": len(source.text)}
     )
+
+
+TASK_BINDINGS: dict[str, TaskBinding] = {
+    "selected-text-tools": TaskBinding(
+        evidence=_selected_evidence,
+        exact_references=2,
+        citable=_after_the_control_fragment,
+        normalize=(_normalize_selected_text_tasks,),
+        span_must_match=True,
+        binds_page=False,
+    ),
+    "ask-selected-files": TaskBinding(
+        evidence=_citation_evidence,
+        minimum_references=2,
+        citable=_after_the_control_fragment,
+        bindable=_after_the_control_fragment,
+        normalize=(_deduplicate_document_citations,),
+    ),
+    "event-extraction": TaskBinding(evidence=_event_evidence),
+    "file-organizer": TaskBinding(
+        evidence=_organizer_evidence,
+        citable=_content_references,
+        bindable=_content_references,
+        normalize=(_merge_organizer_suggestions, _normalize_organizer_tags),
+        finalize=_normalize_organizer_name_extensions,
+    ),
+}

@@ -21,6 +21,7 @@ from omnitensor_vulkan_runtime import (
     grammar,
     grounding,
     hebrew,
+    hints,
     qualification,
     runtime,
 )
@@ -129,7 +130,7 @@ def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
 
 
 def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
-    assert runtime._is_grounded_event_refusal("not-json") is False
+    assert hints._is_grounded_event_refusal("not-json") is False
     assert grounding._organizer_evidence({}) == ()
     assert grounding._organizer_evidence({"suggestions": [None]}) == ()
 
@@ -145,33 +146,29 @@ def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
 
 
 def test_grounding_dispatch_enforces_workload_reference_cardinality():
-    selected = selected_text_task()
-    question = document_question_task()
+    """One registry entry per task, and it states how many fragments the task
+    is defined for: a request carrying fewer is not bound at all."""
+    selected = grounding.TASK_BINDINGS["selected-text-tools"]
+    question = grounding.TASK_BINDINGS["ask-selected-files"]
 
-    assert (
-        grounding._model_evidence(
-            selected, GenerationRequest("job", selected.task_id, ("selection",))
-        )
-        is None
-    )
-    assert (
-        grounding._model_evidence(
-            selected, GenerationRequest("job", selected.task_id, ("selection", "span"))
-        )
-        is grounding._selected_evidence
-    )
-    assert (
-        grounding._model_evidence(
-            question, GenerationRequest("job", question.task_id, ("metadata",))
-        )
-        is None
-    )
-    assert (
-        grounding._model_evidence(
-            question, GenerationRequest("job", question.task_id, ("metadata", "span"))
-        )
-        is grounding._citation_evidence
-    )
+    assert selected.accepts(("selection",)) is False
+    assert selected.accepts(("selection", "span")) is True
+    assert selected.evidence is grounding._selected_evidence
+    assert question.accepts(("metadata",)) is False
+    assert question.accepts(("metadata", "span")) is True
+    assert question.evidence is grounding._citation_evidence
+
+
+def test_every_bound_workload_declares_one_registry_entry():
+    """The seven edit sites a new workload used to need are two: here, and
+    the hint registry beside it."""
+    assert set(grounding.TASK_BINDINGS) == {
+        "selected-text-tools",
+        "ask-selected-files",
+        "event-extraction",
+        "file-organizer",
+    }
+    assert set(hints.TASK_HINTS) <= set(grounding.TASK_BINDINGS)
 
 
 def test_selected_text_task_normalization_preserves_extraction_results():
@@ -229,7 +226,8 @@ def test_organizer_normalization_merges_compatible_per_span_suggestions():
         ]
     }
 
-    grounding._normalize_bound_document(document, "file-organizer")
+    for normalize in grounding.TASK_BINDINGS["file-organizer"].normalize:
+        normalize(document)
 
     assert document == {
         "suggestions": [
@@ -269,7 +267,8 @@ def test_organizer_normalization_refuses_to_merge_conflicting_move_advice():
     ]
     document = {"suggestions": suggestions}
 
-    grounding._normalize_bound_document(document, "file-organizer")
+    for normalize in grounding.TASK_BINDINGS["file-organizer"].normalize:
+        normalize(document)
 
     assert document["suggestions"] == suggestions
 
@@ -300,7 +299,8 @@ def test_organizer_same_file_merge_never_exceeds_tag_contract(first, second):
         ]
     }
 
-    grounding._normalize_bound_document(document, "file-organizer")
+    for normalize in grounding.TASK_BINDINGS["file-organizer"].normalize:
+        normalize(document)
 
     assert all(len(suggestion["tags"]) <= 16 for suggestion in document["suggestions"])
 
@@ -1634,9 +1634,7 @@ def test_document_citation_binding_collapses_only_repeated_exact_sources():
 def test_grounding_hint_lists_only_task_citable_opaque_references(task_id, references, expected):
     request = GenerationRequest("job-1", task_id, references)
 
-    hint = runtime._grounding_hint(
-        replace(_task(), task_id=task_id), request, MemoryFragmentStore()
-    )
+    hint = hints.grounding_hint(replace(_task(), task_id=task_id), request, MemoryFragmentStore())
 
     if not expected:
         assert hint == ""
@@ -1653,7 +1651,7 @@ def test_grounding_hint_contains_no_private_source_text():
     asyncio.run(store.publish("job-1", (question, span)))
     request = GenerationRequest("job-1", "ask-selected-files", (question.reference, span.reference))
 
-    hint = runtime._grounding_hint(document_question_task(), request, store)
+    hint = hints.grounding_hint(document_question_task(), request, store)
 
     assert span.reference in hint
     assert question.reference not in hint
@@ -1681,7 +1679,7 @@ def test_selected_operation_hint_is_explicit_without_selection_text(operation, l
         "job-1", "selected-text-tools", (control.reference, selection.reference)
     )
 
-    hint = runtime._grounding_hint(selected_text_task(), request, store)
+    hint = hints.grounding_hint(selected_text_task(), request, store)
 
     assert f'Trusted selected-text operation is "{operation}"' in hint
     assert required in hint
@@ -1707,7 +1705,7 @@ def test_selected_operation_hint_refuses_invalid_control(control):
         "job-1", "selected-text-tools", (fragment.reference, "private:selection")
     )
 
-    assert runtime._selected_operation_hint(selected_text_task(), request, store) == ""
+    assert hints._selected_operation_hint(selected_text_task(), request, store) == ""
 
 
 @pytest.mark.parametrize(
@@ -1935,14 +1933,14 @@ def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candida
     )
 
     assert len(observed) == 2
-    assert runtime._EVENT_GROUNDING_HINT in observed[0]["messages"][0]["content"]
+    assert hints.EVENT_GROUNDING_HINT in observed[0]["messages"][0]["content"]
     assert observed[1]["messages"][-2] == {
         "role": "assistant",
         "content": json.dumps(refused),
     }
     assert observed[1]["messages"][-1] == {
         "role": "user",
-        "content": runtime._EVENT_RECONSIDERATION,
+        "content": hints.EVENT_RECONSIDERATION,
     }
     # A regular expression used to invent an event here when the model refused
     # twice, and it matched exactly one sentence shape — the one the
@@ -1996,13 +1994,13 @@ def test_event_runtime_does_not_reconsider_an_evidence_based_refusal(tmp_path):
     [
         (
             "Release planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 Europe/Rome.",
-            runtime._EVENT_GROUNDING_HINT,
+            hints.EVENT_GROUNDING_HINT,
         ),
         (
             "Revisão trimestral em 18 de agosto de 2026, das 14:00 às 15:30, Europe/Lisbon.",
-            runtime._EVENT_GROUNDING_HINT,
+            hints.EVENT_GROUNDING_HINT,
         ),
-        ("Release planning on 2026-08-12 at 10:00 UTC.", runtime._EVENT_GROUNDING_HINT),
+        ("Release planning on 2026-08-12 at 10:00 UTC.", hints.EVENT_GROUNDING_HINT),
         ("Release planning on 12 August 2026 in Europe/Rome.", ""),
         ("Release planning at 10:00 Europe/Rome.", ""),
         ("Release planning on 12 August 2026 at 10:00 Fake/Timezone.", ""),
@@ -2016,7 +2014,7 @@ def test_event_grounding_hint_requires_explicit_date_time_and_real_named_zone(co
     asyncio.run(store.publish("job-1", (fragment,)))
 
     assert (
-        runtime._event_grounding_hint(
+        hints._event_grounding_hint(
             event_generation_task(),
             GenerationRequest("job-1", "event-extraction", (fragment.reference,)),
             store,
@@ -2029,7 +2027,7 @@ def test_event_grounding_hint_requires_explicit_date_time_and_real_named_zone(co
 def test_event_grounding_hint_property_accepts_real_numeric_calendar_dates(value):
     text = f"Named activity on {value.isoformat()} at 10:00 UTC."
 
-    assert runtime._has_calendar_date(text) is True
+    assert hints._has_calendar_date(text) is True
 
 
 def test_sync_generation_requires_a_loaded_native_model(tmp_path):
