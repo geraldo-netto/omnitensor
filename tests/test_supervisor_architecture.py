@@ -31,7 +31,6 @@ PUBLIC_FACADE_NAMES = (
     "MAX_SUPERVISED_WORKERS",
     "MAX_WORKER_ARGUMENTS",
     "MAX_WORKER_ARGUMENT_CHARS",
-    "MAX_WORKER_DIAGNOSTICS",
     "PluginRequest",
     "PluginResult",
     "PluginWorkerError",

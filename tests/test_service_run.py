@@ -541,12 +541,12 @@ def test_snapshot_construction_runs_off_the_event_loop(tmp_path):
         )
         build_snapshot = service._build_runtime_snapshot
 
-        def blocking_snapshot():
+        def blocking_snapshot(scheduler=None):
             nonlocal snapshot_thread
             snapshot_thread = threading.get_ident()
             started.set()
             assert release.wait(timeout=0.5)
-            return build_snapshot()
+            return build_snapshot(scheduler)
 
         service._build_runtime_snapshot = blocking_snapshot
         loop_thread = threading.get_ident()
@@ -2214,9 +2214,9 @@ def _count_snapshot_builds(service):
     builds = []
     original = service._build_runtime_snapshot
 
-    def counted():
+    def counted(scheduler=None):
         builds.append(1)
-        return original()
+        return original(scheduler)
 
     service._build_runtime_snapshot = counted
     return builds

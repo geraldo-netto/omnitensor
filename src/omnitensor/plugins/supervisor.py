@@ -24,7 +24,6 @@ from .ipc import (
 from .protocol import PluginRequest, PluginResult, ProgressReporter
 from .supervisor_diagnostics import (
     IDLE_WORKER_DETAIL,
-    MAX_WORKER_DIAGNOSTICS,
     WorkerDiagnostic,
     WorkerDiagnosticCode,
     WorkerState,
@@ -32,7 +31,8 @@ from .supervisor_diagnostics import (
 )
 from .supervisor_diagnostics import diagnostics_for as _diagnostics_for
 from .supervisor_diagnostics import failed_status as _failed_status
-from .supervisor_diagnostics import record_diagnostic as _record_bounded_diagnostic
+from .supervisor_diagnostics import forget_diagnostics as _forget_diagnostics
+from .supervisor_diagnostics import record_diagnostic as _record_journal_diagnostic
 from .supervisor_process import (
     DEFAULT_CANCEL_TIMEOUT_SECONDS,
     DEFAULT_HANDSHAKE_TIMEOUT_SECONDS,
@@ -373,6 +373,7 @@ class PluginWorkerSupervisor:
             if slot is None:
                 self._restart_attempts.pop(plugin_id, None)
                 self._ready_since.pop(plugin_id, None)
+                _forget_diagnostics(self._diagnostics, plugin_id)
                 return previous
             await _cancel_monitor(slot.monitor)
             await self._stop_process(slot)
@@ -387,6 +388,9 @@ class PluginWorkerSupervisor:
             self._statuses[plugin_id] = status
             self._restart_attempts.pop(plugin_id, None)
             self._ready_since.pop(plugin_id, None)
+            # A revoked plugin never runs again under this generation of
+            # specs, so its journal has no reader left and must not outlive it.
+            _forget_diagnostics(self._diagnostics, plugin_id)
         await self._cancel_orphaned_jobs(plugin_id, detail)
         return status
 
@@ -485,11 +489,10 @@ class PluginWorkerSupervisor:
         await _recovery.cancel_orphaned_jobs(self, plugin_id, detail)
 
     def _record_diagnostic(self, diagnostic: WorkerDiagnostic) -> None:
-        _record_bounded_diagnostic(
+        _record_journal_diagnostic(
             self._diagnostics,
             diagnostic,
-            MAX_WORKER_DIAGNOSTICS,
-        )
+                )
 
     async def _stop_process(self, slot: _WorkerSlot) -> bool:
         """Ask the worker to exit, escalating if it will not; never raise."""

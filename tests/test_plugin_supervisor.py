@@ -9,7 +9,6 @@ from omnitensor.plugins import (
     MAX_SUPERVISED_WORKERS,
     MAX_WORKER_ARGUMENT_CHARS,
     MAX_WORKER_ARGUMENTS,
-    MAX_WORKER_DIAGNOSTICS,
     AsyncioSubprocessLauncher,
     HandshakeOffer,
     IPCFrame,
@@ -1034,7 +1033,7 @@ def test_recovery_reaps_rejected_handshake_then_uses_next_attempt():
     run_scenario(scenario())
 
 
-def test_recovery_diagnostics_drop_oldest_entries_at_hard_bound():
+def test_recovery_diagnostics_keep_the_first_failure_through_a_restart_loop():
     async def scenario():
         events = []
         crashed = FakeProcess("bounded", worker_offer("bounded"), events)
@@ -1052,10 +1051,13 @@ def test_recovery_diagnostics_drop_oldest_entries_at_hard_bound():
         crashed.exit(8)
         await asyncio.sleep(0.05)
 
+        # The root cause is the *first* entry, so a loop long enough to fill
+        # any bound must not be the thing that discards it.
         diagnostics = supervisor.diagnostics("bounded")
-        assert len(diagnostics) == MAX_WORKER_DIAGNOSTICS
-        assert diagnostics[0].restart_attempt == 2
+        assert diagnostics[0].restart_attempt == 0
+        assert diagnostics[0].code is WorkerDiagnosticCode.EXITED
         assert diagnostics[-1].code is WorkerDiagnosticCode.EXHAUSTED
+        assert len(diagnostics) > 16
         await supervisor.stop()
 
     run_scenario(scenario())

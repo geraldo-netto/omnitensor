@@ -33,7 +33,7 @@ EXPORT_MAP_SHA256 = "c30b67472b284cd01af7152d9765fd5cb272328468c052a3391459f8713
 
 def test_export_map_preserves_the_locked_public_surface_and_order():
     assert isinstance(plugins.__all__, list)
-    assert len(plugins.__all__) == len(plugins._EXPORTS) == 372
+    assert len(plugins.__all__) == len(plugins._EXPORTS) == 371
     assert plugins.__all__ == list(plugins._EXPORTS)
     assert set(plugins.__all__) <= set(dir(plugins))
     assert tuple(plugins.__all__[-len(KERNEL_EXPORTS) :]) == KERNEL_EXPORTS
@@ -65,7 +65,7 @@ print(json.dumps({
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == {"count": 372, "owners": []}
+    assert json.loads(completed.stdout) == {"count": 371, "owners": []}
 
 
 def test_dir_lists_lazy_exports_without_resolving_them():

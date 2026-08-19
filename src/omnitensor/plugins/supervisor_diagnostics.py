@@ -1,11 +1,10 @@
-"""Stable worker states and bounded supervisor diagnostics."""
+"""Stable worker states and supervisor diagnostics."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 
-MAX_WORKER_DIAGNOSTICS = 16
 # What a registered worker that is deliberately not running has to say for
 # itself. Published as the worker detail so a reader can tell "nobody has asked
 # for anything" from "it would not start".
@@ -70,21 +69,42 @@ def diagnostics_for(
 def record_diagnostic(
     diagnostics: dict[str, list[WorkerDiagnostic]],
     diagnostic: WorkerDiagnostic,
-    maximum: int,
+    maximum: int | None = None,
 ) -> None:
+    """Append one diagnostic to its plugin's journal.
+
+    The journal is kept whole by default: a worker in a restart loop records
+    its root cause first, and a bound that drops the oldest entries is exactly
+    the one that throws that entry away. A caller that must bound the journal
+    passes a `maximum` of at least one; anything smaller is a caller defect,
+    not a request to keep nothing.
+    """
+    if maximum is not None and (isinstance(maximum, bool) or not isinstance(maximum, int)):
+        raise TypeError("diagnostic journal bound must be an integer")
+    if maximum is not None and maximum < 1:
+        raise ValueError("diagnostic journal bound must be at least 1")
     journal = diagnostics.setdefault(diagnostic.plugin_id, [])
     journal.append(diagnostic)
-    del journal[:-maximum]
+    if maximum is not None:
+        del journal[:-maximum]
+
+
+def forget_diagnostics(
+    diagnostics: dict[str, list[WorkerDiagnostic]],
+    plugin_id: str,
+) -> None:
+    """Drop one plugin's journal once nothing can consult it again."""
+    diagnostics.pop(plugin_id, None)
 
 
 __all__ = [
     "IDLE_WORKER_DETAIL",
-    "MAX_WORKER_DIAGNOSTICS",
     "WorkerDiagnostic",
     "WorkerDiagnosticCode",
     "WorkerState",
     "WorkerStatus",
     "diagnostics_for",
     "failed_status",
+    "forget_diagnostics",
     "record_diagnostic",
 ]

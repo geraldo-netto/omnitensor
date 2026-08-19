@@ -146,7 +146,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MAX_WORKER_IMPORT_PATHS": (".loading", "MAX_WORKER_IMPORT_PATHS"),
     "MAX_WORKER_ARGUMENT_CHARS": (".supervisor_process", "MAX_WORKER_ARGUMENT_CHARS"),
     "MAX_WORKER_ARGUMENTS": (".supervisor_process", "MAX_WORKER_ARGUMENTS"),
-    "MAX_WORKER_DIAGNOSTICS": (".supervisor_diagnostics", "MAX_WORKER_DIAGNOSTICS"),
     "MAX_ALERT_ID_CHARS": (".summaries", "MAX_ALERT_ID_CHARS"),
     "JsonObject": (".protocol", "JsonObject"),
     "JsonValue": (".protocol", "JsonValue"),
