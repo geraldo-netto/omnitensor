@@ -83,7 +83,6 @@ def test_service_public_facade_preserves_extracted_object_identity():
     assert service.profile_statuses is profile_selection.profile_statuses
     assert service.RuntimeAPI.__module__ == "omnitensor.service"
     assert service.TelemetryJobObserver.__module__ == "omnitensor.service"
-    assert service.profile_statuses.__module__ == "omnitensor.service"
     for name in (
         "ARTIFACT_UNAVAILABLE",
         "CONSENT_MISSING",
@@ -386,7 +385,6 @@ def test_public_service_dispatch_seams_remain_live(monkeypatch):
     assert api.describe_contract_text() == "contract"
     assert contract_calls == [("custom-method",)]
 
-    monkeypatch.setattr(service, "NO_MODEL", "custom-no-model")
     monkeypatch.setattr(
         profile_selection,
         "select_backend",
@@ -397,8 +395,18 @@ def test_public_service_dispatch_seams_remain_live(monkeypatch):
         {},
         {"queued": 0, "running": 0},
         SimpleNamespace(paused=False, profiles={}),
+        reasons=profile_selection.ReasonCodes(no_model="custom-no-model"),
     )
     assert status["reason"] == "custom-no-model"
+    assert (
+        profile_selection.profile_status(
+            SimpleNamespace(id="profile", models=()),
+            {},
+            {"queued": 0, "running": 0},
+            SimpleNamespace(paused=False, profiles={}),
+        )["reason"]
+        == profile_selection.NO_MODEL
+    )
 
 
 def test_telemetry_observers_resolve_live_state_and_preserve_forecast_routing():

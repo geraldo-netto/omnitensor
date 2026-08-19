@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from .execution import ExecutorSet
 from .registry import Workload
@@ -22,9 +22,25 @@ SERVING = "serving"
 CONSENT_MISSING = "consent-missing"
 
 
-def _reason(name: str, fallback: str) -> str:
-    facade = sys.modules.get("omnitensor.service")
-    return getattr(facade, name, fallback) if facade is not None else fallback
+@dataclass(frozen=True)
+class ReasonCodes:
+    """The machine-readable reason codes a status document may carry.
+
+    These used to be read back off ``omnitensor.service`` through
+    ``sys.modules`` at call time, so this module -- a lower layer -- depended
+    on the facade above it through the module registry.  The codes are data:
+    a caller that wants its own set passes them in.
+    """
+
+    paused_by_policy: str = PAUSED_BY_POLICY
+    profile_disabled: str = PROFILE_DISABLED
+    no_model: str = NO_MODEL
+    artifact_unavailable: str = ARTIFACT_UNAVAILABLE
+    serving: str = SERVING
+    consent_missing: str = CONSENT_MISSING
+
+
+DEFAULT_REASONS = ReasonCodes()
 
 
 def profile_statuses(
@@ -34,6 +50,7 @@ def profile_statuses(
     policy: PolicyState,
     artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
     permissions_missing: Callable[[Workload], tuple[str, ...]] | None = None,
+    reasons: ReasonCodes = DEFAULT_REASONS,
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
     per_profile = scheduler.profile_stats()
@@ -45,6 +62,7 @@ def profile_statuses(
             policy,
             artifact_ready,
             permissions_missing,
+            reasons,
         )
         for workload_id, workload in workloads.items()
     }
@@ -57,6 +75,7 @@ def profile_status(
     policy: PolicyState,
     artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
     permissions_missing: Callable[[Workload], tuple[str, ...]] | None = None,
+    reasons: ReasonCodes = DEFAULT_REASONS,
 ) -> dict:
     queued = counts["queued"]
     profile_policy = policy.profiles.get(workload.id)
@@ -65,14 +84,14 @@ def profile_status(
             "status": "paused",
             "queued": queued,
             "detail": "Runtime paused by policy",
-            "reason": _reason("PAUSED_BY_POLICY", PAUSED_BY_POLICY),
+            "reason": reasons.paused_by_policy,
         }
     if profile_policy is not None and not profile_policy.enabled:
         return {
             "status": "paused",
             "queued": queued,
             "detail": "Profile disabled by policy",
-            "reason": _reason("PROFILE_DISABLED", PROFILE_DISABLED),
+            "reason": reasons.profile_disabled,
         }
     routed_executors = (
         executors.for_device(policy.device_choices.get(workload.id))
@@ -92,7 +111,7 @@ def profile_status(
             "status": "idle",
             "queued": queued,
             "detail": f"Ready on {choice.backend}; no model bundled",
-            "reason": _reason("NO_MODEL", NO_MODEL),
+            "reason": reasons.no_model,
         }
     ungranted = permissions_missing(workload) if permissions_missing is not None else ()
     if ungranted:
@@ -100,7 +119,7 @@ def profile_status(
             "status": "unavailable",
             "queued": queued,
             "detail": f"needs consent for {', '.join(ungranted)}"[:240],
-            "reason": _reason("CONSENT_MISSING", CONSENT_MISSING),
+            "reason": reasons.consent_missing,
         }
     if artifact_ready is not None:
         ready, reason = artifact_ready(workload)
@@ -109,13 +128,13 @@ def profile_status(
                 "status": "unavailable",
                 "queued": queued,
                 "detail": f"{choice.backend}: {reason}"[:240],
-                "reason": _reason("ARTIFACT_UNAVAILABLE", ARTIFACT_UNAVAILABLE),
+                "reason": reasons.artifact_unavailable,
             }
     return {
         "status": "running" if counts["running"] > 0 else "watching",
         "queued": queued,
         "detail": f"Serving on {choice.backend}",
-        "reason": _reason("SERVING", SERVING),
+        "reason": reasons.serving,
     }
 
 
@@ -124,6 +143,7 @@ def plugin_profile_statuses(
     counts_of: dict[str, dict],
     policy: PolicyState,
     limit: int | None = MAX_PUBLISHED_PROFILES,
+    reasons: ReasonCodes = DEFAULT_REASONS,
 ) -> dict[str, dict]:
     """Status per installed plugin profile, for the snapshot document.
 
@@ -137,12 +157,18 @@ def plugin_profile_statuses(
             profile_id,
             counts_of.get(profile_id, {"queued": 0, "running": 0}),
             policy,
+            reasons,
         )
         for profile_id in sorted(profile_ids)[:limit]
     }
 
 
-def plugin_profile_status(profile_id: str, counts: dict, policy: PolicyState) -> dict:
+def plugin_profile_status(
+    profile_id: str,
+    counts: dict,
+    policy: PolicyState,
+    reasons: ReasonCodes = DEFAULT_REASONS,
+) -> dict:
     """One plugin profile's status.
 
     A plugin has no model contract and no scheduler lane to be unavailable on:
@@ -156,14 +182,14 @@ def plugin_profile_status(profile_id: str, counts: dict, policy: PolicyState) ->
             "status": "paused",
             "queued": queued,
             "detail": "Runtime paused by policy",
-            "reason": _reason("PAUSED_BY_POLICY", PAUSED_BY_POLICY),
+            "reason": reasons.paused_by_policy,
         }
     if profile_policy is not None and not profile_policy.enabled:
         return {
             "status": "paused",
             "queued": queued,
             "detail": "Profile disabled by policy",
-            "reason": _reason("PROFILE_DISABLED", PROFILE_DISABLED),
+            "reason": reasons.profile_disabled,
         }
     running = counts["running"]
     weight = profile_policy.weight if profile_policy is not None else 1
@@ -176,21 +202,20 @@ def plugin_profile_status(profile_id: str, counts: dict, policy: PolicyState) ->
         "status": "running" if running else "idle",
         "queued": queued,
         "detail": detail[:240],
-        "reason": _reason("SERVING", SERVING),
+        "reason": reasons.serving,
     }
-
-
-profile_statuses.__module__ = "omnitensor.service"
 
 
 __all__ = [
     "ARTIFACT_UNAVAILABLE",
+    "DEFAULT_REASONS",
     "CONSENT_MISSING",
     "MAX_PUBLISHED_PROFILES",
     "NO_MODEL",
     "PAUSED_BY_POLICY",
     "PROFILE_DISABLED",
     "SERVING",
+    "ReasonCodes",
     "plugin_profile_status",
     "plugin_profile_statuses",
     "profile_status",

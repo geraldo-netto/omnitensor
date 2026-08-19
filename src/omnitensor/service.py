@@ -123,6 +123,9 @@ from .profile_selection import (
     SERVING as SERVING,
 )
 from .profile_selection import (
+    ReasonCodes as ReasonCodes,
+)
+from .profile_selection import (
     plugin_profile_statuses as plugin_profile_statuses,
 )
 from .profile_selection import (
@@ -666,11 +669,30 @@ class OmniTensorService:
         tell a plugin whose policy it may set from one the runtime has never
         heard of, and drew its controls dead for both.
         """
+        reasons = ReasonCodes(
+            paused_by_policy=PAUSED_BY_POLICY,
+            profile_disabled=PROFILE_DISABLED,
+            no_model=NO_MODEL,
+            artifact_unavailable=ARTIFACT_UNAVAILABLE,
+            serving=SERVING,
+            consent_missing=CONSENT_MISSING,
+        )
         statuses = profile_statuses(
-            workloads, executors, scheduler, policy, artifact_ready, permissions_missing
+            workloads,
+            executors,
+            scheduler,
+            policy,
+            artifact_ready,
+            permissions_missing,
+            reasons,
         )
         statuses.update(
-            plugin_profile_statuses(self._plugin_ids(), self._plugin_queue.profile_stats(), policy)
+            plugin_profile_statuses(
+                self._plugin_ids(),
+                self._plugin_queue.profile_stats(),
+                policy,
+                reasons=reasons,
+            )
         )
         return statuses
 
