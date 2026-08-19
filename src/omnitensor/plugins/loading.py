@@ -385,14 +385,21 @@ class InstalledPluginRuntime:
         )
         try:
             return await asyncio.shield(staging)
-        except BaseException:
+        except BaseException as staging_error:
             cleanup = asyncio.create_task(_cleanup_abandoned_staging(staging))
+            # Staging must finish being torn down before this returns, so a
+            # cancellation delivered while waiting is remembered rather than
+            # honoured immediately -- and then re-raised, because a job whose
+            # caller withdrew it must not continue as a plain failure.
+            cancelled: asyncio.CancelledError | None = None
             while not cleanup.done():
                 try:
                     await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    continue
+                except asyncio.CancelledError as cancel:
+                    cancelled = cancel
             await cleanup
+            if cancelled is not None:
+                raise cancelled from staging_error
             raise
 
     async def _execute_with_live_grants(self, request: PluginRequest):

@@ -1033,6 +1033,37 @@ def test_loading_stage_payload_contract_and_repeated_cancellation(tmp_path, monk
     assert removed == [(abandoned, True)]
 
 
+def test_stage_payload_cancelled_during_cleanup_stays_cancelled(tmp_path, monkeypatch):
+    """A cancel delivered while staging is torn down must not become a failure."""
+    runtime = InstalledPluginRuntime(tmp_path)
+    runtime._granted["plugin"] = frozenset({"files:read-selected"})
+    broker = tmp_path / "broker"
+    broker.mkdir()
+    runtime._selected_files_root = broker
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    def stage(*_args):
+        raise RuntimeError("staging failed")
+
+    async def cleanup(_staging_task):
+        cleanup_started.set()
+        await release_cleanup.wait()
+
+    monkeypatch.setattr(loading_module, "_stage_selected_sources", stage)
+    monkeypatch.setattr(loading_module, "_cleanup_abandoned_staging", cleanup)
+
+    async def scenario():
+        task = asyncio.create_task(runtime._stage_payload("job-1", "plugin", {"value": 1}))
+        await asyncio.wait_for(cleanup_started.wait(), timeout=2)
+        task.cancel()
+        release_cleanup.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
 def test_external_runtime_idle_monitor_revokes_once_and_admission_stays_closed(tmp_path):
     from omnitensor.jobs import JobDispatchError
 
