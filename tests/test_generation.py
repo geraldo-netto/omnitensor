@@ -564,7 +564,9 @@ def test_explicit_qualified_npu_preference_uses_npu_first():
     assert gpu.calls == []
 
 
-@pytest.mark.parametrize("code", ["admission-refused", "model-load-failed"])
+@pytest.mark.parametrize(
+    "code", ["admission-refused", "model-load-failed", "model-load-unverified"]
+)
 def test_npu_falls_back_to_gpu_only_for_pre_generation_refusals(code):
     npu = FakeWorker(
         parse_provider_descriptor(provider_document("npu")),

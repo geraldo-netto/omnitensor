@@ -26,7 +26,13 @@ MAX_OUTPUT_BYTES = 1024 * 1024
 MAX_CONTENT_REFERENCES = 32
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_PRE_GENERATION_FAILURES = frozenset({"admission-refused", "model-load-failed"})
+# Refusals that happened before a single token was produced, so another
+# accelerator may still be tried. "model-load-unverified" belongs here for the
+# same reason as a load failure: nothing ran, and a provider that cannot prove
+# where it would have run is not evidence against the next one.
+_PRE_GENERATION_FAILURES = frozenset(
+    {"admission-refused", "model-load-failed", "model-load-unverified"}
+)
 _PREFERENCES = frozenset({("gpu",), ("npu", "gpu")})
 
 

@@ -1087,6 +1087,125 @@ def test_runtime_native_load_rejects_partial_offload(tmp_path, monkeypatch):
     adapter._release()
 
 
+def _log_only_api(callbacks):
+    class NativeApi:
+        GGML_TYPE_Q8_0 = 8
+        llama_log_callback = staticmethod(lambda function: function)
+
+        @staticmethod
+        def llama_log_set(function, _data):
+            callbacks["log"] = function
+
+    return NativeApi
+
+
+def test_runtime_native_load_reads_the_layer_count_from_the_api_when_it_has_one(
+    tmp_path, monkeypatch
+):
+    """An upstream rewording of one debug line must not fail every GPU load:
+    where the build answers through its C entry points, they answer first."""
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    callbacks = {}
+    native_api = _log_only_api(callbacks)
+    native_api.llama_model_n_layer = staticmethod(lambda handle: 36)
+    native_api.llama_model_n_devices = staticmethod(lambda handle: 1)
+
+    class RewordedLlama:
+        _model = SimpleNamespace(model=object())
+
+        def __init__(self, **_kwargs):
+            callbacks["log"](
+                0,
+                b"using device Vulkan0 (AMD Radeon RX 6600 XT (RADV NAVI23)) (0000:03:00.0)\n",
+                None,
+            )
+            callbacks["log"](0, b"assigned 36 of 36 blocks to the accelerator", None)
+
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp", SimpleNamespace(Llama=RewordedLlama, llama_cpp=native_api)
+    )
+
+    report = adapter._acquire_and_load()
+
+    assert report == NativeLoadReport("llama.cpp-vulkan", "Vulkan", 36, 36, False)
+    assert adapter.physical_device == "AMD Radeon RX 6600 XT (RADV NAVI23)"
+    adapter._release()
+
+
+def test_runtime_native_load_refuses_when_the_api_reports_no_device(tmp_path, monkeypatch):
+    """Zero devices is an answer, not a missing one, and the log saying
+    otherwise cannot make it a GPU load."""
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    callbacks = {}
+    native_api = _log_only_api(callbacks)
+    native_api.llama_model_n_layer = staticmethod(lambda handle: 36)
+    native_api.llama_model_n_devices = staticmethod(lambda handle: 0)
+
+    class CpuLlama:
+        _model = SimpleNamespace(model=object())
+
+        def __init__(self, **_kwargs):
+            callbacks["log"](
+                0,
+                b"using device Vulkan0 (AMD Radeon RX 6600 XT (RADV NAVI23)) (0000:03:00.0)\n",
+                None,
+            )
+            callbacks["log"](0, b"offloaded 36/36 layers to GPU", None)
+
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp", SimpleNamespace(Llama=CpuLlama, llama_cpp=native_api)
+    )
+
+    with pytest.raises(ProviderGenerationError) as refused:
+        adapter._acquire_and_load()
+
+    assert (refused.value.code, refused.value.generation_started) == ("model-load-failed", False)
+    assert refused.value.detail == "llama.cpp did not prove full Vulkan layer offload"
+    adapter._release()
+
+
+@pytest.mark.parametrize(
+    ("log_line", "detail"),
+    [
+        (
+            b"assigned 36 of 36 blocks to the accelerator",
+            "llama.cpp reported neither a device count nor a readable offload log",
+        ),
+        (
+            b"offloaded 36/36 layers to GPU",
+            "llama.cpp did not name the Vulkan device it loaded on",
+        ),
+    ],
+)
+def test_runtime_native_load_reports_an_unreadable_log_as_unverified(
+    tmp_path, monkeypatch, log_line, detail
+):
+    """Not "did not prove full offload": nothing here says the load was
+    partial, only that this provider could not read what happened."""
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    callbacks = {}
+    native_api = _log_only_api(callbacks)
+
+    class SilentLlama:
+        def __init__(self, **_kwargs):
+            callbacks["log"](0, log_line, None)
+
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp", SimpleNamespace(Llama=SilentLlama, llama_cpp=native_api)
+    )
+
+    with pytest.raises(ProviderGenerationError) as unverified:
+        adapter._acquire_and_load()
+
+    assert unverified.value.code == "model-load-unverified"
+    assert unverified.value.detail == detail
+    assert unverified.value.generation_started is False
+    adapter._release()
+
+
 def test_sync_generation_streams_only_text_and_binds_private_prompt(tmp_path):
     adapter = _runtime(tmp_path)
     fragment = SourceFragment("private:job-1:span:0-5", "a" * 64, 1, "alpha", "b" * 64)

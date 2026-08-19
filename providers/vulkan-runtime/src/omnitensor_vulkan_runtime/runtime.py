@@ -8,6 +8,7 @@ import json
 import re
 import threading
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO
@@ -82,6 +83,55 @@ _MONTHS = {
     "novembro": 11,
     "dezembro": 12,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _LoadFacts:
+    """What llama.cpp states about a load through its API rather than its log.
+
+    ``None`` means the installed build does not answer that question, which is
+    not the same as answering zero: only a real zero is evidence.
+    """
+
+    layers: int | None = None
+    devices: int | None = None
+
+
+def _structured_load_facts(llama: object, llama_cpp: object) -> _LoadFacts:
+    """Ask the loaded model what it can be asked, and settle for less if not.
+
+    The layer count and the number of devices holding layers are stable C
+    entry points; the device *name* is not exposed by any of them, which is
+    why the log regex survives as the only source for that one field.
+    """
+    handle = getattr(getattr(llama, "_model", None), "model", None)
+    if handle is None:
+        handle = getattr(llama, "model", None)
+    if handle is None:
+        return _LoadFacts()
+    return _LoadFacts(
+        layers=_native_count(llama_cpp, "llama_model_n_layer", handle),
+        devices=_native_count(llama_cpp, "llama_model_n_devices", handle),
+    )
+
+
+def _native_count(llama_cpp: object, name: str, handle: object) -> int | None:
+    entry = getattr(llama_cpp, name, None)
+    if entry is None:
+        return None
+    try:
+        value = int(entry(handle))
+    except Exception:  # noqa: BLE001 - an older build may bind a different shape
+        return None
+    return value if value >= 0 else None
+
+
+def _log_offload(text: str) -> tuple[int | None, int | None]:
+    """The offloaded and total layer counts, if this build's log states them."""
+    match = _OFFLOAD.search(text)
+    if match is None:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
 
 
 class LlamaVulkanRuntime:
@@ -228,19 +278,57 @@ class LlamaVulkanRuntime:
             # other one's load logs. Hand the global sink back to something
             # that keeps nothing.
             self._discard_llama_logs(llama_cpp)
-        match = _OFFLOAD.search("".join(logs))
-        device = _DEVICE.search("".join(logs))
-        if match is None or device is None or int(match.group(1)) != int(match.group(2)):
+        layers = self._prove_full_offload(llama_cpp, "".join(logs))
+        self._load_report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", layers, layers, False)
+        logs.clear()
+        return self._load_report
+
+    def _prove_full_offload(self, llama_cpp, text: str) -> int:
+        """Every layer on the GPU, and the card that took them, or a refusal.
+
+        The no-CPU guarantee used to rest entirely on one English sentence in
+        a debug log, so an upstream rewording would have failed every load.
+        The structured calls answer first where the installed build binds
+        them; the log is the fallback, and a log that cannot be read at all is
+        reported as unverified rather than as a proven partial offload.
+        """
+        facts = _structured_load_facts(self._llama, llama_cpp)
+        offloaded, total = _log_offload(text)
+        if facts.devices == 0:
+            # The API said it outright: no device holds a layer. Nothing the
+            # log says can make that a GPU load.
             raise ProviderGenerationError(
                 "model-load-failed",
                 "llama.cpp did not prove full Vulkan layer offload",
                 generation_started=False,
             )
-        layers = int(match.group(2))
+        if offloaded is None and facts.devices and facts.layers:
+            # The structured answer stands on its own: layers were placed on a
+            # device, and the model has this many of them.
+            offloaded, total = facts.layers, facts.layers
+        if offloaded is None or total is None:
+            raise ProviderGenerationError(
+                "model-load-unverified",
+                "llama.cpp reported neither a device count nor a readable offload log",
+                generation_started=False,
+            )
+        if offloaded != total:
+            raise ProviderGenerationError(
+                "model-load-failed",
+                "llama.cpp did not prove full Vulkan layer offload",
+                generation_started=False,
+            )
+        device = _DEVICE.search(text)
+        if device is None:
+            # Which card ran it is part of the evidence a qualification keeps,
+            # and no public llama.cpp call returns it — only the log does.
+            raise ProviderGenerationError(
+                "model-load-unverified",
+                "llama.cpp did not name the Vulkan device it loaded on",
+                generation_started=False,
+            )
         self._physical_device = device.group(1)
-        self._load_report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", layers, layers, False)
-        logs.clear()
-        return self._load_report
+        return total
 
     def _discard_llama_logs(self, llama_cpp) -> None:
         @llama_cpp.llama_log_callback

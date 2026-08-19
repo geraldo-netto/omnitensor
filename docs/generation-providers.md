@@ -65,8 +65,12 @@ and could return a result from a different model after a partial side effect.
 3. Enforce the task's context limit and any declared budgets in the native SDK
    as well as at the shared contract boundary; never add an output ceiling the
    task did not declare.
-4. Distinguish `admission-refused` and `model-load-failed` before generation
-   from failures after generation begins.
+4. Distinguish `admission-refused`, `model-load-failed` and
+   `model-load-unverified` before generation from failures after generation
+   begins. `model-load-unverified` is the refusal for a load whose placement
+   could not be established either way — the runtime neither answered through
+   its API nor printed a log this provider can read — and is never reported
+   for a load that was proved partial.
 5. Validate the final structured document with `validate_structured_output`.
 6. Test cancellation by proving the worker process exits and releases device
    memory, not merely that the caller stops waiting.
