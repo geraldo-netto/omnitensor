@@ -20,6 +20,10 @@ NO_MODEL = "no-model"
 ARTIFACT_UNAVAILABLE = "artifact-unavailable"
 SERVING = "serving"
 CONSENT_MISSING = "consent-missing"
+# The published reason vocabulary belongs to the sibling service's snapshot
+# schema, so a profile whose accelerator lease could not be re-established
+# reports the closest published code rather than inventing one.
+DEVICE_UNAVAILABLE = "device-absent"
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,7 @@ class ReasonCodes:
     artifact_unavailable: str = ARTIFACT_UNAVAILABLE
     serving: str = SERVING
     consent_missing: str = CONSENT_MISSING
+    device_unavailable: str = DEVICE_UNAVAILABLE
 
 
 DEFAULT_REASONS = ReasonCodes()
@@ -144,6 +149,7 @@ def plugin_profile_statuses(
     policy: PolicyState,
     limit: int | None = MAX_PUBLISHED_PROFILES,
     reasons: ReasonCodes = DEFAULT_REASONS,
+    unavailable: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, dict]:
     """Status per installed plugin profile, for the snapshot document.
 
@@ -158,6 +164,7 @@ def plugin_profile_statuses(
             counts_of.get(profile_id, {"queued": 0, "running": 0}),
             policy,
             reasons,
+            unavailable=profile_id in unavailable,
         )
         for profile_id in sorted(profile_ids)[:limit]
     }
@@ -168,6 +175,8 @@ def plugin_profile_status(
     counts: dict,
     policy: PolicyState,
     reasons: ReasonCodes = DEFAULT_REASONS,
+    *,
+    unavailable: bool = False,
 ) -> dict:
     """One plugin profile's status.
 
@@ -177,6 +186,13 @@ def plugin_profile_status(
     """
     queued = counts["queued"]
     profile_policy = policy.profiles.get(profile_id)
+    if unavailable:
+        return {
+            "status": "unavailable",
+            "queued": queued,
+            "detail": "Accelerator lease could not be re-established; not accepting work",
+            "reason": reasons.device_unavailable,
+        }
     if policy.paused:
         return {
             "status": "paused",
@@ -208,6 +224,7 @@ def plugin_profile_status(
 
 __all__ = [
     "ARTIFACT_UNAVAILABLE",
+    "DEVICE_UNAVAILABLE",
     "DEFAULT_REASONS",
     "CONSENT_MISSING",
     "MAX_PUBLISHED_PROFILES",

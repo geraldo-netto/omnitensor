@@ -236,6 +236,94 @@ def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(fa
     assert service._admits("external-plugin") is True
 
 
+def test_failed_accelerator_reload_never_wedges_admission_silently(
+    fake_nodes, tmp_path, monkeypatch
+):
+    """A reload that keeps failing must publish why, not leave a 'Ready' profile."""
+    add_gpu(fake_nodes, node=128)
+    add_gpu(fake_nodes, node=129)
+    service = build_service(fake_nodes, tmp_path)
+    attempts = []
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+        async def reload_accelerator_devices(self):
+            attempts.append(1)
+            raise RuntimeError("lease is still held")
+
+    service._plugin_runtime = Plugins()
+
+    async def no_delay(_seconds):
+        return None
+
+    monkeypatch.setattr(service_module.asyncio, "sleep", no_delay)
+
+    async def scenario():
+        await service.control.apply_command_text(
+            json.dumps(
+                {
+                    "version": CONTROL_VERSION,
+                    "id": "select-external-gpu",
+                    "issuedAt": 1,
+                    "expectedRevision": 0,
+                    "operation": "set-profile-device",
+                    "profileId": "external-plugin",
+                    "value": "gpu-renderD129",
+                }
+            )
+        )
+        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+
+    asyncio.run(scenario())
+
+    assert len(attempts) == service_module.DEVICE_RELOAD_RETRY_ATTEMPTS
+    assert service._pending_device_profiles == set()
+    assert service._unavailable_device_profiles == {"external-plugin"}
+    assert service._admits("external-plugin") is False
+    status = service.publish_once()["profiles"]["external-plugin"]
+    assert status["status"] == "unavailable"
+    assert status["reason"] == "device-absent"
+
+
+def test_recovered_accelerator_reload_clears_the_unavailable_profile(fake_nodes, tmp_path):
+    add_gpu(fake_nodes, node=128)
+    add_gpu(fake_nodes, node=129)
+    service = build_service(fake_nodes, tmp_path)
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"external-plugin"})
+
+        async def reload_accelerator_devices(self):
+            return object()
+
+    service._plugin_runtime = Plugins()
+    service._unavailable_device_profiles.add("external-plugin")
+
+    async def scenario():
+        await service.control.apply_command_text(
+            json.dumps(
+                {
+                    "version": CONTROL_VERSION,
+                    "id": "select-external-gpu",
+                    "issuedAt": 1,
+                    "expectedRevision": 0,
+                    "operation": "set-profile-device",
+                    "profileId": "external-plugin",
+                    "value": "gpu-renderD129",
+                }
+            )
+        )
+        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+
+    asyncio.run(scenario())
+
+    assert service._unavailable_device_profiles == set()
+    assert service._admits("external-plugin") is True
+
+
 def test_saved_gpu_choice_fails_closed_when_that_device_disappears(fake_nodes, tmp_path):
     add_gpu(fake_nodes, node=128)
     add_gpu(fake_nodes, node=129)
