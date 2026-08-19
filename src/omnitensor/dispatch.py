@@ -44,7 +44,10 @@ from .tensorref import (
 )
 
 MAX_INPUT_TENSORS = 64
-# One result must stay small enough to cross IPC as a single bounded frame.
+# The default bound on what a *caller* may select as input. A result carries no
+# element ceiling: the frame that must stay crossable is bounded independently
+# by socket_transport.MAX_FRAME_BYTES, and destroying a completed correct
+# inference — any 1024x1024x3 image is 3.1M elements — is not a protection.
 MAX_TENSOR_ELEMENTS = 1 << 20
 
 
@@ -509,9 +512,7 @@ def _declared_companions(model: dict) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((str(name), str(digest)) for name, digest in companions.items()))
 
 
-def inference_result_payload(
-    result: InferenceResult, *, max_elements: int = MAX_TENSOR_ELEMENTS
-) -> dict:
+def inference_result_payload(result: InferenceResult, *, max_elements: int | None = None) -> dict:
     """Map an executor outcome back into a plugin-facing job result.
 
     Executors return whatever their backend hands them — a numpy array from
@@ -531,16 +532,20 @@ def inference_result_payload(
 
 
 class _ElementBudget:
-    """Bound the total elements one result may carry across all its tensors."""
+    """Bound the total elements one payload may carry across all its tensors.
+
+    Used for what a caller selected as input, where the bound is real, and
+    optionally for a result, where ``None`` means unbounded.
+    """
 
     def __init__(
         self,
-        maximum: int,
+        maximum: int | None,
         *,
         code: str = "executor-result-invalid",
         label: str = "Inference result",
     ) -> None:
-        if maximum < 1:
+        if maximum is not None and maximum < 1:
             raise ValueError("max_elements must be positive")
         self._remaining = maximum
         self._maximum = maximum
@@ -548,6 +553,8 @@ class _ElementBudget:
         self._label = label
 
     def spend(self, count: int = 1) -> None:
+        if self._remaining is None:
+            return
         self._remaining -= count
         if self._remaining < 0:
             raise JobDispatchError(
@@ -566,7 +573,7 @@ def encode_tensor(value: object, budget: _ElementBudget | None = None) -> object
     caller reads as a broken daemon.
     """
     try:
-        return _encode_tensor(value, budget or _ElementBudget(MAX_TENSOR_ELEMENTS))
+        return _encode_tensor(value, budget or _ElementBudget(None))
     except RecursionError as error:
         raise JobDispatchError(
             "executor-result-invalid", "Inference result is nested too deeply"

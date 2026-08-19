@@ -559,6 +559,14 @@ def test_a_result_at_the_element_bound_is_accepted():
     assert inference_result_payload(result([[1, 2]]), max_elements=2)["outputs"] == [[1, 2]]
 
 
+def test_a_large_result_is_delivered_rather_than_destroyed():
+    from omnitensor.dispatch import MAX_TENSOR_ELEMENTS
+
+    outputs = [list(range(MAX_TENSOR_ELEMENTS + 1))]
+    payload = inference_result_payload(result(outputs))
+    assert len(payload["outputs"][0]) == MAX_TENSOR_ELEMENTS + 1
+
+
 def test_bytes_are_not_treated_as_a_tensor():
     with pytest.raises(JobDispatchError):
         inference_result_payload(result([b"raw"]))
