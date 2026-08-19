@@ -169,6 +169,27 @@ class TestTheVerdict:
         assert verdict(estimated, exactly).fits is False
         assert verdict(estimated, self.card(estimated.total_bytes + DEFAULT_MARGIN_BYTES)).fits
 
+    def test_a_card_that_never_said_its_size_is_answered_unknown(self):
+        """Not "no", which would refuse a card that may well hold the model."""
+        answer = verdict(
+            estimate(shape(), 32_768), DeviceMemory("gpu-renderD128", 0, 0, capacity_known=False)
+        )
+
+        assert answer.fits is None
+        assert answer.headroom_bytes is None
+        assert answer.known is False
+        assert answer.short_by_bytes == 0
+
+    def test_a_refusal_never_comes_with_headroom_to_spare(self):
+        """fits and headroom are one number: the margin is counted in both."""
+        estimated = estimate(shape(), 32_768)
+        card = self.card(estimated.total_bytes + DEFAULT_MARGIN_BYTES // 2)
+
+        answer = verdict(estimated, card)
+
+        assert answer.fits is False
+        assert answer.headroom_bytes < 0
+
     def test_a_model_that_does_not_fit_reports_how_short_it_is(self):
         """Because "no" answers nothing a person can act on."""
         answer = verdict(estimate(shape(), 32_768), self.card(4 * GIB))
@@ -193,12 +214,27 @@ class TestReadingRealCards:
         assert cards[0].total_bytes == 8_573_157_376
         assert cards[0].integrated is False
 
-    def test_a_node_that_publishes_no_memory_is_skipped(self, tmp_path):
-        """A display-only node, or a driver that does not report. Not an error
-        and not a card with zero memory, which would read as a refusal."""
+    def test_a_node_that_publishes_no_memory_is_reported_as_unknown(self, tmp_path):
+        """Only amdgpu exports mem_info_*. An NVIDIA or Intel node is still a
+        card, so it is reported with its capacity marked unknown rather than
+        dropped, which would read as a machine with no GPU at all."""
         (tmp_path / "renderD200/device").mkdir(parents=True)
 
-        assert device_memory(tmp_path) == ()
+        cards = device_memory(tmp_path)
+
+        assert len(cards) == 1
+        assert cards[0].device_id == "gpu-renderD200"
+        assert cards[0].capacity_known is False
+
+    def test_a_card_that_reports_only_its_mapped_pool_is_still_read(self, tmp_path):
+        node = tmp_path / "renderD128/device"
+        node.mkdir(parents=True)
+        (node / "mem_info_gtt_total").write_text("48348819456\n")
+
+        cards = device_memory(tmp_path)
+
+        assert cards[0].capacity_known is True
+        assert cards[0].mapped_total_bytes == 48_348_819_456
 
     def test_nothing_raises_when_there_are_no_cards_at_all(self, tmp_path):
         assert device_memory(tmp_path) == ()

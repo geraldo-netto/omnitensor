@@ -78,11 +78,17 @@ class Estimate:
         return self.weight_bytes + self.cache_bytes + self.overhead_bytes
 
     def fits_in(self, free_bytes: int, margin_bytes: int = DEFAULT_MARGIN_BYTES) -> bool:
-        return self.total_bytes + margin_bytes <= free_bytes
+        return self.headroom_in(free_bytes, margin_bytes) >= 0
 
-    def headroom_in(self, free_bytes: int) -> int:
-        """What would be left over. Negative is how much it is short by."""
-        return free_bytes - self.total_bytes
+    def headroom_in(self, free_bytes: int, margin_bytes: int = DEFAULT_MARGIN_BYTES) -> int:
+        """What would be left over. Negative is how much it is short by.
+
+        The margin is subtracted here for the same reason :meth:`fits_in`
+        adds it: memory that has to stay unclaimed is not headroom. Both
+        answers come from this one number, so a verdict can never say "no"
+        and "with room to spare" at once.
+        """
+        return free_bytes - self.total_bytes - margin_bytes
 
 
 def estimate(
@@ -134,6 +140,15 @@ class DeviceMemory:
     mapped_total_bytes: int = 0
     mapped_used_bytes: int = 0
     memory_vendor: str = ""
+    capacity_known: bool = True
+    """False when the driver publishes no memory counters at all.
+
+    Only amdgpu exports ``mem_info_*`` in sysfs; the NVIDIA and Intel render
+    nodes are just as real and just as much a card, they simply do not say how
+    large they are here. Such a node is still reported, with this flag clear,
+    so a fit question about it is answered "unknown" rather than answered by a
+    machine that appears to have no GPU at all.
+    """
 
     @property
     def free_bytes(self) -> int:
@@ -162,6 +177,10 @@ class DeviceMemory:
 def device_memory(root: Path = _DRM_ROOT) -> tuple[DeviceMemory, ...]:
     """Every render node's memory, as its own driver reports it.
 
+    A node whose driver publishes no counters is still returned, with
+    ``capacity_known`` clear: the machine has that card whether or not sysfs
+    will say how big it is.
+
     Read here rather than through a GPU API because it must work with no
     process holding the card, and because the number that matters is what is
     free *now*, alongside whatever else the desktop is running.
@@ -169,14 +188,26 @@ def device_memory(root: Path = _DRM_ROOT) -> tuple[DeviceMemory, ...]:
     found = []
     for node in sorted(root.glob("renderD*")):
         total = _read_int(node / "device/mem_info_vram_total")
-        if total is None:
+        mapped_total = _read_int(node / "device/mem_info_gtt_total")
+        if total is None and mapped_total is None:
+            # A driver that publishes no counters, which on this path means
+            # anything but amdgpu. The card is there; its size is not knowable
+            # from sysfs, and saying so beats reporting no card.
+            found.append(
+                DeviceMemory(
+                    device_id=f"gpu-{node.name}",
+                    total_bytes=0,
+                    used_bytes=0,
+                    capacity_known=False,
+                )
+            )
             continue
         found.append(
             DeviceMemory(
                 device_id=f"gpu-{node.name}",
-                total_bytes=total,
+                total_bytes=total or 0,
                 used_bytes=_read_int(node / "device/mem_info_vram_used") or 0,
-                mapped_total_bytes=_read_int(node / "device/mem_info_gtt_total") or 0,
+                mapped_total_bytes=mapped_total or 0,
                 mapped_used_bytes=_read_int(node / "device/mem_info_gtt_used") or 0,
                 memory_vendor=_read_text(node / "device/mem_info_vram_vendor"),
             )
@@ -205,12 +236,18 @@ class Verdict:
 
     estimate: Estimate
     device: DeviceMemory
-    fits: bool
-    headroom_bytes: int
+    fits: bool | None
+    headroom_bytes: int | None
+    """None on both when the card never said how much memory it has."""
+
+    @property
+    def known(self) -> bool:
+        """Whether this pairing could be answered at all."""
+        return self.fits is not None
 
     @property
     def short_by_bytes(self) -> int:
-        return max(0, -self.headroom_bytes)
+        return 0 if self.headroom_bytes is None else max(0, -self.headroom_bytes)
 
 
 def verdict(
@@ -219,12 +256,17 @@ def verdict(
     *,
     margin_bytes: int = DEFAULT_MARGIN_BYTES,
 ) -> Verdict:
+    if not device.capacity_known:
+        # No number to compare against. Guessing "no" would refuse a card that
+        # may well hold the model; guessing "yes" would promise a load that
+        # cannot be checked. Both are worse than saying it is not known.
+        return Verdict(estimate=estimated, device=device, fits=None, headroom_bytes=None)
     free = device.usable_free_bytes
     return Verdict(
         estimate=estimated,
         device=device,
         fits=estimated.fits_in(free, margin_bytes),
-        headroom_bytes=estimated.headroom_in(free),
+        headroom_bytes=estimated.headroom_in(free, margin_bytes),
     )
 
 

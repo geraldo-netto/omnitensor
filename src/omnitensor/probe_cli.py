@@ -24,6 +24,7 @@ from .fit import (
     CACHE_BYTES,
     DEFAULT_OVERHEAD_BYTES,
     DeviceMemory,
+    Verdict,
     device_memory,
     estimate,
     gibibytes,
@@ -81,17 +82,33 @@ def rows(
                     gibibytes(estimated.weight_bytes),
                     gibibytes(estimated.cache_bytes),
                     gibibytes(estimated.total_bytes),
-                    gibibytes(device.usable_free_bytes)
-                    + (" (mapped)" if device.integrated else ""),
-                    "yes" if answer.fits else "no",
-                    (
-                        gibibytes(answer.headroom_bytes)
-                        if answer.fits
-                        else f"short {gibibytes(answer.short_by_bytes)}"
-                    ),
+                    _free_cell(device),
+                    _fits_cell(answer),
+                    _headroom_cell(answer),
                 )
             )
     return tuple(built)
+
+
+def _free_cell(device: DeviceMemory) -> str:
+    if not device.capacity_known:
+        return "unknown"
+    return gibibytes(device.usable_free_bytes) + (" (mapped)" if device.integrated else "")
+
+
+def _fits_cell(answer: Verdict) -> str:
+    if answer.fits is None:
+        return "unknown"
+    return "yes" if answer.fits else "no"
+
+
+def _headroom_cell(answer: Verdict) -> str:
+    """What is left once the safety margin stays unclaimed, or how short it is."""
+    if answer.headroom_bytes is None:
+        return "card does not report its memory"
+    if answer.fits:
+        return gibibytes(answer.headroom_bytes)
+    return f"short {gibibytes(answer.short_by_bytes)}"
 
 
 HEADINGS = ("artifact", "card", "weights", "cache", "total", "free", "fits", "headroom")

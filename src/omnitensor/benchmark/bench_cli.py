@@ -173,7 +173,11 @@ def fit_note(model_id: str, artifact_root: Path, device: VulkanDevice, say) -> b
         return False
     # sysfs orders render nodes its own way, so the card is found by what it
     # is — integrated or not — rather than by reusing the Vulkan index.
-    matching = [card for card in device_memory() if card.integrated == device.integrated]
+    matching = [
+        card
+        for card in device_memory()
+        if card.capacity_known and card.integrated == device.integrated
+    ]
     if len(matching) != 1:
         say(f"cannot tell which render node is {device.name}; proceeding anyway")
         return True
