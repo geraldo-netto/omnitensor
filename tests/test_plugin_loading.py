@@ -2707,7 +2707,10 @@ def test_installed_wheel_is_discovered_and_loaded_after_service_restart(tmp_path
         )
         assert started.catalog.rejections == ()
         assert len(started.workers) == 1
-        assert started.workers[0].state is WorkerState.READY
+        # Registered, not launched: no process exists until the job below
+        # routes work to it, and the job still succeeds.
+        assert started.workers[0].state is WorkerState.IDLE
+        assert started.workers[0].pid is None
         assert stopped.workers[0].state is WorkerState.STOPPED
 
 

@@ -29,6 +29,7 @@ import logging
 import secrets
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import artifact_readiness as artifacts
@@ -157,6 +158,38 @@ GRANT_REFRESH_INTERVAL_S = 0.25
 # enough that installing an artifact shows up while someone is still looking
 # for it.
 PLUGIN_READINESS_INTERVAL_S = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class _SchedulerObservation:
+    """A scheduler's published figures, frozen on the event loop.
+
+    Snapshot building runs on a worker thread (`run_off_loop`), and reading the
+    live scheduler from there walked `profiles` and `_running` while the loop
+    deleted drained profiles and finished jobs, raising `RuntimeError` past a
+    handler that catches only `OSError` and `ValueError` — one unlucky
+    interleaving tore the daemon down mid-job. `tick()` also folds busy time
+    into the load EMA and resets it, which is a mutation a function named
+    "build a snapshot" should not perform, and which raced the running job
+    still adding to it. Both now happen on the loop; the thread only reads.
+    """
+
+    _stats: dict
+    _profile_stats: dict
+
+    @classmethod
+    def of(cls, scheduler) -> _SchedulerObservation:
+        scheduler.tick()
+        return cls(scheduler.stats(), scheduler.profile_stats())
+
+    def tick(self) -> None:
+        """Already ticked on the event loop; building a snapshot only reads."""
+
+    def stats(self) -> dict:
+        return self._stats
+
+    def profile_stats(self) -> dict:
+        return self._profile_stats
 
 
 class OmniTensorService:
@@ -599,13 +632,13 @@ class OmniTensorService:
     ) -> ArtifactResolution:
         return self._artifacts.cached(artifact_id, reference)
 
-    def _build_runtime_snapshot(self) -> dict:
+    def _build_runtime_snapshot(self, scheduler=None) -> dict:
         return observation.runtime_snapshot(
             devices=self._devices,
             device_load_of=self._device_load,
             workloads=self._workloads,
             executors=self._executors,
-            scheduler=self._scheduler,
+            scheduler=self._scheduler if scheduler is None else scheduler,
             policy=self.control.state,
             artifact_ready=self._profile_artifact_ready,
             permissions_missing=self._profile_permissions_missing,
@@ -734,7 +767,13 @@ class OmniTensorService:
                         LOGGER.info("Accelerator devices returned; publishing snapshots again")
                         self._snapshot_retracted = False
                     await self._refresh_plugin_readiness()
-                    snapshot = await run_off_loop(self._build_runtime_snapshot)
+                    # Ticked and read on the event loop, then handed to the
+                    # worker thread as an immutable value. Reading the live
+                    # scheduler off-loop walked mappings the loop was deleting
+                    # from, and `tick()` reset busy time a running job was
+                    # still adding to.
+                    scheduler_view = _SchedulerObservation.of(self._scheduler)
+                    snapshot = await run_off_loop(self._build_runtime_snapshot, scheduler_view)
                     # An idle runtime rebuilds the same document every tick.
                     # Rewriting it anyway costs a disk write and wakes every
                     # reader watching the file, forever, to say nothing changed.

@@ -152,7 +152,10 @@ class _BackendQueue:
         self.profiles[job.workload_id].append(job)
 
     def depth(self) -> int:
-        return sum(len(queue) for queue in self.profiles.values())
+        # Over a snapshot of the values: the snapshot publisher reads this from
+        # a worker thread while the event loop pops and prunes profiles, and a
+        # live view raises "dictionary changed size during iteration" there.
+        return sum(len(queue) for queue in list(self.profiles.values()))
 
     def pop_weighted(self, weight_of, admits=None) -> _Job | None:
         """Stride scheduling: the pending profile with the smallest pass value
@@ -325,12 +328,18 @@ class Scheduler:
     def profile_stats(self) -> dict[str, dict[str, int]]:
         """Per-profile queued and running job counts across all backends;
         profiles with no queued or running work are absent."""
+        # Every mapping is snapshotted before it is walked. This runs on the
+        # snapshot publisher's worker thread while the event loop deletes
+        # drained profiles (`pop_weighted`) and finished jobs
+        # (`_job_finished`); iterating them live raised RuntimeError out of the
+        # thread, past a handler that catches only OSError and ValueError, and
+        # took the whole daemon down mid-job.
         stats: dict[str, dict[str, int]] = {}
         for queue in self._queues.values():
-            for profile_id, jobs in queue.profiles.items():
+            for profile_id, jobs in list(queue.profiles.items()):
                 entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
                 entry["queued"] += len(jobs)
-        for profile_id, count in self._running.items():
+        for profile_id, count in list(self._running.items()):
             entry = stats.setdefault(profile_id, {"queued": 0, "running": 0})
             entry["running"] += count
         return stats

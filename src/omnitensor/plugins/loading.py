@@ -72,6 +72,13 @@ _import_paths = _specs.worker_import_paths_tuple
 _trusted_runtime_paths = _specs.trusted_runtime_paths
 LOGGER = logging.getLogger(__name__)
 GRANT_REFRESH_SECONDS = 0.25
+# How long a worker with nothing to do keeps its process, and its model, alive.
+# Long enough that a person working through a document does not pay the model
+# load again between questions; short enough that a machine left alone gets its
+# memory and its accelerator lease back.  It bounds nothing a caller is told:
+# the next request starts the worker again and is answered in full.
+WORKER_IDLE_TIMEOUT_S = 300.0
+IDLE_EXIT_DETAIL = "worker stopped after being idle; starts on demand"
 
 
 async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
@@ -95,6 +102,21 @@ class ReloadablePermissionGrantSource(Protocol):
     """Optional grant source capability for refreshing persisted consent."""
 
     def reload(self) -> object: ...
+
+
+@runtime_checkable
+class OnDemandWorkerSupervisor(Protocol):
+    """Optional supervisor capability: launch and stop one worker at a time.
+
+    A supervisor without it is started eagerly, exactly as before; one with it
+    lets an idle machine hold no plugin processes at all.
+    """
+
+    async def register(self, specs) -> object: ...
+
+    async def ensure_ready(self, plugin_id: str) -> object: ...
+
+    async def stop_worker(self, plugin_id: str, detail: str) -> object: ...
 
 
 @runtime_checkable
@@ -141,6 +163,8 @@ class InstalledPluginRuntime:
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
         profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
         profile_model_choice: Callable[[str], str | None] | None = None,
+        worker_idle_timeout_s: float | None = WORKER_IDLE_TIMEOUT_S,
+        sleep: Callable[[float], object] | None = None,
     ) -> None:
         self._bundled_root = Path(bundled_root)
         # Workers run unbounded: no delegated cgroup, no CPU or memory ceiling.
@@ -164,6 +188,12 @@ class InstalledPluginRuntime:
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
         self._grant_monitor: asyncio.Task | None = None
         self._grant_changes: dict[str, set[asyncio.Event]] = {}
+        # On-demand worker lifecycle: how much work each plugin is currently
+        # doing, and the task that will stop its worker once that reaches zero.
+        self._worker_idle_timeout_s = worker_idle_timeout_s
+        self._sleep = sleep or asyncio.sleep
+        self._inflight: dict[str, int] = {}
+        self._idle_exits: dict[str, asyncio.Task] = {}
 
     @property
     def snapshot(self) -> InstalledPluginSnapshot:
@@ -205,7 +235,7 @@ class InstalledPluginRuntime:
         status = next(
             (item for item in self._supervisor.statuses() if item.plugin_id == plugin_id), None
         )
-        if status is None or status.state is not WorkerState.READY:
+        if status is None or not self._servable(status):
             raise JobDispatchError("worker-unavailable", "Plugin worker is not ready")
         capabilities = set(plugin.manifest["plugin"]["protocol"].get("capabilities", ()))
         if "execute" not in capabilities:
@@ -224,6 +254,21 @@ class InstalledPluginRuntime:
         if violations:
             raise JobDispatchError("payload-invalid", "Payload violates the plugin input contract")
 
+    def _servable(self, status: WorkerStatus) -> bool:
+        """Whether a job may be accepted for the worker in this state.
+
+        A worker that is deliberately not running is not an unavailable one.
+        Refusing here would turn the first request after an idle exit into a
+        failure, when what it should do is pay the start-up cost.
+        """
+        if status.state is WorkerState.READY:
+            return True
+        return status.state is WorkerState.IDLE and self._on_demand
+
+    @property
+    def _on_demand(self) -> bool:
+        return isinstance(self._supervisor, OnDemandWorkerSupervisor)
+
     def _admit_permissions(self, plugin: ResolvedPlugin) -> None:
         plugin_id = plugin.plugin_id
         declared = set(plugin.manifest["plugin"]["permissions"])
@@ -240,19 +285,85 @@ class InstalledPluginRuntime:
         return self._dispatch(job_id, plugin_id, payload)
 
     async def _dispatch(self, job_id: str, plugin_id: str, payload: dict) -> dict:
-        worker_payload, staged = await self._stage_payload(job_id, plugin_id, payload)
+        await self._acquire_worker(plugin_id)
         try:
-            result = await self._execute_with_live_grants(
-                PluginRequest(job_id, plugin_id, "manual", worker_payload, self._clock_ms(), None)
-            )
+            result = await self._dispatch_to_worker(job_id, plugin_id, payload)
         finally:
-            if staged is not None:
-                await _run_off_loop(shutil.rmtree, staged, True)
+            self._release_worker(plugin_id)
         if result.status is PluginResultStatus.SUCCEEDED:
             return dict(result.output)
         if result.status is PluginResultStatus.CANCELLED:
             raise asyncio.CancelledError(result.detail)
         raise PluginWorkerError("plugin-failed", result.detail or "plugin request failed")
+
+    async def _dispatch_to_worker(self, job_id: str, plugin_id: str, payload: dict):
+        worker_payload, staged = await self._stage_payload(job_id, plugin_id, payload)
+        try:
+            return await self._execute_with_live_grants(
+                PluginRequest(job_id, plugin_id, "manual", worker_payload, self._clock_ms(), None)
+            )
+        finally:
+            if staged is not None:
+                await _run_off_loop(shutil.rmtree, staged, True)
+
+    async def _acquire_worker(self, plugin_id: str) -> None:
+        """Make sure a worker is serving this plugin, starting one if needed."""
+        if not self._on_demand:
+            return
+        self._cancel_idle_exit(plugin_id)
+        self._inflight[plugin_id] = self._inflight.get(plugin_id, 0) + 1
+        try:
+            status = await self._supervisor.ensure_ready(plugin_id)
+        except BaseException:
+            self._release_worker(plugin_id)
+            raise
+        if getattr(status, "state", None) is not WorkerState.READY:
+            detail = getattr(status, "detail", "") or "plugin worker could not be started"
+            self._release_worker(plugin_id)
+            raise PluginWorkerError("worker-unavailable", detail)
+
+    def _release_worker(self, plugin_id: str) -> None:
+        """Give the worker back, and arm its idle exit once nothing is left."""
+        remaining = self._inflight.get(plugin_id, 0) - 1
+        if remaining > 0:
+            self._inflight[plugin_id] = remaining
+            return
+        self._inflight.pop(plugin_id, None)
+        if not self._on_demand or self._worker_idle_timeout_s is None:
+            return
+        self._cancel_idle_exit(plugin_id)
+        self._idle_exits[plugin_id] = asyncio.ensure_future(self._exit_when_idle(plugin_id))
+
+    def _cancel_idle_exit(self, plugin_id: str) -> None:
+        pending = self._idle_exits.pop(plugin_id, None)
+        if pending is not None:
+            pending.cancel()
+
+    async def _exit_when_idle(self, plugin_id: str) -> None:
+        """Stop a worker that has had nothing to do for the idle timeout.
+
+        A job still queued for admission has not touched its worker yet, so
+        nothing is lost by stopping one here: when that job is finally served
+        it starts the worker back up and is answered in full.
+        """
+        try:
+            try:
+                await self._sleep(self._worker_idle_timeout_s)
+            except asyncio.CancelledError:
+                return
+            if self._inflight.get(plugin_id):
+                return
+            try:
+                # Shielded: a request arriving mid-stop cancels this task, and
+                # a half-stopped worker would leak its process and its lease.
+                await asyncio.shield(self._supervisor.stop_worker(plugin_id, IDLE_EXIT_DETAIL))
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - supervisors are external
+                LOGGER.exception("Could not stop the idle worker for %s", plugin_id)
+        finally:
+            if self._idle_exits.get(plugin_id) is asyncio.current_task():
+                self._idle_exits.pop(plugin_id, None)
 
     async def _stage_payload(
         self, job_id: str, plugin_id: str, payload: dict
@@ -438,8 +549,9 @@ class InstalledPluginRuntime:
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }
-        workers = await self._supervisor.start(
-            external_worker_specs(catalog.plugins, **spec_options)
+        specs = external_worker_specs(catalog.plugins, **spec_options)
+        workers = await (
+            self._supervisor.register(specs) if self._on_demand else self._supervisor.start(specs)
         )
         self._snapshot = InstalledPluginSnapshot(catalog, workers)
         if isinstance(self._supervisor, WorkerRevoker):
@@ -450,6 +562,13 @@ class InstalledPluginRuntime:
         return self._snapshot
 
     async def stop(self) -> tuple[WorkerStatus, ...]:
+        exits = tuple(self._idle_exits.values())
+        self._idle_exits.clear()
+        self._inflight.clear()
+        for pending in exits:
+            pending.cancel()
+        if exits:
+            await asyncio.gather(*exits, return_exceptions=True)
         monitor = self._grant_monitor
         self._grant_monitor = None
         if monitor is not None:

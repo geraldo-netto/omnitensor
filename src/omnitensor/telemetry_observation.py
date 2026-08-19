@@ -170,7 +170,16 @@ def describe_plugins(
         retained.catalog, PluginCatalogSnapshot
     ):
         return no_inventory()
-    states = {status.plugin_id: str(status.state) for status in retained.workers}
+    # A worker that is deliberately idle has no state the inventory contract
+    # can name: `workerState` is a closed enum the applet validates, and
+    # widening it is a change in both repositories (OMNI-0480). Reporting no
+    # worker is the honest answer — there is none — and the detail beside it,
+    # which is free text, says why.
+    states = {
+        status.plugin_id: str(status.state)
+        for status in retained.workers
+        if str(getattr(status, "state", "")) != WorkerState.IDLE
+    }
     # Why a worker is not running. Dropping it made every failed launch read
     # on the desktop as an unqualified provider, which sent people to install
     # artifacts that were already installed and correct.

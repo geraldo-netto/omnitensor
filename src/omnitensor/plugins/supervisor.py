@@ -23,6 +23,7 @@ from .ipc import (
 )
 from .protocol import PluginRequest, PluginResult, ProgressReporter
 from .supervisor_diagnostics import (
+    IDLE_WORKER_DETAIL,
     MAX_WORKER_DIAGNOSTICS,
     WorkerDiagnostic,
     WorkerDiagnosticCode,
@@ -110,6 +111,7 @@ class PluginWorkerSupervisor:
         self._cancel_timeout = cancel_timeout
         self._recovery_policy = recovery_policy or WorkerRecoveryPolicy()
         self._failure_observer = failure_observer or _NullWorkerFailureObserver()
+        self._specs: dict[str, WorkerSpec] = {}
         self._slots: dict[str, _WorkerSlot] = {}
         self._recoveries: dict[str, asyncio.Task] = {}
         self._restart_attempts: dict[str, int] = {}
@@ -215,19 +217,95 @@ class PluginWorkerSupervisor:
 
     async def start(self, specs: Sequence[WorkerSpec]) -> tuple[WorkerStatus, ...]:
         """Launch and authenticate active plugins in stable identity order."""
-        ordered = _validate_specs(specs)
         async with self._lock:
-            if self._running:
-                raise RuntimeError("plugin supervisor is already running")
-            self._running = True
-            self._statuses.clear()
-            self._diagnostics.clear()
-            self._startup_order.clear()
-            self._restart_attempts.clear()
-            self._ready_since.clear()
+            ordered = self._admit_specs(specs)
             for spec in ordered:
                 await self._start_one(spec)
             return self.statuses()
+
+    async def register(self, specs: Sequence[WorkerSpec]) -> tuple[WorkerStatus, ...]:
+        """Accept the plugins that may run, without launching any of them.
+
+        A worker launched at startup is a process holding a model for someone
+        who has not asked for anything.  Registration keeps every guarantee
+        :meth:`start` gives — validated specs, stable identity order, one slot
+        per plugin — and leaves the launch to the first job routed there.
+        """
+        async with self._lock:
+            ordered = self._admit_specs(specs)
+            for spec in ordered:
+                self._statuses[spec.plugin_id] = WorkerStatus(
+                    spec.plugin_id,
+                    WorkerState.IDLE,
+                    None,
+                    None,
+                    IDLE_WORKER_DETAIL,
+                )
+            return self.statuses()
+
+    def _admit_specs(self, specs: Sequence[WorkerSpec]) -> tuple[WorkerSpec, ...]:
+        """Validate and adopt one generation of specs; the caller holds the lock."""
+        ordered = _validate_specs(specs)
+        if self._running:
+            raise RuntimeError("plugin supervisor is already running")
+        self._running = True
+        self._statuses.clear()
+        self._diagnostics.clear()
+        self._startup_order.clear()
+        self._restart_attempts.clear()
+        self._ready_since.clear()
+        self._specs = {spec.plugin_id: spec for spec in ordered}
+        return ordered
+
+    async def ensure_ready(self, plugin_id: str) -> WorkerStatus | None:
+        """Launch this plugin's worker unless it is already serving.
+
+        The caller pays the start-up cost of the first request after an idle
+        exit; it is never refused one.  A worker whose restart budget ran out
+        is tried again here, because a fresh request is a new demand rather
+        than another turn of a restart loop.
+        """
+        async with self._lock:
+            if not self._running:
+                return None
+            status = self._statuses.get(plugin_id)
+            if plugin_id in self._slots or plugin_id in self._recoveries:
+                # Serving, or a recovery already owns the launch.
+                return status
+            spec = self._specs.get(plugin_id)
+            if spec is None:
+                return status
+            self._restart_attempts[plugin_id] = 0
+            await self._start_one(spec)
+            return self._statuses.get(plugin_id)
+
+    async def stop_worker(
+        self,
+        plugin_id: str,
+        detail: str = IDLE_WORKER_DETAIL,
+    ) -> WorkerStatus | None:
+        """Stop one worker that is not needed, leaving it startable again.
+
+        Unlike :meth:`revoke` this is not a verdict on the plugin: the process
+        goes away, its accelerator lease and model memory with it, and the
+        next request starts it back up.
+        """
+        async with self._lock:
+            recovery = self._recoveries.pop(plugin_id, None)
+            if recovery is not None:
+                recovery.cancel()
+                await asyncio.gather(recovery, return_exceptions=True)
+            slot = self._slots.pop(plugin_id, None)
+            previous = self._statuses.get(plugin_id)
+            if slot is None:
+                return previous
+            await _cancel_monitor(slot.monitor)
+            await self._stop_process(slot)
+            status = WorkerStatus(plugin_id, WorkerState.IDLE, None, None, detail)
+            self._statuses[plugin_id] = status
+            self._restart_attempts.pop(plugin_id, None)
+            self._ready_since.pop(plugin_id, None)
+            return status
 
     async def stop(self) -> tuple[WorkerStatus, ...]:
         """Request graceful shutdown, then terminate children in reverse order."""
@@ -280,6 +358,7 @@ class PluginWorkerSupervisor:
             self._startup_order.clear()
             self._restart_attempts.clear()
             self._ready_since.clear()
+            self._specs.clear()
             return self.statuses()
 
     async def revoke(self, plugin_id: str, detail: str) -> WorkerStatus | None:

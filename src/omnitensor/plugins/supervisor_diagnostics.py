@@ -6,9 +6,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 MAX_WORKER_DIAGNOSTICS = 16
+# What a registered worker that is deliberately not running has to say for
+# itself. Published as the worker detail so a reader can tell "nobody has asked
+# for anything" from "it would not start".
+IDLE_WORKER_DETAIL = "worker idle; starts on demand"
 
 
 class WorkerState(StrEnum):
+    # Registered and startable, with no process running: the state of a plugin
+    # nobody has asked for anything yet, and the one a worker returns to after
+    # its idle exit. It is not a failure and not an outage.
+    IDLE = "idle"
     STARTING = "starting"
     READY = "ready"
     FAILED = "failed"
@@ -70,6 +78,7 @@ def record_diagnostic(
 
 
 __all__ = [
+    "IDLE_WORKER_DETAIL",
     "MAX_WORKER_DIAGNOSTICS",
     "WorkerDiagnostic",
     "WorkerDiagnosticCode",
