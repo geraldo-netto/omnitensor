@@ -567,3 +567,91 @@ def test_draining_worker_stderr_is_bounded_in_bytes_and_in_time():
         assert await process.drain_worker_diagnostics(SimpleNamespace()) == ""
 
     asyncio.run(scenario())
+
+
+def test_the_shutdown_cancel_carries_the_negotiated_frame_version():
+    """Every other service-to-worker write stamps the version the handshake
+    agreed; this one stamped the module constant, so a worker speaking a
+    negotiated version 2 was told to shut down in a dialect it may refuse."""
+
+    async def scenario():
+        written = []
+
+        class Process:
+            pid = 42
+            writer = object()
+            returncode = None
+
+        slot = SimpleNamespace(
+            process=Process(),
+            agreement=SimpleNamespace(protocol_version=2),
+        )
+
+        async def write(_writer, frame):
+            written.append(frame)
+
+        async def close_writer(_writer):
+            return None
+
+        async def terminate(_process, _timeout):
+            return True
+
+        await session.stop_process(
+            slot,
+            timeout=0.01,
+            write=write,
+            close_writer=close_writer,
+            terminate=terminate,
+        )
+        return written
+
+    written = asyncio.run(scenario())
+
+    assert [frame.version for frame in written] == [2]
+
+
+def test_a_worker_frame_in_another_version_is_refused_not_parsed():
+    """`parse_execute`/`parse_progress`/`parse_result` never looked at
+    `frame.version`, so a frame in a version the handshake did not agree was
+    parsed as though its field meanings were settled."""
+    from omnitensor.plugins import IPCFrame, IPCProtocolError, WorkerMessageType
+
+    async def scenario():
+        class Process:
+            pid = 42
+            reader = object()
+            writer = object()
+            returncode = None
+
+        slot = SimpleNamespace(
+            process=Process(),
+            agreement=SimpleNamespace(protocol_version=1),
+        )
+
+        async def read(_reader):
+            return IPCFrame(
+                2,
+                WorkerMessageType.RESULT,
+                "job-1",
+                {"status": "succeeded", "output": {}, "detail": "", "completedAt": 1},
+            )
+
+        with pytest.raises(session.PluginWorkerError) as failure:
+            await session.read_result(slot, "job-1", None, read=read)
+        return failure.value
+
+    failure = asyncio.run(scenario())
+
+    assert failure.code == "worker-protocol-failed"
+    assert "version" in failure.detail
+
+    # And a direct caller of the parser gets the same refusal.
+    frame = IPCFrame(
+        2,
+        WorkerMessageType.RESULT,
+        "job-1",
+        {"status": "succeeded", "output": {}, "detail": "", "completedAt": 1},
+    )
+    with pytest.raises(IPCProtocolError) as refused:
+        plugins.parse_result(frame, protocol_version=1)
+    assert refused.value.code == "frame-version-incompatible"

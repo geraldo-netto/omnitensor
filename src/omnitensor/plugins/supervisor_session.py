@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 
 from .budgets import WorkerBudgetEnforcer
 from .ipc import (
-    FRAME_FORMAT_VERSION,
     HandshakeAgreement,
     IPCFrame,
     IPCProtocolError,
@@ -160,11 +159,7 @@ async def read_result(
 ) -> PluginResult:
     parts: list[str] = []
     while True:
-        frame = await read(slot.process.reader)
-        if frame.request_id != request_id:
-            raise PluginWorkerError(
-                "worker-protocol-failed", "worker response names another request"
-            )
+        frame = _correlated(await read(slot.process.reader), slot, request_id)
         if frame.type is WorkerMessageType.PROGRESS:
             await _report_progress(progress, progress_parser(frame))
             continue
@@ -183,6 +178,24 @@ async def read_result(
         raise PluginWorkerError(
             "worker-protocol-failed", f"unexpected worker message: {frame.type}"
         )
+
+
+def _correlated(frame: IPCFrame, slot: WorkerSlot, request_id: str) -> IPCFrame:
+    """The one place a worker frame is admitted: right version, right request.
+
+    The version was checked only during the handshake, so every later frame
+    was handed to a parser that reads fields without knowing which version
+    settled what they mean.
+    """
+    negotiated = slot.agreement.protocol_version
+    if frame.version != negotiated:
+        raise PluginWorkerError(
+            "worker-protocol-failed",
+            f"worker frame version {frame.version} is not the negotiated {negotiated}",
+        )
+    if frame.request_id != request_id:
+        raise PluginWorkerError("worker-protocol-failed", "worker response names another request")
+    return frame
 
 
 async def _report_progress(progress: ProgressReporter | None, observed: object) -> None:
@@ -238,7 +251,10 @@ async def stop_process(
     if slot.process.returncode is not None:
         return True
     protocol_error = IPCProtocolError
-    frame_version = FRAME_FORMAT_VERSION
+    # The version the handshake agreed, like every other service-to-worker
+    # write: a worker speaking a negotiated version was told to shut down in
+    # a dialect it never agreed to.
+    frame_version = slot.agreement.protocol_version
     with suppress(ConnectionError, protocol_error, RuntimeError):
         await write(
             slot.process.writer,

@@ -172,6 +172,17 @@ async def serve_worker_requests(
                 frame = await run_off_loop(_read_frame, reader)
             except EOFError:
                 break
+            if frame.version != agreement.protocol_version:
+                # The other end of the same check the service makes: a frame
+                # in a version this worker never agreed to was parsed as
+                # though its fields meant what this version says they mean.
+                _write_error(
+                    writer,
+                    agreement.protocol_version,
+                    frame.request_id,
+                    "frame-version-incompatible",
+                )
+                continue
             if not await _handle_request_frame(
                 plugin,
                 frame,
@@ -201,7 +212,7 @@ async def _handle_request_frame(
         return False
     if frame.type is WorkerMessageType.EXECUTE:
         try:
-            request = parse_execute(frame)
+            request = parse_execute(frame, protocol_version=protocol_version)
             if request.plugin_id != plugin.plugin_id:
                 raise IPCProtocolError(
                     "plugin-identity-mismatch", "execute request names another plugin"

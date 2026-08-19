@@ -191,13 +191,24 @@ def handshake_frame(offer: HandshakeOffer) -> IPCFrame:
     )
 
 
-def parse_handshake(frame: IPCFrame) -> HandshakeOffer:
-    """Parse a strict initial hello frame into a validated offer."""
-    if frame.version != FRAME_FORMAT_VERSION:
+def _require_frame_version(frame: IPCFrame, expected: int) -> None:
+    """Refuse a frame whose version is not the one in force.
+
+    Only the handshake pair checked this, so every later frame was parsed as
+    though its field meanings were settled -- in whatever version the peer
+    happened to send.  Before the handshake the version in force is
+    :data:`FRAME_FORMAT_VERSION`; after it, the negotiated one.
+    """
+    if frame.version != expected:
         raise IPCProtocolError(
             "frame-version-incompatible",
-            f"expected {FRAME_FORMAT_VERSION}; received {frame.version}",
+            f"expected {expected}; received {frame.version}",
         )
+
+
+def parse_handshake(frame: IPCFrame) -> HandshakeOffer:
+    """Parse a strict initial hello frame into a validated offer."""
+    _require_frame_version(frame, FRAME_FORMAT_VERSION)
     if frame.type is not WorkerMessageType.HELLO or frame.request_id is not None:
         raise IPCProtocolError("invalid-handshake", "first frame must be an uncorrelated hello")
     expected = {"pluginId", "minimumVersion", "maximumVersion", "capabilities"}
@@ -246,8 +257,11 @@ def execute_frame(request: PluginRequest) -> IPCFrame:
     )
 
 
-def parse_execute(frame: IPCFrame) -> PluginRequest:
+def parse_execute(
+    frame: IPCFrame, *, protocol_version: int = FRAME_FORMAT_VERSION
+) -> PluginRequest:
     """Parse the exact service-to-worker execution request contract."""
+    _require_frame_version(frame, protocol_version)
     if frame.type is not WorkerMessageType.EXECUTE or frame.request_id is None:
         raise IPCProtocolError("invalid-execute", "expected a correlated execute frame")
     if set(frame.payload) != {"pluginId", "trigger", "payload", "submittedAt", "deadlineAt"}:
@@ -280,8 +294,11 @@ def progress_frame(progress: PluginProgress) -> IPCFrame:
     )
 
 
-def parse_progress(frame: IPCFrame) -> PluginProgress:
+def parse_progress(
+    frame: IPCFrame, *, protocol_version: int = FRAME_FORMAT_VERSION
+) -> PluginProgress:
     """Parse a bounded progress update from one worker."""
+    _require_frame_version(frame, protocol_version)
     if frame.type is not WorkerMessageType.PROGRESS or frame.request_id is None:
         raise IPCProtocolError("invalid-progress", "expected a correlated progress frame")
     if set(frame.payload) != {"stage", "fraction", "detail", "observedAt"}:
@@ -377,8 +394,14 @@ def _split_body(body: str, request_id: str, max_frame_bytes: int) -> tuple[str, 
     return tuple(body[start : start + span] for start in range(0, len(body), span)) or ("",)
 
 
-def parse_result_chunk(frame: IPCFrame, expected_sequence: int) -> tuple[str, bool]:
+def parse_result_chunk(
+    frame: IPCFrame,
+    expected_sequence: int,
+    *,
+    protocol_version: int = FRAME_FORMAT_VERSION,
+) -> tuple[str, bool]:
     """One chunk of a split result, in the order the worker sent it."""
+    _require_frame_version(frame, protocol_version)
     if frame.type is not WorkerMessageType.RESULT_CHUNK or frame.request_id is None:
         raise IPCProtocolError("invalid-result", "expected a correlated result chunk")
     if set(frame.payload) != {"sequence", "final", "body"}:
@@ -406,8 +429,9 @@ def assemble_result_chunks(request_id: str, parts: Sequence[str]) -> PluginResul
     )
 
 
-def parse_result(frame: IPCFrame) -> PluginResult:
+def parse_result(frame: IPCFrame, *, protocol_version: int = FRAME_FORMAT_VERSION) -> PluginResult:
     """Parse exactly one terminal result from a worker."""
+    _require_frame_version(frame, protocol_version)
     if frame.type is not WorkerMessageType.RESULT or frame.request_id is None:
         raise IPCProtocolError("invalid-result", "expected a correlated result frame")
     if set(frame.payload) != {"status", "output", "detail", "completedAt"}:
@@ -429,11 +453,7 @@ def parse_result(frame: IPCFrame) -> PluginResult:
 
 def parse_ready(frame: IPCFrame, plugin_id: str) -> None:
     """Accept a strict ready frame for ``plugin_id`` or reject the worker."""
-    if frame.version != FRAME_FORMAT_VERSION:
-        raise IPCProtocolError(
-            "frame-version-incompatible",
-            f"expected {FRAME_FORMAT_VERSION}; received {frame.version}",
-        )
+    _require_frame_version(frame, FRAME_FORMAT_VERSION)
     if frame.type is not WorkerMessageType.READY or frame.request_id is not None:
         raise IPCProtocolError("invalid-ready", "expected an uncorrelated ready frame")
     if set(frame.payload) != {"pluginId"}:
