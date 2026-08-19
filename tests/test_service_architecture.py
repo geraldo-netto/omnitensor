@@ -514,6 +514,9 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
         _input_roots=(),
         _kernel_telemetry_source=object(),
         _profile_statuses=statuses_of,
+        # Profiles whose device reload kept failing: the snapshot publishes
+        # them as unavailable rather than leaving them silently refused.
+        _unavailable_device_profiles=set(),
     )
     # The snapshot's profile set is the owner's own selector, because it must
     # add the installed plugins to whatever the catalog selector returns.
@@ -524,6 +527,9 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
     catalog_owner = SimpleNamespace(
         _plugin_ids=frozenset,
         _plugin_queue=SimpleNamespace(profile_stats=dict),
+        # Profiles whose device reload kept failing, published as unavailable
+        # rather than left silently refused.
+        _unavailable_device_profiles=set(),
     )
     assert service.OmniTensorService._profile_statuses(
         catalog_owner, {}, {}, object(), SimpleNamespace(profiles={}, paused=False), None, None
