@@ -18,7 +18,7 @@ from .base import (
     RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
-    ModelCache,
+    ModelStore,
     require_available,
 )
 
@@ -65,7 +65,7 @@ class TpuExecutor:
         # Interpreters are expensive model-specific runtime state.  The
         # scheduler serializes TPU work; this lock also preserves that safety
         # when callers use the executor directly from multiple threads.
-        self._interpreters = ModelCache(max_cached_models)
+        self._interpreters = ModelStore(max_cached_models)
         self._interpreter_lock = threading.Lock()
 
     def availability(self) -> Availability:
@@ -103,7 +103,7 @@ class TpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        with self._interpreter_lock:
+        with self._interpreters.running(), self._interpreter_lock:
             interpreter = self._interpreter_for(model_path)
             input_details = interpreter.get_input_details()
             for detail, value in zip(input_details, inputs, strict=True):
@@ -116,3 +116,7 @@ class TpuExecutor:
                 for detail in interpreter.get_output_details()
             ]
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)
+
+    def close(self) -> None:
+        """Release every cached interpreter; safe to call more than once."""
+        self._interpreters.close()

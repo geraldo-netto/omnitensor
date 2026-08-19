@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -775,6 +776,39 @@ def test_executor_composition_reuses_only_complete_unchanged_history():
     assert changed["npu"] is same["npu"]
     assert changed["gpu"] is same["gpu"]
     assert changed["tpu"]._device_present is True
+
+
+def test_a_rebuild_closes_the_executors_it_replaced_and_keeps_the_reused_ones():
+    old = Device("tpu-old", "tpu", "old", "pcie")
+    first = build_executors([old])
+    closed = []
+    for backend in ("tpu", "npu", "gpu"):
+        executor = first[backend]
+        executor.close = lambda executor=executor: closed.append(executor)
+
+    replacement = Device("tpu-new", "tpu", "new", "usb")
+    build_executors([replacement], previous_devices=[old], previous_executors=first)
+
+    # Only the TPU adapter was replaced; closing a reused one would tear down
+    # the runtime state a running service is still serving from.
+    assert closed == [first["tpu"]]
+
+
+def test_a_backend_that_fails_to_close_does_not_break_the_rebuild(caplog):
+    old = Device("tpu-old", "tpu", "old", "pcie")
+    first = build_executors([old])
+
+    def explode():
+        raise RuntimeError("driver is unhappy")
+
+    first["tpu"].close = explode
+
+    replacement = Device("tpu-new", "tpu", "new", "usb")
+    with caplog.at_level(logging.ERROR):
+        rebuilt = build_executors([replacement], previous_devices=[old], previous_executors=first)
+
+    assert rebuilt["tpu"] is not first["tpu"]
+    assert "Could not close" in caplog.text
 
 
 def test_executor_composition_keeps_one_gpu_lane_per_stable_device_identity():

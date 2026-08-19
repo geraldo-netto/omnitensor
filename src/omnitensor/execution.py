@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .discovery import BACKENDS
-from .executors.base import DEVICE_ABSENT, Availability
+from .executors.base import DEVICE_ABSENT, Availability, close_executor
 from .executors.gpu import CompositeGpuExecutor, GpuExecutor
 from .executors.npu import NpuExecutor
 from .executors.tpu import TpuExecutor
@@ -158,4 +158,36 @@ def build_executors(
     gpu_ids = [device.id for device in current_devices if device.backend == "gpu"]
     if gpu_ids:
         aliases["gpu"] = device_executors[gpu_ids[0]]
-    return ExecutorSet(aliases, current_devices, device_executors)
+    built = ExecutorSet(aliases, current_devices, device_executors)
+    close_replaced(previous_executors, built)
+    return built
+
+
+def _executor_objects(executors) -> dict[int, object]:
+    """Every distinct executor a set holds, keyed by object identity."""
+    if executors is None:
+        return {}
+    held = list(executors.values())
+    if isinstance(executors, ExecutorSet):
+        held.extend(executors.device_executors.values())
+    return {id(executor): executor for executor in held}
+
+
+def close_replaced(previous, current) -> None:
+    """Close each executor the rebuild dropped.
+
+    Rebuilding on every hotplug is routine, and an executor that is merely
+    dereferenced keeps its ONNX Runtime session, OpenVINO compiled model or
+    ncnn ``Net`` — and the device memory behind it — until the collector
+    happens to run.  A replaced executor is finished with, so it is told so.
+    """
+    kept = _executor_objects(current)
+    for key, executor in _executor_objects(previous).items():
+        if key not in kept:
+            close_executor(executor)
+
+
+def close_executors(executors) -> None:
+    """Close every executor a set holds, at service stop."""
+    for executor in _executor_objects(executors).values():
+        close_executor(executor)

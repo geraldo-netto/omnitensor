@@ -16,6 +16,8 @@ from omnitensor.executors.base import (
     Availability,
     InferenceResult,
     ModelCache,
+    ModelStore,
+    release_runtime_value,
     supports_model,
 )
 from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
@@ -1379,6 +1381,106 @@ def test_a_changed_companion_invalidates_its_cached_model(tmp_path):
     )
 
     assert len(builds) == 2
+
+
+def test_an_evicted_entry_is_released_rather_than_left_to_the_collector(tmp_path):
+    released = []
+    cache = ModelCache(max_entries=1, release=released.append)
+    first = _model_file(tmp_path, "first.tflite")
+    second = _model_file(tmp_path, "second.tflite")
+
+    cache.get_or_build(first, lambda: "first-session")
+    cache.get_or_build(second, lambda: "second-session")
+
+    assert released == ["first-session"]
+
+
+def test_a_rebuilt_entry_releases_the_runtime_state_it_replaces(tmp_path):
+    released = []
+    cache = ModelCache(release=released.append)
+    model = _model_file(tmp_path, "model.tflite")
+
+    cache.get_or_build(model, lambda: "old-session")
+    os.utime(model, ns=(0, 0))
+    cache.get_or_build(model, lambda: "new-session")
+
+    assert released == ["old-session"]
+
+
+def test_clearing_the_cache_releases_every_entry(tmp_path):
+    released = []
+    cache = ModelCache(release=released.append)
+    for index in range(2):
+        cache.get_or_build(_model_file(tmp_path, f"m{index}.tflite"), lambda: "session")
+
+    cache.clear()
+
+    assert len(released) == 2
+    assert len(cache) == 0
+
+
+def test_a_runtime_object_is_released_by_whichever_method_it_offers():
+    class Ncnn:
+        def __init__(self):
+            self.cleared = False
+
+        def clear(self):
+            self.cleared = True
+
+    class Exploding:
+        def close(self):
+            raise RuntimeError("driver is unhappy")
+
+    net = Ncnn()
+    release_runtime_value(net)
+    assert net.cleared
+    release_runtime_value(object())  # nothing to call is not an error
+    release_runtime_value(Exploding())  # nor is a library that fails to tear down
+
+
+def test_a_store_releases_at_once_when_no_job_is_running(tmp_path):
+    released = []
+    store = ModelStore(max_entries=1, release=released.append)
+    store.get_or_build(_model_file(tmp_path, "a.tflite"), lambda: "a")
+    store.get_or_build(_model_file(tmp_path, "b.tflite"), lambda: "b")
+
+    assert released == ["a"]
+
+
+def test_a_store_never_releases_under_a_running_job(tmp_path):
+    released = []
+    store = ModelStore(max_entries=1, release=released.append)
+    first = _model_file(tmp_path, "a.tflite")
+
+    with store.running():
+        store.get_or_build(first, lambda: "a")
+        store.get_or_build(_model_file(tmp_path, "b.tflite"), lambda: "b")
+        store.close()
+        assert released == [], "runtime state was torn down under a running job"
+
+    assert sorted(released) == ["a", "b"]
+
+
+def test_closing_a_store_twice_releases_once(tmp_path):
+    released = []
+    store = ModelStore(release=released.append)
+    store.get_or_build(_model_file(tmp_path, "a.tflite"), lambda: "a")
+
+    store.close()
+    store.close()
+
+    assert released == ["a"]
+
+
+def test_closing_an_executor_releases_its_cached_runtime_state(tmp_path):
+    executor = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime())
+    model = _model_file(tmp_path, "model.tflite")
+    executor.run(model, [[1]])
+
+    executor.close()
+    executor.close()
+
+    assert executor._interpreters.paths() == ()
 
 
 @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "2"])

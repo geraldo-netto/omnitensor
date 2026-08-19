@@ -18,7 +18,7 @@ from .base import (
     RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
-    ModelCache,
+    ModelStore,
     require_available,
 )
 
@@ -49,8 +49,7 @@ class NpuExecutor:
         self._runtime = runtime if runtime is not None else _import_openvino()
         self._core = None
         self._core_lock = threading.Lock()
-        self._compiled_models = ModelCache(max_cached_models)
-        self._compiled_models_lock = threading.Lock()
+        self._compiled_models = ModelStore(max_cached_models)
 
     def _ensure_core(self):
         # availability() runs on the event loop thread while run() executes in
@@ -80,15 +79,19 @@ class NpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        compiled = self._compiled_model_for(model_path)
-        started = time.monotonic()
-        outputs = compiled(inputs)
-        duration_ms = (time.monotonic() - started) * 1000
-        return InferenceResult(outputs=list(outputs.values()), duration_ms=duration_ms)
+        with self._compiled_models.running():
+            compiled = self._compiled_model_for(model_path)
+            started = time.monotonic()
+            outputs = compiled(inputs)
+            duration_ms = (time.monotonic() - started) * 1000
+            return InferenceResult(outputs=list(outputs.values()), duration_ms=duration_ms)
+
+    def close(self) -> None:
+        """Release every compiled model; safe to call more than once."""
+        self._compiled_models.close()
 
     def _compiled_model_for(self, model_path: str):
-        with self._compiled_models_lock:
-            return self._compiled_models.get_or_build(
-                model_path,
-                lambda: self._ensure_core().compile_model(model_path, OPENVINO_DEVICE),
-            )
+        return self._compiled_models.get_or_build(
+            model_path,
+            lambda: self._ensure_core().compile_model(model_path, OPENVINO_DEVICE),
+        )

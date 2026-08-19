@@ -9,11 +9,16 @@ wiring injects the real libraries.
 
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from collections import OrderedDict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+LOGGER = logging.getLogger(__name__)
 
 # Machine-readable counterparts to the sentences below, so a consumer can
 # choose a remedy without matching on English prose. The sentence stays: it
@@ -132,12 +137,25 @@ class ModelCache:
     and revalidated against the model and any companion files' modification
     times and sizes on every lookup. Callers hold their own lock; this class
     does no locking.
+
+    Evicting an entry hands it to ``release`` rather than merely dropping the
+    reference: what these entries hold — an ONNX Runtime session, an OpenVINO
+    compiled model, an ncnn ``Net`` holding Vulkan device memory — is released
+    by the garbage collector at a time and in an order nobody chose otherwise.
+    ``release`` is not called from here for an entry a caller may still be
+    using; deciding that is :class:`ModelStore`'s job.
     """
 
-    def __init__(self, max_entries: int = DEFAULT_MAX_CACHED_MODELS) -> None:
+    def __init__(
+        self,
+        max_entries: int = DEFAULT_MAX_CACHED_MODELS,
+        *,
+        release: Callable[[object], None] | None = None,
+    ) -> None:
         if type(max_entries) is not int or max_entries < 1:
             raise ValueError("max_entries must be a positive integer")
         self._max_entries = max_entries
+        self._release = release
         self._entries: OrderedDict[str, tuple[tuple[tuple[int, int], ...], object]] = OrderedDict()
 
     def get_or_build(
@@ -159,11 +177,24 @@ class ModelCache:
             # model that has since been replaced or withdrawn.
             self._entries.pop(model_path, None)
             return value
+        replaced = self._entries.get(model_path)
         self._entries[model_path] = (revision, value)
         self._entries.move_to_end(model_path)
+        if replaced is not None:
+            self._releasing(replaced[1])
         while len(self._entries) > self._max_entries:
-            self._entries.popitem(last=False)
+            self._releasing(self._entries.popitem(last=False)[1][1])
         return value
+
+    def clear(self) -> None:
+        """Release every entry and empty the cache."""
+        entries, self._entries = self._entries, OrderedDict()
+        for _revision, value in entries.values():
+            self._releasing(value)
+
+    def _releasing(self, value: object) -> None:
+        if self._release is not None:
+            self._release(value)
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -171,6 +202,110 @@ class ModelCache:
     def paths(self) -> tuple[str, ...]:
         """Cached model paths, least recently used first."""
         return tuple(self._entries)
+
+
+# The teardown method each runtime happens to spell differently: ONNX Runtime
+# and tflite hand the object back to the allocator on ``close``, OpenVINO on
+# ``release_memory``, ncnn on ``clear``.  Executors inject their own releaser
+# where they need an order; this is the default for a plain cached object.
+_RELEASE_METHODS = ("close", "release_memory", "clear")
+
+
+def release_runtime_value(value: object) -> None:
+    """Hand one cached runtime object back to its library, if it can be."""
+    for name in _RELEASE_METHODS:
+        method = getattr(value, name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:  # noqa: BLE001 - native teardown fails arbitrarily
+                LOGGER.debug("releasing %s via %s() failed", type(value).__name__, name)
+            return
+
+
+def close_executor(executor: object) -> None:
+    """Close an executor that is being discarded, if it knows how."""
+    close = getattr(executor, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:  # noqa: BLE001 - backend teardown fails arbitrarily
+        LOGGER.exception("Could not close the %s executor", getattr(executor, "backend", "?"))
+
+
+class ModelStore:
+    """A :class:`ModelCache`, the lock guarding it, and its teardown order.
+
+    Releasing a cached runtime object is not simply "do it on eviction".
+    Another thread can be mid-inference on the exact object being evicted, and
+    tearing an ncnn ``Net``'s allocators down under a running extractor is a
+    fault this package has already had once — it surfaces as freed device
+    memory handed to a later job, not as a crash.  So a release requested
+    while a job is in flight is parked, and performed by the last job to
+    leave; a release requested while the store is idle happens at once.
+
+    ``close`` therefore never blocks on a running job, which matters because
+    the executors are discarded on the event loop thread whenever discovery
+    rebuilds them.
+    """
+
+    def __init__(
+        self,
+        max_entries: int = DEFAULT_MAX_CACHED_MODELS,
+        *,
+        release: Callable[[object], None] = release_runtime_value,
+    ) -> None:
+        self._release = release
+        self._cache = ModelCache(max_entries, release=self._releasing)
+        self._cache_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._in_flight = 0
+        self._pending: list[object] = []
+
+    def get_or_build(
+        self,
+        model_path: str,
+        build: Callable[[], object],
+        *,
+        companion_paths: Iterable[str] = (),
+    ) -> object:
+        with self._cache_lock:
+            return self._cache.get_or_build(model_path, build, companion_paths=companion_paths)
+
+    @contextmanager
+    def running(self) -> Iterator[None]:
+        """Mark one job in flight, so nothing is released underneath it."""
+        with self._state_lock:
+            self._in_flight += 1
+        try:
+            yield
+        finally:
+            with self._state_lock:
+                self._in_flight -= 1
+                parked = self._pending if self._in_flight == 0 else []
+                if parked:
+                    self._pending = []
+            for value in parked:
+                self._release(value)
+
+    def close(self) -> None:
+        """Release everything held; safe to call more than once."""
+        with self._cache_lock:
+            self._cache.clear()
+
+    def _releasing(self, value: object) -> None:
+        with self._state_lock:
+            if self._in_flight:
+                self._pending.append(value)
+                return
+        self._release(value)
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+    def paths(self) -> tuple[str, ...]:
+        return self._cache.paths()
 
 
 def _model_revision(

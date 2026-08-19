@@ -65,6 +65,7 @@ from .control import ControlService
 from .device_lanes import DeviceLanes
 from .discovery import DiscoveryPaths
 from .execution import build_executors as build_executors
+from .execution import close_executors
 from .host import FileSnapshotPublisher as FileSnapshotPublisher
 from .host import SysfsDeviceDiscovery as SysfsDeviceDiscovery
 from .host import build_host_ports
@@ -935,6 +936,10 @@ class OmniTensorService:
             await self._stop_plugin_runtime()
             await self._transport.stop()
             await self._close_discovery()
+            # Last: the scheduler has stopped, so no job still holds a
+            # runtime, and the accelerator memory is handed back in a chosen
+            # order rather than whenever the collector notices.
+            close_executors(self._executors)
 
     async def _start_plugin_runtime(self) -> None:
         async with self._plugin_lifecycle_lock:

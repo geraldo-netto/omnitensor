@@ -8,7 +8,6 @@ silently loading the host CPU.
 
 from __future__ import annotations
 
-import threading
 import time
 
 from .base import (
@@ -19,7 +18,8 @@ from .base import (
     RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
-    ModelCache,
+    ModelStore,
+    close_executor,
     most_actionable,
     require_available,
     supports_model,
@@ -50,8 +50,7 @@ class GpuExecutor:
     ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_onnxruntime()
-        self._sessions = ModelCache(max_cached_models)
-        self._sessions_lock = threading.Lock()
+        self._sessions = ModelStore(max_cached_models)
 
     def _providers(self) -> list[str]:
         return [
@@ -75,22 +74,26 @@ class GpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        session = self._session_for(model_path)
-        feed = {
-            session_input.name: value
-            for session_input, value in zip(session.get_inputs(), inputs, strict=True)
-        }
-        started = time.monotonic()
-        outputs = session.run(None, feed)
-        duration_ms = (time.monotonic() - started) * 1000
-        return InferenceResult(outputs=list(outputs), duration_ms=duration_ms)
+        with self._sessions.running():
+            session = self._session_for(model_path)
+            feed = {
+                session_input.name: value
+                for session_input, value in zip(session.get_inputs(), inputs, strict=True)
+            }
+            started = time.monotonic()
+            outputs = session.run(None, feed)
+            duration_ms = (time.monotonic() - started) * 1000
+            return InferenceResult(outputs=list(outputs), duration_ms=duration_ms)
+
+    def close(self) -> None:
+        """Release every cached session; safe to call more than once."""
+        self._sessions.close()
 
     def _session_for(self, model_path: str):
-        with self._sessions_lock:
-            return self._sessions.get_or_build(
-                model_path,
-                lambda: self._runtime.InferenceSession(model_path, providers=self._providers()),
-            )
+        return self._sessions.get_or_build(
+            model_path,
+            lambda: self._runtime.InferenceSession(model_path, providers=self._providers()),
+        )
 
 
 class CompositeGpuExecutor:
@@ -158,3 +161,8 @@ class CompositeGpuExecutor:
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         model_format = "ncnn" if model_path.endswith(".param") else "onnx"
         return self.run_for_format(model_format, model_path, inputs)
+
+    def close(self) -> None:
+        """Close every runtime this composite owns."""
+        for executor in self._executors:
+            close_executor(executor)

@@ -10,7 +10,6 @@ the host CPU.  Discrete devices are preferred over integrated ones.
 
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +21,7 @@ from .base import (
     RUNTIME_UNUSABLE,
     Availability,
     InferenceResult,
-    ModelCache,
+    ModelStore,
 )
 
 # ncnn VkGpuInfo.type(): 0 discrete, 1 integrated, 2 virtual, 3 cpu (software).
@@ -184,8 +183,7 @@ class VulkanGpuExecutor:
         self._runtime = runtime if runtime is not None else _import_ncnn()
         self._requested_device = requested_device
         self._selected: tuple[int | None, str] | None = None
-        self._nets = ModelCache(max_cached_models)
-        self._net_cache_lock = threading.Lock()
+        self._nets = ModelStore(max_cached_models)
 
     def _select_device(self) -> tuple[int | None, str]:
         """Choose a device once and keep the answer.
@@ -237,7 +235,13 @@ class VulkanGpuExecutor:
         device, reason, _code = self._available_device()
         if device is None:
             raise RuntimeError(f"{self.backend} executor unavailable: {reason}")
-        net = self._loaded(model_path, device)
+        # The store counts this job in flight for the whole block, so an
+        # eviction or a close from another thread parks the Net's teardown
+        # until after the extractor below has been released.
+        with self._nets.running():
+            return self._extract(self._loaded(model_path, device), inputs)
+
+    def _extract(self, net, inputs: list) -> InferenceResult:
         extractor = net.create_extractor()
         try:
             input_names = net.input_names()
@@ -267,6 +271,14 @@ class VulkanGpuExecutor:
             del extractor
         return InferenceResult(outputs=outputs, duration_ms=duration_ms)
 
+    def close(self) -> None:
+        """Release every loaded network; safe to call more than once.
+
+        A network still under a running extraction is released once that job
+        leaves, never underneath it.
+        """
+        self._nets.close()
+
     def _loaded(self, model_path: str, device: int):
         """The network for this model on this device, built at most once.
 
@@ -284,10 +296,12 @@ class VulkanGpuExecutor:
         service does not accumulate one network per model it has ever been
         asked for.
 
-        Eviction drops the reference and does not call `clear()`: a job that
-        is mid-extraction still holds the network it is running on, and
-        tearing down its allocators from another thread is the failure this
-        executor already had once.
+        Eviction releases the network through the store rather than dropping
+        the reference for the collector to notice later — but never while a
+        job is running on it: a job that is mid-extraction still holds the
+        network it is running on, and tearing down its allocators from
+        another thread is the failure this executor already had once, so the
+        store parks that teardown until the last job has left.
         """
         param_path = Path(model_path)
         bin_path = param_path.with_suffix(".bin")
@@ -311,14 +325,13 @@ class VulkanGpuExecutor:
 
         # Device selection is immutable for this executor, so its cache and
         # the parameter path together identify the model/device pair. Jobs run
-        # one at a time per backend, but this also prevents direct callers from
-        # building the same network twice concurrently.
-        with self._net_cache_lock:
-            return self._nets.get_or_build(
-                str(param_path),
-                build,
-                companion_paths=(str(bin_path),),
-            )
+        # one at a time per backend, but the store's lock also prevents direct
+        # callers from building the same network twice concurrently.
+        return self._nets.get_or_build(
+            str(param_path),
+            build,
+            companion_paths=(str(bin_path),),
+        )
 
     def _to_mat(self, value):
         """Build the Mat ncnn expects from the tensor a caller declared.
