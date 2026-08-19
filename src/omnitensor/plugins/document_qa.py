@@ -32,7 +32,6 @@ from ..sdk import (
     succeeded_result,
 )
 from .event_workload import (
-    EventWorkloadError,
     MemoryFragmentStore,
     PlainTextAdapter,
     PyMuPdfAdapter,
@@ -40,7 +39,7 @@ from .event_workload import (
     select_sources,
 )
 from .extraction import DocumentExtractor, ExtractionAdapter, ExtractionOutcome
-from .fragments import SourceFragment
+from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
@@ -220,11 +219,15 @@ class DocumentQuestionPlugin(ManagedPlugin):
             seen_citations: set[tuple] = set()
             provider_id = ""
             accelerator = ""
+            # Published once, outside the loop: the store rejects a repeated
+            # reference, so republishing the same question on pass 2 refused
+            # every multi-pass answer.
+            await self._store.publish(request.job_id, (question_fragment,))
             for index, batch in enumerate(passes):
                 cancellation.raise_if_cancelled()
                 await self._store.publish(
                     request.job_id,
-                    (question_fragment, *(span.fragment() for span in batch)),
+                    tuple(span.fragment() for span in batch),
                 )
                 generated = await self._router.run(
                     task,
@@ -294,7 +297,10 @@ class DocumentQuestionPlugin(ManagedPlugin):
             )
         except (
             DocumentQuestionError,
-            EventWorkloadError,
+            # EventWorkloadError subclasses FragmentStoreError; naming the base
+            # keeps a store failure inside the plugin result instead of letting
+            # it escape and kill the job with no result at all.
+            FragmentStoreError,
             GenerationError,
             SDKContractError,
         ) as error:

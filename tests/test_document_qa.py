@@ -9,6 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor.plugins import document_qa
 from omnitensor.plugins.document_qa import (
     EMBEDDING_DIMENSIONS,
     MAX_SPAN_CHARACTERS,
@@ -1021,3 +1022,30 @@ async def test_a_failure_reaches_the_caller_as_a_sentence_not_a_code(tmp_path):
     # person reads is checked here rather than through a whole worker run.
     assert "cut off" in failure_detail("provider-output-truncated")
     assert "could not be read" in failure_detail("selected-file-unavailable")
+
+
+@pytest.mark.asyncio
+async def test_a_selection_needing_several_passes_is_answered_not_refused(tmp_path, monkeypatch):
+    """Regression: the question fragment was republished on every pass.
+
+    ``MemoryFragmentStore.publish`` refuses a repeated reference, so pass two
+    raised ``FragmentStoreError`` — and because only ``EventWorkloadError`` was
+    caught, the error escaped ``execute`` and killed the job with no result.
+    """
+    source = tmp_path / "mars.txt"
+    paragraph = "Mars is red because iron minerals oxidize. " * 60
+    source.write_text("\n\n".join(paragraph for _ in range(4)), encoding="utf-8")
+    monkeypatch.setattr(
+        document_qa,
+        "answer_passes",
+        lambda spans, context_tokens: tuple((span,) for span in spans),
+    )
+    plugin, _embedder, worker, _store = await running_plugin(source)
+
+    result = await plugin.execute(request(source), CancellationController(), Progress())
+
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert len(worker.requests) > 1
+    for _task, generation in worker.requests:
+        assert generation.content_references[0] == "private:job-1:question"
+    assert validate_document("document-question-result.schema.json", result.output) == []

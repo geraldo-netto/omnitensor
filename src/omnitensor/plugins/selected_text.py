@@ -21,8 +21,8 @@ from ..sdk import (
     failed_result,
     succeeded_result,
 )
-from .event_workload import EventWorkloadError, MemoryFragmentStore
-from .fragments import SourceFragment
+from .event_workload import MemoryFragmentStore
+from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
@@ -170,7 +170,10 @@ class SelectedTextPlugin(ManagedPlugin):
             )
         except (
             SelectedTextError,
-            EventWorkloadError,
+            # EventWorkloadError subclasses FragmentStoreError; naming the base
+            # keeps a store failure inside the plugin result instead of letting
+            # it escape and kill the job with no result at all.
+            FragmentStoreError,
             GenerationError,
             SDKContractError,
         ) as error:
