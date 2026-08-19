@@ -2874,16 +2874,26 @@ def test_a_load_that_falls_back_to_the_cpu_is_still_refused(monkeypatch):
     assert calls == ["__startup__", "stop"]
 
 
-def _ncnn(names):
+def _ncnn(names, kinds=None):
+    """A fake ncnn whose devices state their type, as the real one does.
+
+    ncnn reports 0 discrete, 1 integrated, 2 virtual and 3 software (CPU);
+    a device with no type given here is discrete hardware.
+    """
+    types = tuple(kinds) if kinds is not None else (0,) * len(names)
     return SimpleNamespace(
         get_gpu_count=lambda: len(names),
-        get_gpu_info=lambda index: SimpleNamespace(device_name=lambda: names[index]),
+        get_gpu_info=lambda index: SimpleNamespace(
+            device_name=lambda: names[index], type=lambda: types[index]
+        ),
     )
 
 
 def test_the_named_device_is_used_when_it_is_present(monkeypatch):
     monkeypatch.setitem(
-        sys.modules, "ncnn", _ncnn(("integrated", bge.QUALIFIED_DEVICE, "software"))
+        sys.modules,
+        "ncnn",
+        _ncnn(("integrated", bge.QUALIFIED_DEVICE, "llvmpipe"), kinds=(1, 0, 3)),
     )
 
     assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 1
@@ -2916,7 +2926,7 @@ def test_device_selection_refuses_only_when_the_choice_is_genuinely_ambiguous(mo
     The refusal names them, because "qualified BGE Vulkan device is
     unavailable" told somebody with two working GPUs nothing they could act on.
     """
-    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("integrated", "discrete")))
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("integrated", "discrete"), kinds=(1, 0)))
 
     with pytest.raises(ValueError, match="one of: discrete, integrated"):
         bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
@@ -2924,6 +2934,27 @@ def test_device_selection_refuses_only_when_the_choice_is_genuinely_ambiguous(mo
     monkeypatch.setitem(sys.modules, "ncnn", _ncnn(()))
     with pytest.raises(ValueError, match="no Vulkan device is available"):
         bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
+
+
+def test_a_software_device_is_never_embedded_on(monkeypatch):
+    """llvmpipe alone is a refusal, not "the only one there is".
+
+    The sole-device shortcut used to be taken without looking at the type, so
+    a machine whose only Vulkan device was software embedded on the host CPU —
+    the one thing the accelerator rule forbids.
+    """
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("llvmpipe",), kinds=(3,)))
+
+    with pytest.raises(ValueError, match="CPU execution is not used"):
+        bge.vulkan_device_index(bge.QUALIFIED_DEVICE)
+
+
+def test_a_hardware_card_beside_a_software_one_is_unambiguous(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules, "ncnn", _ncnn(("llvmpipe", "AMD Radeon 610M"), kinds=(3, 1))
+    )
+
+    assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 1
 
 
 def test_two_cards_with_the_measured_name_is_still_a_choice(monkeypatch):

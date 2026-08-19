@@ -88,11 +88,18 @@ def _requested_device(candidates, requested):
     return matching[0][2]
 
 
-def select_vulkan_device(
-    runtime,
-    requested: int | VulkanDeviceRequest | None = None,
-) -> VulkanDevice:
-    """Choose the preferred hardware Vulkan device, never a CPU device."""
+def hardware_vulkan_devices(runtime) -> tuple[int, tuple[tuple[int, int, VulkanDevice], ...]]:
+    """Every hardware Vulkan device the runtime reports, and how many it saw.
+
+    The count is returned alongside because "no hardware device" and "no
+    device at all" are different answers: the first means a software (CPU)
+    device was present and refused, which is the no-CPU rule doing its job and
+    has to be said differently from absent hardware.
+
+    Anything that enumerates Vulkan has to come through here.  A second,
+    weaker enumeration elsewhere is how a caller ends up on llvmpipe: it sees
+    one device, calls it the obvious answer, and never looks at its type.
+    """
     try:
         count = runtime.get_gpu_count()
         candidates = []
@@ -113,6 +120,15 @@ def select_vulkan_device(
                 )
     except Exception as error:  # noqa: BLE001 - native loader failures are arbitrary
         raise VulkanSelectionError("enumeration", str(error)) from error
+    return count, tuple(candidates)
+
+
+def select_vulkan_device(
+    runtime,
+    requested: int | VulkanDeviceRequest | None = None,
+) -> VulkanDevice:
+    """Choose the preferred hardware Vulkan device, never a CPU device."""
+    count, candidates = hardware_vulkan_devices(runtime)
     if requested is not None:
         return _requested_device(candidates, requested)
     if not candidates:

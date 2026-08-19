@@ -15,6 +15,7 @@ from pathlib import Path
 # service without the trainers.
 from omnitensor.document_model_runners import BgeTokenizer, VulkanBgeRunner
 from omnitensor.document_model_types import QUERY_PREFIX
+from omnitensor.executors.vulkan import VulkanSelectionError, hardware_vulkan_devices
 from omnitensor.plugins.document_qa import EmbeddingProvider
 from omnitensor.plugins.protocol import CancellationToken
 
@@ -90,7 +91,7 @@ class BgeVulkanEmbedder:
 
 
 def vulkan_device_index(preferred: str) -> int:
-    """The GPU to embed on: the one asked for, or the only one there is.
+    """The GPU to embed on: the one asked for, or the only hardware one there is.
 
     This matched one hardcoded device name and refused everything else, so the
     embedder ran on exactly one card in the world and `ask-selected-files` was
@@ -98,17 +99,32 @@ def vulkan_device_index(preferred: str) -> int:
     A named preference that is present is honoured; otherwise a sole GPU is the
     obvious answer. Only an ambiguous choice is refused, and it says what the
     alternatives were.
+
+    Which devices exist is asked of `select_vulkan_device`'s enumeration, not
+    of a second one here: that one drops software (CPU) Vulkan devices, and
+    the count it also reports separates "only llvmpipe is present" — the
+    no-CPU rule refusing, which used to embed on the host CPU whenever a
+    software device was the only one — from no Vulkan device at all.
     """
     try:
         import ncnn
     except ImportError as error:  # pragma: no cover - dependency boundary
         raise ValueError("ncnn is unavailable") from error
-    names = [ncnn.get_gpu_info(index).device_name() for index in range(ncnn.get_gpu_count())]
-    if not names:
+    try:
+        count, candidates = hardware_vulkan_devices(ncnn)
+    except VulkanSelectionError as error:
+        raise ValueError(error.reason) from error
+    devices = [device for _preference, _index, device in candidates]
+    if not devices:
+        if count > 0:
+            raise ValueError(
+                "only a software (CPU) Vulkan device is present; CPU execution is not used"
+            )
         raise ValueError("no Vulkan device is available")
-    matches = [index for index, name in enumerate(names) if name == preferred]
+    matches = [device for device in devices if device.name == preferred]
     if len(matches) == 1:
-        return matches[0]
-    if len(names) == 1:
-        return 0
-    raise ValueError(f"name the Vulkan device to embed on, one of: {', '.join(sorted(set(names)))}")
+        return matches[0].index
+    if len(devices) == 1:
+        return devices[0].index
+    names = ", ".join(sorted({device.name for device in devices}))
+    raise ValueError(f"name the Vulkan device to embed on, one of: {names}")
