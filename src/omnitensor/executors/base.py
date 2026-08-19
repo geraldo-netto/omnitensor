@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -306,6 +307,72 @@ class ModelStore:
 
     def paths(self) -> tuple[str, ...]:
         return self._cache.paths()
+
+
+class CachingExecutor:
+    """The skeleton every accelerator executor shares.
+
+    All four backends answer availability with the same three-step ladder --
+    is the device present, is the runtime importable, is the runtime usable --
+    hold one :class:`ModelStore` of expensive per-model state, and time one
+    call.  Each had its own copy, and the copies had drifted: the four lanes
+    measured four different things and called them all ``duration_ms``.
+
+    ``duration_ms`` now has exactly one definition, in :meth:`_timed`.
+
+    Subclasses supply ``device_absent_reason`` and ``runtime_missing_reason``,
+    override :meth:`_runtime_health` when the runtime can be present but
+    unusable, and run their work through :meth:`_timed`.
+    """
+
+    backend: str
+    model_formats: frozenset[str]
+    device_absent_reason = "No accelerator device detected"
+    runtime_missing_reason = "the runtime library is not installed"
+
+    def __init__(
+        self,
+        device_present: bool,
+        runtime=None,
+        *,
+        max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._device_present = device_present
+        self._runtime = runtime
+        self._clock = clock
+        self._models = ModelStore(max_cached_models)
+
+    def availability(self) -> Availability:
+        if not self._device_present:
+            return Availability(False, self.device_absent_reason, DEVICE_ABSENT)
+        if self._runtime is None:
+            return Availability(False, self.runtime_missing_reason, RUNTIME_MISSING)
+        return self._runtime_health()
+
+    def _runtime_health(self) -> Availability:
+        """Whether an importable runtime can actually serve this device."""
+        return Availability(True)
+
+    def _timed(self, execute: Callable[[], Iterable]) -> InferenceResult:
+        """Run ``execute`` and report how long the accelerator took.
+
+        ``duration_ms`` is the wall time from the first runtime call that
+        executes the graph until its outputs are in hand.  Deliberately
+        outside it: loading or looking up the model, which is amortised over
+        every later job and would make a cold job incomparable to a warm one,
+        and marshalling the inputs into the runtime's own types.  Deliberately
+        inside it: reading the outputs back, because on lanes like ncnn the
+        compute and the read are the same call and cannot be separated -- so
+        excluding it elsewhere would be the drift, not the fix.
+        """
+        started = self._clock()
+        outputs = list(execute())
+        return InferenceResult(outputs=outputs, duration_ms=(self._clock() - started) * 1000)
+
+    def close(self) -> None:
+        """Release every cached model; safe to call more than once."""
+        self._models.close()
 
 
 def _model_revision(

@@ -12,13 +12,11 @@ import time
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
-    DEVICE_ABSENT,
     FORMAT_UNSUPPORTED,
-    RUNTIME_MISSING,
     RUNTIME_UNUSABLE,
     Availability,
+    CachingExecutor,
     InferenceResult,
-    ModelStore,
     close_executor,
     most_actionable,
     require_available,
@@ -37,9 +35,11 @@ def _import_onnxruntime():  # pragma: no cover - trivial import shim
         return None
 
 
-class GpuExecutor:
+class GpuExecutor(CachingExecutor):
     backend = "gpu"
     model_formats = frozenset({"onnx"})
+    device_absent_reason = "No GPU render node detected"
+    runtime_missing_reason = "onnxruntime is not installed"
 
     def __init__(
         self,
@@ -47,10 +47,14 @@ class GpuExecutor:
         runtime=None,
         *,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+        clock=time.monotonic,
     ):
-        self._device_present = device_present
-        self._runtime = runtime if runtime is not None else _import_onnxruntime()
-        self._sessions = ModelStore(max_cached_models)
+        super().__init__(
+            device_present,
+            runtime if runtime is not None else _import_onnxruntime(),
+            max_cached_models=max_cached_models,
+            clock=clock,
+        )
 
     def _providers(self) -> list[str]:
         return [
@@ -59,11 +63,7 @@ class GpuExecutor:
             if provider in GPU_PROVIDERS
         ]
 
-    def availability(self) -> Availability:
-        if not self._device_present:
-            return Availability(False, "No GPU render node detected", DEVICE_ABSENT)
-        if self._runtime is None:
-            return Availability(False, "onnxruntime is not installed", RUNTIME_MISSING)
+    def _runtime_health(self) -> Availability:
         if not self._providers():
             return Availability(
                 False,
@@ -74,23 +74,16 @@ class GpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        with self._sessions.running():
+        with self._models.running():
             session = self._session_for(model_path)
             feed = {
                 session_input.name: value
                 for session_input, value in zip(session.get_inputs(), inputs, strict=True)
             }
-            started = time.monotonic()
-            outputs = session.run(None, feed)
-            duration_ms = (time.monotonic() - started) * 1000
-            return InferenceResult(outputs=list(outputs), duration_ms=duration_ms)
-
-    def close(self) -> None:
-        """Release every cached session; safe to call more than once."""
-        self._sessions.close()
+            return self._timed(lambda: session.run(None, feed))
 
     def _session_for(self, model_path: str):
-        return self._sessions.get_or_build(
+        return self._models.get_or_build(
             model_path,
             lambda: self._runtime.InferenceSession(model_path, providers=self._providers()),
         )

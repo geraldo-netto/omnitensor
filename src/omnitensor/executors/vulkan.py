@@ -21,8 +21,8 @@ from .base import (
     RUNTIME_MISSING,
     RUNTIME_UNUSABLE,
     Availability,
+    CachingExecutor,
     InferenceResult,
-    ModelStore,
 )
 
 # How long a failed enumeration is trusted before the next question retries
@@ -175,9 +175,11 @@ def _import_ncnn():  # pragma: no cover - trivial import shim
         return None
 
 
-class VulkanGpuExecutor:
+class VulkanGpuExecutor(CachingExecutor):
     backend = "gpu"
     model_formats = frozenset({"ncnn"})
+    device_absent_reason = "No GPU render node detected"
+    runtime_missing_reason = "ncnn is not installed"
 
     def __init__(
         self,
@@ -189,18 +191,20 @@ class VulkanGpuExecutor:
         selection_retry_seconds: float = SELECTION_RETRY_SECONDS,
         clock=time.monotonic,
     ):
-        self._device_present = device_present
-        self._runtime = runtime if runtime is not None else _import_ncnn()
+        super().__init__(
+            device_present,
+            runtime if runtime is not None else _import_ncnn(),
+            max_cached_models=max_cached_models,
+            clock=clock,
+        )
         self._requested_device = requested_device
         self._selection_retry_seconds = selection_retry_seconds
-        self._clock = clock
         # Written by run() in a dedicated off-loop thread and read by
         # availability() on the event loop thread; the lock makes the
         # publication of the answer safe across threads.
         self._selected: tuple[int, str] | None = None
         self._failure: tuple[str, float] | None = None
         self._selection_lock = threading.Lock()
-        self._nets = ModelStore(max_cached_models)
 
     def _select_device(self) -> tuple[int | None, str]:
         """Choose a device once and keep the answer.
@@ -250,15 +254,18 @@ class VulkanGpuExecutor:
                 return None, f"Vulkan device enumeration failed: {error.reason}"
             return None, error.reason
 
-    def availability(self) -> Availability:
+    def _runtime_health(self) -> Availability:
         device, reason, code = self._available_device()
         return Availability(device is not None, reason, code)
 
     def _available_device(self) -> tuple[int | None, str, str]:
+        # run() needs the chosen index as well as the verdict, so this stays
+        # separate from the base class's availability() ladder rather than
+        # enumerating twice.
         if not self._device_present:
-            return None, "No GPU render node detected", DEVICE_ABSENT
+            return None, self.device_absent_reason, DEVICE_ABSENT
         if self._runtime is None:
-            return None, "ncnn is not installed", RUNTIME_MISSING
+            return None, self.runtime_missing_reason, RUNTIME_MISSING
         device, reason = self._select_device()
         return device, reason, "" if device is not None else RUNTIME_UNUSABLE
 
@@ -272,7 +279,7 @@ class VulkanGpuExecutor:
         # The store counts this job in flight for the whole block, so an
         # eviction or a close from another thread parks the Net's teardown
         # until after the extractor below has been released.
-        with self._nets.running():
+        with self._models.running():
             return self._extract(self._loaded(model_path, device), inputs)
 
     def _extract(self, net, inputs: list) -> InferenceResult:
@@ -282,17 +289,7 @@ class VulkanGpuExecutor:
             output_names = net.output_names()
             for name, value in zip(input_names, inputs, strict=True):
                 extractor.input(name, self._to_mat(value))
-            started = time.monotonic()
-            outputs = []
-            for name in output_names:
-                code, mat = extractor.extract(name)
-                if code != 0:
-                    raise RuntimeError(f"ncnn extraction failed for output {name}")
-                # Copied out of the Mat here, while the Net that owns its
-                # memory is still alive.
-                outputs.append(self._from_mat(mat))
-                del mat
-            duration_ms = (time.monotonic() - started) * 1000
+            result = self._timed(lambda: self._extracted(extractor, output_names))
         finally:
             # The extractor holds Vulkan memory the Net's allocators own, and
             # nothing ordered their teardown: letting both fall out of scope
@@ -302,8 +299,22 @@ class VulkanGpuExecutor:
             # to be handed to a later job. The Net now outlives the job, so
             # this orders the extractor's release before anything else can
             # drop the last reference to the Net that owns those allocators.
-            del extractor
-        return InferenceResult(outputs=outputs, duration_ms=duration_ms)
+            # Rebound rather than deleted only so the timed closure above can
+            # still name it; either way this drops the last reference here.
+            extractor = None
+        return result
+
+    def _extracted(self, extractor, output_names) -> list:
+        outputs = []
+        for name in output_names:
+            code, mat = extractor.extract(name)
+            if code != 0:
+                raise RuntimeError(f"ncnn extraction failed for output {name}")
+            # Copied out of the Mat here, while the Net that owns its
+            # memory is still alive.
+            outputs.append(self._from_mat(mat))
+            del mat
+        return outputs
 
     def close(self) -> None:
         """Release every loaded network; safe to call more than once.
@@ -311,7 +322,7 @@ class VulkanGpuExecutor:
         A network still under a running extraction is released once that job
         leaves, never underneath it.
         """
-        self._nets.close()
+        super().close()
 
     def _loaded(self, model_path: str, device: int):
         """The network for this model on this device, built at most once.
@@ -361,7 +372,7 @@ class VulkanGpuExecutor:
         # the parameter path together identify the model/device pair. Jobs run
         # one at a time per backend, but the store's lock also prevents direct
         # callers from building the same network twice concurrently.
-        return self._nets.get_or_build(
+        return self._models.get_or_build(
             str(param_path),
             build,
             companion_paths=(str(bin_path),),

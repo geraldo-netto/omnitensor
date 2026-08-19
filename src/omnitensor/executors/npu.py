@@ -13,12 +13,10 @@ import time
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
-    DEVICE_ABSENT,
-    RUNTIME_MISSING,
     RUNTIME_UNUSABLE,
     Availability,
+    CachingExecutor,
     InferenceResult,
-    ModelStore,
     require_available,
 )
 
@@ -34,9 +32,11 @@ def _import_openvino():  # pragma: no cover - trivial import shim
         return None
 
 
-class NpuExecutor:
+class NpuExecutor(CachingExecutor):
     backend = "npu"
     model_formats = frozenset({"openvino", "onnx"})
+    device_absent_reason = "No /dev/accel NPU device detected"
+    runtime_missing_reason = "openvino is not installed"
 
     def __init__(
         self,
@@ -44,12 +44,16 @@ class NpuExecutor:
         runtime=None,
         *,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+        clock=time.monotonic,
     ):
-        self._device_present = device_present
-        self._runtime = runtime if runtime is not None else _import_openvino()
+        super().__init__(
+            device_present,
+            runtime if runtime is not None else _import_openvino(),
+            max_cached_models=max_cached_models,
+            clock=clock,
+        )
         self._core = None
         self._core_lock = threading.Lock()
-        self._compiled_models = ModelStore(max_cached_models)
 
     def _ensure_core(self):
         # availability() runs on the event loop thread while run() executes in
@@ -60,11 +64,7 @@ class NpuExecutor:
                 self._core = self._runtime.Core()
             return self._core
 
-    def availability(self) -> Availability:
-        if not self._device_present:
-            return Availability(False, "No /dev/accel NPU device detected", DEVICE_ABSENT)
-        if self._runtime is None:
-            return Availability(False, "openvino is not installed", RUNTIME_MISSING)
+    def _runtime_health(self) -> Availability:
         try:
             devices = self._ensure_core().available_devices
         except Exception as error:  # noqa: BLE001 - plugin discovery can fail arbitrarily
@@ -79,19 +79,12 @@ class NpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        with self._compiled_models.running():
+        with self._models.running():
             compiled = self._compiled_model_for(model_path)
-            started = time.monotonic()
-            outputs = compiled(inputs)
-            duration_ms = (time.monotonic() - started) * 1000
-            return InferenceResult(outputs=list(outputs.values()), duration_ms=duration_ms)
-
-    def close(self) -> None:
-        """Release every compiled model; safe to call more than once."""
-        self._compiled_models.close()
+            return self._timed(lambda: compiled(inputs).values())
 
     def _compiled_model_for(self, model_path: str):
-        return self._compiled_models.get_or_build(
+        return self._models.get_or_build(
             model_path,
             lambda: self._ensure_core().compile_model(model_path, OPENVINO_DEVICE),
         )

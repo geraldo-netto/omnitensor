@@ -7,9 +7,6 @@ from pathlib import Path
 import pytest
 from conftest import sample_manifest
 
-import omnitensor.executors.gpu as gpu_module
-import omnitensor.executors.npu as npu_module
-import omnitensor.executors.tpu as tpu_module
 from omnitensor.executors.base import (
     DEVICE_ABSENT,
     FORMAT_UNSUPPORTED,
@@ -138,13 +135,11 @@ def test_tpu_executor_rejects_wrong_input_count():
         executor.run("model.tflite", [[1], [2]])
 
 
-def test_tpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+def test_tpu_executor_reports_inference_duration_in_milliseconds():
     ticks = iter([10.0, 10.25])
-    monkeypatch.setattr(tpu_module.time, "monotonic", lambda: next(ticks))
-    result = TpuExecutor(device_present=True, runtime=FakeTfliteRuntime()).run(
-        "model.tflite",
-        [[1]],
-    )
+    result = TpuExecutor(
+        device_present=True, runtime=FakeTfliteRuntime(), clock=lambda: next(ticks)
+    ).run("model.tflite", [[1]])
     assert result.duration_ms == 250.0
 
 
@@ -229,7 +224,7 @@ def test_gpu_executor_evicts_the_least_recently_used_session(tmp_path):
         gamma,
         beta,
     ]
-    assert executor._sessions.paths() == (gamma, beta)
+    assert executor._models.paths() == (gamma, beta)
 
 
 def test_gpu_executor_rejects_wrong_input_count():
@@ -239,11 +234,12 @@ def test_gpu_executor_rejects_wrong_input_count():
         executor.run("model.onnx", [[1], [2]])
 
 
-def test_gpu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+def test_gpu_executor_reports_inference_duration_in_milliseconds():
     ticks = iter([10.0, 10.25])
-    monkeypatch.setattr(gpu_module.time, "monotonic", lambda: next(ticks))
 
-    result = GpuExecutor(device_present=True, runtime=CountingOrtRuntime()).run("model.onnx", [[1]])
+    result = GpuExecutor(
+        device_present=True, runtime=CountingOrtRuntime(), clock=lambda: next(ticks)
+    ).run("model.onnx", [[1]])
 
     assert result.duration_ms == 250.0
 
@@ -973,7 +969,7 @@ def test_npu_executor_reuses_one_compiled_model_per_path(tmp_path):
     assert executor._core.compiled_paths == [alpha, beta]
 
 
-def test_npu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
+def test_npu_executor_reports_inference_duration_in_milliseconds():
     class Compiled:
         def __call__(self, inputs):
             return {"output": inputs[0]}
@@ -990,8 +986,9 @@ def test_npu_executor_reports_inference_duration_in_milliseconds(monkeypatch):
     Runtime.Core = Core
 
     ticks = iter([10.0, 10.25])
-    monkeypatch.setattr(npu_module.time, "monotonic", lambda: next(ticks))
-    result = NpuExecutor(device_present=True, runtime=Runtime()).run("model.xml", [[1]])
+    result = NpuExecutor(device_present=True, runtime=Runtime(), clock=lambda: next(ticks)).run(
+        "model.xml", [[1]]
+    )
     assert result.duration_ms == 250.0
 
 
@@ -1480,10 +1477,73 @@ def test_closing_an_executor_releases_its_cached_runtime_state(tmp_path):
     executor.close()
     executor.close()
 
-    assert executor._interpreters.paths() == ()
+    assert executor._models.paths() == ()
 
 
 @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "2"])
 def test_the_model_cache_bound_is_a_positive_integer(bad):
     with pytest.raises(ValueError, match="max_entries"):
         ModelCache(bad)
+
+
+def test_every_lane_measures_the_same_thing_as_duration_ms():
+    """The four lanes each timed something different and called it all
+    duration_ms, so the number was not comparable across backends.  One
+    definition now: the window opens at the runtime call that executes the
+    graph and closes once its outputs are in hand -- never around the model
+    build, and never around marshalling the inputs."""
+    log = []
+
+    class LoggingInterpreter(FakeTfliteInterpreter):
+        def __init__(self, model_path, experimental_delegates):
+            log.append("build")
+            super().__init__(model_path, experimental_delegates)
+
+        def set_tensor(self, index, value):
+            log.append("marshal-input")
+            super().set_tensor(index, value)
+
+        def invoke(self):
+            log.append("execute")
+            super().invoke()
+
+        def get_tensor(self, index):
+            log.append("read-output")
+            return super().get_tensor(index)
+
+    class LoggingTflite(FakeTfliteRuntime):
+        Interpreter = LoggingInterpreter
+
+    class LoggingSession(FakeOrtSession):
+        def __init__(self, model_path, providers):
+            log.append("build")
+            super().__init__(model_path, providers)
+
+        def run(self, outputs, feed):
+            log.append("execute")
+            log.append("read-output")
+            return super().run(outputs, feed)
+
+    class LoggingOrt(FakeOrtRuntime):
+        InferenceSession = LoggingSession
+
+    lanes = (
+        (TpuExecutor(device_present=True, runtime=LoggingTflite()), "model.tflite"),
+        (
+            GpuExecutor(device_present=True, runtime=LoggingOrt(["CUDAExecutionProvider"])),
+            "model.onnx",
+        ),
+    )
+    for executor, model_path in lanes:
+        executor._clock = lambda: (log.append("clock"), 0.0)[1]
+        log.clear()
+
+        executor.run(model_path, [[1]])
+
+        # Building the model falls before the first clock reading, as does
+        # any marshalling of the inputs; the execute and the output read fall
+        # between the two readings.
+        opened = log.index("clock")
+        assert "build" in log[:opened]
+        assert "execute" not in log[:opened]
+        assert log[opened:] == ["clock", "execute", "read-output", "clock"]

@@ -13,12 +13,10 @@ import time
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
-    DEVICE_ABSENT,
-    RUNTIME_MISSING,
     RUNTIME_UNUSABLE,
     Availability,
+    CachingExecutor,
     InferenceResult,
-    ModelStore,
     require_available,
 )
 
@@ -39,9 +37,11 @@ def _import_tflite():  # pragma: no cover - trivial import shim
         return None
 
 
-class TpuExecutor:
+class TpuExecutor(CachingExecutor):
     backend = "tpu"
     model_formats = frozenset({"tflite-edgetpu"})
+    device_absent_reason = "No Coral Edge TPU device detected"
+    runtime_missing_reason = "tflite-runtime is not installed"
 
     def __init__(
         self,
@@ -52,27 +52,26 @@ class TpuExecutor:
         clock=time.monotonic,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
     ):
-        self._device_present = device_present
-        self._runtime = runtime if runtime is not None else _import_tflite()
+        super().__init__(
+            device_present,
+            runtime if runtime is not None else _import_tflite(),
+            max_cached_models=max_cached_models,
+            clock=clock,
+        )
         self._delegate_retry_seconds = delegate_retry_seconds
-        self._clock = clock
         # Written by run() in a dedicated off-loop thread and read by
         # availability() on the event loop thread; the lock makes the
         # publication of the error text safe across threads.  The timestamp is
         # what keeps the failure from latching.
         self._delegate_error: tuple[str, float] | None = None
         self._delegate_error_lock = threading.Lock()
-        # Interpreters are expensive model-specific runtime state.  The
-        # scheduler serializes TPU work; this lock also preserves that safety
-        # when callers use the executor directly from multiple threads.
-        self._interpreters = ModelStore(max_cached_models)
+        # Interpreters are expensive model-specific runtime state, cached by
+        # the base class.  The scheduler serializes TPU work; this lock also
+        # preserves that safety when callers use the executor directly from
+        # multiple threads.
         self._interpreter_lock = threading.Lock()
 
-    def availability(self) -> Availability:
-        if not self._device_present:
-            return Availability(False, "No Coral Edge TPU device detected", DEVICE_ABSENT)
-        if self._runtime is None:
-            return Availability(False, "tflite-runtime is not installed", RUNTIME_MISSING)
+    def _runtime_health(self) -> Availability:
         with self._delegate_error_lock:
             failure = self._delegate_error
         if failure is not None and self._clock() - failure[1] < self._delegate_retry_seconds:
@@ -80,9 +79,7 @@ class TpuExecutor:
         return Availability(True)
 
     def _interpreter_for(self, model_path: str):
-        return self._interpreters.get_or_build(
-            model_path, lambda: self._build_interpreter(model_path)
-        )
+        return self._models.get_or_build(model_path, lambda: self._build_interpreter(model_path))
 
     def _build_interpreter(self, model_path: str):
         try:
@@ -103,20 +100,19 @@ class TpuExecutor:
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
-        with self._interpreters.running(), self._interpreter_lock:
+        with self._models.running(), self._interpreter_lock:
             interpreter = self._interpreter_for(model_path)
             input_details = interpreter.get_input_details()
             for detail, value in zip(input_details, inputs, strict=True):
                 interpreter.set_tensor(detail["index"], value)
-            started = time.monotonic()
-            interpreter.invoke()
-            duration_ms = (time.monotonic() - started) * 1000
-            outputs = [
-                interpreter.get_tensor(detail["index"])
-                for detail in interpreter.get_output_details()
-            ]
-        return InferenceResult(outputs=outputs, duration_ms=duration_ms)
+            # Reading the output tensors is inside the measured window, the
+            # same as every other lane: invoke() alone timed less of the work
+            # than the other three backends reported under the same name.
+            return self._timed(lambda: self._invoked(interpreter))
 
-    def close(self) -> None:
-        """Release every cached interpreter; safe to call more than once."""
-        self._interpreters.close()
+    @staticmethod
+    def _invoked(interpreter) -> list:
+        interpreter.invoke()
+        return [
+            interpreter.get_tensor(detail["index"]) for detail in interpreter.get_output_details()
+        ]
