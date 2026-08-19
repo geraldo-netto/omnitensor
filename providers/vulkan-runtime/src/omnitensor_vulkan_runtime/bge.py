@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import math
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -44,6 +45,8 @@ class BgeVulkanEmbedder:
             raise ValueError("accelerator lease is unavailable")
         self._lease_path = lease_path
         self._descriptor = EmbeddingProvider("bge-small-documents-gpu", "gpu", model_sha256, True)
+        self._runner = None
+        self._runner_lock = threading.Lock()
 
     @property
     def descriptor(self) -> EmbeddingProvider:
@@ -64,6 +67,46 @@ class BgeVulkanEmbedder:
         cancellation.raise_if_cancelled()
         return vectors
 
+    async def aclose(self) -> None:
+        """Release the loaded model; safe to call more than once."""
+        await asyncio.to_thread(self.close)
+
+    def close(self) -> None:
+        """Unload under the lease, so no embed is running on what is released."""
+        with self._lease_path.open("a+b") as lease:
+            fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
+            with self._runner_lock:
+                runner, self._runner = self._runner, None
+        if runner is not None:
+            release = getattr(runner, "close", None)
+            if callable(release):
+                release()
+
+    def _runner_under_lease(self):
+        """The tokenizer, device and loaded model, built at most once.
+
+        This was rebuilt on every embed call: a fresh tokenizer, a fresh ncnn
+        ``Net`` — reading the weights and compiling every layer's shaders —
+        and a fresh Vulkan enumeration, which initialises the loader and
+        queries every driver. That is the 60–190 ms
+        ``omnitensor.executors.vulkan`` documents and caches, paid per
+        question rather than per worker, and nothing released the runner it
+        replaced either.
+
+        The caller holds the cross-process lease, so the model is loaded while
+        this worker owns the GPU; the lock only keeps two of this process's
+        embed threads from loading it twice.
+        """
+        with self._runner_lock:
+            if self._runner is None:
+                tokenizer = BgeTokenizer(self._tokenizer)
+                self._runner = VulkanBgeRunner(
+                    self._model,
+                    tokenizer,
+                    device_index=vulkan_device_index(self._device or QUALIFIED_DEVICE),
+                )
+            return self._runner
+
     def _embed_sync(
         self,
         texts: tuple[str, ...],
@@ -72,12 +115,7 @@ class BgeVulkanEmbedder:
     ) -> tuple[tuple[float, ...], ...]:
         with self._lease_path.open("a+b") as lease:
             fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
-            tokenizer = BgeTokenizer(self._tokenizer)
-            runner = VulkanBgeRunner(
-                self._model,
-                tokenizer,
-                device_index=vulkan_device_index(self._device or QUALIFIED_DEVICE),
-            )
+            runner = self._runner_under_lease()
             vectors = []
             for text in texts:
                 if cancellation is not None:

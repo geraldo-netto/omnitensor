@@ -93,6 +93,10 @@ class VulkanBgeRunner:
         if self._net.load_param(str(param)) != 0 or self._net.load_model(str(binary)) != 0:
             raise DocumentModelError("native-invalid", "cannot load the compiled ncnn model")
 
+    def close(self) -> None:
+        """Release the network and the Vulkan memory behind it."""
+        self._net.clear()
+
     def embed(self, text: str):
         try:
             import numpy  # noqa: PLC0415

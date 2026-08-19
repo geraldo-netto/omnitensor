@@ -2344,6 +2344,19 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
     )
 
 
+class _RecordingEmbedder:
+    """Stands in for the BGE embedder, whose start and stop are both observed."""
+
+    def __init__(self, calls):
+        self._calls = calls
+
+    async def preflight(self):
+        self._calls.append(("preflight",))
+
+    async def aclose(self):
+        self._calls.append(("embedder-closed",))
+
+
 def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
     calls = []
     health = object()
@@ -2375,13 +2388,9 @@ def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
         async def terminate(self, request_id):
             calls.append(("terminate", request_id))
 
-    class Embedder:
-        async def preflight(self):
-            calls.append(("preflight",))
-
     plugin = Plugin()
     native = Native()
-    embedder = Embedder()
+    embedder = _RecordingEmbedder(calls)
     receipt = _qualification()
     monkeypatch.setattr(
         factories,
@@ -2404,6 +2413,7 @@ def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
         ("preflight",),
         ("execute", "request", "cancel", "progress"),
         ("terminate", "__startup__"),
+        ("embedder-closed",),
         ("stop",),
     ]
 
@@ -2999,6 +3009,44 @@ def test_bge_embedder_uses_the_selected_device_and_query_prefix(tmp_path, monkey
         "a" * 64,
         True,
     )
+
+
+def test_the_model_is_loaded_once_per_embedder_not_once_per_embed(tmp_path, monkeypatch):
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    builds = []
+    enumerations = []
+
+    class FakeRunner:
+        device_name = "whatever this machine has"
+
+        def __init__(self, *_args, **_kwargs):
+            builds.append(1)
+            self.closed = False
+
+        def embed(self, _text):
+            return [0.5] * 384
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(bge, "BgeTokenizer", lambda path: path)
+    monkeypatch.setattr(bge, "VulkanBgeRunner", FakeRunner)
+    monkeypatch.setattr(bge, "vulkan_device_index", lambda _preferred: enumerations.append(1) or 0)
+    embedder = bge.BgeVulkanEmbedder(tmp_path / "model", tmp_path / "tokenizer", "a" * 64, lease)
+
+    embedder._embed_sync(("one",), False, None)
+    embedder._embed_sync(("two",), False, None)
+
+    assert builds == [1], "the ncnn model was rebuilt for a second question"
+    assert enumerations == [1], "Vulkan was re-enumerated for a second question"
+
+    runner = embedder._runner
+    asyncio.run(embedder.aclose())
+    asyncio.run(embedder.aclose())
+    assert runner.closed
+    embedder._embed_sync(("three",), False, None)
+    assert builds == [1, 1], "a closed embedder did not reload"
 
 
 def test_a_caller_may_name_the_device_to_embed_on(tmp_path, monkeypatch):

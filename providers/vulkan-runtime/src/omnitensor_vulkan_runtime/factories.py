@@ -154,6 +154,8 @@ class QualifiedWorkload:
             failure = _capture_sync_failure(self._clear_load_receipt, failure)
         for runtime, _model_path, _qualification in self._runtimes:
             failure = await _capture_async_failure(runtime.terminate("__startup__"), failure)
+        if self._embedder is not None:
+            failure = await _capture_async_failure(self._embedder.aclose(), failure)
         failure = await _capture_async_failure(self._plugin.stop(), failure)
         if not clear_receipt_first:
             failure = _capture_sync_failure(self._clear_load_receipt, failure)
