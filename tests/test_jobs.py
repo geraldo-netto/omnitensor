@@ -1314,3 +1314,72 @@ def test_the_fail_closed_dispatcher_refuses_at_admission_as_well_as_at_dispatch(
 
     assert admission.value.code == dispatched.value.code == "dispatch-unavailable"
     assert admission.value.message == dispatched.value.message
+
+
+def test_an_observer_failure_never_rejects_a_job_that_is_already_running():
+    """OMNI-0412: the reply and the capacity slot must agree with reality."""
+
+    class ExplodingObserver:
+        def job_started(self, workload_id):
+            raise RuntimeError("publisher is down")
+
+        def job_finished(self, workload_id, status, detail=""):
+            pass
+
+    async def scenario():
+        dispatcher = BlockingDispatcher()
+        service = JobSubmissionService(
+            dispatcher,
+            allows_all(),
+            id_factory=lambda: "job-observed",
+            observer=ExplodingObserver(),
+        )
+
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
+
+        assert reply["status"] == "accepted"
+        assert service.active_job_ids() == ("job-observed",)
+        dispatcher.release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert service.active_job_ids() == ()
+
+    run_scenario(scenario())
+
+
+def test_a_rejected_submission_leaves_no_running_job_holding_capacity():
+    """OMNI-0412: an internal-error reply must not strand the started task."""
+
+    async def scenario():
+        dispatcher = BlockingDispatcher()
+        service = JobSubmissionService(
+            dispatcher,
+            allows_all(),
+            id_factory=lambda: "job-stranded",
+        )
+        service._reply = _failing_once(service._reply)
+        before = asyncio.all_tasks()
+
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
+
+        assert reply["status"] == "rejected"
+        assert reply["code"] == "internal-error"
+        assert service.active_job_ids() == ()
+        started = asyncio.all_tasks() - before
+        assert started
+        await asyncio.gather(*started, return_exceptions=True)
+        assert all(task.cancelled() for task in started)
+
+    run_scenario(scenario())
+
+
+def _failing_once(reply):
+    state = {"failed": False}
+
+    def guarded(*args, **kwargs):
+        if not state["failed"] and args[2] == "accepted":
+            state["failed"] = True
+            raise RuntimeError("acknowledgement encoding failed")
+        return reply(*args, **kwargs)
+
+    return guarded

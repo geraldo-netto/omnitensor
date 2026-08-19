@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import math
 import secrets
 import time
@@ -34,6 +35,8 @@ from .job_ports import (
 )
 from .plugins.job_results import JobRecord, JobResultError, JobResultStore
 from .plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
+
+LOGGER = logging.getLogger("omnitensor.jobs")
 
 DEFAULT_MAX_ACTIVE_JOBS = 128
 MAX_ACTIVE_JOBS_LIMIT = 1024
@@ -163,6 +166,7 @@ class JobSubmissionService:
         return tuple(sorted(self._active))
 
     async def submit_job_text(self, text: str, *, owner: str = ANONYMOUS_OWNER) -> str:
+        started_job_id: str | None = None
         try:
             document = _parse_request(
                 text,
@@ -195,20 +199,7 @@ class JobSubmissionService:
                 # refused job leaves nothing behind for a caller to poll and
                 # occupies no scheduler slot.
                 self._admission.admit(request.workload_id, request.payload)
-            job_id = self._id_factory()
-            _validate_identifier("generated job ID", job_id)
-            if job_id in self._active:
-                raise RuntimeError("job ID collision")
-            operation = self._dispatcher.dispatch(job_id, request.workload_id, request.payload)
-            task = asyncio.ensure_future(operation)
-            self._active[job_id] = _ActiveJob(request.workload_id, task, owner)
-            self._observer.job_started(request.workload_id)
-            # Recorded before the reply so a caller that polls immediately sees
-            # a queued job rather than a job it cannot distinguish from a hang.
-            self.note_progress(job_id, "queued", 0.0, "Job accepted and queued")
-            task.add_done_callback(
-                lambda completed, current_id=job_id: self._job_completed(current_id, completed)
-            )
+            started_job_id = job_id = self._begin_job(request, owner)
             return self._reply(
                 request.request_id,
                 job_id,
@@ -234,6 +225,9 @@ class JobSubmissionService:
                 error.message,
             )
         except Exception:
+            # The caller is being told the job was rejected, so nothing may
+            # keep running on its behalf or keep holding a capacity slot.
+            self._abandon_job(started_job_id)
             return self._reply(
                 _request_id_from_text(text, self._max_request_bytes),
                 None,
@@ -241,6 +235,45 @@ class JobSubmissionService:
                 "internal-error",
                 "Internal error while submitting the job",
             )
+
+    def _begin_job(self, request: JobRequest, owner: str) -> str:
+        """Mint an id, start the operation and register it, then notify."""
+        job_id = self._id_factory()
+        _validate_identifier("generated job ID", job_id)
+        if job_id in self._active:
+            raise RuntimeError("job ID collision")
+        operation = self._dispatcher.dispatch(job_id, request.workload_id, request.payload)
+        task = asyncio.ensure_future(operation)
+        self._active[job_id] = _ActiveJob(request.workload_id, task, owner)
+        # Attached before anything else can raise.  A failure between the
+        # registration above and the reply to the caller would otherwise leave
+        # a running task whose outcome is never recorded and whose _active
+        # entry is never removed, so it would count against max_active_jobs
+        # for the life of the process and every later submission would end in
+        # permanent capacity-exceeded.
+        task.add_done_callback(
+            lambda completed, current_id=job_id: self._job_completed(current_id, completed)
+        )
+        # Observers are host code: the publishing observer writes a file.  Its
+        # failure is an outage of one output, not a reason to tell the caller
+        # that its already-running job was rejected.
+        try:
+            self._observer.job_started(request.workload_id)
+            # Recorded before the reply so a caller that polls immediately
+            # sees a queued job rather than a job it cannot distinguish from
+            # a hang.
+            self.note_progress(job_id, "queued", 0.0, "Job accepted and queued")
+        except Exception:  # noqa: BLE001 - observers are host code
+            LOGGER.exception("Job observer failed for accepted job %s", job_id)
+        return job_id
+
+    def _abandon_job(self, job_id: str | None) -> None:
+        """Stop and deregister a job whose caller is being told it was rejected."""
+        if job_id is None:
+            return
+        active = self._active.pop(job_id, None)
+        if active is not None:
+            active.task.cancel()
 
     async def cancel_job_text(self, text: str, *, owner: str = ANONYMOUS_OWNER) -> str:
         try:
