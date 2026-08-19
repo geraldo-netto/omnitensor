@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import functools
 import pickle
 import subprocess
 import sys
@@ -255,65 +256,132 @@ def test_authenticated_launch_receives_live_facade_session_hooks(monkeypatch):
     }
 
 
-def test_recovery_catches_the_live_facade_start_error(monkeypatch):
-    class LiveStartError(Exception):
-        def __init__(self, detail, pid, *, charges_restart=True):
-            self.detail = detail
-            self.pid = pid
-            self.charges_restart = charges_restart
-            super().__init__(detail)
+def test_recovery_catches_the_real_start_error_whatever_the_facade_is_rebound_to():
+    """OMNI-0452: the caught type is the imported class, not a registry lookup.
 
-    monkeypatch.setattr(supervisor, "_WorkerStartError", LiveStartError)
+    `recover_worker` used to resolve the exception type out of
+    `sys.modules['omnitensor.plugins.supervisor']`, so anything rebinding
+    `supervisor._WorkerStartError` made it stop catching launch failures and
+    the recovery task died silently.
+    """
 
-    async def scenario():
-        observed = []
+    class DecoyError(Exception):
+        pass
 
-        class Host:
-            def __init__(self):
-                self._lock = asyncio.Lock()
-                self._running = True
-                self._recovery_policy = recovery.WorkerRecoveryPolicy(
-                    max_restarts=1,
-                    initial_backoff_seconds=0.0001,
-                    max_backoff_seconds=0.0001,
-                )
-                self._recoveries = {"worker": asyncio.current_task()}
-                self._restart_attempts = {"worker": 0}
-                self._statuses = {
-                    "worker": diagnostics.WorkerStatus(
-                        "worker",
-                        diagnostics.WorkerState.FAILED,
-                        5,
-                        1,
-                        "failed",
-                    )
-                }
-                self._stop_timeout = 0.1
+    original = supervisor._WorkerStartError
+    supervisor._WorkerStartError = DecoyError
+    try:
+        host, observed = asyncio.run(_exhaust_one_restart())
+    finally:
+        supervisor._WorkerStartError = original
 
-            async def _cancel_orphaned_jobs(self, plugin_id, detail):
-                observed.append(("orphans", plugin_id, detail))
-
-            async def _launch_authenticated(self, spec):
-                raise LiveStartError("restart failed", 6)
-
-            def _record_diagnostic(self, diagnostic):
-                observed.append(diagnostic)
-
-        host = Host()
-        await recovery.recover_worker(
-            host,
-            process.WorkerSpec("worker", ("python",)),
-            "exited",
-            force_stop=lambda *_args: None,
-        )
-        return host, observed
-
-    host, observed = asyncio.run(scenario())
     assert host._statuses["worker"].state is diagnostics.WorkerState.EXHAUSTED
     assert [item.code for item in observed[1:]] == [
         diagnostics.WorkerDiagnosticCode.RESTART_FAILED,
         diagnostics.WorkerDiagnosticCode.EXHAUSTED,
     ]
+
+
+async def _exhaust_one_restart():
+    observed = []
+
+    class Host:
+        def __init__(self):
+            self._lock = asyncio.Lock()
+            self._running = True
+            self._recovery_policy = recovery.WorkerRecoveryPolicy(
+                max_restarts=1,
+                initial_backoff_seconds=0.0001,
+                max_backoff_seconds=0.0001,
+            )
+            self._recoveries = {"worker": asyncio.current_task()}
+            self._restart_attempts = {"worker": 0}
+            self._statuses = {
+                "worker": diagnostics.WorkerStatus(
+                    "worker",
+                    diagnostics.WorkerState.FAILED,
+                    5,
+                    1,
+                    "failed",
+                )
+            }
+            self._stop_timeout = 0.1
+
+        async def _cancel_orphaned_jobs(self, plugin_id, detail):
+            observed.append(("orphans", plugin_id, detail))
+
+        async def _launch_authenticated(self, spec):
+            raise session.WorkerStartError("restart failed", 6)
+
+        def _record_diagnostic(self, diagnostic):
+            observed.append(diagnostic)
+
+    host = Host()
+    await recovery.recover_worker(
+        host,
+        process.WorkerSpec("worker", ("python",)),
+        "exited",
+        force_stop=lambda *_args: None,
+    )
+    return host, observed
+
+
+def test_a_recovery_task_that_dies_leaves_a_diagnostic_and_no_stale_entry():
+    """OMNI-0407: nothing awaits the task `monitor_worker` creates."""
+    observed = []
+
+    class Host:
+        def __init__(self):
+            self._restart_attempts = {"worker": 2}
+            self._record_diagnostic = observed.append
+
+    async def scenario():
+        host = Host()
+
+        async def explode():
+            raise RuntimeError("boom")
+
+        task = asyncio.ensure_future(explode())
+        host._recoveries = {"worker": task}
+        task.add_done_callback(functools.partial(recovery._recovery_finished, host, "worker"))
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+        return host
+
+    host = asyncio.run(scenario())
+
+    assert host._recoveries == {}
+    [diagnostic] = observed
+    assert diagnostic.code is diagnostics.WorkerDiagnosticCode.RESTART_FAILED
+    assert diagnostic.detail == "recovery task failed: RuntimeError"
+    assert diagnostic.restart_attempt == 2
+
+
+def test_recovery_survives_a_revoke_that_forgot_the_plugin_mid_flight():
+    """OMNI-0407: `revoke` pops both maps a recovery indexed with bare `[]`."""
+
+    class Host:
+        _lock = asyncio.Lock()
+        _running = False
+        _recovery_policy = recovery.WorkerRecoveryPolicy(max_restarts=1)
+        _recoveries: dict = {}
+        _restart_attempts: dict = {}
+        _statuses: dict = {}
+
+        async def _cancel_orphaned_jobs(self, plugin_id, detail):
+            return None
+
+        def _record_diagnostic(self, diagnostic):
+            return None
+
+    asyncio.run(
+        recovery.recover_worker(
+            Host(),
+            process.WorkerSpec("worker", ("python",)),
+            "exited",
+            force_stop=lambda *_args: None,
+        )
+    )
 
 
 def test_a_cancelled_launch_still_kills_the_child_it_started():
