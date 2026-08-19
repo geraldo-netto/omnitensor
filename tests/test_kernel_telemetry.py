@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -184,8 +185,52 @@ def test_an_oversized_aggregate_is_refused(tmp_path):
 
     aggregate = UnixSocketAggregateSource(path, max_aggregate_bytes=64).read()
 
-    assert aggregate.state is KernelTelemetryState.HELPER_UNREACHABLE
+    # The helper answered; what it sent is unusable. Calling that
+    # "unreachable" sends a reader looking for a socket that is fine.
+    assert aggregate.state is KernelTelemetryState.HELPER_INVALID
     assert "exceeds 64 bytes" in aggregate.detail
+
+
+def test_a_delimited_aggregate_is_read_without_waiting_for_the_helper_to_hang_up(tmp_path):
+    """A helper that keeps the connection open used to cost a full timeout.
+
+    The reader budgeted `max_aggregate_bytes + 1` and stopped only at EOF or a
+    zero budget, so a helper writing exactly the maximum and holding the
+    socket open left one byte of budget and blocked the whole
+    `timeout_seconds` on `recv(1)` -- then reported HELPER_UNREACHABLE, though
+    a complete valid document had already arrived. The payload is newline
+    delimited now, so the reader knows where the document ends.
+    """
+    path = tmp_path / "bpf.sock"
+    payload = json.dumps(document()).encode() + b"\n"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(1)
+    holding = threading.Event()
+
+    def run():
+        connection, _ = server.accept()
+        connection.sendall(payload)
+        # Deliberately no close: the reader must not depend on EOF.
+        holding.wait(5)
+        connection.close()
+        server.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        started = time.monotonic()
+        aggregate = UnixSocketAggregateSource(
+            path, max_aggregate_bytes=len(payload) - 1, timeout_seconds=3.0
+        ).read()
+        elapsed = time.monotonic() - started
+    finally:
+        holding.set()
+        thread.join(5)
+
+    assert aggregate.usable
+    assert aggregate.state is KernelTelemetryState.READY
+    assert elapsed < 1.0
 
 
 def test_a_socket_that_refuses_the_connection_is_reported(tmp_path):

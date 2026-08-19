@@ -336,6 +336,14 @@ class UnixSocketAggregateSource:
                 KernelTelemetryState.HELPER_UNREACHABLE,
                 f"kernel telemetry helper is unreachable: {error}",
             )
+        except KernelTelemetryError as error:
+            # The helper answered and the socket is healthy; what arrived is
+            # unusable. Reporting that as unreachable sent a reader looking
+            # for a socket that is fine.
+            return KernelAggregate(
+                KernelTelemetryState.HELPER_INVALID,
+                f"kernel telemetry helper sent an unusable aggregate: {error.detail}",
+            )
         try:
             return parse_aggregate(json.loads(payload))
         except (ValueError, KernelTelemetryError) as error:
@@ -345,21 +353,35 @@ class UnixSocketAggregateSource:
             )
 
     def _read_bytes(self) -> bytes:
+        """One newline-delimited aggregate, without waiting for a hang-up.
+
+        The document used to end only where the helper closed the connection,
+        so a helper writing exactly ``max_aggregate_bytes`` and keeping the
+        socket open left one byte of budget and blocked the whole timeout on
+        a ``recv`` nothing would ever answer -- with a complete, valid
+        document already in hand.  The delimiter says where the document
+        ends; EOF is still honoured, so an older helper keeps working.
+        """
+        limit = self._max_aggregate_bytes
+        chunks: list[bytes] = []
+        total = 0
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
             stream.settimeout(self._timeout_seconds)
             stream.connect(str(self._socket_path))
-            chunks: list[bytes] = []
-            remaining = self._max_aggregate_bytes + 1
-            while remaining > 0:
-                chunk = stream.recv(min(65536, remaining))
+            while total <= limit:
+                chunk = stream.recv(min(65536, limit + 1 - total))
                 if not chunk:
                     break
+                end = chunk.find(b"\n")
+                if end >= 0:
+                    chunks.append(chunk[:end])
+                    total += end
+                    break
                 chunks.append(chunk)
-                remaining -= len(chunk)
-        payload = b"".join(chunks)
-        if len(payload) > self._max_aggregate_bytes:
-            raise OSError(f"aggregate exceeds {self._max_aggregate_bytes} bytes")
-        return payload
+                total += len(chunk)
+        if total > limit:
+            raise KernelTelemetryError("aggregate-too-large", f"aggregate exceeds {limit} bytes")
+        return b"".join(chunks)
 
 
 class AbsentAggregateSource:

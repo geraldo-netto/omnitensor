@@ -158,7 +158,9 @@ def serve(socket_path: Path, pin_dir: Path) -> None:
                 ) as error:
                     payload = json.dumps({"version": AGGREGATE_VERSION, "error": str(error)[:200]})
                 try:
-                    connection.sendall(payload.encode("utf-8"))
+                    # Newline delimited: the reader must not have to wait for
+                    # a hang-up to learn where the document ends.
+                    connection.sendall(payload.encode("utf-8") + b"\n")
                 except (BrokenPipeError, ConnectionResetError):
                     continue
 
