@@ -55,6 +55,7 @@ from omnitensor.ports import (
     PluginSnapshotSource,
     RuntimeHandler,
 )
+from omnitensor.scheduler_observation import SchedulerObservation
 from omnitensor.socket_transport import SocketControlTransport, default_socket_path
 
 MUTMUT_TRAMPOLINE_MODULE = "mutmut.mutation.trampoline"
@@ -930,3 +931,36 @@ def test_service_module_is_only_the_compatibility_surface_for_host_implementatio
     assert "class SocketControlTransport" not in source
     assert "class SysfsDeviceDiscovery" not in source
     assert "def build_service_from_env" not in source
+
+
+def test_building_a_snapshot_reads_the_scheduler_without_mutating_it():
+    """OMNI-0410: `tick()` mutates, so it cannot live inside a `build`.
+
+    Snapshot building runs on a worker thread, and `tick()` resets the busy
+    time a running job is still adding to. It belongs on the event loop,
+    before the build, and the build must only read.
+    """
+    source = inspect.getsource(telemetry_observation.runtime_snapshot)
+    body = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
+
+    assert "tick()" not in body
+    assert "scheduler.stats()" in body
+
+
+def test_a_scheduler_observation_ticks_once_on_the_loop_and_then_only_reads():
+    """The off-loop reader gets frozen figures, not the live mappings."""
+    live_profiles = {"alpha": {"queued": 1, "running": 0}}
+    calls = []
+    scheduler = SimpleNamespace(
+        tick=lambda: calls.append("tick"),
+        stats=lambda: {"queueDepth": 1, "runningProfiles": 0, "loads": {}},
+        profile_stats=lambda: dict(live_profiles),
+    )
+
+    view = SchedulerObservation.of(scheduler)
+    live_profiles.clear()
+
+    assert calls == ["tick"]
+    assert view.profile_stats() == {"alpha": {"queued": 1, "running": 0}}
+    assert view.stats()["queueDepth"] == 1
+    assert not hasattr(view, "tick")

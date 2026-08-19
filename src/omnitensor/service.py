@@ -666,7 +666,7 @@ class OmniTensorService:
 
     def publish_once(self) -> dict:
         """Synchronously build and publish one snapshot (test/adapter API)."""
-        snapshot = self._build_runtime_snapshot()
+        snapshot = self._build_runtime_snapshot(SchedulerObservation.of(self._scheduler))
         self._publisher_port.publish(snapshot)
         self._record_published(snapshot)
         return snapshot

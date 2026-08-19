@@ -229,7 +229,11 @@ def runtime_snapshot(
     kernel_telemetry_source,
     profile_statuses_of=None,
 ) -> dict:
-    scheduler.tick()
+    # Building a snapshot only reads. `tick()` folds busy time into the load
+    # EMA and resets it, so calling it here made a "build" mutate the live
+    # scheduler — and, once building moved to a worker thread, mutate it from
+    # off the event loop while a running job was still adding to that busy
+    # time. Ticking is the caller's job, on the loop, before it asks.
     stats = scheduler.stats()
     observed_devices = [
         dataclasses.replace(device, load=device_load_of(device, stats)) for device in devices

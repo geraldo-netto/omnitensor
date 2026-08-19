@@ -27,9 +27,6 @@ class SchedulerObservation:
         scheduler.tick()
         return cls(scheduler.stats(), scheduler.profile_stats())
 
-    def tick(self) -> None:
-        """Already ticked on the event loop; building a snapshot only reads."""
-
     def stats(self) -> dict:
         return self._stats
 
