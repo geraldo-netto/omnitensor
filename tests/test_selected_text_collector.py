@@ -137,6 +137,58 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
     assert [method for method, _params in control.calls] == ["describe-plugins"]
 
 
+def test_collector_accepts_every_artifact_the_manifest_declares():
+    """A worker that installed all three manifest artifacts is ready, not broken."""
+    collector = _collector_module()
+    manifest = json.loads((ROOT / "plugin-manifests/selected-text-tools.json").read_text())
+    declared = [artifact["id"] for artifact in manifest["plugin"]["artifacts"]]
+    assert "qwen3-5-9b-iq4-xs" in declared
+
+    collector._require_ready(
+        {
+            "plugins": [
+                {
+                    "id": "selected-text-tools",
+                    "version": "1.1.0",
+                    "workerState": "ready",
+                    "artifacts": [{"id": identifier, "ready": True} for identifier in declared],
+                }
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifacts", "detail"),
+    [
+        ([{"id": "qwen3-8b-q4-k-m", "ready": True}], "not installed: dictalm2-hebrew-q4-k-m"),
+        (
+            [
+                {"id": "qwen3-8b-q4-k-m", "ready": True},
+                {"id": "dictalm2-hebrew-q4-k-m", "ready": False},
+            ],
+            "not ready: dictalm2-hebrew-q4-k-m",
+        ),
+    ],
+)
+def test_collector_names_the_routed_artifact_that_is_missing_or_unready(artifacts, detail):
+    collector = _collector_module()
+
+    with pytest.raises(RuntimeError, match=detail):
+        collector._require_ready(
+            {
+                "plugins": [
+                    {
+                        "id": "selected-text-tools",
+                        "version": "1.1.0",
+                        "workerState": "ready",
+                        "artifacts": artifacts,
+                    }
+                ]
+            }
+        )
+
+
 def test_collector_invalid_receipt_aborts_before_corpus_jobs_and_output(tmp_path, monkeypatch):
     collector = _collector_module()
     control = _install_control(monkeypatch, collector)

@@ -112,8 +112,17 @@ def _require_ready(inventory):
     if plugin.get("version") != "1.1.0" or plugin.get("workerState") != "ready":
         raise RuntimeError("selected-text 1.1.0 worker is not ready")
     expected = {"qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"}
-    if set(artifacts) != expected or not all(item.get("ready") for item in artifacts.values()):
-        raise RuntimeError("selected-text model artifacts are not ready")
+    # The manifest may declare more artifacts than this corpus exercises, so
+    # require the ones it routes to and never refuse a worker for having the
+    # rest of what the manifest asked for.
+    missing = sorted(identifier for identifier in expected if identifier not in artifacts)
+    if missing:
+        raise RuntimeError(f"selected-text model artifacts are not installed: {', '.join(missing)}")
+    unready = sorted(
+        identifier for identifier in expected if not artifacts[identifier].get("ready")
+    )
+    if unready:
+        raise RuntimeError(f"selected-text model artifacts are not ready: {', '.join(unready)}")
 
 
 async def _collect(arguments):
