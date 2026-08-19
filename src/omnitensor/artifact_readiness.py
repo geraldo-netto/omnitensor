@@ -6,7 +6,12 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from .dispatch import declared_artifact_reference
-from .plugins.artifacts import ArtifactReference, ArtifactResolution, artifact_filename
+from .plugins.artifacts import (
+    ArtifactReference,
+    ArtifactResolution,
+    artifact_filename,
+    companion_filenames,
+)
 from .registry import Workload
 from .scheduler import runnable_model, select_backend
 
@@ -75,6 +80,13 @@ def cached_resolution(
     stamp: Callable[[str, ArtifactReference], tuple | None],
 ) -> ArtifactResolution:
     current = stamp(artifact_id, reference)
+    if current is None:
+        # No stamp means one of the artifact's files could not be read, so
+        # there is nothing to revalidate a remembered answer against: an
+        # answer kept under "unstampable" would be served forever, whatever
+        # arrived on disk later.
+        resolutions.pop(artifact_id, None)
+        return artifact_store.resolve(reference)
     cached = resolutions.get(artifact_id)
     if cached is not None and cached[0] == current:
         return cached[1]
@@ -88,16 +100,32 @@ def artifact_stamp(
     artifact_id: str,
     reference: ArtifactReference,
 ) -> tuple | None:
+    """Identify every file this artifact is, so a swap invalidates the answer.
+
+    Stamping the primary file alone left ``cached_resolution`` answering
+    "ready" after a companion was replaced — the ncnn weights beside a
+    ``.param``, the labels list that names what a classifier's numbers mean —
+    which is the failure the digest machinery exists to prevent, and which
+    ``executors.base._model_revision`` already avoids by stamping companions
+    too.  ``None`` means one of the files could not be read, so nothing may be
+    remembered about this artifact at all.
+    """
     try:
-        status = (
-            Path(artifact_root)
-            / artifact_id
-            / reference.version
-            / artifact_filename(reference.format)
-        ).stat()
+        directory = Path(artifact_root) / artifact_id / reference.version
+        filenames = [artifact_filename(reference.format)]
     except (OSError, ValueError):
         return None
-    return (reference, status.st_size, status.st_mtime_ns)
+    filenames.extend(
+        sorted(set(companion_filenames(reference.format)) | set(reference.declared_companions))
+    )
+    files = []
+    for filename in filenames:
+        try:
+            status = (directory / filename).stat()
+        except (OSError, ValueError):
+            return None
+        files.append((filename, status.st_size, status.st_mtime_ns))
+    return (reference, tuple(files))
 
 
 def declared_reference(

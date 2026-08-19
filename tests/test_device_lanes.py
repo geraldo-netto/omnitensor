@@ -129,6 +129,42 @@ class TestResolutionIsRememberedButNotStale:
 
         assert len(store.calls) == 2
 
+    def test_a_replaced_companion_is_digested_again(self, tmp_path):
+        """The `.param` was stamped and its weights were not, so swapping the
+        weights kept answering "ready" about the model that was retired."""
+        store = CountingStore()
+        reference = ArtifactReference(
+            "sample-model", "1.0.0", "ncnn", "a" * 64, (("model.bin", "b" * 64),)
+        )
+        weights = tmp_path / "sample-model" / "1.0.0"
+        weights.mkdir(parents=True)
+        (weights / "model.param").write_bytes(b"x" * 17)
+        companion = weights / "model.bin"
+        companion.write_bytes(b"x" * 17)
+        resolver = self.resolver(store, root=tmp_path)
+
+        resolver.cached("sample-model", reference)
+        resolver.cached("sample-model", reference)
+        assert len(store.calls) == 1
+
+        companion.write_bytes(b"y" * 21)
+        resolver.cached("sample-model", reference)
+
+        assert len(store.calls) == 2
+
+    def test_an_absent_companion_is_never_remembered_as_an_answer(self, tmp_path):
+        store = CountingStore()
+        reference = ArtifactReference("sample-model", "1.0.0", "ncnn", "a" * 64, ())
+        weights = tmp_path / "sample-model" / "1.0.0"
+        weights.mkdir(parents=True)
+        (weights / "model.param").write_bytes(b"x" * 17)
+        resolver = self.resolver(store, root=tmp_path)
+
+        resolver.cached("sample-model", reference)
+        resolver.cached("sample-model", reference)
+
+        assert len(store.calls) == 2
+
     def test_a_different_store_answers_for_itself(self, tmp_path):
         first = CountingStore("from the first store")
         weights = tmp_path / "sample-model" / "1.0.0"
