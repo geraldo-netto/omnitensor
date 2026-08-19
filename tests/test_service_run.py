@@ -257,10 +257,12 @@ def test_service_resolves_prepared_devices_by_exact_physical_identity(tmp_path):
     assert service._executor_for_device("gpu", "gpu-renderD999") is None
     assert service._executor_for_device("tpu", tpu.id) is service._executors["tpu"]
 
-    legacy_gpu = object()
-    service._executors = {"gpu": legacy_gpu}
-    assert service._device_identity("profile", "gpu") == "gpu"
-    assert service._executor_for_device("gpu", gpu_b.id) is legacy_gpu
+    # A plain mapping cannot tell two cards apart, so it answers neither
+    # question rather than naming a backend as an identity or handing over an
+    # executor that may belong to the other card.
+    service._executors = {"gpu": object()}
+    assert service._device_identity("profile", "gpu") is None
+    assert service._executor_for_device("gpu", gpu_b.id) is None
 
 
 async def wait_until(predicate, *, timeout: float = 2.0) -> None:

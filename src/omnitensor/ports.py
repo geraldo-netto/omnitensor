@@ -165,3 +165,23 @@ class AcceleratorReloadableRuntime(Protocol):
     """A plugin runtime whose worker sandboxes can adopt new device leases."""
 
     async def reload_accelerator_devices(self) -> object: ...
+
+
+@runtime_checkable
+class DeviceAwareExecutors(Protocol):
+    """An executor collection that can answer about one physical device.
+
+    An executor set assembled by an older build (or by a test) is a plain
+    mapping keyed by backend name, which cannot tell two cards apart.  This
+    Protocol is what separates the two, so the distinction is a declared
+    contract rather than four independent ``getattr(..., "for_device")``
+    probes.
+    """
+
+    def for_device(self, gpu_device_id: str | None) -> dict: ...
+
+    def lane_key(self, backend: str, gpu_device_id: str | None) -> str: ...
+
+    def device_id(self, backend: str, gpu_device_id: str | None) -> str | None: ...
+
+    def executor_for_device(self, backend: str, device_id: str) -> object | None: ...

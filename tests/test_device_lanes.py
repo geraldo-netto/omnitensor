@@ -46,27 +46,39 @@ class TestALaneFollowsTheChosenDevice:
         assert lanes.lane("watcher", "gpu") == "gpu"
         assert lanes.identity("watcher", "gpu") is None
 
-    def test_a_plain_mapping_of_executors_still_answers(self):
+    def test_a_plain_mapping_of_executors_still_answers_what_it_can(self):
         # An older build, or a test, hands over a dict with no device knowledge.
-        # Every question then has exactly one honest answer: the backend itself.
+        # It can name a queue and hand over its executors; it cannot name a
+        # physical device, so it must not pretend the backend name is one.
         executors = {"gpu": "the-only-gpu-executor"}
         lanes = self.lanes(executors, {"watcher": "gpu-renderD129"})
 
         assert lanes.lane("watcher", "gpu") == "gpu"
-        assert lanes.identity("watcher", "gpu") == "gpu"
         assert lanes.executors_for("watcher") == executors
-        assert lanes.executor_for("gpu", "gpu-renderD129") == "the-only-gpu-executor"
+
+    def test_a_plain_mapping_refuses_to_answer_about_a_physical_device(self):
+        # "gpu" is a backend name, not a device id; and the one executor under
+        # that key is not known to own the card the caller asked about.
+        lanes = self.lanes({"gpu": "the-only-gpu-executor"}, {"watcher": "gpu-renderD129"})
+
+        assert lanes.identity("watcher", "gpu") is None
+        assert lanes.executor_for("gpu", "gpu-renderD129") is None
         assert lanes.executor_for("tpu", "tpu-pcie-0") is None
 
     def test_lanes_read_the_executors_that_exist_now(self):
         # Rediscovery replaces the whole executor set; a lane resolved against
         # the set from ten seconds ago would name a device that is gone.
-        current = {"gpu": "first"}
-        lanes = DeviceLanes(lambda: current, {}.get)
-        assert lanes.executor_for("gpu", "any") == "first"
+        current = DeviceAwareExecutors()
+        holder = [current]
+        lanes = DeviceLanes(lambda: holder[0], {}.get)
+        assert lanes.executor_for("gpu", "gpu-renderD129") == "gpu:gpu-renderD129"
 
-        current = {"gpu": "second"}
-        assert lanes.executor_for("gpu", "any") == "second"
+        class Rediscovered(DeviceAwareExecutors):
+            def executor_for_device(self, backend, device_id):
+                return f"second:{backend}:{device_id}"
+
+        holder[0] = Rediscovered()
+        assert lanes.executor_for("gpu", "gpu-renderD129") == "second:gpu:gpu-renderD129"
 
 
 class CountingStore:
