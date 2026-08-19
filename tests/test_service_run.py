@@ -2322,3 +2322,81 @@ def test_stopping_ends_the_publisher_wait_without_burning_the_idle_interval(tmp_
         await asyncio.wait_for(runner, timeout=1)
 
     asyncio.run(scenario())
+
+
+def test_a_failed_startup_still_stops_the_scheduler(tmp_path):
+    """`stop()` lived in an inner `finally` the failure never reached.
+
+    Anything raising between `scheduler.start()` and that block left the
+    per-backend worker tasks spawned and every queued job's future unresolved.
+    """
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    def explode():
+        raise RuntimeError("startup exploded")
+
+    service._rediscover = explode
+
+    with pytest.raises(RuntimeError, match="startup exploded"):
+        asyncio.run(service.run())
+
+    assert service._scheduler._workers == {}
+
+
+def test_a_finished_run_leaves_the_service_able_to_run_again(tmp_path):
+    """`_stopping` was never cleared and `_publish_loop` never reset, so a
+    second `run()` returned at once and published nothing, silently."""
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=FakeTransport(),
+    )
+
+    service._stopping.set()
+    asyncio.run(service.run())
+
+    assert not service._stopping.is_set()
+    assert service._publish_loop is None
+
+
+def test_the_publisher_can_be_woken_while_the_transport_is_still_starting(tmp_path):
+    """`_publish_loop` was assigned after `transport.start()`, so every
+    `request_publish()` a starting transport made was a silent no-op."""
+
+    class WakingTransport(FakeTransport):
+        def __init__(self, service_box):
+            super().__init__()
+            self._box = service_box
+            self.woke = False
+
+        async def start(self, handler):
+            await super().start(handler)
+            service = self._box[0]
+            service.request_publish()
+            # `request_publish` hands the wake to the loop, so observe the
+            # scheduled callback rather than the event it has not set yet.
+            self.woke = any(
+                getattr(handle, "_callback", None) == service._publish_wake.set
+                for handle in asyncio.get_running_loop()._ready
+            )
+
+    box = []
+    transport = WakingTransport(box)
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=transport,
+    )
+    box.append(service)
+
+    service._stopping.set()
+    asyncio.run(service.run())
+
+    assert transport.woke

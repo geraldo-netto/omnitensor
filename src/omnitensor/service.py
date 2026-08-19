@@ -903,12 +903,15 @@ class OmniTensorService:
             LOGGER.exception("Could not close the device-event source")
 
     async def run(self) -> None:
+        # Bound before anything else starts: a transport, a reconciled job or
+        # an adopted plugin that asks to publish during startup used to find
+        # `_publish_loop` still None and have its request silently dropped.
+        loop = asyncio.get_running_loop()
+        self._publish_loop = loop
         try:
             await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
             self._scheduler.start()
-            loop = asyncio.get_running_loop()
-            self._publish_loop = loop
             loop_tasks = [
                 loop.create_task(self._publisher()),
                 loop.create_task(self._rediscover()),
@@ -933,8 +936,12 @@ class OmniTensorService:
                 for task in loop_tasks:
                     task.cancel()
                 await asyncio.gather(plugin_start, loops, *loop_tasks, return_exceptions=True)
-                await self._scheduler.stop()
         finally:
+            # Out here rather than in the inner `finally`: anything raising
+            # between `start()` and that block left the per-backend worker
+            # tasks spawned and every queued job's future unresolved.
+            self._stopping.set()
+            await self._scheduler.stop()
             await self.jobs.stop()
             reload_task = self._plugin_reload_task
             if reload_task is not None:
@@ -947,6 +954,11 @@ class OmniTensorService:
             # runtime, and the accelerator memory is handed back in a chosen
             # order rather than whenever the collector notices.
             close_executors(self._executors)
+            # Leave the service able to run again. Neither of these was
+            # reset, so a second `run()` returned at once and published
+            # nothing, saying nothing about why.
+            self._publish_loop = None
+            self._stopping.clear()
 
     async def _start_plugin_runtime(self) -> None:
         async with self._plugin_lifecycle_lock:
