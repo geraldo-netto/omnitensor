@@ -291,13 +291,27 @@ def test_an_invalid_snapshot_timestamp_is_refused():
         collect(subject)
 
 
-def test_an_oversized_snapshot_is_refused():
-    items = tuple(sample(f"sensor-{index}") for index in range(MAX_COLLECTED_ITEMS + 1))
+def test_an_oversized_eligible_set_is_refused():
+    identities = [f"sensor-{index}" for index in range(MAX_COLLECTED_ITEMS + 1)]
+    items = tuple(sample(identity) for identity in identities)
     subject = HardwareHealthCollector(
-        ReplaySource([SourceSnapshot(SourceStatus.READY, 1, items)]), permissions(CPU), ()
+        ReplaySource([SourceSnapshot(SourceStatus.READY, 1, items)]),
+        permissions(*identities),
+        (),
     )
     with pytest.raises(CollectionError, match="more than"):
         collect(subject)
+
+
+def test_a_large_source_narrowed_by_consent_is_collected():
+    items = tuple(sample(f"sensor-{index}") for index in range(MAX_COLLECTED_ITEMS + 1))
+    subject = HardwareHealthCollector(
+        ReplaySource([SourceSnapshot(SourceStatus.READY, 1, items)]),
+        permissions("sensor-7"),
+        ("sensor-7",),
+    )
+    output = collect(subject)
+    assert [item["id"] for item in output["items"]] == ["sensor-7"]
 
 
 def test_an_empty_replay_is_unavailable():

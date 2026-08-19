@@ -235,6 +235,7 @@ class BoundedCollector(Generic[Sample]):
             (item for item in items if self._may_emit(self.identity_of(item))),
             key=self.identity_of,
         )
+        self._validate_eligible(eligible)
         selected = eligible[: self._max_items]
         # Churn is tracked against everything eligible, not the truncated
         # emission list: an item past the cap is still present, and reporting
@@ -330,6 +331,20 @@ class BoundedCollector(Generic[Sample]):
                 f"{subject} requires a {self.plugin_id} trigger",
             )
 
+    def _validate_eligible(self, eligible: Sequence[Sample]) -> None:
+        """Bound what this collector will emit, after consent has narrowed it.
+
+        The bound belongs here rather than on the raw snapshot: a collector
+        allowlisted to three units on a host with eleven hundred of them asked
+        about three, and refusing the whole read because the *source* is large
+        means those three are never looked at, every tick, forever.
+        """
+        if len(eligible) > MAX_COLLECTED_ITEMS:
+            raise self.error_type(
+                "source-invalid",
+                f"{self.label} returned more than {MAX_COLLECTED_ITEMS} eligible items",
+            )
+
     def _validate_snapshot(self, snapshot: object) -> None:
         if not isinstance(snapshot, SourceSnapshot):
             raise self.error_type("source-invalid", f"{self.label} returned no snapshot")
@@ -337,11 +352,6 @@ class BoundedCollector(Generic[Sample]):
             raise self.error_type("source-invalid", f"{self.label} status is invalid")
         if _non_negative_integer_error(snapshot.observed_at_ms):
             raise self.error_type("source-invalid", f"{self.label} timestamp is invalid")
-        if len(snapshot.items) > MAX_COLLECTED_ITEMS:
-            raise self.error_type(
-                "source-invalid",
-                f"{self.label} returned more than {MAX_COLLECTED_ITEMS} items",
-            )
         for item in snapshot.items:
             try:
                 identity = self.identity_of(item)
