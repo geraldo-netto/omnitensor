@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 
@@ -408,7 +409,7 @@ def test_a_batch_that_changes_nothing_is_named_rather_than_accepted(control):
     acknowledgement = apply(control, batch([{"profileId": "visual-library"}]))
 
     assert acknowledgement["status"] == "rejected"
-    assert "neither enabled nor weight" in acknowledgement["message"]
+    assert "none of enabled, weight, deviceId or modelId" in acknowledgement["message"]
     assert acknowledgement["revision"] == 0
 
 
@@ -619,3 +620,16 @@ def test_adopting_nothing_new_spends_no_revision(control):
 
     assert asyncio.run(control.adopt_profiles(["file-organizer"])) == ()
     assert control.state.revision == revision
+
+
+def test_unpersistable_adoption_is_logged_rather_than_silent(control, monkeypatch, caplog):
+    def refuse(_state):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(control._store, "save", refuse)
+
+    with caplog.at_level(logging.WARNING, logger="omnitensor.control"):
+        assert asyncio.run(control.adopt_profiles(["file-organizer"])) == ()
+
+    assert "file-organizer" not in control.state.profiles
+    assert any("file-organizer" in record.getMessage() for record in caplog.records)

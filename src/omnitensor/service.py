@@ -325,6 +325,7 @@ class OmniTensorService:
             logger=LOGGER,
         )
         self._snapshot_retracted = False
+        self._plugin_adoption_pending = False
         self._last_published_snapshot: dict | None = None
         self._next_snapshot_heartbeat = 0.0
         self._idle = False
@@ -752,6 +753,8 @@ class OmniTensorService:
             # supervises the loops and takes down job dispatch and D-Bus with
             # it, so a full disk would stop far more than snapshot publishing.
             try:
+                if self._plugin_adoption_pending:
+                    await self._adopt_plugin_profiles()
                 if self._devices:
                     await self._refresh_grants()
                     if self._snapshot_retracted:
@@ -951,10 +954,23 @@ class OmniTensorService:
         """
         plugin_ids = self._plugin_ids()
         if not plugin_ids:
+            self._plugin_adoption_pending = False
             return
         adopted = await self.control.adopt_profiles(plugin_ids)
         if adopted:
             LOGGER.info("Adopted policy for %d plugin profile(s)", len(adopted))
+        # Adoption persists, so it can fail on a full or read-only disk.  Left
+        # to the start path alone that is permanent for the life of the
+        # process; the publish tick is the cheapest place to try again.
+        ungoverned = sorted(plugin_ids - set(self.control.state.profiles))
+        self._plugin_adoption_pending = bool(ungoverned)
+        if ungoverned:
+            LOGGER.warning(
+                "Plugin profile(s) %s still have no policy; commands naming them are"
+                " refused as unknown and the published profile set omits them."
+                " Retrying on the next publish tick",
+                ", ".join(ungoverned),
+            )
 
     async def _record_plugin_readiness(self) -> None:
         """Record artifact readiness and worker health for every plugin.

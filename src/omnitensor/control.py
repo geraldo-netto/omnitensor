@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import copy
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -28,6 +29,8 @@ from .state import (
     PolicyStore,
     ProfilePolicy,
 )
+
+LOGGER = logging.getLogger("omnitensor.control")
 
 CONTROL_VERSION = 2
 REVISION_MISMATCH_MESSAGE = "Runtime policy revision changed; refresh and retry"
@@ -138,7 +141,16 @@ class ControlService:
                 await run_off_loop(self._store.save, candidate)
             except OSError:
                 # Unpersisted adoption would be forgotten on the next start
-                # while the running process believed it had happened.
+                # while the running process believed it had happened.  Say so:
+                # silence here looks exactly like nothing needing adoption,
+                # while every command naming these profiles is refused as
+                # unknown and the published profile set omits them.
+                LOGGER.warning(
+                    "Could not persist policy adoption for profile(s) %s;"
+                    " commands naming them are refused as unknown until it succeeds",
+                    ", ".join(adopted),
+                    exc_info=True,
+                )
                 return ()
             self._state = candidate
         if self._on_applied is not None:
@@ -275,7 +287,7 @@ class ControlService:
         if not {"enabled", "weight", "deviceId", "modelId"} & set(change):
             # A change that changes nothing is a caller mistake worth naming:
             # silently accepting it would spend a revision and alter nothing.
-            return f"Change for {profile_id} sets neither enabled nor weight"
+            return f"Change for {profile_id} sets none of enabled, weight, deviceId or modelId"
         if ("enabled" in change or "weight" in change) and profile_id not in state.profiles:
             return f"Profile policy unavailable: {profile_id}"
         if "deviceId" in change:

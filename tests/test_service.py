@@ -901,3 +901,30 @@ def test_a_plugin_weight_reaches_the_pool_that_orders_plugin_jobs(fake_nodes, tm
 
     assert service._weight_of("file-organizer") == 4
     assert service._plugin_queue.max_concurrent == DEFAULT_MAX_CONCURRENT
+
+
+def test_unpersistable_plugin_adoption_is_retried_on_the_next_publish(fake_nodes, tmp_path):
+    add_gpu(fake_nodes, node=128)
+    service = build_service(fake_nodes, tmp_path, [sample_manifest()])
+
+    class Plugins:
+        def plugin_ids(self):
+            return frozenset({"file-organizer"})
+
+    service._plugin_runtime = Plugins()
+    saved = service.control._store.save
+
+    def refuse(_state):
+        raise OSError("read-only file system")
+
+    service.control._store.save = refuse
+    asyncio.run(service._adopt_plugin_profiles())
+
+    assert service._plugin_adoption_pending is True
+    assert "file-organizer" not in service.control.state.profiles
+
+    service.control._store.save = saved
+    asyncio.run(service._adopt_plugin_profiles())
+
+    assert service._plugin_adoption_pending is False
+    assert "file-organizer" in service.control.state.profiles
