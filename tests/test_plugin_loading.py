@@ -933,8 +933,32 @@ def test_external_runtime_repeats_grant_refreshes_off_the_event_loop(
 
     assert len(refresh_threads) == refreshes
     assert all(thread.ident != loop_thread for thread in refresh_threads)
-    assert all(thread.name == "omnitensor-plugin-io" for thread in refresh_threads)
-    assert all(thread.daemon for thread in refresh_threads)
+    # Pooled, so the same thread may serve several refreshes; it is named for
+    # this runtime and joined at loop shutdown rather than killed as a daemon.
+    assert all(thread.name.startswith("omnitensor-plugin-io") for thread in refresh_threads)
+    assert not any(thread.daemon for thread in refresh_threads)
+
+
+def test_off_loop_reuses_one_pool_instead_of_a_thread_per_call():
+    """A thread per call was hundreds of thousands of creations a day.
+
+    `_refresh_permission_grants` alone runs every GRANT_REFRESH_SECONDS = 0.25,
+    and every received IPC frame adds one more.
+    """
+
+    threads = []
+
+    def note():
+        threads.append(threading.current_thread())
+
+    async def scenario():
+        for _ in range(50):
+            await loading_module._run_off_loop(note)
+
+    asyncio.run(scenario())
+
+    assert len(threads) == 50
+    assert len({thread.ident for thread in threads}) == 1
 
 
 def test_loading_off_loop_propagates_failure_and_remains_cancellable():
@@ -2398,8 +2422,8 @@ def test_executable_worker_streams_progress_and_one_terminal_result():
     assert frames[1].payload == {"pluginId": "external-example"}
     assert reads
     assert all(thread.ident != loop_thread for thread in reads)
-    assert all(thread.name == "omnitensor-plugin-io" for thread in reads)
-    assert all(thread.daemon for thread in reads)
+    assert all(thread.name.startswith("omnitensor-plugin-io") for thread in reads)
+    assert not any(thread.daemon for thread in reads)
 
 
 def test_worker_blocking_frame_read_keeps_the_event_loop_responsive():

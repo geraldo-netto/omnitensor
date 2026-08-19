@@ -444,8 +444,10 @@ def test_scheduler_executor_uses_dedicated_off_loop_thread(monkeypatch):
     assert result.outputs == [[1]]
     assert len(observed) == 1
     assert observed[0].ident != loop_thread
-    assert observed[0].daemon is True
-    assert observed[0].name == "omnitensor-plugin-io"
+    # Not a daemon: the pool is the loop's default executor, so its threads are
+    # joined at shutdown instead of being killed part-way through a write.
+    assert observed[0].daemon is False
+    assert observed[0].name.startswith("omnitensor-plugin-io")
 
 
 def test_scheduler_forwards_the_declared_format_through_the_queued_job():
