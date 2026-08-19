@@ -28,7 +28,7 @@ KERNEL_EXPORTS = (
 # Covers the targets as well as the names, so retargeting an export at its owning
 # module moves it. The surface itself — which names, in which order — is asserted
 # above and did not move when the supervisor facade was retired.
-EXPORT_MAP_SHA256 = "c30b67472b284cd01af7152d9765fd5cb272328468c052a3391459f87134c5e4"
+EXPORT_MAP_SHA256 = "3bfe06a9145e630265154615a359bc9946e7400c1d496a7c1de07be0ae203b9e"
 
 
 def test_export_map_preserves_the_locked_public_surface_and_order():

@@ -492,7 +492,7 @@ class PluginWorkerSupervisor:
         _record_journal_diagnostic(
             self._diagnostics,
             diagnostic,
-                )
+        )
 
     async def _stop_process(self, slot: _WorkerSlot) -> bool:
         """Ask the worker to exit, escalating if it will not; never raise."""

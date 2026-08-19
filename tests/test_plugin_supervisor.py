@@ -35,6 +35,7 @@ from omnitensor.plugins import (
     result_frame,
     result_frames,
 )
+from omnitensor.plugins.supervisor_diagnostics import record_diagnostic
 
 
 def run_scenario(coroutine):
@@ -261,11 +262,22 @@ def test_live_revocation_stops_one_worker_without_recovery_and_cancels_orphans()
         assert monitor is not None and monitor.done()
         assert "alpha" not in supervisor._slots
         assert "alpha" not in supervisor._recoveries
+        # A revoked plugin has no reader left for its journal, so the key goes
+        # with it rather than growing for the service's life.
+        assert "alpha" not in supervisor._diagnostics
         assert decode_frame(process.writer.writes[-1]).payload == {"reason": "shutdown"}
         assert await supervisor.revoke("alpha", "again") == status
         assert await supervisor.stop() == (status,)
 
     run_scenario(scenario())
+
+
+@pytest.mark.parametrize("bound", [0, -1, True])
+def test_a_diagnostic_journal_bound_below_one_is_refused(bound):
+    """0 grew the journal unbounded and a negative bound dropped the oldest."""
+    diagnostic = WorkerDiagnostic("alpha", WorkerDiagnosticCode.EXITED, "x", 1, 1, 0)
+    with pytest.raises((TypeError, ValueError)):
+        record_diagnostic({}, diagnostic, bound)
 
 
 def test_supervisor_executes_and_forwards_correlated_progress():
