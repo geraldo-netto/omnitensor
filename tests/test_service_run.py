@@ -1491,7 +1491,7 @@ def test_a_submitted_job_is_owned_by_the_caller_that_submitted_it(tmp_path):
 
 def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
     """The bus reply is the caller's only channel; an exception says nothing."""
-    from omnitensor.guard import ControlGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, GuardRefusedError, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     class Jobs:
@@ -1510,17 +1510,23 @@ def test_a_caller_over_quota_gets_a_stable_code_not_an_opaque_failure(tmp_path):
     )
 
     async def scenario():
-        return [json.loads(await api.submit_job_text("{}")) for _ in range(2)]
+        accepted = json.loads(await api.submit_job_text("{}"))
+        # The guard runs before the method, so there is no acknowledgement to
+        # answer with: the refusal leaves as an exception the transport turns
+        # into an envelope error, never as a document in the method's place.
+        with pytest.raises(GuardRefusedError) as refused:
+            await api.submit_job_text("{}")
+        return accepted, refused.value
 
     accepted, refused = asyncio.run(scenario())
 
     assert accepted == {"accepted": True}
-    assert refused["status"] == "rejected"
-    assert refused["code"] == "rate-limit-exceeded"
-    assert refused["method"] == "submit-job"
+    assert refused.code == "rate-limit-exceeded"
+    assert refused.method == "submit-job"
 
 
 def test_a_caller_asserted_owner_never_reaches_the_job_service(tmp_path):
+    from omnitensor.guard import GuardRefusedError
     from omnitensor.service import RuntimeAPI
 
     class Jobs:
@@ -1537,16 +1543,15 @@ def test_a_caller_asserted_owner_never_reaches_the_job_service(tmp_path):
     jobs = Jobs()
     api = RuntimeAPI(None, jobs, lambda: "{}")
 
-    reply = json.loads(
+    with pytest.raises(GuardRefusedError) as refused:
         asyncio.run(api.submit_job_text(json.dumps({"version": 1, "owner": "uid:0"})))
-    )
 
-    assert reply["code"] == "identity-asserted"
+    assert refused.value.code == "identity-asserted"
     assert jobs.calls == []
 
 
 def test_describing_plugins_is_rate_limited_too(tmp_path):
-    from omnitensor.guard import ControlGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, GuardRefusedError, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     api = RuntimeAPI(
@@ -1558,7 +1563,9 @@ def test_describing_plugins_is_rate_limited_too(tmp_path):
     )
 
     assert json.loads(api.describe_plugins_text()) == {"plugins": []}
-    assert json.loads(api.describe_plugins_text())["code"] == "rate-limit-exceeded"
+    with pytest.raises(GuardRefusedError) as refused:
+        api.describe_plugins_text()
+    assert refused.value.code == "rate-limit-exceeded"
 
 
 def test_the_control_surface_exposes_a_way_to_learn_a_job_outcome(tmp_path):
@@ -1582,7 +1589,7 @@ def test_the_service_keeps_a_result_store_so_outcomes_outlive_the_call(tmp_path)
 
 def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
     from omnitensor.callers import CallerIdentityResolver, bind_sender
-    from omnitensor.guard import ControlGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, GuardRefusedError, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     class Jobs:
@@ -1604,13 +1611,16 @@ def test_a_job_result_request_is_owner_scoped_and_quota_guarded(tmp_path):
 
     async def scenario():
         bind_sender("peer:1000:1")
-        return [json.loads(await api.job_result_text("{}")) for _ in range(2)]
+        first = json.loads(await api.job_result_text("{}"))
+        with pytest.raises(GuardRefusedError) as refused:
+            await api.job_result_text("{}")
+        return first, refused.value
 
     first, second = asyncio.run(scenario())
 
     assert first == {"state": "running"}
     assert jobs.owners == ["uid:1000"]
-    assert second["code"] == "rate-limit-exceeded"
+    assert second.code == "rate-limit-exceeded"
 
 
 def test_the_service_routes_submission_through_its_runners(tmp_path):
@@ -1753,7 +1763,7 @@ def test_the_contract_handshake_is_answerable_over_the_control_surface(tmp_path)
 
 def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
     """Otherwise asking what the service speaks is a way to keep it busy."""
-    from omnitensor.guard import ControlGuard, MethodQuota
+    from omnitensor.guard import ControlGuard, GuardRefusedError, MethodQuota
     from omnitensor.service import RuntimeAPI
 
     api = RuntimeAPI(
@@ -1765,7 +1775,9 @@ def test_the_handshake_is_rate_limited_like_every_other_method(tmp_path):
     )
 
     assert json.loads(api.describe_contract_text())["version"] == 1
-    assert json.loads(api.describe_contract_text())["code"] == "rate-limit-exceeded"
+    with pytest.raises(GuardRefusedError) as refused:
+        api.describe_contract_text()
+    assert refused.value.code == "rate-limit-exceeded"
 
 
 def test_the_inventory_reports_the_model_a_bundled_profile_declares(tmp_path):

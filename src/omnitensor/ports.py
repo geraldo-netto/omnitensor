@@ -80,7 +80,13 @@ class CommandHandler(Protocol):
 
 
 class RuntimeHandler(CommandHandler, Protocol):
-    """Versioned runtime control and bounded job boundary."""
+    """Versioned runtime control and bounded job boundary.
+
+    Every method returns its own schema's document, or raises
+    :class:`omnitensor.guard.GuardRefusedError` when the call is refused at
+    the boundary before the method runs.  A transport renders that refusal as
+    an envelope error, never as the method's result.
+    """
 
     async def submit_job_text(self, text: str) -> str:
         """Submit one versioned job request and return an acknowledgement."""

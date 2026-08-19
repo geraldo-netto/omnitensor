@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local.invalid/omnitensor/control-reply.schema.json",
   "title": "OmniTensor control reply version 1",
-  "description": "One reply frame on the control socket, correlated to its request by id. Exactly one of result and error is present. An error here means the envelope failed — the frame did not validate, the method does not exist, the dispatch itself broke — while a method-level refusal (a quota, a rejected command) is a result, because the method answered and its answer is the refusal document.",
+  "description": "One reply frame on the control socket, correlated to its request by id. Exactly one of result and error is present. An error here means the method never ran — the frame did not validate, the method does not exist, the dispatch broke, or the guard refused the call at the boundary and its stable code is the error code — while a method that ran answers with a result, even when that answer is a rejection its own schema describes.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id"],

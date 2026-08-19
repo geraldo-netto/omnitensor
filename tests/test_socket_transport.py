@@ -55,6 +55,8 @@ class RecordingHandler:
     def describe_plugins_text(self):
         self.calls.append(("describe-plugins", ""))
         self.senders.append(current_sender())
+        if self.error is not None:
+            raise self.error
         return json.dumps(self.replies.get("describe-plugins", {"answered": "describe-plugins"}))
 
     def describe_contract_text(self):
@@ -235,6 +237,36 @@ def test_a_handler_failure_is_an_internal_error_not_a_dead_connection(socket_pat
 
     assert error.code == "internal-error"
     assert "scheduler exploded" in error.detail
+
+
+@pytest.mark.parametrize("method", ["submit-job", "describe-plugins"])
+def test_a_guard_refusal_is_an_envelope_error_not_the_wrong_method_document(method, socket_path):
+    """The guard refuses *before* the method runs, so there is no method result.
+
+    Answering `submit-job` with a runtime-refusal document made a client
+    validating the reply against runtime-job-acknowledgement fail with no
+    envelope error to branch on -- and `describe-plugins` answer with a
+    refusal where the applet expects a plugin inventory.
+    """
+    from omnitensor.guard import GuardRefusedError
+
+    handler = RecordingHandler(
+        error=GuardRefusedError("rate-limit-exceeded", "too many calls", method=method)
+    )
+
+    async def scenario():
+        async with serve(handler, socket_path):
+            try:
+                await call_control(method, {}, socket_path=socket_path)
+            except ControlSocketError as error:
+                return error
+            return None
+
+    error = asyncio.run(scenario())
+
+    assert error is not None
+    assert error.code == "rate-limit-exceeded"
+    assert error.detail == "too many calls"
 
 
 def test_each_connection_is_stamped_with_the_peer_uid(socket_path):

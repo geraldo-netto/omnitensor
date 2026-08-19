@@ -18,12 +18,15 @@ inline image tensor, which is why there is no codec negotiation — one codec,
 chosen where it matters most.
 
 Envelope errors and method answers travel differently on purpose.  A method's
-refusal (a quota, a rejected command) is a *result* — the method answered, and
-its answer is the refusal document its own schema describes.  An ``error`` in
-the reply envelope means the envelope itself failed: the frame did not decode,
-the request did not validate, the method does not exist.  A client can
-therefore branch on transport health without parsing method documents, and on
-method outcomes without guessing about the transport.
+own rejection (a command the policy declines) is a *result* — the method ran,
+and its answer is the rejection its own schema describes.  An ``error`` in the
+reply envelope means the method never ran: the frame did not decode, the
+request did not validate, the method does not exist, or the guard refused the
+call at the boundary — a quota, an oversized payload, an asserted identity —
+in which case the envelope error carries the guard's own stable code.  A
+client can therefore branch on transport health without parsing method
+documents, and validate every result against the method's own schema without
+a second shape to allow for.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ import msgpack
 
 from .callers import bind_sender
 from .contract import RUNTIME_METHODS
+from .guard import GuardRefusedError
 from .ports import RuntimeHandler
 from .registry import validate_document
 
@@ -308,6 +312,13 @@ class SocketControlTransport:
             return _error_reply(request_id, "request-invalid", "params are not a JSON document")
         try:
             result = json.loads(await call(text))
+        except GuardRefusedError as refusal:
+            # The guard refused before the method ran, so there is no method
+            # document to answer with. `text()` validates the refusal against
+            # runtime-refusal.schema.json on the way past, so a code outside
+            # that vocabulary cannot reach the wire as if it were stable.
+            document = json.loads(refusal.text())
+            return _error_reply(request_id, document["code"], document["message"])
         except Exception as error:  # noqa: BLE001 - one request must not kill the connection
             return _error_reply(request_id, "internal-error", f"{type(error).__name__}: {error}")
         return {"version": CONTROL_PROTOCOL_VERSION, "id": request_id, "result": result}

@@ -8,23 +8,26 @@ as an alternative.
 Read it before relying on the boundary for anything, and before adding a
 method that returns one caller's data to another.
 
-## Refusals are method replies
+## Refusals are envelope errors
 
-A guarded method returns a version-one `runtime-refusal` document when the
-call is over quota, oversized, asserts an identity, exceeds concurrency, or
-names an unknown method. That reply is deliberately not a job acknowledgement.
-Consumers must try the refusal contract before parsing the method's success
-contract; treating every text reply as an acknowledgement hides actionable
-policy failures behind a generic parse error.
+The guard runs *before* the method does. When a call is over quota, oversized,
+asserts an identity, exceeds concurrency, or names an unknown method, the
+method never runs, so there is no acknowledgement for it to answer with: the
+reply is a `control-reply` **error** whose `code` is the guard's own stable
+code — the same vocabulary `runtime-refusal.schema.json` enumerates, which the
+runtime still validates the refusal against before it reaches the wire.
 
-The transport keeps its own failures apart from these: an envelope that does
-not validate, or a method that does not exist at dispatch, is answered with a
-`control-reply` **error**, while a method-level refusal is a **result**,
-because the method answered and its answer is the refusal document. The
-Cinnamon applet follows that order in `runtime-control-gateway.js` and maps
-every published refusal code to deterministic recovery text. Its
-`guard-refusal-regression.test.js` drives all codes through the real gateway
-and manager boundary. Unknown or malformed envelopes still fail closed.
+That leaves exactly one shape per channel. Every `result` on the socket
+validates against its own method's schema and nothing else, and a client
+branches on policy failures through `error.code` without parsing method
+documents. A rejection the method itself decided — a command the policy
+declines — stays a **result**, because the method ran and answered.
+
+The Cinnamon applet reads those codes in `runtime-control-gateway.js` and maps
+each to deterministic recovery text; its `guard-refusal-regression.test.js`
+drives all codes through the real gateway and manager boundary. Both must read
+the code from the envelope error rather than from a result document. Unknown
+or malformed envelopes still fail closed.
 
 ## The guarantee
 

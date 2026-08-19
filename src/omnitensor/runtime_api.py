@@ -1,4 +1,14 @@
-"""Transport-neutral runtime API facade."""
+"""Transport-neutral runtime API facade.
+
+A guard refusal is *not* a method result.  The guard runs before the method
+does, so no method-specific acknowledgement exists yet: returning the refusal
+document from the call put a ``runtime-refusal`` where a client validating
+against ``runtime-job-acknowledgement`` or ``plugin-inventory`` expected the
+method's own schema, and left no envelope error to branch on.
+:class:`omnitensor.guard.GuardRefusedError` therefore propagates out of every
+method here, and the transport renders it as an envelope error carrying the
+guard's stable code.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +19,7 @@ from collections.abc import Callable
 from .callers import CallerIdentityResolver
 from .contract import RUNTIME_METHODS, contract_document_text
 from .control import ControlService
-from .guard import ControlGuard, GuardRefusedError, guarded
+from .guard import ControlGuard, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION
 from .jobs import JobSubmissionService
 
@@ -80,19 +90,13 @@ class RuntimeAPI:
 
     def describe_plugins_text(self) -> str:
         owner = self._callers.owner_token()
-        try:
-            with guarded(self._guard, "describe-plugins", owner):
-                return self._inspector()
-        except GuardRefusedError as refusal:
-            return refusal.text()
+        with guarded(self._guard, "describe-plugins", owner):
+            return self._inspector()
 
     def describe_contract_text(self) -> str:
         owner = self._callers.owner_token()
-        try:
-            with guarded(self._guard, "describe-contract", owner):
-                return contract_document_text(_runtime_methods())
-        except GuardRefusedError as refusal:
-            return refusal.text()
+        with guarded(self._guard, "describe-contract", owner):
+            return contract_document_text(_runtime_methods())
 
     async def _guarded(
         self,
@@ -103,11 +107,8 @@ class RuntimeAPI:
         owner: str | None = None,
     ) -> str:
         resolved = owner if owner is not None else self._callers.owner_token()
-        try:
-            with guarded(self._guard, method, resolved, text):
-                return await call(text)
-        except GuardRefusedError as refusal:
-            return refusal.text()
+        with guarded(self._guard, method, resolved, text):
+            return await call(text)
 
 
 RuntimeAPI.__module__ = "omnitensor.service"
