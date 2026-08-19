@@ -261,7 +261,7 @@ class SocketControlTransport:
                 request = await read_frame(reader)
                 if request is None:
                     break
-                writer.write(encode_frame(await self._reply_for(request)))
+                writer.write(self._encoded_reply(await self._reply_for(request)))
                 await writer.drain()
         except (ControlSocketError, ConnectionResetError, BrokenPipeError):
             # A peer that violates the framing gets a closed connection, not a
@@ -272,6 +272,23 @@ class SocketControlTransport:
             writer.close()
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
+
+    @staticmethod
+    def _encoded_reply(reply: dict) -> bytes:
+        """One reply frame, or an envelope error saying the result did not fit.
+
+        An oversized *reply* is not a framing violation: the boundary is intact
+        and the connection is healthy, so dropping it would leave the client
+        unable to tell a result too big to send from a daemon that crashed.
+        The substituted envelope names the cause and always fits, because it
+        carries a bounded code and message and nothing of the result.
+        """
+        try:
+            return encode_frame(reply)
+        except ControlSocketError as oversized:
+            if oversized.code != "frame-too-large":
+                raise
+            return encode_frame(_error_reply(reply["id"], "result-too-large", oversized.detail))
 
     async def _reply_for(self, request: dict) -> dict:
         violations = validate_document(CONTROL_REQUEST_SCHEMA, request)

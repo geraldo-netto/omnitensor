@@ -355,3 +355,22 @@ def test_stop_of_a_refused_instance_leaves_the_live_socket_alone(socket_path):
 
 def test_stop_without_start_is_a_no_op(socket_path):
     asyncio.run(SocketControlTransport(socket_path=socket_path).stop())
+
+
+def test_a_result_too_large_to_send_is_named_not_dropped(socket_path):
+    """An oversized reply is diagnosable; the connection is not just cut.
+
+    The framing violation the connection is dropped for is inbound. For a reply
+    the boundary is intact, so a client that asked for more than a frame can
+    hold must be able to tell that from a daemon that died mid-answer.
+    """
+    handler = RecordingHandler(replies={"get-job-result": {"text": "x" * (MAX_FRAME_BYTES + 1)}})
+
+    async def scenario():
+        async with serve(handler, socket_path):
+            await call_control("get-job-result", {"jobId": "j"}, socket_path=socket_path)
+
+    with pytest.raises(ControlSocketError) as captured:
+        asyncio.run(scenario())
+    assert captured.value.code == "result-too-large"
+    assert str(MAX_FRAME_BYTES) in captured.value.detail
