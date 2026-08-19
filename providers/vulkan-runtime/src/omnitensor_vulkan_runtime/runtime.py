@@ -110,6 +110,7 @@ class LlamaVulkanRuntime:
         # rather than pull the model out from under it.
         self._in_use = threading.RLock()
         self._stopping = threading.Event()
+        self._log_callback = None
 
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport:
         if accelerator != "gpu" or len(artifacts) != 1:
@@ -217,18 +218,16 @@ class LlamaVulkanRuntime:
 
         self._log_callback = callback
         llama_cpp.llama_log_set(callback, None)
-        self._llama = Llama(
-            model_path=str(self._model_path),
-            n_ctx=MAX_RUNTIME_CONTEXT_TOKENS,
-            n_gpu_layers=-1,
-            main_gpu=0,
-            offload_kqv=True,
-            op_offload=True,
-            flash_attn=True,
-            type_k=llama_cpp.GGML_TYPE_Q8_0,
-            type_v=llama_cpp.GGML_TYPE_Q8_0,
-            verbose=False,
-        )
+        try:
+            self._llama = self._load_llama(Llama, llama_cpp)
+        finally:
+            # llama_log_set is global and the callback outlives the load it was
+            # made for: it used to stay registered for the process lifetime,
+            # appending every later log line to this load's list -- growing
+            # without bound, and, with a second runtime alive, capturing the
+            # other one's load logs. Hand the global sink back to something
+            # that keeps nothing.
+            self._discard_llama_logs(llama_cpp)
         match = _OFFLOAD.search("".join(logs))
         device = _DEVICE.search("".join(logs))
         if match is None or device is None or int(match.group(1)) != int(match.group(2)):
@@ -240,7 +239,32 @@ class LlamaVulkanRuntime:
         layers = int(match.group(2))
         self._physical_device = device.group(1)
         self._load_report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", layers, layers, False)
+        logs.clear()
         return self._load_report
+
+    def _discard_llama_logs(self, llama_cpp) -> None:
+        @llama_cpp.llama_log_callback
+        def discard(_level, _text, _data):
+            return None
+
+        # Kept on the instance because llama.cpp holds the pointer, not the
+        # object: a callback that is garbage collected is a dangling call.
+        self._log_callback = discard
+        llama_cpp.llama_log_set(discard, None)
+
+    def _load_llama(self, Llama, llama_cpp):  # noqa: N803 - the class is llama-cpp's name
+        return Llama(
+            model_path=str(self._model_path),
+            n_ctx=MAX_RUNTIME_CONTEXT_TOKENS,
+            n_gpu_layers=-1,
+            main_gpu=0,
+            offload_kqv=True,
+            op_offload=True,
+            flash_attn=True,
+            type_k=llama_cpp.GGML_TYPE_Q8_0,
+            type_v=llama_cpp.GGML_TYPE_Q8_0,
+            verbose=False,
+        )
 
     @property
     def physical_device(self) -> str:

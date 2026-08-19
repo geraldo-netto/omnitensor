@@ -3171,3 +3171,54 @@ def test_the_model_is_not_freed_under_a_running_decode(tmp_path, monkeypatch):
     assert "decode-left" in order
     assert order.index("decode-left") < order.index("close")
     assert len(order) < 200
+
+
+def test_the_load_log_sink_is_handed_back_after_the_load(tmp_path, monkeypatch):
+    """The collecting callback used to stay registered for the process life.
+
+    `llama_log_set` is global: the closure appending to one load's list was
+    never unset, so every later llama.cpp log line grew that list without
+    bound, and with a second runtime alive the last registration captured the
+    other one's load logs.
+    """
+    adapter = _runtime(tmp_path)
+    adapter._model_path = tmp_path / "model.gguf"
+    registered = []
+
+    class NativeApi:
+        GGML_TYPE_Q8_0 = 8
+
+        @staticmethod
+        def llama_log_callback(function):
+            return function
+
+        @staticmethod
+        def llama_log_set(function, _data):
+            registered.append(function)
+
+    class FakeLlama:
+        def __init__(self, **_kwargs):
+            registered[-1](
+                0,
+                b"using device Vulkan0 (AMD Radeon RX 6600 XT (RADV NAVI23)) (0000:03:00.0)\n",
+                None,
+            )
+            registered[-1](0, b"offloaded 4/4 layers to GPU", None)
+
+        def close(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "llama_cpp", SimpleNamespace(Llama=FakeLlama, llama_cpp=NativeApi)
+    )
+
+    adapter._acquire_and_load()
+
+    assert len(registered) == 2
+    collecting, discarding = registered
+    assert adapter._log_callback is discarding
+    assert discarding is not collecting
+    # The sink now in place keeps nothing, however much llama.cpp says later.
+    for _ in range(1000):
+        discarding(0, b"noise after the load", None)
+    adapter._release()
