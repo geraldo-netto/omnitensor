@@ -29,6 +29,13 @@ def requirements(pyproject: Path) -> list[str]:
 
 
 if __name__ == "__main__":
+    # CI reads this through a process substitution, so a traceback becomes an
+    # empty requirements file and a silently under-installed environment. Say
+    # what is wrong on stderr and exit non-zero instead.
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: provider-requirements.py <provider-dir-or-pyproject.toml>")
     root = Path(sys.argv[1])
     path = root if root.name == "pyproject.toml" else root / "pyproject.toml"
+    if not path.is_file():
+        raise SystemExit(f"no pyproject.toml at {path}")
     print("\n".join(requirements(path)))

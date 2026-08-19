@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -36,3 +38,40 @@ def test_workflows_consume_the_lock_and_pin_external_code() -> None:
             if "uses: actions/" in line:
                 message = f"unpinned action in {workflow.name}: {line}"
                 assert ACTION_REVISION.search(line.strip()), message
+
+
+def test_provider_requirements_refuses_a_missing_argument() -> None:
+    # CI reads this script through a process substitution, where a traceback
+    # becomes an empty requirements file and a silently under-installed
+    # provider environment -- the failure the script exists to prevent.
+    script = ROOT / "scripts" / "provider-requirements.py"
+    completed = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert "usage" in completed.stderr.lower()
+
+    missing = subprocess.run(
+        [sys.executable, str(script), str(ROOT / "providers" / "does-not-exist")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert missing.returncode != 0
+    assert missing.stdout == ""
+    assert "does-not-exist" in missing.stderr
+
+
+def test_provider_suite_script_owns_the_install_loop() -> None:
+    script = (ROOT / "scripts" / "run-provider-suites.sh").read_text(encoding="utf-8")
+    assert "--install" in script
+    assert "provider-requirements.py" in script
+    assert "install --no-deps -e" in script
+
+    workflow = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+    assert "./scripts/run-provider-suites.sh --install" in workflow
+    # The loop lives in one place now, so CI cannot drift away from what a
+    # developer reproduces locally.
+    assert "provider-requirements.py" not in workflow
+    assert "uv pip install --no-deps -e" not in workflow

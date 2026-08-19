@@ -19,6 +19,43 @@ if [[ ! -x "$python" ]]; then
     python="$(command -v python3)"
 fi
 
+install=0
+declare -a args=()
+for argument in "$@"; do
+    case "$argument" in
+        # The install loop used to live only in `.github/workflows/quality.yml`,
+        # so a developer running this script exactly as the header invites hit
+        # the same missing dependencies that once hid 35 failures of 107. It
+        # lives here now and CI calls the script.
+        --install) install=1 ;;
+        *) args+=("$argument") ;;
+    esac
+done
+
+if command -v uv > /dev/null 2>&1; then
+    declare -a installer=(uv pip)
+else
+    declare -a installer=("$python" -m pip)
+fi
+
+install_providers() {
+    local provider requirements
+    for provider in "$root"/providers/*/; do
+        echo "== installing $(basename "$provider")"
+        "${installer[@]}" install --no-deps -e "$provider"
+        # Captured rather than piped through a process substitution: a failure
+        # here must stop the run, not become an empty requirements file.
+        requirements="$("$python" "$root/scripts/provider-requirements.py" "$provider")"
+        if [[ -n "$requirements" ]]; then
+            printf '%s\n' "$requirements" | "${installer[@]}" install -r -
+        fi
+    done
+}
+
+if (( install )); then
+    install_providers
+fi
+
 declare -a ran=() skipped=() failed=()
 
 for provider in "$root"/providers/*/; do
@@ -30,7 +67,7 @@ for provider in "$root"/providers/*/; do
         continue
     fi
     echo "== $name"
-    if (cd "$provider" && "$python" -m pytest -q "$@"); then
+    if (cd "$provider" && "$python" -m pytest -q "${args[@]+"${args[@]}"}"); then
         ran+=("$name")
     else
         failed+=("$name")
