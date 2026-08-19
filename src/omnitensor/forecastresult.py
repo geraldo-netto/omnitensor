@@ -31,12 +31,44 @@ def forecast_reading(model: Mapping | None, tensors: object) -> dict | None:
     contract = model.get("featureContract") if isinstance(model, Mapping) else None
     if not isinstance(contract, Mapping) or contract.get("recipe") != "forecast-v1":
         return None
+    # The contract is written by the sibling Python service that owns the
+    # schemas, so its keys can drift.  Indexing raised a bare KeyError from
+    # there, and skipping the bounds let this producer emit a reading its own
+    # parse_forecast_reading would reject.  Both are the same predicates now.
+    target = contract.get("targetFeature")
+    if not _valid_target(target):
+        raise ForecastResultError(
+            "forecast-contract-invalid",
+            f"targetFeature must be 1 to {MAX_TARGET_CHARS} characters",
+        )
+    horizon = contract.get("horizon")
+    if not _valid_horizon(horizon):
+        raise ForecastResultError(
+            "forecast-contract-invalid",
+            f"horizon must be an integer from 1 to {MAX_HORIZON}",
+        )
     return {
         "kind": FORECAST_KIND,
-        "targetFeature": contract["targetFeature"],
-        "horizon": contract["horizon"],
+        "targetFeature": target,
+        "horizon": horizon,
         "value": _single_finite_value(tensors),
     }
+
+
+def _valid_target(target: object) -> bool:
+    return isinstance(target, str) and 1 <= len(target) <= MAX_TARGET_CHARS
+
+
+def _valid_horizon(horizon: object) -> bool:
+    if isinstance(horizon, bool) or not isinstance(horizon, int):
+        return False
+    return 1 <= horizon <= MAX_HORIZON
+
+
+def _valid_value(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value)
 
 
 def parse_forecast_reading(document: object) -> dict | None:
@@ -48,11 +80,7 @@ def parse_forecast_reading(document: object) -> dict | None:
     target = document.get("targetFeature")
     horizon = document.get("horizon")
     value = document.get("value")
-    if not isinstance(target, str) or not 1 <= len(target) <= MAX_TARGET_CHARS:
-        return None
-    if isinstance(horizon, bool) or not isinstance(horizon, int) or not 1 <= horizon <= MAX_HORIZON:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if not _valid_target(target) or not _valid_horizon(horizon) or not _valid_value(value):
         return None
     return {
         "kind": FORECAST_KIND,

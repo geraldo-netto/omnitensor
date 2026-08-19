@@ -214,3 +214,39 @@ async def test_postprocess_preserves_classification_reduction_and_labels():
 
 def test_single_value_helper_accepts_exact_nesting_boundary():
     assert _single_finite_value([[[1.0]]]) == 1.0
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        {"targetFeature": None},
+        {"horizon": None},
+        {"targetFeature": ""},
+        {"targetFeature": "w" * 65},
+        {"targetFeature": 7},
+        {"horizon": 0},
+        {"horizon": 129},
+        {"horizon": True},
+        {"horizon": "3"},
+    ],
+)
+def test_a_drifted_contract_is_a_stable_refusal_not_a_key_error(drift):
+    """The sibling service owns this schema, so a missing or out-of-bounds
+    field must refuse the way every other forecast failure does."""
+    contract = _contract()
+    for field, value in drift.items():
+        if value is None:
+            del contract[field]
+        else:
+            contract[field] = value
+
+    with pytest.raises(ForecastResultError) as excinfo:
+        forecast_reading({"featureContract": contract}, [[1.0]])
+
+    assert excinfo.value.code == "forecast-contract-invalid"
+
+
+def test_a_reading_this_producer_emits_is_one_its_own_parser_accepts():
+    reading = forecast_reading(_model(), [[2.5]])
+
+    assert parse_forecast_reading(reading) == reading
