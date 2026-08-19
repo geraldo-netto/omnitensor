@@ -17,7 +17,7 @@ from omnitensor.executors.base import (
     release_runtime_value,
     supports_model,
 )
-from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor
+from omnitensor.executors.gpu import CompositeGpuExecutor, GpuExecutor, external_data_paths
 from omnitensor.executors.npu import NpuExecutor
 from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.registry import Workload
@@ -1547,3 +1547,37 @@ def test_every_lane_measures_the_same_thing_as_duration_ms():
         assert "build" in log[:opened]
         assert "execute" not in log[:opened]
         assert log[opened:] == ["clock", "execute", "read-output", "clock"]
+
+
+def test_gpu_executor_revalidates_a_replaced_external_weights_file(tmp_path):
+    """A large ONNX model keeps its initializers in a sibling file; the graph
+    file does not change when those weights are replaced, so validating on it
+    alone kept serving the model the operator had retired."""
+    runtime = CountingOrtRuntime()
+    executor = GpuExecutor(device_present=True, runtime=runtime)
+    model = _model_file(tmp_path, "big.onnx")
+    weights = tmp_path / "big.onnx_data"
+    weights.write_bytes(b"x" * 32)
+
+    executor.run(model, [[1]])
+    executor.run(model, [[1]])
+    assert len(runtime.sessions) == 1
+
+    weights.write_bytes(b"y" * 64)
+    executor.run(model, [[1]])
+
+    assert len(runtime.sessions) == 2
+
+
+def test_gpu_external_data_paths_names_only_the_model_s_own_siblings(tmp_path):
+    model = _model_file(tmp_path, "alpha.onnx")
+    (tmp_path / "alpha.onnx_data").write_bytes(b"a")
+    (tmp_path / "alpha.onnx.data").write_bytes(b"a")
+    _model_file(tmp_path, "beta.onnx")
+    (tmp_path / "beta.onnx_data").write_bytes(b"b")
+
+    assert external_data_paths(model) == (
+        str(tmp_path / "alpha.onnx.data"),
+        str(tmp_path / "alpha.onnx_data"),
+    )
+    assert external_data_paths(str(tmp_path / "absent" / "model.onnx")) == ()

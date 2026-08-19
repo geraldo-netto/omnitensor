@@ -9,6 +9,7 @@ silently loading the host CPU.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from .base import (
     DEFAULT_MAX_CACHED_MODELS,
@@ -24,6 +25,31 @@ from .base import (
 )
 
 GPU_PROVIDERS = ("CUDAExecutionProvider", "ROCMExecutionProvider")
+
+
+def external_data_paths(model_path: str) -> tuple[str, ...]:
+    """The sibling weight files an ONNX graph may keep its tensors in.
+
+    A model above the 2 GB protobuf limit stores its initializers beside the
+    graph -- ``model.onnx_data``, ``model.onnx.data``, and the other spellings
+    the exporters use, all of which begin with the graph's own filename.  The
+    graph file alone is then a poor identity: it does not change when the
+    weights are replaced, so a revalidated cache entry keeps serving the model
+    the operator retired.  Every such sibling is reported so the cache
+    revalidates against them too.
+    """
+    path = Path(model_path)
+    try:
+        siblings = sorted(
+            str(entry)
+            for entry in path.parent.iterdir()
+            if entry.name.startswith(path.name) and entry.name != path.name
+        )
+    except OSError:
+        # Unreadable directory: the model's own stat still decides the entry,
+        # and the cache refuses to hold anything it cannot revalidate.
+        return ()
+    return tuple(siblings)
 
 
 def _import_onnxruntime():  # pragma: no cover - trivial import shim
@@ -86,6 +112,7 @@ class GpuExecutor(CachingExecutor):
         return self._models.get_or_build(
             model_path,
             lambda: self._runtime.InferenceSession(model_path, providers=self._providers()),
+            companion_paths=external_data_paths(model_path),
         )
 
 
