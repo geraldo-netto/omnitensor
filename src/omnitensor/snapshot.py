@@ -21,7 +21,6 @@ from .tensorref import DEFAULT_MAX_TENSOR_BYTES
 
 SNAPSHOT_VERSION = 1
 PLUGIN_TELEMETRY_VERSION = PLUGIN_TELEMETRY_CONTRACT_VERSION
-MAX_DEVICE_ENTRIES = 16
 
 
 def _now_ms() -> int:
@@ -90,7 +89,7 @@ def build_snapshot(
     snapshot = {
         "version": SNAPSHOT_VERSION,
         "generatedAt": generated_at_ms if generated_at_ms is not None else _now_ms(),
-        "devices": [device.snapshot_entry() for device in devices[:MAX_DEVICE_ENTRIES]],
+        "devices": [device.snapshot_entry() for device in devices],
         "metrics": {
             "queueDepth": _metric(metrics, "queueDepth"),
             "runningProfiles": _metric(metrics, "runningProfiles"),

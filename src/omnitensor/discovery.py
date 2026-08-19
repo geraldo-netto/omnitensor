@@ -16,9 +16,6 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-MAX_PCIE_DEVICES = 8
-MAX_ACCEL_DEVICES = 8
-MAX_RENDER_DEVICES = 8
 _PCIE_NODE = re.compile(r"^apex_([0-9]{1,6})$")
 _ACCEL_NODE = re.compile(r"^accel([0-9]{1,6})$")
 _RENDER_NODE = re.compile(r"^renderD([0-9]{1,6})$")
@@ -87,9 +84,7 @@ def _read_trimmed(path: Path) -> str:
         return ""
 
 
-def _numbered_nodes(
-    root: Path, pattern: re.Pattern[str], limit: int
-) -> tuple[tuple[int, Path], ...]:
+def _numbered_nodes(root: Path, pattern: re.Pattern[str]) -> tuple[tuple[int, Path], ...]:
     try:
         entries = list(root.iterdir())
     except OSError:
@@ -99,7 +94,7 @@ def _numbered_nodes(
         match = pattern.fullmatch(entry.name)
         if match is not None and entry.exists():
             matched.append((int(match.group(1)), entry))
-    return tuple(sorted(matched, key=lambda item: (item[0], item[1].name))[:limit])
+    return tuple(sorted(matched, key=lambda item: (item[0], item[1].name)))
 
 
 def _selected(candidates: list[Device], selected_id: str | None) -> Device | None:
@@ -110,7 +105,7 @@ def _selected(candidates: list[Device], selected_id: str | None) -> Device | Non
 
 def detect_tpu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
     candidates = []
-    for index, _node in _numbered_nodes(paths.dev, _PCIE_NODE, MAX_PCIE_DEVICES):
+    for index, _node in _numbered_nodes(paths.dev, _PCIE_NODE):
         suffix = "" if index == 0 else f" {index + 1}"
         candidates.append(
             Device(
@@ -166,7 +161,7 @@ def _detect_node(
 
 def detect_npu(paths: DiscoveryPaths, selected_id: str | None = None) -> Device | None:
     candidates = []
-    for index, node in _numbered_nodes(paths.dev / "accel", _ACCEL_NODE, MAX_ACCEL_DEVICES):
+    for index, node in _numbered_nodes(paths.dev / "accel", _ACCEL_NODE):
         device = _detect_node(
             node,
             paths.sys / f"class/accel/accel{index}/device/vendor",
@@ -185,7 +180,7 @@ def detect_gpus(paths: DiscoveryPaths) -> tuple[Device, ...]:
     """Every DRM render node, with a Vulkan-matchable hardware identity."""
     candidates = []
     occurrences: dict[tuple[str, str], int] = {}
-    for node_number, node in _numbered_nodes(paths.dev / "dri", _RENDER_NODE, MAX_RENDER_DEVICES):
+    for node_number, node in _numbered_nodes(paths.dev / "dri", _RENDER_NODE):
         vendor_file = paths.sys / f"class/drm/renderD{node_number}/device/vendor"
         hardware_file = paths.sys / f"class/drm/renderD{node_number}/device/device"
         vendor = _read_trimmed(vendor_file)
