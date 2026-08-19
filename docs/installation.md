@@ -173,7 +173,7 @@ deliberately rather than taking the default.
 | Extra | Installs | Needed for |
 | --- | --- | --- |
 | *(none)* | `cryptography`, `jsonschema`, `msgpack` | the service, control socket, schemas, policy — **no inference** |
-| `[gpu]` | `ncnn`, `numpy` | GPU inference over Vulkan; the only lane that works on AMD |
+| `[gpu]` | `ncnn`, `numpy`, `pillow` | GPU inference over Vulkan; the only lane that works on AMD |
 | `[gpu-onnx-cuda]` | `onnxruntime-gpu` | GPU inference on NVIDIA |
 | `[gpu-onnx-rocm]` | `onnxruntime-rocm` | GPU inference on AMD via ROCm, instead of Vulkan |
 | `[npu]` | `openvino` | Intel NPU |
@@ -187,9 +187,10 @@ only, and `executors/gpu.py` refuses it by design — OmniTensor has no CPU
 backend — so it can never satisfy the GPU lane no matter how it is configured.
 
 `[gpu]` is not small: `ncnn` pulls `opencv-python` (~72 MB), `requests`,
-`tqdm`, and `portalocker` transitively. `numpy` is declared explicitly because
-the Vulkan executor imports it directly; relying on it arriving with `ncnn`
-would turn a future wheel change into an `ImportError` at inference time.
+`tqdm`, and `portalocker` transitively. `numpy` and `pillow` are declared
+explicitly because the Vulkan executor and the image workloads import them
+directly; relying on either arriving with `ncnn` would turn a future wheel
+change into an `ImportError` at inference time.
 
 Training is a separate distribution, `omnitensor-training`, and is neither
 mandatory nor useful in the service environment: the service never imports it,

@@ -17,7 +17,7 @@ trusted integrations unless explicitly listed below.
 | --- | --- |
 | Catalog | Nine schema-valid manifests bundled in source distributions and wheels |
 | Policy | Enable/disable, weights 1–5, global pause, durable revision, and optimistic concurrency |
-| Routing | Ordered `tpu`, `npu`, `gpu` selection constrained by model format; never CPU fallback |
+| Routing | Ordered `gpu`, `npu`, `tpu` selection constrained by model format; never CPU fallback |
 | Scheduling | Serialized dispatch per backend with weighted soft shares |
 | Observation | Contract-valid devices, queue depth, profile state, and routing detail in snapshots |
 | Inference pipeline | Version 1 bounded `submit-job`/`cancel-job` control-socket methods and backend scheduler exist; verified artifact dispatch and host use-case pipelines remain readiness-gated |

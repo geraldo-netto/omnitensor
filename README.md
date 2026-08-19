@@ -109,7 +109,7 @@ model format is compatible; otherwise the profile reports `unavailable`.
 
 ```sh
 pip install .[dev]          # development
-pip install .[tpu,gpu,npu]  # runtime extras per available hardware
+pip install .[gpu,npu,tpu]  # runtime extras per available hardware
 pip install .[convert] 'packaging/omnitensor-training[train]' # separate producer environment
 ```
 

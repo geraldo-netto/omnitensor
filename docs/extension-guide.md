@@ -95,8 +95,8 @@ trust before activation, and only then swaps the active pointer, keeping the
 previous version as the single rollback target. Storage is bounded by a quota
 whose collection never removes the active or rollback version.
 
-There is deliberately no CPU backend: an artifact must be compiled for TPU,
-NPU, or GPU. Ship the compiler report that proves the mapping.
+There is deliberately no CPU backend: an artifact must be compiled for GPU,
+NPU, or TPU. Ship the compiler report that proves the mapping.
 
 ## 6. Testing locally
 
