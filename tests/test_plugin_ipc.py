@@ -441,10 +441,6 @@ def test_execute_frame_accepts_exact_request_boundaries(job_id, trigger):
             "progress fields are invalid",
         ),
         (PluginProgress("job", "stage", 1.1, "", 1), "progress fields are invalid"),
-        (
-            PluginProgress("job", "stage", 0.5, "x" * 1025, 1),
-            "progress fields are invalid",
-        ),
         (PluginProgress("job", "stage", 0.5, "", True), "progress fields are invalid"),
     ],
 )
@@ -461,6 +457,18 @@ def test_progress_frame_accepts_exact_boundaries(fraction, stage):
     assert parse_progress(progress_frame(progress)) == progress
 
 
+def test_progress_detail_is_bounded_only_by_the_frame():
+    """A long explanation is carried, not refused: the frame limit is the bound."""
+    progress = PluginProgress("job", "stage", 0.5, "x" * 20_000, 1)
+    assert parse_progress(progress_frame(progress)) == progress
+
+
+def test_result_detail_is_bounded_only_by_the_frame():
+    """A plugin that explains a failure at length keeps its whole result."""
+    result = PluginResult("job", PluginResultStatus.FAILED, {}, "x" * 20_000, 1)
+    assert parse_result(result_frame(result)) == result
+
+
 @pytest.mark.parametrize(
     ("result", "detail"),
     [
@@ -472,10 +480,6 @@ def test_progress_frame_accepts_exact_boundaries(fraction, stage):
         (PluginResult("job", "succeeded", {}, "", 1), "result fields are invalid"),
         (
             PluginResult("job", PluginResultStatus.SUCCEEDED, [], "", 1),
-            "result fields are invalid",
-        ),
-        (
-            PluginResult("job", PluginResultStatus.SUCCEEDED, {}, "x" * 2049, 1),
             "result fields are invalid",
         ),
         (

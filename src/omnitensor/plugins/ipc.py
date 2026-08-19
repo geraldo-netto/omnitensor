@@ -27,8 +27,6 @@ _MAX_REQUEST_ID_CHARS = 128
 _MAX_CAPABILITIES = 32
 _MAX_CAPABILITY_CHARS = 64
 _MAX_STAGE_CHARS = 80
-_MAX_PROGRESS_DETAIL_CHARS = 1024
-_MAX_RESULT_DETAIL_CHARS = 2048
 # A JSON string costs at most six bytes for one character: an escaped control
 # character. Every other character is cheaper written literally.
 _WORST_CASE_CHAR_BYTES = 6
@@ -599,7 +597,6 @@ def _validate_progress(progress: PluginProgress) -> None:
         or not math.isfinite(fraction)
         or not 0 <= fraction <= 1
         or not isinstance(progress.detail, str)
-        or len(progress.detail) > _MAX_PROGRESS_DETAIL_CHARS
         or isinstance(progress.observed_at_ms, bool)
         or not isinstance(progress.observed_at_ms, int)
         or progress.observed_at_ms < 1
@@ -615,7 +612,6 @@ def _validate_result(result: PluginResult) -> None:
         not isinstance(result.status, PluginResultStatus)
         or not isinstance(result.output, dict)
         or not isinstance(result.detail, str)
-        or len(result.detail) > _MAX_RESULT_DETAIL_CHARS
         or isinstance(result.completed_at_ms, bool)
         or not isinstance(result.completed_at_ms, int)
         or result.completed_at_ms < 1
