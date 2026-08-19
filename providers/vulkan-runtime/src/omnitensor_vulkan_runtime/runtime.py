@@ -6,6 +6,7 @@ import asyncio
 import fcntl
 import json
 import re
+import threading
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -99,6 +100,16 @@ class LlamaVulkanRuntime:
         self._load_report: NativeLoadReport | None = None
         self._physical_device = ""
         self._active_request = ""
+        # The model is native memory shared between the event loop and the
+        # worker thread running a decode.  `terminate` used to call `_release`
+        # -- and so `llama.close()` -- while `create_chat_completion` was still
+        # reading the same context, freeing it under an in-flight decode; two
+        # concurrent `generate` calls did the same to each other through their
+        # `finally`.  Every use and every free now holds `_in_use`, and
+        # `_stopping` is how a waiting `terminate` asks the decode to stop
+        # rather than pull the model out from under it.
+        self._in_use = threading.RLock()
+        self._stopping = threading.Event()
 
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport:
         if accelerator != "gpu" or len(artifacts) != 1:
@@ -163,9 +174,21 @@ class LlamaVulkanRuntime:
 
     async def terminate(self, request_id: str) -> None:
         if request_id == self._active_request or request_id == "__startup__":
-            await asyncio.to_thread(self._release)
+            # Ask first, free second: the decode stops at its next chunk and
+            # drops the lock, and only then is the model closed.
+            self._stopping.set()
+            try:
+                await asyncio.to_thread(self._release)
+            finally:
+                self._stopping.clear()
 
     def _acquire_and_load(self) -> NativeLoadReport:
+        # Loading writes `_llama` and `_lease`, so it takes the same lock a
+        # decode and a release do: a load must not run beside either.
+        with self._in_use:
+            return self._acquire_and_load_locked()
+
+    def _acquire_and_load_locked(self) -> NativeLoadReport:
         self._lease_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lease = self._lease_path.open("a+b")
         try:
@@ -229,9 +252,19 @@ class LlamaVulkanRuntime:
         request: GenerationRequest,
         cancellation: CancellationToken,
     ) -> str:
-        llama = self._llama
-        if llama is None:
-            raise RuntimeError("model not loaded")
+        with self._in_use:
+            llama = self._llama
+            if llama is None:
+                raise RuntimeError("model not loaded")
+            return self._generate_locked(llama, task, request, cancellation)
+
+    def _generate_locked(
+        self,
+        llama,
+        task: GenerationTask,
+        request: GenerationRequest,
+        cancellation: CancellationToken,
+    ) -> str:
         content = _private_content(self._store, request)
         instruction = task.instruction_template.replace("{{UNTRUSTED_CONTENT}}", content)
         grounding_hint = _grounding_hint(task, request, self._store)
@@ -248,7 +281,7 @@ class LlamaVulkanRuntime:
             },
             {"role": "user", "content": instruction},
         ]
-        raw = _complete_json(llama, messages, task, cancellation)
+        raw = _complete_json(llama, messages, task, cancellation, self._stopping)
         if grounding_hint and _is_grounded_event_refusal(raw):
             messages.extend(
                 (
@@ -256,10 +289,14 @@ class LlamaVulkanRuntime:
                     {"role": "user", "content": _EVENT_RECONSIDERATION},
                 )
             )
-            raw = _complete_json(llama, messages, task, cancellation)
+            raw = _complete_json(llama, messages, task, cancellation, self._stopping)
         return bind_grounding_metadata(raw, task, request, self._store)
 
     def _release(self) -> None:
+        with self._in_use:
+            self._release_locked()
+
+    def _release_locked(self) -> None:
         llama = self._llama
         self._llama = None
         if llama is not None:
@@ -278,6 +315,7 @@ def _complete_json(
     messages: list[dict[str, str]],
     task: GenerationTask,
     cancellation: CancellationToken,
+    stopping: threading.Event | None = None,
 ) -> str:
     reply = llama.create_chat_completion(
         messages=messages,
@@ -294,6 +332,10 @@ def _complete_json(
     chunks = []
     for reply_chunk in reply:
         cancellation.raise_if_cancelled()
+        if stopping is not None and stopping.is_set():
+            # `terminate` is waiting to close this model: stop reading it now,
+            # rather than making the caller wait out a whole generation.
+            raise asyncio.CancelledError
         choices = reply_chunk.get("choices") if isinstance(reply_chunk, Mapping) else None
         delta = choices[0].get("delta") if isinstance(choices, list) and choices else None
         text = delta.get("content") if isinstance(delta, Mapping) else None

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
+import time
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -2950,9 +2952,7 @@ def test_a_software_device_is_never_embedded_on(monkeypatch):
 
 
 def test_a_hardware_card_beside_a_software_one_is_unambiguous(monkeypatch):
-    monkeypatch.setitem(
-        sys.modules, "ncnn", _ncnn(("llvmpipe", "AMD Radeon 610M"), kinds=(3, 1))
-    )
+    monkeypatch.setitem(sys.modules, "ncnn", _ncnn(("llvmpipe", "AMD Radeon 610M"), kinds=(3, 1)))
 
     assert bge.vulkan_device_index(bge.QUALIFIED_DEVICE) == 1
 
@@ -3114,3 +3114,60 @@ def test_provenance_is_read_from_the_artifact_and_refused_when_unstated(tmp_path
     ):
         with pytest.raises(RuntimeError, match="states no source or licence"):
             factories._provenance(missing)
+
+
+def test_the_model_is_not_freed_under_a_running_decode(tmp_path, monkeypatch):
+    """`terminate` used to close the model while a decode still held it.
+
+    `_release` ran on the event loop's thread pool while `_generate_sync` was
+    inside `create_chat_completion` with a local reference to the same `Llama`,
+    so llama.cpp's context was freed under an in-flight read. The release must
+    now wait for the decode to leave, and the decode is asked to stop rather
+    than made to finish a whole generation first.
+    """
+    monkeypatch.setattr(runtime, "grammar_schema", lambda _schema: {})
+    order: list[str] = []
+    started = threading.Event()
+
+    class Llama:
+        def create_chat_completion(self, **_kwargs):
+            started.set()
+            for index in range(200):
+                order.append(f"chunk-{index}")
+                time.sleep(0.005)
+                yield {"choices": [{"delta": {"content": "x"}}]}
+
+        def close(self):
+            order.append("close")
+
+    lease = tmp_path / "generation.lock"
+    lease.touch()
+    native = runtime.LlamaVulkanRuntime(MemoryFragmentStore(), lease)
+    native._llama = Llama()
+    task = SimpleNamespace(limits=SimpleNamespace(output_tokens=64), output_schema={})
+    cancellation = CancellationController()
+
+    def decode() -> None:
+        with native._in_use:
+            try:
+                runtime._complete_json(
+                    native._llama,
+                    [{"role": "user", "content": "hello"}],
+                    task,
+                    cancellation,
+                    native._stopping,
+                )
+            except asyncio.CancelledError:
+                order.append("decode-left")
+
+    worker = threading.Thread(target=decode)
+    worker.start()
+    assert started.wait(5)
+    native._stopping.set()
+    native._release()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert "decode-left" in order
+    assert order.index("decode-left") < order.index("close")
+    assert len(order) < 200
