@@ -194,6 +194,22 @@ def test_a_stage_fault_ends_only_that_job():
     assert "plugin defect" in result.detail
 
 
+def test_a_fault_explanation_reaches_the_caller_whole():
+    """`detail` is the only record of why a job failed, so it is not clipped."""
+    built, record = stages()
+    message = "jsonschema violation at " + "a" * 500
+
+    async def broken(carried):
+        raise ValueError(message)
+
+    built[PipelineStage.INFER] = broken
+    subject, _ = runner(stage_map=(built, record))
+
+    result = run(subject.run("job-1", {}))
+
+    assert result.detail == f"ValueError: {message}"
+
+
 def test_backpressure_is_reported_as_a_terminal_result_not_an_exception():
     flow = PluginFlowController(PLUGIN, max_in_flight=1)
     built, record = stages(delays={PipelineStage.COLLECT: 1})

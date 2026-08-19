@@ -105,7 +105,7 @@ class PipelineRunner:
             return machine.terminal_result
         except Exception as error:  # noqa: BLE001 - one plugin fault ends one job
             machine.fail(
-                f"{type(error).__name__}: {error}"[:200],
+                f"{type(error).__name__}: {error}",
                 completed_at_ms=self._clock_ms(),
             )
             return machine.terminal_result
@@ -118,5 +118,5 @@ class PipelineRunner:
 
     def _failed(self, job_id: str, code: str, detail: str) -> PluginResult:
         machine = PipelineStateMachine(job_id)
-        machine.fail(f"{code}: {detail}"[:200], completed_at_ms=self._clock_ms())
+        machine.fail(f"{code}: {detail}", completed_at_ms=self._clock_ms())
         return machine.terminal_result
