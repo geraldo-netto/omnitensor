@@ -10,6 +10,7 @@ the host CPU.  Discrete devices are preferred over integrated ones.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,13 @@ from .base import (
     InferenceResult,
     ModelStore,
 )
+
+# How long a failed enumeration is trusted before the next question retries
+# it.  Latching the failure for the executor's whole life turned one transient
+# error — a driver reloading, a device momentarily busy — into a GPU lane that
+# stayed dead until the device set changed.  The same remedy the TPU lane's
+# DELEGATE_RETRY_SECONDS applies to its delegate.
+SELECTION_RETRY_SECONDS = 30.0
 
 # ncnn VkGpuInfo.type(): 0 discrete, 1 integrated, 2 virtual, 3 cpu (software).
 _DEVICE_PREFERENCE = {0: 0, 1: 1, 2: 2}
@@ -178,11 +186,20 @@ class VulkanGpuExecutor:
         *,
         requested_device: int | VulkanDeviceRequest | None = None,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
+        selection_retry_seconds: float = SELECTION_RETRY_SECONDS,
+        clock=time.monotonic,
     ):
         self._device_present = device_present
         self._runtime = runtime if runtime is not None else _import_ncnn()
         self._requested_device = requested_device
-        self._selected: tuple[int | None, str] | None = None
+        self._selection_retry_seconds = selection_retry_seconds
+        self._clock = clock
+        # Written by run() in a dedicated off-loop thread and read by
+        # availability() on the event loop thread; the lock makes the
+        # publication of the answer safe across threads.
+        self._selected: tuple[int, str] | None = None
+        self._failure: tuple[str, float] | None = None
+        self._selection_lock = threading.Lock()
         self._nets = ModelStore(max_cached_models)
 
     def _select_device(self) -> tuple[int | None, str]:
@@ -203,10 +220,27 @@ class VulkanGpuExecutor:
         submission to the next; measurement did not support that, and the
         cause turned out to be a Mat pointing at freed pixels (see
         ``_to_mat``).
+
+        Only a *successful* selection is kept for good.  A failure is kept for
+        ``selection_retry_seconds`` and then asked again: caching it forever
+        meant one bad moment during enumeration disabled this lane until the
+        hardware changed, which on a single-GPU host is until the service is
+        restarted.
         """
-        if self._selected is None:
-            self._selected = self._enumerate_device()
-        return self._selected
+        with self._selection_lock:
+            if self._selected is not None:
+                return self._selected
+            failure = self._failure
+            if failure is not None and self._clock() - failure[1] < self._selection_retry_seconds:
+                return None, failure[0]
+        answer = self._enumerate_device()
+        with self._selection_lock:
+            if answer[0] is not None:
+                self._selected = answer
+                self._failure = None
+            else:
+                self._failure = (answer[1], self._clock())
+        return answer
 
     def _enumerate_device(self) -> tuple[int | None, str]:
         try:

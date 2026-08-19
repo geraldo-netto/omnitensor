@@ -476,6 +476,53 @@ def test_the_device_is_enumerated_once_and_reused():
     assert runtime.enumerations == 1, "the answer changes only when hardware does"
 
 
+def test_a_transient_enumeration_failure_does_not_disable_the_lane_for_good():
+    """The failure the TPU lane's delegate retry already fixed, for Vulkan.
+
+    Caching the refusal forever meant one bad moment during enumeration — a
+    driver reloading, a device momentarily busy — left this executor answering
+    "unavailable" until the hardware changed, which on a single-GPU host means
+    until the service restarts.
+    """
+
+    class FlakyNcnn(FakeNcnn):
+        def __init__(self):
+            super().__init__([DISCRETE])
+            self.broken = True
+            self.enumerations = 0
+
+        def get_gpu_count(self):
+            self.enumerations += 1
+            if self.broken:
+                raise OSError("loader broken")
+            return super().get_gpu_count()
+
+    now = [1000.0]
+    runtime = FlakyNcnn()
+    executor = VulkanGpuExecutor(
+        device_present=True,
+        runtime=runtime,
+        selection_retry_seconds=30.0,
+        clock=lambda: now[0],
+    )
+
+    assert executor.availability().available is False
+    runtime.broken = False
+    # Inside the retry window the remembered failure still answers, so a
+    # publisher ticking twice a second does not re-enumerate every tick.
+    assert executor.availability().available is False
+    assert runtime.enumerations == 1
+
+    now[0] += 31.0
+    assert executor.availability().available is True
+
+    # A success, by contrast, is kept for the executor's life.
+    runtime.broken = True
+    now[0] += 3600.0
+    assert executor.availability().available is True
+    assert runtime.enumerations == 2
+
+
 def test_the_loaded_net_is_reused_between_jobs(tmp_path):
     """Loading and compiling the same model on every job defeats warm inference."""
     runtime = FakeNcnn([DISCRETE])
