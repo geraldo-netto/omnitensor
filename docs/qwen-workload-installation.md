@@ -253,6 +253,15 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
   "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl
 ```
 
+Reinstalling the service alone is not an upgrade. The provider wheels import
+module-level names from the service package, so the two must come from the same
+tree: rebuild the wheels above and repeat the whole `--no-deps` provider install
+in the same step whenever `omnitensor` itself is reinstalled. Skipping it leaves
+a worker that dies at entry-point load, which reaches the applet as `worker
+handshake rejected: truncated-frame`; `omnitensor-verify-install` reports the
+same skew as a failed `provider-imports` check, naming the distribution to
+reinstall.
+
 Install optional document/media parsing only when needed:
 
 ```sh

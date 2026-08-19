@@ -220,6 +220,17 @@ the store by hand.
 A profile reporting `unavailable: gpu: ncnn is not installed` means the extra
 was omitted; a profile reporting `Ready on gpu` means the runtime resolved.
 
+Reinstall the providers whenever you reinstall the service. Provider
+distributions import module-level names from the service package, so a service
+built from a newer tree can leave an installed provider wheel importing a name
+that no longer exists. The worker then dies at entry-point load and the applet
+is told only `worker handshake rejected: truncated-frame`. Rebuild and
+reinstall the provider wheels from the same tree in the same step — see
+[Installing the Qwen workload providers](qwen-workload-installation.md) — and
+run `omnitensor-verify-install` afterwards: its `provider-imports` check loads
+every installed provider entry point and names the distribution and the missing
+symbol when one no longer matches.
+
 `omnitensor-verify-install` asks the executors whether each installed runtime
 is usable, not merely whether it imports — so a plain `onnxruntime` is reported
 as unusable with the executor's own reason rather than counted as a GPU lane.

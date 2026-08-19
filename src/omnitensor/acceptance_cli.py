@@ -14,6 +14,7 @@ from .acceptance_checks import (
     check_executable,
     check_isolation,
     check_plugin_discovery,
+    check_provider_imports,
     check_schemas,
     check_service,
     check_snapshot,
@@ -66,6 +67,7 @@ def build_default_report(
     schemas_check = check_schemas
     workloads_check = check_workload_catalog
     discovery_check = check_plugin_discovery
+    provider_import_check = check_provider_imports
     isolation_check = check_isolation
     bus_check = check_bus
     snapshot_check = check_snapshot
@@ -81,6 +83,7 @@ def build_default_report(
         schemas_check(),
         workloads_check(bundled),
         discovery_check(lambda: discover_plugin_metadata(bundled_root=bundled)),
+        provider_import_check(),
         isolation_check(
             external_worker_specs(
                 resolve_plugin_identities(discover_plugin_metadata(bundled_root=bundled)).plugins

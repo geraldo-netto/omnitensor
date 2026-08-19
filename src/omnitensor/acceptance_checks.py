@@ -133,6 +133,66 @@ def check_plugin_discovery(discover: Callable[[], Iterable]) -> Check:
     return Check("discovery", True, f"{len(candidates)} plugin candidates discovered")
 
 
+def check_provider_imports(
+    entry_points_provider: Callable[..., Iterable] | None = None,
+) -> Check:
+    """Load every installed provider entry point, and name what a skew broke.
+
+    Provider distributions import module-level names from the service package,
+    so reinstalling ``omnitensor`` without the providers built from the same
+    tree leaves an installed wheel importing a name that no longer exists.
+    Removing ``MAX_VISUALS`` and reinstalling only the root package left
+    ``media-transcription`` dead at entry-point load, and the applet was told
+    only ``worker handshake rejected: truncated-frame``.
+
+    Discovery cannot catch this: it enumerates entry points deterministically
+    and never calls ``load()``, which is the point at which the import happens.
+    """
+    from importlib import metadata  # noqa: PLC0415 - only needed for this probe
+
+    from .plugins.discovery import PLUGIN_ENTRY_POINT_GROUP  # noqa: PLC0415
+
+    provider = entry_points_provider or metadata.entry_points
+    try:
+        entry_points = tuple(provider(group=PLUGIN_ENTRY_POINT_GROUP))
+    except Exception as error:  # noqa: BLE001 - a broken installation, not a crash here
+        return Check(
+            "provider-imports",
+            False,
+            f"entry-point enumeration failed: {type(error).__name__}: {error}",
+        )
+    broken: list[str] = []
+    loaded = 0
+    for entry_point in sorted(entry_points, key=lambda point: point.name):
+        try:
+            entry_point.load()
+        except Exception as error:  # noqa: BLE001 - any failure to load is a failed install
+            broken.append(
+                f"{entry_point.name} from {_distribution_label(entry_point)}: "
+                f"{type(error).__name__}: {error}"
+            )
+        else:
+            loaded += 1
+    if broken:
+        return Check(
+            "provider-imports",
+            False,
+            "installed providers that cannot be loaded — reinstall them from the same "
+            "tree as the service: " + "; ".join(broken),
+        )
+    return Check("provider-imports", True, f"{loaded} installed providers import cleanly")
+
+
+def _distribution_label(entry_point: object) -> str:
+    """The distribution to reinstall, or the entry point's target when unknown."""
+    distribution = getattr(entry_point, "dist", None)
+    name = getattr(distribution, "name", None)
+    version = getattr(distribution, "version", None)
+    if name and version:
+        return f"{name} {version}"
+    return name or str(getattr(entry_point, "value", "an unknown distribution"))
+
+
 def check_isolation(specs: Iterable) -> Check:
     external = tuple(specs)
     unsandboxed = [spec.plugin_id for spec in external if getattr(spec, "sandbox", None) is None]

@@ -18,6 +18,7 @@ from omnitensor.acceptance import (
     check_executable,
     check_isolation,
     check_plugin_discovery,
+    check_provider_imports,
     check_schemas,
     check_service,
     check_snapshot,
@@ -233,6 +234,74 @@ def test_successful_discovery_counts_candidates():
     check = check_plugin_discovery(lambda: (object(), object()))
     assert check.ok is True
     assert "2 plugin candidates" in check.detail
+
+
+class StubDistribution:
+    def __init__(self, name, version):
+        self.name = name
+        self.version = version
+
+
+class StubEntryPoint:
+    """An installed provider entry point, loadable or not."""
+
+    def __init__(self, name, value, dist=None, error=None):
+        self.name = name
+        self.value = value
+        self.dist = dist
+        self.error = error
+
+    def load(self):
+        if self.error is not None:
+            raise self.error
+        return object()
+
+
+def test_a_provider_importing_a_name_the_service_dropped_is_named(tmp_path):
+    """The skew that killed a worker with only `truncated-frame` to show for it.
+
+    Removing MAX_VISUALS and reinstalling only the root package left the
+    installed media-transcription wheel importing a name that no longer exists.
+    Discovery never noticed, because it enumerates entry points without loading
+    them.
+    """
+    broken = StubEntryPoint(
+        "media-transcription",
+        "omnitensor_media_transcription.formats:plugin",
+        StubDistribution("omnitensor-media-transcription", "1.4.0"),
+        ImportError("cannot import name 'MAX_VISUALS' from 'omnitensor.plugins'"),
+    )
+    healthy = StubEntryPoint("event-extraction", "omnitensor_event_extraction:plugin")
+
+    check = check_provider_imports(lambda group: (healthy, broken))
+
+    assert check.ok is False
+    assert "media-transcription" in check.detail
+    assert "omnitensor-media-transcription 1.4.0" in check.detail
+    assert "MAX_VISUALS" in check.detail
+    assert "reinstall" in check.detail
+
+
+def test_providers_that_all_import_are_counted():
+    entry_points = (
+        StubEntryPoint("event-extraction", "omnitensor_event_extraction:plugin"),
+        StubEntryPoint("file-organizer", "omnitensor_file_organizer:plugin"),
+    )
+
+    check = check_provider_imports(lambda group: entry_points)
+
+    assert check.ok is True
+    assert "2 installed providers" in check.detail
+
+
+def test_unreadable_entry_point_metadata_fails_the_check():
+    def explode(group):
+        raise OSError("entry points unreadable")
+
+    check = check_provider_imports(explode)
+
+    assert check.ok is False
+    assert "OSError" in check.detail
 
 
 class StubSpec:

@@ -29,6 +29,7 @@ def test_facade_exports_the_exact_owner_objects():
         "check_schemas",
         "check_workload_catalog",
         "check_plugin_discovery",
+        "check_provider_imports",
         "check_isolation",
         "check_bus",
         "check_snapshot",
