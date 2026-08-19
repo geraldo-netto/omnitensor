@@ -148,7 +148,6 @@
     },
     "alerts": {
       "type": "array",
-      "maxItems": 100,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -173,12 +172,10 @@
           },
           "title": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 160
+            "minLength": 1
           },
           "summary": {
-            "type": "string",
-            "maxLength": 500
+            "type": "string"
           },
           "severity": {
             "enum": [

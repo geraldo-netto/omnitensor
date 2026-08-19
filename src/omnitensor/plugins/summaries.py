@@ -10,9 +10,6 @@ from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
-MAX_RESULT_SUMMARIES = 100
-MAX_SUMMARY_TITLE_CHARS = 160
-MAX_SUMMARY_TEXT_CHARS = 500
 MAX_JOB_ID_CHARS = 120
 MAX_ALERT_ID_CHARS = 120
 ADVISORY_RISK_MAX = 0.5
@@ -68,23 +65,17 @@ class ResultSummary:
 
 
 class ResultSummaryRegistry:
-    """Keep only bounded allowlisted public fields; never retain full output."""
+    """Keep only the allowlisted public fields; never retain full output.
 
-    def __init__(
-        self,
-        *,
-        max_summaries: int = MAX_RESULT_SUMMARIES,
-        alert_id_factory: Callable[[], str],
-    ) -> None:
-        if (
-            isinstance(max_summaries, bool)
-            or not isinstance(max_summaries, int)
-            or not 1 <= max_summaries <= MAX_RESULT_SUMMARIES
-        ):
-            raise ValueError(f"max_summaries must be between 1 and {MAX_RESULT_SUMMARIES}")
+    Redaction, not length, is the privacy control here, and alerts are the
+    runtime's only channel for "something went wrong" — so a summary is kept
+    whole and every alert is retained. A count or a character ceiling would
+    discard signal exactly during the incident that produced it.
+    """
+
+    def __init__(self, *, alert_id_factory: Callable[[], str]) -> None:
         if not callable(alert_id_factory):
             raise TypeError("alert_id_factory must be callable")
-        self._max_summaries = max_summaries
         self._alert_id_factory = alert_id_factory
         self._summaries: dict[str, ResultSummary] = {}
         self._lock = Lock()
@@ -108,12 +99,8 @@ class ResultSummaryRegistry:
         _validate_job_id(job_id)
         if not hasattr(redactor, "redact_text"):
             raise TypeError("redactor must provide redact_text")
-        public_title = _public_text(
-            "title", title, redactor, MAX_SUMMARY_TITLE_CHARS, required=True
-        )
-        public_summary = _public_text(
-            "summary", summary, redactor, MAX_SUMMARY_TEXT_CHARS, required=False
-        )
+        public_title = _public_text("title", title, redactor, required=True)
+        public_summary = _public_text("summary", summary, redactor, required=False)
         alert_id = self._alert_id_factory()
         _validate_public_id("generated alert ID", alert_id, MAX_ALERT_ID_CHARS)
         item = ResultSummary(
@@ -131,8 +118,6 @@ class ResultSummaryRegistry:
         with self._lock:
             if alert_id in self._summaries:
                 raise SummaryError("alert-id-collision", "generated alert ID already exists")
-            if len(self._summaries) >= self._max_summaries:
-                self._summaries.pop(self._eviction_candidate().alert_id)
             self._summaries[alert_id] = item
         return item
 
@@ -156,9 +141,6 @@ class ResultSummaryRegistry:
     def documents(self) -> list[dict]:
         return [summary.document() for summary in self.summaries()]
 
-    def _eviction_candidate(self) -> ResultSummary:
-        return min(self._summaries.values(), key=_eviction_order)
-
 
 def severity_for_risk(risk_score: float | None) -> SummarySeverity:
     risk_score = _optional_probability("risk_score", risk_score)
@@ -173,30 +155,13 @@ def _display_order(summary: ResultSummary) -> tuple[int, str]:
     return (-summary.timestamp_ms, summary.alert_id)
 
 
-def _eviction_order(summary: ResultSummary) -> tuple[bool, int, int, str]:
-    severity_rank = {
-        SummarySeverity.ADVISORY: 0,
-        SummarySeverity.WARNING: 1,
-        SummarySeverity.CRITICAL: 2,
-    }[summary.severity]
-    return (not summary.resolved, severity_rank, summary.timestamp_ms, summary.alert_id)
-
-
-def _public_text(
-    name: str,
-    value: object,
-    redactor: TextRedactor,
-    maximum: int,
-    *,
-    required: bool,
-) -> str:
+def _public_text(name: str, value: object, redactor: TextRedactor, *, required: bool) -> str:
     if not isinstance(value, str):
         raise SummaryError("invalid-summary", f"{name} must be a string")
     redacted = redactor.redact_text(value).replace("\x00", "")
-    bounded = redacted[:maximum]
-    if required and not bounded:
+    if required and not redacted:
         raise SummaryError("invalid-summary", f"{name} must not be empty")
-    return bounded
+    return redacted
 
 
 def _optional_probability(name: str, value: object) -> float | None:

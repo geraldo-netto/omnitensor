@@ -11,9 +11,6 @@ from hypothesis import strategies as st
 
 from omnitensor.discovery import Device
 from omnitensor.plugins import (
-    MAX_RESULT_SUMMARIES,
-    MAX_SUMMARY_TEXT_CHARS,
-    MAX_SUMMARY_TITLE_CHARS,
     ResultSummary,
     ResultSummaryRegistry,
     SecretRedactor,
@@ -25,12 +22,9 @@ from omnitensor.registry import validate_document
 from omnitensor.snapshot import build_snapshot
 
 
-def registry(*ids, maximum=MAX_RESULT_SUMMARIES):
+def registry(*ids):
     values = iter(ids or (f"alert-{index}" for index in itertools.count()))
-    return ResultSummaryRegistry(
-        max_summaries=maximum,
-        alert_id_factory=lambda: next(values),
-    )
+    return ResultSummaryRegistry(alert_id_factory=lambda: next(values))
 
 
 def publish(instance, **changes):
@@ -91,8 +85,9 @@ def test_publish_redacts_bounds_and_emits_only_allowlisted_snapshot_fields():
     assert item.severity is SummarySeverity.CRITICAL
     assert secret not in item.title + item.summary
     assert "\x00" not in item.summary
-    assert len(item.title) == MAX_SUMMARY_TITLE_CHARS
-    assert len(item.summary) == MAX_SUMMARY_TEXT_CHARS
+    # Redaction is the privacy control; the text a person is shown is whole.
+    assert item.title.endswith("x" * 200)
+    assert item.summary.endswith("y" * 600)
     assert [field.name for field in fields(ResultSummary)] == [
         "alert_id",
         "plugin_id",
@@ -168,8 +163,9 @@ def test_documents_are_newest_first_with_alert_id_tie_break():
     ]
 
 
-def test_capacity_evicts_resolved_before_unresolved_then_lowest_risk_oldest():
-    instance = registry("critical", "resolved", "advisory", "new", maximum=3)
+def test_every_alert_is_retained_whatever_its_severity_or_resolution():
+    """Alerts are the only 'something went wrong' channel, so none is evicted."""
+    instance = registry("critical", "resolved", "advisory", "new")
     publish(instance, risk_score=0.9, timestamp_ms=1)
     publish(instance, risk_score=0.7, timestamp_ms=2)
     instance.resolve("resolved")
@@ -179,17 +175,9 @@ def test_capacity_evicts_resolved_before_unresolved_then_lowest_risk_oldest():
 
     assert {item.alert_id for item in instance.summaries()} == {
         "critical",
+        "resolved",
         "advisory",
         "new",
-    }
-
-    second = registry("old-warning", "old-advisory", "new-critical", maximum=2)
-    publish(second, risk_score=0.6, timestamp_ms=1)
-    publish(second, risk_score=0.1, timestamp_ms=2)
-    publish(second, risk_score=0.9, timestamp_ms=3)
-    assert {item.alert_id for item in second.summaries()} == {
-        "old-warning",
-        "new-critical",
     }
 
 
@@ -273,15 +261,12 @@ def test_redactor_is_required_before_any_summary_is_retained():
     assert instance.summaries() == ()
 
 
-@pytest.mark.parametrize("maximum", [0, -1, True, 101, 1.5, "1"])
-def test_registry_capacity_is_strict(maximum):
-    with pytest.raises(ValueError, match="max_summaries"):
-        registry(maximum=maximum)
+def test_an_alert_id_factory_is_required():
     with pytest.raises(TypeError, match="must be callable"):
         ResultSummaryRegistry(alert_id_factory=None)
 
 
-def test_concurrent_publish_is_bounded_without_lost_or_partial_documents():
+def test_concurrent_publish_loses_no_alert_and_writes_no_partial_document():
     counter = itertools.count()
     instance = ResultSummaryRegistry(alert_id_factory=lambda: f"alert-{next(counter)}")
 
@@ -290,5 +275,5 @@ def test_concurrent_publish_is_bounded_without_lost_or_partial_documents():
 
     assert len(items) == 150
     documents = instance.documents()
-    assert len(documents) == MAX_RESULT_SUMMARIES
-    assert len({document["id"] for document in documents}) == MAX_RESULT_SUMMARIES
+    assert len(documents) == 150
+    assert len({document["id"] for document in documents}) == 150
