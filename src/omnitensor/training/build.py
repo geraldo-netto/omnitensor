@@ -35,21 +35,9 @@ from .tabular import (
 )
 from .tabular import binary_auc as _auc
 from .tabular import normalization as _normalization
-from .tabular import normalized_features as _normalized_features  # noqa: F401
-from .tabular import stable_sigmoid as _sigmoid  # noqa: F401
+from .tabular import normalized_features as _normalized_features
+from .tabular import stable_sigmoid as _sigmoid
 from .tabular import unit_interval as _unit_interval
-
-
-def _model_normalized_features(features, means, scales):
-    return _normalized_features(features, means, scales)
-
-
-def _model_probability(value):
-    return _sigmoid(value)
-
-
-BuildAdvisorModel._normalize = staticmethod(_model_normalized_features)
-BuildAdvisorModel._probability = staticmethod(_model_probability)
 
 BUILD_RECIPE = "metadata-risk-ranking-v1"
 BUILD_PROVENANCE_CONFIRMATION = "I-confirm-build-metadata-is-approved"

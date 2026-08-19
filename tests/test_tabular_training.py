@@ -75,7 +75,15 @@ def test_legacy_build_symbols_are_canonical_shared_objects():
     assert build._sigmoid is stable_sigmoid
 
 
-def test_legacy_build_callbacks_are_resolved_at_prediction_and_fit_time(monkeypatch):
+def test_model_prediction_uses_the_package_functions_not_a_patched_module():
+    """Importing ``build`` must not rebind the shared model's own callables."""
+    assert BuildAdvisorModel._normalize is normalized_features
+    assert BuildAdvisorModel._probability is stable_sigmoid
+    model = BuildAdvisorModel((1.0,), (2.0,), ((2.0,),), (1.0,))
+    assert model.predict((9.0,)) == (stable_sigmoid(9.0),)
+
+
+def test_legacy_build_fit_callbacks_are_resolved_at_fit_time(monkeypatch):
     normalized = []
     probabilities = []
 
@@ -89,18 +97,13 @@ def test_legacy_build_callbacks_are_resolved_at_prediction_and_fit_time(monkeypa
 
     monkeypatch.setattr(build, "_normalized_features", normalize)
     monkeypatch.setattr(build, "_sigmoid", probability)
-    model = BuildAdvisorModel((1.0,), (2.0,), ((2.0,),), (1.0,))
-    assert model.predict((9.0,)) == (0.25,)
-    assert normalized == [((9.0,), (1.0,), (2.0,))]
-    assert probabilities == [7.0]
-
     examples = (
         BuildExample(0, (0.0,), 0, (), ()),
         BuildExample(1, (1.0,), 1, (), ()),
     )
     build._fit_output(examples, lambda item: item.build_failed, (0.5,), (0.5,))
-    assert len(normalized) == 481
-    assert len(probabilities) == 481
+    assert len(normalized) == 480
+    assert len(probabilities) == 480
 
 
 @pytest.mark.parametrize(
