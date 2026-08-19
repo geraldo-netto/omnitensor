@@ -17,7 +17,6 @@ from omnitensor.training.compilers import (
     EdgeTpuTargetCompiler,
     NcnnTargetCompiler,
     OpenVinoTargetCompiler,
-    _bounded_tail,
     compatible_available_targets,
     compiler_catalog,
     default_target_compilers,
@@ -448,6 +447,22 @@ def test_edge_tpu_subprocess_has_stable_failures(tmp_path, monkeypatch, effect, 
     assert detail in captured.value.detail
 
 
-def test_compiler_diagnostic_tail_is_exactly_bounded_and_never_empty():
-    assert _bounded_tail(" \n ") == "compiler returned no diagnostics"
-    assert _bounded_tail("prefix-" + "x" * 400) == "x" * 400
+def test_a_failed_compilation_reports_the_whole_report_and_where_it_lives(tmp_path, monkeypatch):
+    source = tmp_path / "model.tflite"
+    source.write_bytes(b"portable")
+    long_report = "first line\n" + "x" * 4000
+    monkeypatch.setattr(
+        "omnitensor.training.compilers.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=2, stdout=long_report, stderr=""),
+    )
+    report_path = tmp_path / "out" / "report.txt"
+    report_path.parent.mkdir()
+
+    with pytest.raises(CompilerError) as captured:
+        EdgeTpuSubprocess(Path("/tools/edgetpu_compiler")).compile(
+            source, tmp_path / "out", report_path, 9
+        )
+
+    assert captured.value.code == "compilation-failed"
+    assert long_report in captured.value.detail
+    assert str(report_path) in captured.value.detail

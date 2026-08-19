@@ -135,7 +135,7 @@ async def run_case(
     except json.JSONDecodeError:
         error = "output was not JSON"
     except Exception as failure:  # a failed case is data, not a stopped run
-        error = f"{type(failure).__name__}: {failure}"[:200]
+        error = f"{type(failure).__name__}: {failure}"
     finally:
         elapsed = time.monotonic() - started
         await store.discard(request_id)

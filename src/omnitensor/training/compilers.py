@@ -129,7 +129,10 @@ class EdgeTpuSubprocess:
         report = "\n".join(part for part in (result.stdout, result.stderr) if part)
         report_path.write_text(report, encoding="utf-8")
         if result.returncode != 0:
-            raise CompilerError("compilation-failed", _bounded_tail(report))
+            diagnostics = report.strip() or "compiler returned no diagnostics"
+            raise CompilerError(
+                "compilation-failed", f"{diagnostics} (full report at {report_path})"
+            )
         compiled = output_dir / f"{source.stem}_edgetpu.tflite"
         if not compiled.is_file() or compiled.stat().st_size == 0:
             raise CompilerError(
@@ -328,8 +331,3 @@ def _require_full_edge_tpu_mapping(report_path: Path) -> None:
         raise CompilerError(
             "mapping-incomplete", f"Edge TPU compiler mapped {counts['cpu']} operations to CPU"
         )
-
-
-def _bounded_tail(output: str, limit: int = 400) -> str:
-    cleaned = output.strip()
-    return cleaned[-limit:] if cleaned else "compiler returned no diagnostics"
