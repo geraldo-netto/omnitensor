@@ -12,10 +12,10 @@ from .executors.vulkan import UNMATCHABLE_DEVICE_ID, VulkanDeviceRequest, Vulkan
 
 class _UnavailableSelectedGpuExecutor:
     backend = "gpu"
-    model_formats = frozenset({"ncnn", "onnx"})
 
-    def __init__(self, device_id: str) -> None:
+    def __init__(self, device_id: str, model_formats: frozenset[str]) -> None:
         self._device_id = device_id
+        self.model_formats = model_formats
 
     def availability(self) -> Availability:
         return Availability(
@@ -42,9 +42,9 @@ class ExecutorSet(dict):
         if gpu_device_id is None:
             return selected
         executor = self.device_executors.get(gpu_device_id)
-        selected["gpu"] = (
-            executor if executor is not None else _UnavailableSelectedGpuExecutor(gpu_device_id)
-        )
+        if executor is None:
+            executor = _UnavailableSelectedGpuExecutor(gpu_device_id, self["gpu"].model_formats)
+        selected["gpu"] = executor
         return selected
 
     def scheduler_executors(self) -> dict:

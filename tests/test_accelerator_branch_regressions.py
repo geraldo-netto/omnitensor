@@ -3,6 +3,7 @@ from __future__ import annotations
 from omnitensor.discovery import Device
 from omnitensor.execution import build_executors
 from omnitensor.executors.base import (
+    DEVICE_ABSENT,
     RUNTIME_MISSING,
     Availability,
     InferenceResult,
@@ -158,3 +159,11 @@ def test_executor_reconciliation_replaces_only_removed_and_readded_lane():
     assert readded["tpu"]._device_present is True
     assert readded["npu"] is removed["npu"]
     assert readded["gpu"] is removed["gpu"]
+
+
+def test_absent_selected_gpu_placeholder_mirrors_the_gpu_lane_formats():
+    executors = build_executors([Device("gpu-0", "gpu", "Some GPU", "pci")])
+    placeholder = executors.for_device("gpu-vanished")["gpu"]
+
+    assert placeholder.model_formats == executors["gpu"].model_formats
+    assert placeholder.availability().code == DEVICE_ABSENT
