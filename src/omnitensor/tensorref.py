@@ -312,6 +312,16 @@ def _chunks(path: Path, max_bytes: int):
 
 def _unpack(payload: bytes, reference: TensorReference) -> list:
     code = _DTYPE_CODES[reference.dtype]
+    if len(payload) != reference.expected_bytes:
+        # _permitted stat()ed the file before the read; a file that grew or
+        # shrank in between reaches here with the wrong byte count, and
+        # struct.error is neither a ValueError nor a TensorReferenceError, so
+        # it would escape this module's stable-refusal contract as a crash.
+        raise TensorReferenceError(
+            "input-ref-mismatch",
+            f"declared shape needs {reference.expected_bytes} bytes, "
+            f"the read returned {len(payload)}",
+        )
     values = struct.unpack(f"<{reference.element_count}{code}", payload)
     return list(values)
 

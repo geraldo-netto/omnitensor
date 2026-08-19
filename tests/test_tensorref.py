@@ -545,3 +545,23 @@ def test_a_finite_buffer_still_verifies(tmp_path):
     reference = TensorReference(path, (3,), "float32", _digest(path))
 
     verify_reference(reference, OptedInInputRoots([tmp_path]))
+
+
+def test_a_payload_of_the_wrong_length_refuses_instead_of_raising_struct_error(tmp_path):
+    """_permitted stats the file before the read, so a file that changes size
+    in between reaches the decode with the wrong byte count.  struct.error is
+    neither a ValueError nor a TensorReferenceError and would escape the
+    module's stable-refusal contract."""
+    from omnitensor import tensorref
+
+    path = tmp_path / "grown.f32"
+    payload = struct.pack("<3f", 1.0, 2.0, 3.0)
+    path.write_bytes(payload)
+    reference = TensorReference(path, (2,), "float32", _digest(path))
+
+    with pytest.raises(TensorReferenceError) as excinfo:
+        tensorref._unpack(payload, reference)
+
+    assert excinfo.value.code == "input-ref-mismatch"
+    assert "8 bytes" in excinfo.value.detail
+    assert "returned 12" in excinfo.value.detail
