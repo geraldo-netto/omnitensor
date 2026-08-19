@@ -94,6 +94,9 @@ def test_an_empty_file_has_no_expansion_ratio():
         (b"BZh9", "bzip2"),
         (b"\xfd7zXZ\x00", "xz"),
         (b"nothing recognisable", ""),
+        (b"a note about PK\x03\x04 and BZh archives", ""),
+        (b"\x00" * 257 + b"ustar\x0000", "tar"),
+        (b"ustar is a tar magic word", ""),
     ],
 )
 def test_types_are_detected_from_bytes(header, expected):

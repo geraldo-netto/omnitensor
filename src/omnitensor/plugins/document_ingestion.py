@@ -29,17 +29,21 @@ from .ingestion import (
 DEFAULT_MAX_DOCUMENT_BYTES = 128 * 1024 * 1024
 DEFAULT_MAX_EXPANSION_RATIO = 100
 DEFAULT_MAX_CONTAINER_DEPTH = 3
-MAX_MAGIC_BYTES = 16
+# Enough of a header to reach the furthest signature: tar's `ustar` sits at
+# offset 257, every other one at offset 0.
+MAX_MAGIC_BYTES = 262
 
-# Header signatures, so a declared suffix is never trusted on its own.
-_SIGNATURES: tuple[tuple[bytes, str], ...] = (
-    (b"%PDF-", "pdf"),
-    (b"PK\x03\x04", "zip"),
-    (b"\x1f\x8b", "gzip"),
-    (b"BZh", "bzip2"),
-    (b"\xfd7zXZ", "xz"),
-    (b"ustar", "tar"),
-    (b"{\\rtf", "rtf"),
+# Header signatures at the offset each format actually puts them, so a declared
+# suffix is never trusted on its own — and so a plain text file that happens to
+# contain "BZh" or "PK\x03\x04" in its first bytes is not called an archive.
+_SIGNATURES: tuple[tuple[int, bytes, str], ...] = (
+    (0, b"%PDF-", "pdf"),
+    (0, b"PK\x03\x04", "zip"),
+    (0, b"\x1f\x8b", "gzip"),
+    (0, b"BZh", "bzip2"),
+    (0, b"\xfd7zXZ", "xz"),
+    (257, b"ustar", "tar"),
+    (0, b"{\\rtf", "rtf"),
 )
 
 
@@ -167,8 +171,8 @@ class DocumentIngestor:
 
 def detect_document_type(header: bytes) -> str:
     """The type the bytes actually are, ignoring what the name claims."""
-    for signature, name in _SIGNATURES:
-        if header.startswith(signature) or signature in header[:MAX_MAGIC_BYTES]:
+    for offset, signature, name in _SIGNATURES:
+        if header[offset : offset + len(signature)] == signature:
             return name
     return ""
 
