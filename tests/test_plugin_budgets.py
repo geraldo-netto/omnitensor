@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import errno
-import json
 import math
 from collections.abc import Awaitable
-from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
 
@@ -18,14 +16,12 @@ from omnitensor.plugins import (
     DEFAULT_MAX_CONCURRENCY,
     DEFAULT_MAX_DESCRIPTORS,
     DEFAULT_MAX_MEMORY_BYTES,
-    DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_MAX_PROCESSES,
     DEFAULT_RESOURCE_POLL_SECONDS,
     MAX_CALL_TIMEOUT_SECONDS,
     MAX_CONCURRENCY_LIMIT,
     MAX_DESCRIPTORS_LIMIT,
     MAX_MEMORY_BYTES_LIMIT,
-    MAX_OUTPUT_BYTES_LIMIT,
     MAX_PROCESSES_LIMIT,
     MAX_PROCFS_PROCESSES,
     CgroupWorkerUsageProbe,
@@ -65,7 +61,6 @@ def test_default_limits_are_explicit_and_bounded():
         DEFAULT_MAX_PROCESSES,
         DEFAULT_MAX_MEMORY_BYTES,
         DEFAULT_MAX_DESCRIPTORS,
-        DEFAULT_MAX_OUTPUT_BYTES,
         DEFAULT_MAX_CONCURRENCY,
         DEFAULT_RESOURCE_POLL_SECONDS,
     )
@@ -84,8 +79,6 @@ def test_default_limits_are_explicit_and_bounded():
         ({"max_memory_bytes": MAX_MEMORY_BYTES_LIMIT + 1}, "max_memory_bytes"),
         ({"max_descriptors": 0}, "max_descriptors"),
         ({"max_descriptors": MAX_DESCRIPTORS_LIMIT + 1}, "max_descriptors"),
-        ({"max_output_bytes": 0}, "max_output_bytes"),
-        ({"max_output_bytes": MAX_OUTPUT_BYTES_LIMIT + 1}, "max_output_bytes"),
         ({"max_concurrency": MAX_CONCURRENCY_LIMIT + 1}, "max_concurrency"),
         ({"resource_poll_seconds": 0}, "resource_poll_seconds"),
         (
@@ -257,62 +250,24 @@ def test_concurrency_rejects_without_constructing_an_operation():
     run_scenario(scenario())
 
 
-@pytest.mark.parametrize(
-    "result, detail",
-    [
-        ({"value": math.nan}, "worker output is not finite JSON"),
-        ({"value": object()}, "worker output is not finite JSON"),
-        ({"value": "12345"}, "worker output is 17 bytes; limit is 16"),
-    ],
-)
-def test_output_budget_rejects_invalid_or_oversized_results(result, detail):
-    async def scenario():
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(max_output_bytes=16),
-            usage,
-        )
-        with pytest.raises(WorkerBudgetExceededError) as error:
-            await enforcer.run(lambda: asyncio.sleep(0, result=result))
-        assert error.value.code is WorkerBudgetCode.OUTPUT
-        assert error.value.detail == detail
-        assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 0, 1)
-
-    run_scenario(scenario())
-
-
 @given(st.text(max_size=64))
-def test_output_budget_measures_protocol_result_dataclasses_exactly(value):
+def test_no_answer_is_refused_for_its_size(value):
+    """A long answer is not a budget violation. It used to be discarded here
+    and to cost a model reload; the transport splits it across frames now."""
     result = PluginResult(
         "job",
         PluginResultStatus.SUCCEEDED,
-        {"value": value},
+        {"value": value * 64},
         "",
         1,
     )
-    encoded_size = len(
-        json.dumps(
-            asdict(result),
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-    )
 
-    async def accepted():
-        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(max_output_bytes=encoded_size), usage)
+    async def scenario():
+        enforcer = WorkerBudgetEnforcer(WorkerBudgetLimits(), usage)
         assert await enforcer.run(lambda: asyncio.sleep(0, result=result)) == result
+        assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 1, 0)
 
-    async def rejected():
-        enforcer = WorkerBudgetEnforcer(
-            WorkerBudgetLimits(max_output_bytes=encoded_size - 1), usage
-        )
-        with pytest.raises(WorkerBudgetExceededError) as error:
-            await enforcer.run(lambda: asyncio.sleep(0, result=result))
-        assert error.value.code is WorkerBudgetCode.OUTPUT
-
-    run_scenario(accepted())
-    run_scenario(rejected())
+    run_scenario(scenario())
 
 
 def test_a_probe_that_fails_cannot_fail_the_call():
@@ -399,18 +354,6 @@ def test_procfs_probe_validates_pid_and_missing_memory_field(tmp_path):
     (tmp_path / "10/status").write_text("Name:\tfixture\n", encoding="ascii")
     with pytest.raises(OSError, match="VmRSS is unavailable"):
         ProcfsWorkerUsageProbe(10, proc_root=tmp_path)()
-
-
-def test_output_limit_may_exceed_its_default():
-    """The default was used as the ceiling, so no larger value was accepted."""
-    limits = WorkerBudgetLimits(max_output_bytes=DEFAULT_MAX_OUTPUT_BYTES * 4)
-    assert limits.max_output_bytes == DEFAULT_MAX_OUTPUT_BYTES * 4
-
-
-def test_output_limit_has_its_own_ceiling():
-    WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT)
-    with pytest.raises(ValueError, match="max_output_bytes"):
-        WorkerBudgetLimits(max_output_bytes=MAX_OUTPUT_BYTES_LIMIT + 1)
 
 
 def test_cancelling_a_call_does_not_leak_its_concurrency_slot():

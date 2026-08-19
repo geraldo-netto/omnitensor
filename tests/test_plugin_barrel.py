@@ -28,12 +28,12 @@ KERNEL_EXPORTS = (
 # Covers the targets as well as the names, so retargeting an export at its owning
 # module moves it. The surface itself — which names, in which order — is asserted
 # above and did not move when the supervisor facade was retired.
-EXPORT_MAP_SHA256 = "9285f8c076df3f9daa54660bf6ece5f8a698cc45b51bc617a6d128ba5b7cee99"
+EXPORT_MAP_SHA256 = "c30b67472b284cd01af7152d9765fd5cb272328468c052a3391459f87134c5e4"
 
 
 def test_export_map_preserves_the_locked_public_surface_and_order():
     assert isinstance(plugins.__all__, list)
-    assert len(plugins.__all__) == len(plugins._EXPORTS) == 371
+    assert len(plugins.__all__) == len(plugins._EXPORTS) == 372
     assert plugins.__all__ == list(plugins._EXPORTS)
     assert set(plugins.__all__) <= set(dir(plugins))
     assert tuple(plugins.__all__[-len(KERNEL_EXPORTS) :]) == KERNEL_EXPORTS
@@ -65,7 +65,7 @@ print(json.dumps({
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == {"count": 371, "owners": []}
+    assert json.loads(completed.stdout) == {"count": 372, "owners": []}
 
 
 def test_dir_lists_lazy_exports_without_resolving_them():

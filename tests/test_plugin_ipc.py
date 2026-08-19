@@ -19,6 +19,7 @@ from omnitensor.plugins import (
     PluginResult,
     PluginResultStatus,
     WorkerMessageType,
+    assemble_result_chunks,
     decode_frame,
     encode_frame,
     execute_frame,
@@ -28,11 +29,13 @@ from omnitensor.plugins import (
     parse_handshake,
     parse_progress,
     parse_result,
+    parse_result_chunk,
     perform_service_handshake,
     perform_worker_handshake,
     progress_frame,
     read_frame,
     result_frame,
+    result_frames,
     write_frame,
 )
 
@@ -491,6 +494,54 @@ def test_result_frame_rejects_invalid_boundaries(result, detail):
 def test_result_frame_accepts_exact_boundaries(job_id):
     result = PluginResult(job_id, PluginResultStatus.SUCCEEDED, {}, "x" * 2048, 1)
     assert parse_result(result_frame(result)) == result
+
+
+def test_a_result_that_fits_is_still_exactly_one_frame():
+    result = PluginResult("job", PluginResultStatus.SUCCEEDED, {"ok": True}, "", 1)
+
+    assert result_frames(result) == (result_frame(result),)
+
+
+@given(st.text(min_size=1, max_size=32), st.integers(min_value=200, max_value=4096))
+def test_a_result_too_large_for_one_frame_survives_the_round_trip(value, frame_bytes):
+    """The answer is not the place to enforce a size: an oversized result used
+    to be discarded whole and to cost a model reload on the next request."""
+    result = PluginResult("job", PluginResultStatus.SUCCEEDED, {"value": value * 4096}, "", 1)
+
+    frames = result_frames(result, max_frame_bytes=frame_bytes)
+
+    assert len(frames) > 1
+    assert all(
+        len(encode_frame(frame, max_frame_bytes=frame_bytes)) <= frame_bytes for frame in frames
+    )
+    parts = []
+    for index, frame in enumerate(frames):
+        body, final = parse_result_chunk(frame, index)
+        parts.append(body)
+        assert final is (index == len(frames) - 1)
+    assert assemble_result_chunks("job", parts) == result
+
+
+def test_result_chunks_are_refused_out_of_order_or_malformed():
+    frames = result_frames(
+        PluginResult("job", PluginResultStatus.SUCCEEDED, {"value": "x" * 8192}, "", 1),
+        max_frame_bytes=512,
+    )
+
+    with pytest.raises(IPCProtocolError, match="out of order"):
+        parse_result_chunk(frames[1], 0)
+    with pytest.raises(IPCProtocolError, match="do not match the contract"):
+        parse_result_chunk(
+            IPCFrame(FRAME_FORMAT_VERSION, WorkerMessageType.RESULT_CHUNK, "job", {}), 0
+        )
+    with pytest.raises(IPCProtocolError, match="expected a correlated result chunk"):
+        parse_result_chunk(
+            result_frame(PluginResult("job", PluginResultStatus.SUCCEEDED, {}, "", 1)), 0
+        )
+    with pytest.raises(IPCProtocolError, match="not valid JSON"):
+        assemble_result_chunks("job", ("{",))
+    with pytest.raises(IPCProtocolError, match="not an object"):
+        assemble_result_chunks("job", ("[]",))
 
 
 def test_execution_parsers_reject_wrong_field_sets_and_status():

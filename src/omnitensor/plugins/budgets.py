@@ -5,19 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import errno
-import json
 import math
 import os
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
-# Bubblewrap retains a supervisor and namespace init around the worker.  Four
-# covers that fixed three-process sandbox topology plus no more than one
-# short-lived helper; additional forks are rejected.
 # Unbounded by default. These ceilings refused real work — a Qwen worker
 # legitimately holding 831 MB was killed against a 512 MiB limit once its model
 # had loaded — and the in-process check was already observe-only for that
@@ -27,14 +23,12 @@ DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_PROCESSES = None
 DEFAULT_MAX_MEMORY_BYTES = None
 DEFAULT_MAX_DESCRIPTORS = None
-DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_MAX_CONCURRENCY = 1
 DEFAULT_RESOURCE_POLL_SECONDS = 0.05
 MAX_CALL_TIMEOUT_SECONDS = 3600.0
 MAX_PROCESSES_LIMIT = 128
 MAX_MEMORY_BYTES_LIMIT = 64 * 1024 * 1024 * 1024
 MAX_DESCRIPTORS_LIMIT = 65_536
-MAX_OUTPUT_BYTES_LIMIT = 64 * 1024 * 1024
 MAX_CONCURRENCY_LIMIT = 32
 MAX_PROCFS_PROCESSES = 4096
 CGROUP_PROCS_FILE = "cgroup.procs"
@@ -49,7 +43,6 @@ class WorkerBudgetCode(StrEnum):
     PROCESS = "process-budget-exceeded"
     MEMORY = "memory-budget-exceeded"
     DESCRIPTOR = "descriptor-budget-exceeded"
-    OUTPUT = "output-budget-exceeded"
     CONCURRENCY = "concurrency-budget-exceeded"
     USAGE_UNAVAILABLE = "usage-unavailable"
 
@@ -69,7 +62,6 @@ class WorkerBudgetLimits:
     max_processes: int | None = DEFAULT_MAX_PROCESSES
     max_memory_bytes: int | None = DEFAULT_MAX_MEMORY_BYTES
     max_descriptors: int | None = DEFAULT_MAX_DESCRIPTORS
-    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY
     resource_poll_seconds: float = DEFAULT_RESOURCE_POLL_SECONDS
 
@@ -82,7 +74,6 @@ class WorkerBudgetLimits:
         _optional_bounded_integer(self.max_processes, "max_processes", MAX_PROCESSES_LIMIT)
         _optional_bounded_integer(self.max_memory_bytes, "max_memory_bytes", MAX_MEMORY_BYTES_LIMIT)
         _optional_bounded_integer(self.max_descriptors, "max_descriptors", MAX_DESCRIPTORS_LIMIT)
-        _bounded_integer(self.max_output_bytes, "max_output_bytes", MAX_OUTPUT_BYTES_LIMIT)
         _bounded_integer(self.max_concurrency, "max_concurrency", MAX_CONCURRENCY_LIMIT)
         _bounded_number(
             self.resource_poll_seconds,
@@ -148,11 +139,10 @@ class WorkerBudgetEnforcer:
             task = asyncio.create_task(operation())
             result = await self._wait(task)
             self._sample_usage()
-            try:
-                _check_output(result, self._limits.max_output_bytes)
-            except WorkerBudgetExceededError:
-                self._rejected += 1
-                raise
+            # Nothing here inspects the size of the answer. A result too large
+            # for one IPC frame is split across frames by the transport; it was
+            # refused here once, which discarded a whole document-QA answer and
+            # cost a model reload on the next request.
             self._completed += 1
             return result
         finally:
@@ -418,28 +408,6 @@ def _vanished(error: OSError) -> bool:
     turned an ordinary race into a spurious usage-unavailable rejection.
     """
     return error.errno in (errno.ENOENT, errno.ESRCH)
-
-
-def _check_output(value: object, limit: int) -> None:
-    document = asdict(value) if is_dataclass(value) and not isinstance(value, type) else value
-    try:
-        body = json.dumps(
-            document,
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as error:
-        raise WorkerBudgetExceededError(
-            WorkerBudgetCode.OUTPUT,
-            "worker output is not finite JSON",
-        ) from error
-    if len(body) > limit:
-        raise WorkerBudgetExceededError(
-            WorkerBudgetCode.OUTPUT,
-            f"worker output is {len(body)} bytes; limit is {limit}",
-        )
 
 
 def _optional_bounded_integer(value: object, name: str, maximum: int) -> None:

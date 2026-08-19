@@ -7,6 +7,7 @@ import json
 import math
 import re
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -28,6 +29,11 @@ _MAX_CAPABILITY_CHARS = 64
 _MAX_STAGE_CHARS = 80
 _MAX_PROGRESS_DETAIL_CHARS = 1024
 _MAX_RESULT_DETAIL_CHARS = 2048
+# A JSON string costs at most six bytes for one character: an escaped control
+# character. Every other character is cheaper written literally.
+_WORST_CASE_CHAR_BYTES = 6
+# Room for the chunk counter to grow past its first digit.
+_SEQUENCE_DIGITS = 20
 
 
 class WorkerMessageType(StrEnum):
@@ -43,6 +49,7 @@ class WorkerMessageType(StrEnum):
     DELIVER = "deliver"
     PROGRESS = "progress"
     RESULT = "result"
+    RESULT_CHUNK = "result-chunk"
     ERROR = "error"
     CANCEL = "cancel"
     HEALTH = "health"
@@ -305,6 +312,99 @@ def result_frame(result: PluginResult) -> IPCFrame:
             "detail": result.detail,
             "completedAt": result.completed_at_ms,
         },
+    )
+
+
+def result_frames(
+    result: PluginResult,
+    *,
+    max_frame_bytes: int = DEFAULT_MAX_FRAME_BYTES,
+) -> tuple[IPCFrame, ...]:
+    """One result as however many frames it takes.
+
+    An answer is as long as the question deserves: a document-QA answer or a
+    long transcript over the frame size used to be refused outright, and the
+    refusal cost a full model reload on the next request. A result that fits
+    is still exactly one RESULT frame — the common case, byte for byte as
+    before — and one that does not is carried as ordered RESULT_CHUNK frames
+    that :func:`assemble_result_chunks` joins back into the same result.
+    """
+    frame = result_frame(result)
+    try:
+        encode_frame(frame, max_frame_bytes=max_frame_bytes)
+    except IPCProtocolError as error:
+        if error.code != "frame-too-large":
+            raise
+    else:
+        return (frame,)
+    body = json.dumps(
+        dict(frame.payload),
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    parts = _split_body(body, result.job_id, max_frame_bytes)
+    return tuple(
+        IPCFrame(
+            FRAME_FORMAT_VERSION,
+            WorkerMessageType.RESULT_CHUNK,
+            result.job_id,
+            {"sequence": index, "final": index == len(parts) - 1, "body": part},
+        )
+        for index, part in enumerate(parts)
+    )
+
+
+def _split_body(body: str, request_id: str, max_frame_bytes: int) -> tuple[str, ...]:
+    """Cut the encoded result at character boundaries that always fit a frame.
+
+    Sized against the worst case a JSON string can cost per character — six
+    bytes, for a control character written as an escape — rather than against
+    the length of this particular text, because a chunk that overflows on
+    encoding would be a protocol failure rather than a slower answer.
+    """
+    envelope = len(
+        encode_frame(
+            IPCFrame(
+                FRAME_FORMAT_VERSION,
+                WorkerMessageType.RESULT_CHUNK,
+                request_id,
+                {"sequence": 0, "final": False, "body": ""},
+            ),
+            max_frame_bytes=max_frame_bytes,
+        )
+    )
+    span = max(1, (max_frame_bytes - envelope - _SEQUENCE_DIGITS) // _WORST_CASE_CHAR_BYTES)
+    return tuple(body[start : start + span] for start in range(0, len(body), span)) or ("",)
+
+
+def parse_result_chunk(frame: IPCFrame, expected_sequence: int) -> tuple[str, bool]:
+    """One chunk of a split result, in the order the worker sent it."""
+    if frame.type is not WorkerMessageType.RESULT_CHUNK or frame.request_id is None:
+        raise IPCProtocolError("invalid-result", "expected a correlated result chunk")
+    if set(frame.payload) != {"sequence", "final", "body"}:
+        raise IPCProtocolError("invalid-result", "result chunk fields do not match the contract")
+    sequence = frame.payload["sequence"]
+    final = frame.payload["final"]
+    body = frame.payload["body"]
+    if type(sequence) is not int or sequence != expected_sequence:
+        raise IPCProtocolError("invalid-result", "result chunks arrived out of order")
+    if not isinstance(final, bool) or not isinstance(body, str):
+        raise IPCProtocolError("invalid-result", "result chunk fields are invalid")
+    return body, final
+
+
+def assemble_result_chunks(request_id: str, parts: Sequence[str]) -> PluginResult:
+    """Rebuild the result a worker had to split, or refuse the whole answer."""
+    try:
+        payload = json.loads("".join(parts))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise IPCProtocolError("invalid-result", "split result is not valid JSON") from error
+    if not isinstance(payload, dict):
+        raise IPCProtocolError("invalid-result", "split result is not an object")
+    return parse_result(
+        IPCFrame(FRAME_FORMAT_VERSION, WorkerMessageType.RESULT, request_id, payload)
     )
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 
@@ -14,9 +14,11 @@ from .ipc import (
     IPCFrame,
     IPCProtocolError,
     WorkerMessageType,
+    assemble_result_chunks,
     await_worker_ready,
     parse_progress,
     parse_result,
+    parse_result_chunk,
     perform_service_handshake,
     read_frame,
     write_frame,
@@ -137,7 +139,10 @@ async def read_result(
     read: Callable[..., Awaitable[IPCFrame]] = read_frame,
     progress_parser: Callable[[IPCFrame], object] = parse_progress,
     result_parser: Callable[[IPCFrame], PluginResult] = parse_result,
+    chunk_parser: Callable[[IPCFrame, int], tuple[str, bool]] = parse_result_chunk,
+    chunk_assembler: Callable[[str, Sequence[str]], PluginResult] = assemble_result_chunks,
 ) -> PluginResult:
+    parts: list[str] = []
     while True:
         frame = await read(slot.process.reader)
         if frame.request_id != request_id:
@@ -145,23 +150,37 @@ async def read_result(
                 "worker-protocol-failed", "worker response names another request"
             )
         if frame.type is WorkerMessageType.PROGRESS:
-            observed = progress_parser(frame)
-            if progress is not None:
-                await progress.report(observed)
+            await _report_progress(progress, progress_parser(frame))
             continue
         if frame.type is WorkerMessageType.RESULT:
             return result_parser(frame)
+        if frame.type is WorkerMessageType.RESULT_CHUNK:
+            # An answer too large for one frame is still the answer: collect
+            # the pieces in order rather than refusing the whole result.
+            body, final = chunk_parser(frame, len(parts))
+            parts.append(body)
+            if final:
+                return chunk_assembler(request_id, parts)
+            continue
         if frame.type is WorkerMessageType.ERROR:
-            code = frame.payload.get("code")
-            detail = frame.payload.get("detail")
-            if not isinstance(code, str) or not code or not isinstance(detail, str):
-                raise PluginWorkerError(
-                    "worker-protocol-failed", "worker error response is invalid"
-                )
-            raise PluginWorkerError(code, detail)
+            _raise_worker_error(frame)
         raise PluginWorkerError(
             "worker-protocol-failed", f"unexpected worker message: {frame.type}"
         )
+
+
+async def _report_progress(progress: ProgressReporter | None, observed: object) -> None:
+    if progress is not None:
+        await progress.report(observed)
+
+
+def _raise_worker_error(frame: IPCFrame) -> None:
+    """Re-raise a worker's own refusal, or refuse the refusal if it is malformed."""
+    code = frame.payload.get("code")
+    detail = frame.payload.get("detail")
+    if not isinstance(code, str) or not code or not isinstance(detail, str):
+        raise PluginWorkerError("worker-protocol-failed", "worker error response is invalid")
+    raise PluginWorkerError(code, detail)
 
 
 async def cancel_request(

@@ -34,6 +34,7 @@ from omnitensor.plugins import (
     progress_frame,
     ready_frame,
     result_frame,
+    result_frames,
 )
 
 
@@ -438,7 +439,7 @@ def test_supervisor_executes_a_worker_over_the_former_resource_ceilings():
     run_scenario(scenario())
 
 
-def test_supervisor_enforces_call_deadline_and_output_budget():
+def test_supervisor_enforces_the_call_deadline_and_reassembles_split_results():
     async def deadline_scenario():
         events = []
         offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
@@ -463,7 +464,8 @@ def test_supervisor_enforces_call_deadline_and_output_budget():
         assert process.writer.closed is True
         await supervisor.stop()
 
-    async def output_scenario():
+    async def split_result_scenario():
+        """An answer larger than one frame arrives whole, and costs no reload."""
         events = []
         offer = HandshakeOffer("events", 1, 1, frozenset({"execute"}))
         process = FakeProcess("events", offer, events)
@@ -473,36 +475,30 @@ def test_supervisor_enforces_call_deadline_and_output_budget():
             "events",
             ("python", "worker.py"),
             capabilities=frozenset({"execute"}),
-            budget_limits=WorkerBudgetLimits(max_output_bytes=64),
         )
         await supervisor.start((spec,))
         pending = asyncio.create_task(
             supervisor.execute(PluginRequest("job-1", "events", "manual", {}, 1, None))
         )
         await asyncio.sleep(0)
-        process.reader.feed_data(
-            encode_frame(
-                result_frame(
-                    PluginResult(
-                        "job-1",
-                        PluginResultStatus.SUCCEEDED,
-                        {"value": "x" * 128},
-                        "",
-                        2,
-                    )
-                )
-            )
+        expected = PluginResult(
+            "job-1",
+            PluginResultStatus.SUCCEEDED,
+            {"value": "x" * 4096},
+            "",
+            2,
         )
+        frames = result_frames(expected, max_frame_bytes=512)
+        assert len(frames) > 1
+        for frame in frames:
+            process.reader.feed_data(encode_frame(frame))
 
-        with pytest.raises(PluginWorkerError) as rejected:
-            await pending
-
-        assert rejected.value.code == "output-budget-exceeded"
-        assert process.writer.closed is True
+        assert await pending == expected
+        assert process.writer.closed is False
         await supervisor.stop()
 
     run_scenario(deadline_scenario())
-    run_scenario(output_scenario())
+    run_scenario(split_result_scenario())
 
 
 def test_supervisor_preserves_a_valid_worker_error_without_stopping_the_channel():

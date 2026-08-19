@@ -36,7 +36,7 @@ from .ipc import (
     parse_handshake,
     progress_frame,
     ready_frame,
-    result_frame,
+    result_frames,
 )
 from .offloop import run_off_loop
 from .protocol import PluginContext, PluginProgress, PluginRequest, WorkloadPlugin
@@ -291,21 +291,22 @@ async def _execute_request(
         )
         if result.job_id != request.job_id:
             raise IPCProtocolError("invalid-result", "result names another request")
-        frame = result_frame(result)
+        frames = result_frames(result)
     except asyncio.CancelledError:
         result = cancelled_result(
             request,
             "plugin request cancelled",
             completed_at_ms=max(1, time.time_ns() // 1_000_000),
         )
-        frame = result_frame(result)
+        frames = result_frames(result)
     except Exception:
         _write_error(writer, protocol_version, request.job_id, "plugin-execution-failed")
         return
-    _write_frame(
-        writer,
-        IPCFrame(protocol_version, frame.type, frame.request_id, frame.payload),
-    )
+    for frame in frames:
+        _write_frame(
+            writer,
+            IPCFrame(protocol_version, frame.type, frame.request_id, frame.payload),
+        )
 
 
 def _write_error(
