@@ -87,6 +87,12 @@ def binding_manifest(
         raise error_type("profile-unknown", f"no bundled profile is named {profile_id}")
     resolved = variants() if callable(variants) else variants
     lanes = [lane for lane in lane_order if lane in resolved]
+    if not lanes:
+        raise error_type(
+            "binding-invalid",
+            f"{profile_id} has no variant for any of the requested lanes "
+            f"{', '.join(lane_order) or '(none)'}",
+        )
     manifest = copy.deepcopy(workload.manifest)
     requirements = manifest["requirements"]
     if plural:

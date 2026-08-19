@@ -413,7 +413,8 @@ def _require_training_snapshot(snapshot: object) -> None:
     detail = network_snapshot_error(snapshot)
     if detail:
         raise TrainingError("snapshot-invalid", detail)
-    assert isinstance(snapshot, NetworkSnapshot)
+    if not isinstance(snapshot, NetworkSnapshot):
+        raise TrainingError("snapshot-invalid", "network snapshot has the wrong type")
     if snapshot.status is not SourceStatus.READY:
         raise TrainingError(
             "snapshot-unhealthy", "normal training requires ready network snapshots"

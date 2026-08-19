@@ -282,7 +282,7 @@ class TrainingReport:
 
 def _quality_is_finite(value: object) -> bool:
     if isinstance(value, bool) or value is None or isinstance(value, str):
-        return isinstance(value, (bool, str)) or value is None
+        return True
     if isinstance(value, (int, float)):
         return math.isfinite(value)
     if isinstance(value, dict):

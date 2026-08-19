@@ -327,3 +327,21 @@ def test_document_private_facade_keeps_error_mapping_and_patch_seams(monkeypatch
         "binding-invalid",
         "first; second",
     )
+
+
+@pytest.mark.parametrize("plural", [True, False])
+def test_binding_without_any_matching_lane_raises_the_injected_error(plural):
+    base = sample_manifest("resource-scheduler", model={"id": "legacy"})
+    with pytest.raises(TrainingError) as failure:
+        binding_manifest(
+            "resource-scheduler",
+            {"cpu": {"id": "model-cpu"}},
+            lane_order=("tpu", "npu", "gpu"),
+            plural=plural,
+            root=Path("catalog"),
+            load=_loader("resource-scheduler", base),
+            validate=lambda _manifest: [],
+            error_type=TrainingError,
+        )
+    assert failure.value.code == "binding-invalid"
+    assert "tpu, npu, gpu" in str(failure.value)

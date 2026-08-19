@@ -783,3 +783,12 @@ def test_aggregate_feature_property_is_finite_ordered_and_identity_free(
     assert features[1] == pytest.approx(transmitted / (elapsed / 1000))
     assert all(math.isfinite(value) for value in features)
     assert "private-id" not in repr(features)
+
+
+def test_training_snapshot_guard_survives_disabled_assertions(monkeypatch):
+    from omnitensor.training import network as network_module
+
+    monkeypatch.setattr(network_module, "network_snapshot_error", lambda _snapshot: "")
+    with pytest.raises(TrainingError) as failure:
+        network_module._require_training_snapshot(object())
+    assert failure.value.code == "snapshot-invalid"
