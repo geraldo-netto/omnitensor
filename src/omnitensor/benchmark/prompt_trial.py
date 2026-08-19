@@ -136,50 +136,55 @@ def trial(
     runtime = LlamaVulkanRuntime(
         store, lease_file(Path.home() / ".cache/omnitensor-bench", device.index)
     )
-    path = model_path(artifact_root, model_id)
-    say(f"loading {model_id} on {device.name}")
-    started = time.monotonic()
-    report = asyncio_run(runtime.load((path,), "gpu"))
-    load_seconds = time.monotonic() - started
-    confirm(device, runtime.physical_device)
+    try:
+        path = model_path(artifact_root, model_id)
+        say(f"loading {model_id} on {device.name}")
+        started = time.monotonic()
+        report = asyncio_run(runtime.load((path,), "gpu"))
+        load_seconds = time.monotonic() - started
+        confirm(device, runtime.physical_device)
 
-    loaded = case_files.load(workload, case_root)
-    if answerable_only:
-        # A wording that refuses everything scores well on cases that expect a
-        # refusal, which is how a broken task can look half right.
-        loaded = tuple(case for case in loaded if case.answerable)
-    say(f"{len(loaded)} cases")
-    outcomes = asyncio_run(
-        run_cases(
-            runtime,
-            task,
-            loaded,
-            store,
-            progress=SilentProgress(),
-            cancellation=NoCancellation(),
-            on_case=lambda outcome: say(
-                f"  {outcome.case_id:32} {'ok  ' if outcome.judgement.correct else 'FAIL'} "
-                f"{outcome.timing.seconds:6.1f}s"
-                + (f"  {outcome.error}" if outcome.error else "")
-                + (
-                    ""
-                    if outcome.judgement.correct
-                    else "  failed: " + ", ".join(outcome.judgement.failed)
-                )
-            ),
+        loaded = case_files.load(workload, case_root)
+        if answerable_only:
+            # A wording that refuses everything scores well on cases that expect a
+            # refusal, which is how a broken task can look half right.
+            loaded = tuple(case for case in loaded if case.answerable)
+        say(f"{len(loaded)} cases")
+        outcomes = asyncio_run(
+            run_cases(
+                runtime,
+                task,
+                loaded,
+                store,
+                progress=SilentProgress(),
+                cancellation=NoCancellation(),
+                on_case=lambda outcome: say(
+                    f"  {outcome.case_id:32} {'ok  ' if outcome.judgement.correct else 'FAIL'} "
+                    f"{outcome.timing.seconds:6.1f}s"
+                    + (f"  {outcome.error}" if outcome.error else "")
+                    + (
+                        ""
+                        if outcome.judgement.correct
+                        else "  failed: " + ", ".join(outcome.judgement.failed)
+                    )
+                ),
+            )
         )
-    )
-    asyncio_run(runtime.terminate("__startup__"))
-    return Run(
-        workload=workload,
-        model_id=model_id,
-        device=device.name,
-        outcomes=outcomes,
-        load_seconds=load_seconds,
-        layers_offloaded=report.accelerator_layers,
-        context_tokens=MAX_RUNTIME_CONTEXT_TOKENS,
-        cache="q8_0",
-    )
+        return Run(
+            workload=workload,
+            model_id=model_id,
+            device=device.name,
+            outcomes=outcomes,
+            load_seconds=load_seconds,
+            layers_offloaded=report.accelerator_layers,
+            context_tokens=MAX_RUNTIME_CONTEXT_TOKENS,
+            cache="q8_0",
+        )
+    finally:
+        # The runtime holds the VRAM and the cross-worker lease; a raising
+        # `confirm()`, `case_files.load()` or `run_cases()` must not leave
+        # either behind for the next process that wants the card.
+        asyncio_run(runtime.terminate("__startup__"))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
