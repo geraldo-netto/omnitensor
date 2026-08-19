@@ -251,16 +251,5 @@ def _workload_model(record: object) -> None:
         raise RuntimeError("workload failure has no reason")
 
 
-def _workload(value: object, plugin_id: str, model_id: str, task_digest: str) -> None:
-    workload = _workload_entry(value, plugin_id)
-    record = workload["models"].get(model_id)
-    if record is None:
-        raise RuntimeError("model has no qualification for this workload")
-    if record["result"] != PASSED:
-        raise RuntimeError("model did not pass qualification for this workload")
-    if record["taskSha256"] != task_digest:
-        raise RuntimeError("workload differs from qualification")
-
-
 def _is_digest(value: object) -> bool:
     return isinstance(value, str) and _DIGEST.fullmatch(value) is not None
