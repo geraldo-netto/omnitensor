@@ -146,6 +146,34 @@ async def test_waiting_after_aclose_reports_no_event_source(socket_pair):
     assert await changes.wait_for_change() is False
 
 
+async def test_aclose_wakes_an_in_flight_wait_instead_of_stranding_it(socket_pair):
+    reader, _writer = socket_pair
+    changes = UeventDeviceChanges(reader)
+    waiting = asyncio.ensure_future(changes.wait_for_change())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    await changes.aclose()
+
+    assert await asyncio.wait_for(waiting, timeout=5) is False
+
+
+async def test_aclose_unregisters_the_reader_before_the_descriptor_is_closed(socket_pair):
+    reader, _writer = socket_pair
+    changes = UeventDeviceChanges(reader)
+    waiting = asyncio.ensure_future(changes.wait_for_change())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    fileno = reader.fileno()
+
+    await changes.aclose()
+    await asyncio.wait_for(waiting, timeout=5)
+
+    # A descriptor still in the selector after close would be re-registered
+    # against whatever file the kernel hands out next.
+    assert fileno not in asyncio.get_running_loop()._selector.get_map()
+
+
 async def test_a_socket_that_cannot_be_polled_falls_back_rather_than_raising():
     class Detached:
         def fileno(self):

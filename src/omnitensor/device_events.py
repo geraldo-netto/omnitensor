@@ -80,6 +80,12 @@ class UeventDeviceChanges:
         self._subsystems = frozenset(subsystems)
         self._frame_bytes = frame_bytes
         self._closed = False
+        # The waiter and the fd it is registered against live on the instance
+        # so that :meth:`aclose` can unregister and resolve them.  Closing the
+        # socket alone drops the fd from the selector without ever waking the
+        # reader, which would leave ``wait_for_change`` awaiting forever.
+        self._waiter: asyncio.Future | None = None
+        self._reader: tuple[asyncio.AbstractEventLoop, int] | None = None
 
     async def wait_for_change(self) -> bool:
         """Sleep on the socket until a watched subsystem reports an event.
@@ -102,10 +108,16 @@ class UeventDeviceChanges:
             except (OSError, ValueError):
                 self._closed = True
                 return False
+            self._waiter = waiter
+            self._reader = (loop, fileno)
             try:
                 await waiter
             finally:
-                loop.remove_reader(fileno)
+                self._unregister_reader()
+                self._waiter = None
+            if self._closed:
+                # ``aclose`` woke us; the socket is gone, so do not read it.
+                return False
             relevant, alive = self._drain()
             if not alive:
                 self._closed = True
@@ -142,9 +154,30 @@ class UeventDeviceChanges:
             if field.startswith(_SUBSYSTEM_KEY)
         )
 
+    def _unregister_reader(self) -> None:
+        """Drop the selector registration while the fd is still valid."""
+        reader, self._reader = self._reader, None
+        if reader is None:
+            return
+        loop, fileno = reader
+        try:
+            loop.remove_reader(fileno)
+        except (OSError, ValueError, RuntimeError):  # pragma: no cover - loop already gone
+            LOGGER.debug("uevent reader removal failed", exc_info=True)
+
     async def aclose(self) -> None:
-        """Release the socket; safe to call more than once."""
+        """Release the socket; safe to call more than once.
+
+        The reader is unregistered before the fd is closed — afterwards the
+        number may already name a different file — and any pending waiter is
+        resolved so an in-flight :meth:`wait_for_change` returns instead of
+        awaiting a socket nobody will ever read again.
+        """
         self._closed = True
+        self._unregister_reader()
+        waiter, self._waiter = self._waiter, None
+        if waiter is not None:
+            _wake(waiter)
         try:
             self._socket.close()
         except OSError:  # pragma: no cover - close rarely fails
