@@ -215,3 +215,49 @@ def test_every_shipped_manifest_declares_a_contract_this_can_derive():
         )
         spec = manifest_configuration_spec(document["id"], document)
         assert spec.plugin_version == DEFAULT_CONFIGURATION_VERSION, path
+
+
+GENERATION_WORKLOADS = (
+    "ask-selected-files",
+    "selected-text-tools",
+    "event-extraction",
+    "file-organizer",
+    "document-translation",
+)
+
+
+@pytest.mark.parametrize("workload_id", GENERATION_WORKLOADS)
+def test_every_generation_workload_declares_the_two_tunables(workload_id):
+    """OMNI-0513: the client's translator has been waiting for a non-empty schema."""
+    from omnitensor.plugins.tuning import ANSWER_GUIDANCE_KEY, ANSWER_LENGTH_KEY, ANSWER_LENGTHS
+
+    document = json.loads((MANIFESTS / f"{workload_id}.json").read_text(encoding="utf-8"))
+    schema = document["plugin"]["schemas"]["configuration"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {ANSWER_GUIDANCE_KEY, ANSWER_LENGTH_KEY}
+    assert set(schema["properties"][ANSWER_LENGTH_KEY]["enum"]) == set(ANSWER_LENGTHS)
+
+    spec = manifest_configuration_spec(workload_id, document)
+    assert spec.defaults == {ANSWER_GUIDANCE_KEY: "", ANSWER_LENGTH_KEY: "standard"}
+
+
+@pytest.mark.parametrize("workload_id", GENERATION_WORKLOADS)
+def test_the_declared_defaults_are_what_an_untuned_workload_already_does(workload_id):
+    from omnitensor.plugins.tuning import WorkloadTuning
+
+    document = json.loads((MANIFESTS / f"{workload_id}.json").read_text(encoding="utf-8"))
+    spec = manifest_configuration_spec(workload_id, document)
+    assert WorkloadTuning.from_configuration(spec.defaults).message() is None
+
+
+def test_transcription_declares_no_tunable_it_would_not_honour():
+    """`media-transcription` runs whisper, not a generation task.
+
+    Declaring answer guidance there would put a control on a window that
+    changes nothing, which is worse than the control not being there.
+    """
+    document = json.loads((MANIFESTS / "media-transcription.json").read_text(encoding="utf-8"))
+    assert document["plugin"]["schemas"]["configuration"] == {
+        "type": "object",
+        "additionalProperties": False,
+    }

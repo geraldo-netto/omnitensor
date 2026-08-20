@@ -21,7 +21,19 @@
     "schemas": {
       "configuration": {
         "type": "object",
-        "additionalProperties": false
+        "additionalProperties": false,
+        "properties": {
+          "answerGuidance": {
+            "description": "Extra guidance for the answer, in the person's own words. Carried as a private instruction appended to their request, never as a system rule: it cannot move what the answer is grounded in or which sources are cited.",
+            "type": "string",
+            "default": ""
+          },
+          "answerLength": {
+            "description": "How long an answer is wanted. A preference stated to the model, not a ceiling on what it may return.",
+            "enum": ["brief", "standard", "thorough"],
+            "default": "standard"
+          }
+        }
       },
       "input": {
         "type": "object",
