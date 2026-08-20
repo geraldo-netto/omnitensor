@@ -38,10 +38,19 @@ def run_production_pipeline(
     result: Callable[[Path, Path, Evidence], Result],
     writer: ReportWriter,
     prepare_export: Callable[[], Callable[[], None]] | None = None,
+    extra_outputs: Sequence[Path] = (),
+    error_factory: Callable[[str, str], BaseException] = ModelRecipeError,
 ) -> Result:
-    """Run one producer, removing every partial output on any failure."""
-    if model_path.exists() or report_path.exists():
-        raise ModelRecipeError("producer-conflict", conflict_detail)
+    """Run one producer, removing every partial output on any failure.
+
+    ``extra_outputs`` names the further files an export writes beside the
+    model and its report — a compiled pair, a checkpoint — so that a producer
+    with several outputs refuses on any of them and removes all of them.
+    ``error_factory`` lets a producer with its own stable error type keep it.
+    """
+    outputs = (model_path, report_path, *extra_outputs)
+    if any(path.exists() for path in outputs):
+        raise error_factory("producer-conflict", conflict_detail)
     export_operation = prepare_export() if prepare_export is not None else export
     if export_operation is None:
         raise TypeError("production export operation is required")
@@ -49,11 +58,11 @@ def run_production_pipeline(
         export_operation()
         evidence = evaluate()
         if not accepted(evidence):
-            raise ModelRecipeError(rejection_code, rejection_detail)
+            raise error_factory(rejection_code, rejection_detail)
         writer(report_path, report(evidence), prefix=report_prefix)
     except BaseException:
-        model_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
+        for path in outputs:
+            path.unlink(missing_ok=True)
         raise
     return result(model_path, report_path, evidence)
 

@@ -1551,3 +1551,107 @@ def test_document_model_cli_help_is_an_exact_operator_contract(capsys):
     with pytest.raises(SystemExit) as missing:
         main([])
     assert missing.value.code == 2
+
+
+def install_with_dependencies(*args, **options):
+    from omnitensor.training.document_model_installation import install_document_model
+
+    return install_document_model(*args, **options)
+
+
+def _failing_gate_dependencies(tmp_path: Path, accepted: bool):
+    """Dependencies that build both outputs and then fail the parity gate."""
+    from omnitensor.training.document_model_installation import (
+        DocumentModelInstallationDependencies,
+    )
+
+    class _Exporter:
+        @staticmethod
+        def export(_source, destination):
+            destination.write_bytes(b"portable")
+
+    def native_export(_source, destination, _sample):
+        param = destination / "model.ncnn.param"
+        param.write_text("graph", encoding="utf-8")
+        param.with_suffix(".bin").write_bytes(b"weights")
+        (destination / "model.pt").write_bytes(b"checkpoint")
+        return param
+
+    return DocumentModelInstallationDependencies(
+        tokenizer_factory=lambda _path: _StaticTokenizer(),
+        holdout_loader=load_bge_holdout,
+        portable_exporter_type=lambda: _Exporter(),
+        native_exporter=native_export,
+        portable_runner_factory=lambda _path, _tokenizer: object(),
+        native_runner_factory=lambda _path, _tokenizer, *, device_index: SimpleNamespace(
+            device_index=device_index or 0, device_name="GPU"
+        ),
+        gate_evaluator=lambda *_args: EmbeddingGateEvidence(0.9999, 1.0, 0.0, 28, 2, 12, accepted),
+        maximum_error=lambda *_args: 0.0002,
+        expected_hits=lambda _holdout, expected, _runner: len(expected),
+    )
+
+
+def test_a_refused_parity_gate_leaves_no_output_behind(tmp_path):
+    """OMNI-0415: the second attempt used to die on files nobody was told about."""
+    source = _source(tmp_path)
+    build = tmp_path / "build"
+
+    with pytest.raises(DocumentModelError) as refused:
+        install_with_dependencies(
+            source,
+            corpus_path=_bundled_corpus_path(),
+            build_root=build,
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            dependencies=_failing_gate_dependencies(tmp_path, accepted=False),
+        )
+
+    _assert_document_error(
+        refused.value, "native-parity-failed", "BGE native retrieval gate did not pass"
+    )
+    for name in (
+        "model.reference.onnx",
+        "model.ncnn.param",
+        "model.ncnn.bin",
+        "model.pt",
+        "document-model-report.json",
+    ):
+        assert not (build / name).exists(), name
+
+    # And so the operator can simply run it again, with no manual cleanup.
+    with pytest.raises(DocumentModelError) as again:
+        install_with_dependencies(
+            source,
+            corpus_path=_bundled_corpus_path(),
+            build_root=build,
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            dependencies=_failing_gate_dependencies(tmp_path, accepted=False),
+        )
+    assert again.value.code == "native-parity-failed"
+
+
+@pytest.mark.parametrize(
+    "leftover",
+    ["model.reference.onnx", "model.ncnn.param", "model.ncnn.bin", "document-model-report.json"],
+)
+def test_any_preexisting_build_output_refuses_before_exporting(tmp_path, leftover):
+    source = _source(tmp_path)
+    build = tmp_path / "build"
+    build.mkdir()
+    (build / leftover).write_bytes(b"present")
+
+    with pytest.raises(DocumentModelError) as conflict:
+        install_with_dependencies(
+            source,
+            corpus_path=_bundled_corpus_path(),
+            build_root=build,
+            artifact_root=tmp_path / "artifacts",
+            bindings_root=tmp_path / "bindings",
+            dependencies=_failing_gate_dependencies(tmp_path, accepted=True),
+        )
+
+    _assert_document_error(
+        conflict.value, "producer-conflict", "portable reference output already exists"
+    )

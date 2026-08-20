@@ -36,6 +36,7 @@ from .document_model_gate import (
     write_document_model_report,
 )
 from .embedding_production import SentenceEmbeddingOnnxExporter, evaluate_embedding_gate
+from .production_pipeline import run_production_pipeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,42 +81,20 @@ def install_document_model(
     holdout, expected = deps.holdout_loader(corpus_path)
     sample = tokenizer.encode(holdout.queries[0])
     portable = output / "model.reference.onnx"
-    if portable.exists():
-        raise DocumentModelError("producer-conflict", "portable reference output already exists")
-    deps.portable_exporter_type().export(source, portable)
-    native = deps.native_exporter(source, output, sample)
-    portable_runner = deps.portable_runner_factory(portable, tokenizer)
-    native_runner = deps.native_runner_factory(native, tokenizer, device_index=device_index)
-    gate = deps.gate_evaluator(holdout, portable_runner, native_runner)
-    maximum_error = deps.maximum_error(holdout, portable_runner, native_runner)
-    expected_hits = deps.expected_hits(holdout, expected, native_runner)
-    if (
-        not gate.accepted
-        or gate.minimum_cosine_similarity < MIN_NATIVE_COSINE
-        or gate.minimum_top10_overlap < MIN_RETRIEVAL_OVERLAP
-        or maximum_error > MAX_NATIVE_ABSOLUTE_ERROR
-        or expected_hits != len(expected)
-    ):
-        raise DocumentModelError("native-parity-failed", "BGE native retrieval gate did not pass")
-    prepared = deps.preparer(
-        native,
-        artifact_id=f"{RECIPE_ID}-gpu",
-        version=source.recipe.version,
-        model_format="ncnn",
-    )
-    evidence = DocumentModelEvidence(
-        native_runner.device_index,
-        native_runner.device_name,
-        gate.vector_count,
-        gate.minimum_cosine_similarity,
-        gate.minimum_top10_overlap,
-        maximum_error,
-        expected_hits,
-    )
     report_path = output / "document-model-report.json"
-    portable_sha = deps.digest(portable)
-    report = deps.report_builder(source, portable_sha, prepared.reference.sha256, holdout, evidence)
-    deps.report_writer(report_path, report)
+    built = _build_and_gate(
+        source,
+        deps,
+        output=output,
+        portable=portable,
+        report_path=report_path,
+        tokenizer=tokenizer,
+        sample=sample,
+        holdout=holdout,
+        expected=expected,
+        device_index=device_index,
+    )
+    prepared, evidence, portable_sha = built.prepared, built.evidence, built.portable_sha
     report_sha = deps.digest(report_path)
     installed = deps.installer(prepared, artifact_root)
     builder = deps.binding_builder or binding_document
@@ -135,6 +114,108 @@ def install_document_model(
         writer=deps.atomic_writer,
     )
     return InstalledDocumentModel(installed, binding_path, report_path, evidence)
+
+
+@dataclass(frozen=True, slots=True)
+class _BuiltDocumentModel:
+    """What the gated build produced, before it is installed and bound."""
+
+    prepared: object
+    evidence: DocumentModelEvidence
+    portable_sha: str
+
+
+def _build_and_gate(
+    source,
+    deps: DocumentModelInstallationDependencies,
+    *,
+    output: Path,
+    portable: Path,
+    report_path: Path,
+    tokenizer,
+    sample,
+    holdout,
+    expected,
+    device_index: int | None,
+) -> _BuiltDocumentModel:
+    """Export, gate, prepare, and report — leaving nothing behind on a refusal.
+
+    Every output of this sequence is named to the shared production runner, so
+    a failed parity gate removes the portable reference and the ncnn pair it
+    wrote instead of leaving an operator with a `producer-conflict` they were
+    never told about.
+    """
+    native_outputs = (output / "model.pt", output / "model.ncnn.param", output / "model.ncnn.bin")
+    built: dict[str, object] = {}
+
+    def export() -> None:
+        deps.portable_exporter_type().export(source, portable)
+        built["native"] = deps.native_exporter(source, output, sample)
+
+    def evaluate() -> _BuiltDocumentModel:
+        native = built["native"]
+        portable_runner = deps.portable_runner_factory(portable, tokenizer)
+        native_runner = deps.native_runner_factory(native, tokenizer, device_index=device_index)
+        gate = deps.gate_evaluator(holdout, portable_runner, native_runner)
+        maximum_error = deps.maximum_error(holdout, portable_runner, native_runner)
+        expected_hits = deps.expected_hits(holdout, expected, native_runner)
+        built["gate"] = gate
+        built["maximum_error"] = maximum_error
+        built["expected_hits"] = expected_hits
+        if not _gate_passed(gate, maximum_error, expected_hits, expected):
+            return None  # type: ignore[return-value]
+        prepared = deps.preparer(
+            native,
+            artifact_id=f"{RECIPE_ID}-gpu",
+            version=source.recipe.version,
+            model_format="ncnn",
+        )
+        return _BuiltDocumentModel(
+            prepared,
+            DocumentModelEvidence(
+                native_runner.device_index,
+                native_runner.device_name,
+                gate.vector_count,
+                gate.minimum_cosine_similarity,
+                gate.minimum_top10_overlap,
+                maximum_error,
+                expected_hits,
+            ),
+            deps.digest(portable),
+        )
+
+    return run_production_pipeline(
+        portable,
+        report_path,
+        conflict_detail="portable reference output already exists",
+        export=export,
+        evaluate=evaluate,
+        accepted=lambda built_model: built_model is not None,
+        rejection_code="native-parity-failed",
+        rejection_detail="BGE native retrieval gate did not pass",
+        report=lambda built_model: deps.report_builder(
+            source,
+            built_model.portable_sha,
+            built_model.prepared.reference.sha256,
+            holdout,
+            built_model.evidence,
+        ),
+        report_prefix=".document-model-report-",
+        result=lambda _model, _report, built_model: built_model,
+        writer=lambda path, payload, *, prefix: deps.report_writer(path, payload),
+        extra_outputs=native_outputs,
+        error_factory=DocumentModelError,
+    )
+
+
+def _gate_passed(gate, maximum_error, expected_hits, expected) -> bool:
+    return (
+        gate.accepted
+        and gate.minimum_cosine_similarity >= MIN_NATIVE_COSINE
+        and gate.minimum_top10_overlap >= MIN_RETRIEVAL_OVERLAP
+        and maximum_error <= MAX_NATIVE_ABSOLUTE_ERROR
+        and expected_hits == len(expected)
+    )
 
 
 def binding_document(
