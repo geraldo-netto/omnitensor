@@ -172,6 +172,7 @@ def _page_description(text: str) -> str:
         else "Document page with no extractable text, read without rendering."
     )
 
+
 def _document_page_count(source: Path) -> int:
     try:
         suffix = source.suffix.lower()

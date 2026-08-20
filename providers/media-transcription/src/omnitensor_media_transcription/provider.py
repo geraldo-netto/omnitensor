@@ -21,7 +21,7 @@ from .documents import (
     _render_document_page,
     _render_pdf_page,
 )
-from .errors import QualifiedMediaError
+from .errors import MediaGpuError
 from .formats import (
     AUDIO_SAMPLE_RATE,
     AUDIO_WINDOW_SAMPLES,
@@ -46,7 +46,6 @@ from .presentations import (
     _joined_slide_text,
     _slide_description,
 )
-from .qualification import QUALIFICATION_EVIDENCE, load_qualification
 
 PLUGIN_ID = "media-transcription"
 PROVIDER_ID = "media-transcription-vulkan"
@@ -55,37 +54,33 @@ SPEECH_ARTIFACT_ID = "whisper-small-multilingual"
 VISION_PROJECTOR = "mmproj.gguf"
 
 
-def _qualification() -> dict:
-    """Compatibility seam for tests and frozen composition wiring."""
-    return load_qualification()
-
-
 def create() -> MediaTranscriptionPlugin:
-    qualification = _qualification()
+    """Wire the plugin from what is installed on this machine.
+
+    This used to begin by reading a receipt frozen on one desk in August 2026
+    and refusing the whole plugin unless the recorded date, this
+    distribution's version, the installed `llama-cpp-python` and
+    `pywhispercpp` versions, the three artifact digests and the sha256 of a
+    benchmark report all still matched it. Every one of those is expected to
+    change — the models above all — so the receipt turned an upgrade into a
+    workload that stopped working, with a message about qualification rather
+    than about anything a person did. What the runtime already guarantees is
+    kept: the artifacts are resolved and verified by the service that
+    installed them, and each model still has to prove it loaded onto a Vulkan
+    device before it answers.
+    """
     bootstrap = current_plugin_bootstrap(PLUGIN_ID)
     if bootstrap.accelerator_lease_path is None:
-        raise QualifiedMediaError("GPU accelerator grant is unavailable")
+        raise MediaGpuError("GPU accelerator grant is unavailable")
     vision = bootstrap.require_artifact(VISION_ARTIFACT_ID)
     speech = bootstrap.require_artifact(SPEECH_ARTIFACT_ID)
-    artifacts = qualification["artifacts"]
-    observed = {
-        vision.id: vision.sha256,
-        f"{vision.id}/mmproj": dict(vision.companions).get(VISION_PROJECTOR),
-        speech.id: speech.sha256,
-    }
-    if artifacts != observed:
-        raise QualifiedMediaError("media artifacts differ from qualification")
     projector = vision.path.parent / VISION_PROJECTOR
     if not projector.is_file():
-        raise QualifiedMediaError("qualified visual projector is unavailable")
+        raise MediaGpuError("the visual projector is unavailable")
     lease = VulkanLease(bootstrap.accelerator_lease_path)
     adapter = AvMediaAdapter()
-    whisper = WhisperVulkanTranscriber(
-        speech.path, adapter, lease, qualification["devices"]["speech"]
-    )
-    qwen = QwenVulkanVisualTranscriber(
-        vision.path, projector, lease, qualification["devices"]["vision"]
-    )
+    whisper = WhisperVulkanTranscriber(speech.path, adapter, lease)
+    qwen = QwenVulkanVisualTranscriber(vision.path, projector, lease)
 
     async def preflight() -> None:
         await asyncio.to_thread(qwen._runtime)
@@ -110,7 +105,7 @@ __all__ = [
     "PROVIDER_ID",
     "PresentationArchiveTranscriber",
     "QwenVulkanVisualTranscriber",
-    "QualifiedMediaError",
+    "MediaGpuError",
     "VulkanLease",
     "WhisperVulkanTranscriber",
     "create",

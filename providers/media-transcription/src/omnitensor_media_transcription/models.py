@@ -23,7 +23,7 @@ from omnitensor.plugins.media_transcription import (
 )
 from omnitensor.plugins.protocol import CancellationToken
 
-from .errors import QualifiedMediaError
+from .errors import MediaGpuError
 from .formats import AUDIO_SAMPLE_RATE, AvMediaAdapter, _visual_payload
 
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.I)
@@ -51,7 +51,7 @@ def _window_segments(spoken, offset_ms: int, window_ms: int):
 class VulkanLease:
     def __init__(self, path: Path) -> None:
         if not isinstance(path, Path) or not path.is_file():
-            raise QualifiedMediaError("GPU accelerator lease is unavailable")
+            raise MediaGpuError("GPU accelerator lease is unavailable")
         self._path = path
 
     @contextmanager
@@ -91,7 +91,6 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
         model_path: Path,
         decoder: AvMediaAdapter,
         lease: VulkanLease,
-        expected_device: str,
     ) -> None:
         self._model_path = model_path
         self._decoder = decoder
@@ -99,7 +98,6 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
         # what it still does unless somebody says otherwise.
         self._language: str | None = None
         self._lease = lease
-        self._expected_device = expected_device
         self._device_proven = False
 
     async def preflight(self) -> None:
@@ -183,7 +181,7 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
             import _pywhispercpp as native  # noqa: PLC0415 - deferred: an optional or heavy dependency
             from pywhispercpp.model import Model  # noqa: PLC0415
         except ImportError as error:
-            raise QualifiedMediaError(
+            raise MediaGpuError(
                 "install pywhispercpp 1.5.0 from source with GGML_VULKAN=1"
             ) from error
         logs = []
@@ -203,10 +201,14 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
         match = _WHISPER_DEVICE.search(joined)
         backend = _WHISPER_BACKEND.search(joined)
         if match is not None:
-            self._device_proven = match.group(1).strip() == self._expected_device
+            # A named device, whichever card it is. Pinning the name meant a
+            # new card, or a driver that words the line differently, turned
+            # transcription off — while what has to be true is only that this
+            # did not quietly run on the CPU.
+            self._device_proven = bool(match.group(1).strip())
         if backend is None or backend.group(1) != "0" or not self._device_proven:
             _close_whisper(model)
-            raise QualifiedMediaError("Whisper did not prove its qualified Vulkan device")
+            raise MediaGpuError("Whisper did not prove it loaded onto a Vulkan device")
         return model, tuple(logs)
 
 
@@ -216,12 +218,10 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
         model_path: Path,
         projector_path: Path,
         lease: VulkanLease,
-        expected_device: str,
     ) -> None:
         self._model_path = model_path
         self._projector_path = projector_path
         self._lease = lease
-        self._expected_device = expected_device
         self._lease_stream = None
         self._handler = None
         self._llama = None
@@ -354,14 +354,12 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
             raise
         offload = _OFFLOAD.search("".join(logs))
         device = _LLAMA_DEVICE.search("".join(logs))
-        if (
-            offload is None
-            or device is None
-            or offload.group(1) != offload.group(2)
-            or device.group(1) != self._expected_device
-        ):
+        if offload is None or device is None or offload.group(1) != offload.group(2):
+            # Every layer on a Vulkan device, whichever device that is. The
+            # part worth refusing over is a partial offload, which runs the
+            # rest on the CPU.
             self._release_sync()
-            raise QualifiedMediaError("Qwen VL did not prove full qualified Vulkan offload")
+            raise MediaGpuError("Qwen VL did not prove full Vulkan offload")
         return self._llama
 
     @staticmethod
@@ -373,7 +371,7 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
             )
             from llama_cpp.llama_chat_format import Qwen25VLChatHandler  # noqa: PLC0415
         except ImportError as error:
-            raise QualifiedMediaError("Vulkan llama-cpp-python runtime is unavailable") from error
+            raise MediaGpuError("Vulkan llama-cpp-python runtime is unavailable") from error
         return Llama, llama_cpp, Qwen25VLChatHandler
 
     async def release(self) -> None:

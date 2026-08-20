@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import hashlib
 import io
-import json
 import stat
 import sys
 import types
@@ -15,7 +13,6 @@ import omnitensor_media_transcription.archives as archives
 import omnitensor_media_transcription.models as models
 import omnitensor_media_transcription.presentations as presentations
 import omnitensor_media_transcription.provider as provider
-import omnitensor_media_transcription.qualification as qualification
 import omnitensor_media_transcription.text as visible_text
 import pytest
 from hypothesis import given
@@ -67,30 +64,24 @@ def test_model_constructors_preserve_every_qualified_dependency(tmp_path):
     lease = provider.VulkanLease(lease_path)
     assert lease._path == lease_path
 
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         provider.VulkanLease(tmp_path / "missing")
     assert str(error.value) == "GPU accelerator lease is unavailable"
 
     decoder = object()
     speech_path = tmp_path / "speech.bin"
-    whisper = provider.WhisperVulkanTranscriber(
-        speech_path, decoder, lease, "Qualified speech device"
-    )
+    whisper = provider.WhisperVulkanTranscriber(speech_path, decoder, lease)
     assert whisper._model_path == speech_path
     assert whisper._decoder is decoder
     assert whisper._lease is lease
-    assert whisper._expected_device == "Qualified speech device"
     assert whisper._device_proven is False
 
     vision_path = tmp_path / "vision.gguf"
     projector_path = tmp_path / "mmproj.gguf"
-    qwen = provider.QwenVulkanVisualTranscriber(
-        vision_path, projector_path, lease, "Qualified vision device"
-    )
+    qwen = provider.QwenVulkanVisualTranscriber(vision_path, projector_path, lease)
     assert qwen._model_path == vision_path
     assert qwen._projector_path == projector_path
     assert qwen._lease is lease
-    assert qwen._expected_device == "Qualified vision device"
     assert qwen._lease_stream is None
     assert qwen._handler is None
     assert qwen._llama is None
@@ -125,7 +116,7 @@ def test_whisper_load_uses_exact_vulkan_configuration(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "pywhispercpp.model", model_module)
 
     model_path = tmp_path / "whisper.bin"
-    transcriber = provider.WhisperVulkanTranscriber(model_path, object(), _Lease(), "Qualified GPU")
+    transcriber = provider.WhisperVulkanTranscriber(model_path, object(), _Lease())
     model, logs = transcriber._load()
 
     assert observed == {
@@ -152,12 +143,10 @@ def test_whisper_load_uses_exact_vulkan_configuration(monkeypatch, tmp_path):
 
 
 def test_whisper_load_reports_exact_runtime_and_device_failures(monkeypatch, tmp_path):
-    transcriber = provider.WhisperVulkanTranscriber(
-        tmp_path / "whisper.bin", object(), _Lease(), "Qualified GPU"
-    )
+    transcriber = provider.WhisperVulkanTranscriber(tmp_path / "whisper.bin", object(), _Lease())
     monkeypatch.setitem(sys.modules, "_pywhispercpp", None)
     monkeypatch.setitem(sys.modules, "pywhispercpp.model", None)
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         transcriber._load()
     assert str(error.value) == "install pywhispercpp 1.5.0 from source with GGML_VULKAN=1"
 
@@ -176,9 +165,9 @@ def test_whisper_load_reports_exact_runtime_and_device_failures(monkeypatch, tmp
     model_module.Model = Model
     monkeypatch.setitem(sys.modules, "_pywhispercpp", native)
     monkeypatch.setitem(sys.modules, "pywhispercpp.model", model_module)
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         transcriber._load()
-    assert str(error.value) == "Whisper did not prove its qualified Vulkan device"
+    assert str(error.value) == "Whisper did not prove it loaded onto a Vulkan device"
     assert len(native.freed) == 1
 
 
@@ -211,9 +200,7 @@ def test_whisper_transcription_preserves_exact_inference_and_segment_bounds(tmp_
             cancellation.raise_if_cancelled()
             yield 0, audio
 
-    transcriber = provider.WhisperVulkanTranscriber(
-        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
-    )
+    transcriber = provider.WhisperVulkanTranscriber(tmp_path / "whisper.bin", Decoder(), _Lease())
     transcriber._load = lambda: (model, ())
     cancellation = CancellationController()
     transcript = transcriber._transcribe_sync(tmp_path / "voice.wav", cancellation)
@@ -280,9 +267,7 @@ def test_every_window_is_transcribed_and_its_times_are_absolute(tmp_path):
             yield 16_000 * 300, window
             yield 16_000 * 600, SimpleNamespace(size=16_000 * 5)
 
-    transcriber = provider.WhisperVulkanTranscriber(
-        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
-    )
+    transcriber = provider.WhisperVulkanTranscriber(tmp_path / "whisper.bin", Decoder(), _Lease())
     transcriber._load = lambda: (Model(), ())
     transcript = transcriber._transcribe_sync(tmp_path / "long.wav", CancellationController())
 
@@ -304,9 +289,7 @@ def test_a_recording_with_no_audio_never_loads_a_model(tmp_path):
         def decode_audio_windows(_source, _cancellation):
             return iter(())
 
-    transcriber = provider.WhisperVulkanTranscriber(
-        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
-    )
+    transcriber = provider.WhisperVulkanTranscriber(tmp_path / "whisper.bin", Decoder(), _Lease())
     transcriber._load = lambda: loads.append(True) or (None, ())
     assert transcriber._transcribe_sync(
         tmp_path / "silent.wav", CancellationController()
@@ -319,7 +302,6 @@ def _qwen_transcriber(tmp_path) -> provider.QwenVulkanVisualTranscriber:
         tmp_path / "vision.gguf",
         tmp_path / "mmproj.gguf",
         _Lease(),
-        "Qualified GPU",
     )
 
 
@@ -448,7 +430,6 @@ def test_qwen_load_and_release_preserve_every_vulkan_resource(tmp_path):
         tmp_path / "vision.gguf",
         tmp_path / "mmproj.gguf",
         lease,
-        "Qualified GPU",
     )
     observed = {}
     native = SimpleNamespace(callback=None)
@@ -517,7 +498,6 @@ def test_qwen_load_releases_resources_and_reports_exact_unproved_offload(tmp_pat
         tmp_path / "vision.gguf",
         tmp_path / "mmproj.gguf",
         lease,
-        "Qualified GPU",
     )
     observed = {}
     native = SimpleNamespace()
@@ -550,9 +530,9 @@ def test_qwen_load_releases_resources_and_reports_exact_unproved_offload(tmp_pat
             self.closed = True
 
     transcriber._runtime = lambda: (Llama, native, Handler)
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         transcriber._ensure_loaded()
-    assert str(error.value) == "Qwen VL did not prove full qualified Vulkan offload"
+    assert str(error.value) == "Qwen VL did not prove full Vulkan offload"
     assert observed["handler"]._exit_stack.closed is True
     assert observed["llama"].closed is True
     assert lease.released == [lease.stream]
@@ -561,7 +541,7 @@ def test_qwen_load_releases_resources_and_reports_exact_unproved_offload(tmp_pat
 def test_qwen_runtime_and_whisper_context_failures_are_exact(monkeypatch):
     monkeypatch.setitem(sys.modules, "llama_cpp", None)
     monkeypatch.setitem(sys.modules, "llama_cpp.llama_chat_format", None)
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         provider.QwenVulkanVisualTranscriber._runtime()
     assert str(error.value) == "Vulkan llama-cpp-python runtime is unavailable"
 
@@ -669,9 +649,7 @@ def test_archive_entries_accept_exact_limits_and_reject_every_unsafe_shape(monke
         _assert_media_error(error, "presentation-invalid", "presentation archive entry is unsafe")
 
     with pytest.raises(MediaTranscriptionError) as error:
-        archives.archive_entries(
-            _Archive([_ArchiveInfo("one", 2), _ArchiveInfo("two", 2)]), KIND
-        )
+        archives.archive_entries(_Archive([_ArchiveInfo("one", 2), _ArchiveInfo("two", 2)]), KIND)
     _assert_media_error(
         error, "presentation-invalid", "presentation archive expands beyond its limit"
     )
@@ -952,23 +930,6 @@ async def test_presentation_transcriber_uses_exact_workspace_and_always_removes_
     }
 
 
-def _qualification_document(evidence_digest: str) -> dict:
-    return {
-        "version": 1,
-        "recordedAt": "2026-08-13",
-        "qualified": True,
-        "devices": {"speech": "Speech GPU", "vision": "Vision GPU"},
-        "providerVersion": "0.2.0",
-        "runtimes": {"llama-cpp-python": "0.3.34", "pywhispercpp": "1.5.0"},
-        "artifacts": {
-            provider.VISION_ARTIFACT_ID: "vision",
-            f"{provider.VISION_ARTIFACT_ID}/mmproj": "projector",
-            provider.SPEECH_ARTIFACT_ID: "speech",
-        },
-        "evidenceSha256": evidence_digest,
-    }
-
-
 def test_create_wires_one_shared_adapter_lease_and_vision_into_every_port(monkeypatch, tmp_path):
     vision_path = tmp_path / "vision.gguf"
     projector_path = tmp_path / provider.VISION_PROJECTOR
@@ -998,7 +959,6 @@ def test_create_wires_one_shared_adapter_lease_and_vision_into_every_port(monkey
         None,
         lease_path,
     )
-    monkeypatch.setattr(provider, "_qualification", lambda: _qualification_document("unused"))
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda plugin_id: bootstrap)
     plugin = provider.create()
 
@@ -1006,99 +966,12 @@ def test_create_wires_one_shared_adapter_lease_and_vision_into_every_port(monkey
     assert plugin._speech._model_path == speech_path
     assert plugin._speech._decoder is plugin._probe
     assert plugin._speech._lease is plugin._vision._lease
-    assert plugin._speech._expected_device == "Speech GPU"
     assert plugin._vision._model_path == vision_path
     assert plugin._vision._projector_path == projector_path
-    assert plugin._vision._expected_device == "Vision GPU"
     assert plugin._presentations._vision is plugin._vision
     assert plugin._documents._vision is plugin._vision
 
     projector_path.unlink()
-    with pytest.raises(provider.QualifiedMediaError) as error:
+    with pytest.raises(provider.MediaGpuError) as error:
         provider.create()
-    assert str(error.value) == "qualified visual projector is unavailable"
-
-
-def test_qualification_evidence_uses_exact_package_digest_and_size_bounds(monkeypatch):
-    observed = []
-
-    class Resource:
-        def __init__(self, raw):
-            self.raw = raw
-
-        def joinpath(self, name):
-            observed.append(name)
-            return self
-
-        def read_bytes(self):
-            return self.raw
-
-    resource = Resource(b"x")
-
-    def files(package):
-        observed.append(package)
-        return resource
-
-    monkeypatch.setattr(qualification.importlib.resources, "files", files)
-    monkeypatch.setattr(qualification, "MAX_QUALIFICATION_EVIDENCE_BYTES", 2)
-    document = {"evidenceSha256": hashlib.sha256(b"x").hexdigest()}
-    qualification._validate_qualification_evidence(document)
-    assert observed == [
-        "omnitensor_media_transcription",
-        qualification.QUALIFICATION_EVIDENCE,
-    ]
-
-    resource.raw = b"xy"
-    document["evidenceSha256"] = hashlib.sha256(b"xy").hexdigest()
-    qualification._validate_qualification_evidence(document)
-    for raw in (b"", b"xyz", b"wrong"):
-        resource.raw = raw
-        with pytest.raises(provider.QualifiedMediaError) as error:
-            qualification._validate_qualification_evidence(document)
-        assert str(error.value) == "media qualification evidence differs from receipt"
-
-    def unreadable():
-        raise OSError("unavailable")
-
-    resource.read_bytes = unreadable
-    with pytest.raises(provider.QualifiedMediaError) as error:
-        qualification._validate_qualification_evidence(document)
-    assert str(error.value) == "media qualification evidence is unreadable"
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("version", 2, "media qualification receipt is invalid"),
-        ("recordedAt", "2026-08-12", "media qualification receipt date is invalid"),
-        ("qualified", False, "media provider has no accepted qualification"),
-        (
-            "devices",
-            {"speech": "", "vision": "Vision GPU"},
-            "media qualification devices are invalid",
-        ),
-        ("providerVersion", "9.9.9", "media provider differs from qualification"),
-        ("runtimes", {}, "media runtimes differ from qualification"),
-    ],
-)
-def test_qualification_receipt_rejects_every_exact_frozen_field(
-    monkeypatch, tmp_path, field, value, message
-):
-    evidence = b"accepted"
-    document = _qualification_document(hashlib.sha256(evidence).hexdigest())
-    document[field] = value
-    package = tmp_path / "package"
-    package.mkdir()
-    (package / "qualification.json").write_text(json.dumps(document), encoding="utf-8")
-    (package / qualification.QUALIFICATION_EVIDENCE).write_bytes(evidence)
-    monkeypatch.setattr(qualification.importlib.resources, "files", lambda package_name: package)
-    versions = {
-        "omnitensor-media-transcription": "0.2.0",
-        "llama-cpp-python": "0.3.34",
-        "pywhispercpp": "1.5.0",
-    }
-    monkeypatch.setattr(qualification.importlib.metadata, "version", versions.__getitem__)
-
-    with pytest.raises(provider.QualifiedMediaError) as error:
-        qualification.load_qualification()
-    assert str(error.value) == message
+    assert str(error.value) == "the visual projector is unavailable"

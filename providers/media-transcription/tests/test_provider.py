@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import io
 import json
 import shutil
@@ -219,7 +218,7 @@ def test_vulkan_lease_requires_file_and_serializes_access(tmp_path):
     assert stream.closed
     with lease.hold():
         assert lease_path.is_file()
-    with pytest.raises(provider.QualifiedMediaError, match="lease is unavailable"):
+    with pytest.raises(provider.MediaGpuError, match="lease is unavailable"):
         provider.VulkanLease(tmp_path / "missing")
 
 
@@ -721,8 +720,8 @@ def _install_fake_whisper(monkeypatch, *, good_device=True):
         def __init__(self, *_args, **kwargs):
             self.kwargs = kwargs
             self._ctx = object()
-            name = "AMD Radeon RX 6600 XT" if good_device else "Wrong GPU"
-            if native.show_device:
+            name = "AMD Radeon RX 6600 XT"
+            if native.show_device and good_device:
                 native.callback(1, f"ggml_vulkan: 0 = {name} (driver)\n")
             native.callback(1, "whisper_backend_init_gpu: using Vulkan0 backend\n")
 
@@ -750,7 +749,6 @@ def test_whisper_vulkan_proves_device_transcribes_and_releases(monkeypatch, tmp_
         tmp_path / "model.bin",
         decoder,
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
     transcript = transcriber._transcribe_sync(tmp_path / "voice.wav", CancellationController())
     assert transcript.language == "he"
@@ -770,9 +768,8 @@ def test_whisper_vulkan_refuses_unproved_device_and_closes_context(monkeypatch, 
         tmp_path / "model.bin",
         SimpleNamespace(),
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
-    with pytest.raises(provider.QualifiedMediaError, match="did not prove"):
+    with pytest.raises(provider.MediaGpuError, match="did not prove"):
         transcriber._load()
     assert len(native.freed) == 1
     provider._close_whisper(None)
@@ -802,7 +799,6 @@ async def test_whisper_async_preflight_and_empty_or_spoken_audio(monkeypatch, tm
         tmp_path / "model.bin",
         decoder,
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
     await transcriber.preflight()
     assert await transcriber.transcribe(tmp_path / "empty.wav", CancellationController()) == (
@@ -816,7 +812,11 @@ async def test_whisper_async_preflight_and_empty_or_spoken_audio(monkeypatch, tm
 def _install_fake_llama(monkeypatch, *, good_device=True, content=None):  # noqa: C901
     package = types.ModuleType("llama_cpp")
     native = SimpleNamespace(callback=None, completion_kwargs=None, abort_callback=None)
-    device_name = {True: "AMD Radeon RX 6600 XT", False: "Wrong GPU"}[good_device]
+    # `good_device` now means the load ended up wholly on a Vulkan device.
+    # Which card it is is no longer asserted; a partial offload is, because
+    # the remainder of it runs on the CPU.
+    device_name = "AMD Radeon RX 6600 XT"
+    offloaded = "33/33" if good_device else "20/33"
     response_content = _fake_visual_content(content)
 
     def callback_type(callback):
@@ -854,7 +854,7 @@ def _install_fake_llama(monkeypatch, *, good_device=True, content=None):  # noqa
                 f"using device Vulkan0 ({device_name}) (0000:00:00.0)\n".encode(),
                 None,
             )
-            native.callback(1, b"offloaded 33/33 layers to GPU\n", None)
+            native.callback(1, f"offloaded {offloaded} layers to GPU\n".encode(), None)
 
         def create_chat_completion(self, **kwargs):
             native.completion_kwargs = kwargs
@@ -887,7 +887,6 @@ def test_qwen_vulkan_proves_full_offload_transcribes_and_releases(monkeypatch, t
         tmp_path / "model.gguf",
         tmp_path / "mmproj.gguf",
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
     result = transcriber._transcribe_sync(VisualFrame(image, 10), CancellationController())
     assert result.visible_text == "שלום"
@@ -933,9 +932,8 @@ def test_qwen_vulkan_refuses_unproved_or_invalid_output(
         tmp_path / "model.gguf",
         tmp_path / "mmproj.gguf",
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
-    expected = provider.QualifiedMediaError if not good_device else MediaTranscriptionError
+    expected = provider.MediaGpuError if not good_device else MediaTranscriptionError
     with pytest.raises(expected):
         transcriber._transcribe_sync(VisualFrame(image, None), CancellationController())
     transcriber._release_sync()
@@ -952,7 +950,6 @@ async def test_qwen_async_lifecycle_and_missing_runtime(monkeypatch, tmp_path):
         tmp_path / "model.gguf",
         tmp_path / "mmproj.gguf",
         provider.VulkanLease(lease_path),
-        "AMD Radeon RX 6600 XT",
     )
     await transcriber.preflight()
     result = await transcriber.transcribe(VisualFrame(image, None), CancellationController())
@@ -961,68 +958,8 @@ async def test_qwen_async_lifecycle_and_missing_runtime(monkeypatch, tmp_path):
 
     monkeypatch.setitem(sys.modules, "llama_cpp", None)
     monkeypatch.setitem(sys.modules, "llama_cpp.llama_chat_format", None)
-    with pytest.raises(provider.QualifiedMediaError, match="runtime is unavailable"):
+    with pytest.raises(provider.MediaGpuError, match="runtime is unavailable"):
         provider.QwenVulkanVisualTranscriber._runtime()
-
-
-def _qualification_document(qualified=True, evidence_sha256="evidence"):
-    return {
-        "version": 1,
-        "recordedAt": "2026-08-13",
-        "qualified": qualified,
-        "devices": {
-            "speech": "AMD Radeon RX 6600 XT",
-            "vision": "AMD Radeon RX 6600 XT",
-        },
-        "providerVersion": "0.2.0",
-        "runtimes": {"llama-cpp-python": "0.3.34", "pywhispercpp": "1.5.0"},
-        "artifacts": {
-            provider.VISION_ARTIFACT_ID: "vision",
-            f"{provider.VISION_ARTIFACT_ID}/mmproj": "projector",
-            provider.SPEECH_ARTIFACT_ID: "speech",
-        },
-        "evidenceSha256": evidence_sha256,
-    }
-
-
-def test_qualification_requires_exact_accepted_versions(monkeypatch, tmp_path):
-    package = tmp_path / "package"
-    package.mkdir()
-    receipt = package / "qualification.json"
-    evidence = package / provider.QUALIFICATION_EVIDENCE
-    evidence.write_bytes(b"accepted hardware evidence")
-    evidence_digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
-    monkeypatch.setattr(provider.importlib.resources, "files", lambda _name: package)
-    versions = {
-        "omnitensor-media-transcription": "0.2.0",
-        "llama-cpp-python": "0.3.34",
-        "pywhispercpp": "1.5.0",
-    }
-    monkeypatch.setattr(provider.importlib.metadata, "version", versions.__getitem__)
-
-    receipt.write_text(json.dumps(_qualification_document(evidence_sha256=evidence_digest)))
-    assert provider._qualification()["qualified"] is True
-    receipt.write_text(json.dumps(_qualification_document(False, evidence_digest)))
-    with pytest.raises(provider.QualifiedMediaError, match="no accepted"):
-        provider._qualification()
-    wrong_date = _qualification_document(evidence_sha256=evidence_digest)
-    wrong_date["recordedAt"] = "2026-08-12"
-    receipt.write_text(json.dumps(wrong_date))
-    with pytest.raises(provider.QualifiedMediaError, match="date is invalid"):
-        provider._qualification()
-    receipt.write_text(json.dumps(_qualification_document(evidence_sha256="0" * 64)))
-    with pytest.raises(provider.QualifiedMediaError, match="evidence differs"):
-        provider._qualification()
-    evidence.unlink()
-    receipt.write_text(json.dumps(_qualification_document(evidence_sha256=evidence_digest)))
-    with pytest.raises(provider.QualifiedMediaError, match="evidence is unreadable"):
-        provider._qualification()
-    receipt.write_text("not-json")
-    with pytest.raises(provider.QualifiedMediaError, match="unreadable"):
-        provider._qualification()
-    receipt.write_text(json.dumps({"version": 1}))
-    with pytest.raises(provider.QualifiedMediaError, match="invalid"):
-        provider._qualification()
 
 
 def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_path):
@@ -1054,7 +991,6 @@ def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_p
         None,
         lease_path,
     )
-    monkeypatch.setattr(provider, "_qualification", _qualification_document)
     requested_plugin_ids = []
 
     def current_bootstrap(plugin_id):
@@ -1087,17 +1023,15 @@ def test_create_binds_exact_bootstrap_artifacts_and_preflight(monkeypatch, tmp_p
 
     missing_lease = PluginBootstrap(provider.PLUGIN_ID, bootstrap.artifacts, None, None)
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: missing_lease)
-    with pytest.raises(provider.QualifiedMediaError) as excinfo:
+    with pytest.raises(provider.MediaGpuError) as excinfo:
         provider.create()
     assert str(excinfo.value) == "GPU accelerator grant is unavailable"
 
-    wrong_artifacts = _qualification_document()
-    wrong_artifacts["artifacts"] = {}
-    monkeypatch.setattr(provider, "_qualification", lambda: wrong_artifacts)
+    projector_path.unlink()
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: bootstrap)
-    with pytest.raises(provider.QualifiedMediaError) as excinfo:
+    with pytest.raises(provider.MediaGpuError) as excinfo:
         provider.create()
-    assert str(excinfo.value) == "media artifacts differ from qualification"
+    assert str(excinfo.value) == "the visual projector is unavailable"
 
 
 def test_public_provider_exports_are_bounded():
@@ -1107,7 +1041,7 @@ def test_public_provider_exports_are_bounded():
         "PROVIDER_ID",
         "PresentationArchiveTranscriber",
         "QwenVulkanVisualTranscriber",
-        "QualifiedMediaError",
+        "MediaGpuError",
         "VulkanLease",
         "WhisperVulkanTranscriber",
         "create",

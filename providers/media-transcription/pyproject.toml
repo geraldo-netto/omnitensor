@@ -32,7 +32,6 @@ packages = ["src/omnitensor_media_transcription"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "../../plugin-manifests/media-transcription.json" = "omnitensor_media_transcription/omnitensor-plugin.json"
-"../../acceptance-evidence/media-transcription-rx6600xt-report.json" = "omnitensor_media_transcription/media-transcription-rx6600xt-report.json"
 
 # The floor this distribution's own suite must hold; measured 98% when set.
 [tool.coverage.report]
