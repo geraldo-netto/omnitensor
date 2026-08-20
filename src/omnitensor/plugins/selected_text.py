@@ -24,6 +24,7 @@ from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
+    checked_answer,
     generation_request,
     parse_generation_task,
 )
@@ -254,10 +255,12 @@ def grounded_selected_text_result(
     provider_id: str,
     accelerator: str,
 ) -> dict:
-    violations = validate_document("selected-text-answer.schema.json", document)
-    if violations:
-        raise SelectedTextError("result-invalid", violations[0])
-    assert isinstance(document, Mapping)
+    document = checked_answer(
+        "selected-text-answer.schema.json",
+        document,
+        error_type=SelectedTextError,
+        code="result-invalid",
+    )
     evidence = document["evidence"]
     assert isinstance(evidence, Mapping)
     if document["requestId"] != request_id or document["operation"] != operation:

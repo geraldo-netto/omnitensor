@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import jsonschema
 
+from ..registry import validate_document
 from ..stable_error import StableError
 from .protocol import CancellationToken, ProgressReporter
 
@@ -305,6 +306,36 @@ def validate_structured_output(task: GenerationTask, raw: str) -> dict:
     if violations:
         raise GenerationError("provider-output-invalid", violations[0].message)
     assert isinstance(document, dict)
+    return document
+
+
+def checked_answer(
+    schema_name: str,
+    document: object,
+    *,
+    error_type: Callable[[str, str], Exception],
+    code: str,
+) -> Mapping[str, object]:
+    """A workload's own reading of an answer the router has already checked.
+
+    `_parse_output` above validates every provider answer against
+    `task.output_schema`, and for each workload that schema *is* the file named
+    here, so on the router path this cannot fail. It stays because these
+    publishers are the entry point for an answer and are called directly —
+    by tests, and by anything that reassembles an answer without a router — and
+    a publisher that trusted its input there would raise `KeyError` at the
+    first field instead of refusing. It also narrows the type for everything
+    below it.
+
+    What it replaces is four copies of the same three lines, one per workload,
+    each of them the only reason its module imported `validate_document`. A
+    workload not trusting its router is a decision worth stating; it is not
+    worth stating four times by accident.
+    """
+    violations = validate_document(schema_name, document)
+    if violations:
+        raise error_type(code, violations[0])
+    assert isinstance(document, Mapping)
     return document
 
 

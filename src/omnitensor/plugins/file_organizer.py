@@ -46,6 +46,7 @@ from .fragments import SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
+    checked_answer,
     generation_request,
     parse_generation_task,
 )
@@ -265,10 +266,12 @@ def review_only_plan(
     accelerator: str,
 ) -> dict:
     """Validate suggestions and produce a capability-free public plan."""
-    violations = validate_document("file-organizer-answer.schema.json", document)
-    if violations:
-        raise FileOrganizerError("plan-invalid", violations[0])
-    assert isinstance(document, Mapping)
+    document = checked_answer(
+        "file-organizer-answer.schema.json",
+        document,
+        error_type=FileOrganizerError,
+        code="plan-invalid",
+    )
     if document["requestId"] != request_id:
         raise FileOrganizerError("plan-invalid", "plan request id does not match")
     suggestions = document["suggestions"]

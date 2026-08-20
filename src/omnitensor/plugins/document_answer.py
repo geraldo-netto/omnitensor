@@ -16,7 +16,7 @@ from .document_spans import (
     IndexedSpan,
 )
 from .extraction import measured_failure_detail
-from .generation import parse_generation_task
+from .generation import checked_answer, parse_generation_task
 
 PLUGIN_ID = "ask-selected-files"
 
@@ -30,10 +30,12 @@ def grounded_answer_document(
     accelerator: str,
 ) -> dict:
     """Validate every citation against the retrieved private span index."""
-    violations = validate_document("document-question-answer.schema.json", document)
-    if violations:
-        raise DocumentQuestionError("answer-invalid", violations[0])
-    assert isinstance(document, Mapping)
+    document = checked_answer(
+        "document-question-answer.schema.json",
+        document,
+        error_type=DocumentQuestionError,
+        code="answer-invalid",
+    )
     if document["requestId"] != request_id:
         raise DocumentQuestionError("answer-invalid", "answer request id does not match")
     by_reference = {span.reference: span for span in retrieved}

@@ -58,6 +58,7 @@ from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
+    checked_answer,
     generation_request,
     parse_generation_task,
 )
@@ -383,10 +384,12 @@ def _translation_tokens(task) -> int:
 
 def _span_translation(document: object, request_id: str, reference: str, digest: str) -> str:
     """One span's answer, checked against the contract before it is used."""
-    violations = validate_document("document-translation-answer.schema.json", document)
-    if violations:
-        raise DocumentTranslationError("translation-invalid", violations[0])
-    assert isinstance(document, Mapping)
+    document = checked_answer(
+        "document-translation-answer.schema.json",
+        document,
+        error_type=DocumentTranslationError,
+        code="translation-invalid",
+    )
     if document["requestId"] != request_id:
         raise DocumentTranslationError(
             "translation-invalid", "translation request id does not match"
