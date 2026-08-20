@@ -185,11 +185,13 @@ class ControlGuard:
             )
         return quota
 
-    def admit(self, method: str, owner: str, payload: str = "") -> None:
+    def admit(self, method: str, owner: str, payload: str = "") -> _CallerWindow:
         """Charge one call against ``owner``'s quota, or refuse it.
 
         Raises :class:`GuardRefusedError`; the caller turns that into
-        whatever the transport's error shape is.
+        whatever the transport's error shape is. The charged window is
+        returned so the caller can give the slot back to *that* window even if
+        the LRU has since evicted its key.
         """
         quota = self.quota_for(method)
         self._check_payload(method, quota, payload)
@@ -210,11 +212,22 @@ class ControlGuard:
             )
         window.calls.append(now)
         window.in_flight += 1
+        return window
 
     def release(self, method: str, owner: str) -> None:
         """Mark one admitted call finished; never lets the count go negative."""
         window = self._windows.get((method, owner))
-        if window is not None and window.in_flight > 0:
+        if window is not None:
+            self.release_admitted(window)
+
+    @staticmethod
+    def release_admitted(window: _CallerWindow) -> None:
+        """Give back the slot charged on this exact window.
+
+        By key, an eviction between admit and release loses the decrement and
+        the readmitted window under-counts its in-flight calls for good.
+        """
+        if window.in_flight > 0:
             window.in_flight -= 1
 
     def _check_payload(self, method: str, quota: MethodQuota, payload: object) -> None:
@@ -264,16 +277,24 @@ class ControlGuard:
 class guarded:  # noqa: N801 - used as a context manager, not a type
     """Hold one admitted call for the duration of a block."""
 
-    __slots__ = ("_guard", "_method", "_owner")
+    __slots__ = ("_guard", "_method", "_owner", "_payload", "_window")
 
     def __init__(self, guard: ControlGuard, method: str, owner: str, payload: str = "") -> None:
         self._guard = guard
         self._method = method
         self._owner = owner
-        guard.admit(method, owner, payload)
+        self._payload = payload
+        self._window: _CallerWindow | None = None
 
     def __enter__(self) -> guarded:
+        # Charged here rather than in __init__: one constructed and never
+        # entered used to hold a concurrency slot no __exit__ would ever give
+        # back, locking that caller out with concurrency-limit-exceeded.
+        self._window = self._guard.admit(self._method, self._owner, self._payload)
         return self
 
     def __exit__(self, *_exception) -> None:
-        self._guard.release(self._method, self._owner)
+        window = self._window
+        self._window = None
+        if window is not None:
+            self._guard.release_admitted(window)

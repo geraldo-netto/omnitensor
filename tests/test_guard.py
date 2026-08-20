@@ -357,3 +357,36 @@ def test_every_bus_method_has_a_quota():
     from omnitensor.service import RUNTIME_METHODS
 
     assert set(RUNTIME_METHODS) == set(DEFAULT_QUOTAS)
+
+
+def test_a_guard_constructed_and_never_entered_charges_nothing():
+    """OMNI-0418: constructing one used to hold a slot no exit gave back."""
+    from omnitensor.guard import ControlGuard, guarded
+
+    subject = ControlGuard()
+    guarded(subject, "submit-job", "uid:1000")
+    guarded(subject, "submit-job", "uid:1000")
+
+    quota = subject.quota_for("submit-job")
+    with guarded(subject, "submit-job", "uid:1000"):
+        window = subject._windows[("submit-job", "uid:1000")]  # noqa: SLF001
+        assert window.in_flight == 1
+    assert window.in_flight == 0
+    assert quota.max_concurrent >= 1
+
+
+def test_an_evicted_window_still_gets_its_slot_back():
+    """The decrement follows the window object, not its key."""
+    from omnitensor.guard import ControlGuard, guarded
+
+    subject = ControlGuard()
+    with guarded(subject, "submit-job", "uid:1000"):
+        window = subject._windows[("submit-job", "uid:1000")]  # noqa: SLF001
+        # Evicted mid-call, exactly as the LRU does under many callers.
+        subject._windows.clear()  # noqa: SLF001
+    assert window.in_flight == 0
+
+    # And the caller can still be admitted afterwards, up to the full quota.
+    for _index in range(subject.quota_for("submit-job").max_concurrent):
+        guard = guarded(subject, "submit-job", "uid:1000")
+        guard.__enter__()
