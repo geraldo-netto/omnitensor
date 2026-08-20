@@ -815,3 +815,24 @@ def test_the_installed_applet_reads_what_this_service_publishes():
         pytest.skip("no applet and snapshot pair is installed on this host")
 
     assert check_applet_contract(root, snapshot).ok is True
+
+
+def test_a_lane_with_no_hardware_passes_but_is_not_called_usable(monkeypatch):
+    """OMNI-0450: the report promised a lane that refuses the first job."""
+    from omnitensor import acceptance_checks as checks
+    from omnitensor.acceptance import check_backends
+    from omnitensor.acceptance_probes import DEVICE_MISSING, USABLE
+
+    # Two importable stand-ins, so the probe reaches the state check at all.
+    states = {"io": (DEVICE_MISSING, "no Coral is present"), "json": (USABLE, "")}
+    monkeypatch.setattr(checks, "runtime_state", lambda module: states[module])
+
+    waiting = check_backends((("tpu", "io", "plug in a Coral"),))
+    assert waiting.ok is True
+    assert "usable" not in waiting.detail
+    assert "waiting for hardware: tpu:io (no Coral is present)" in waiting.detail
+
+    both = check_backends((("tpu", "io", "plug in a Coral"), ("gpu", "json", "unused")))
+    assert both.ok is True
+    assert "accelerator runtimes usable: gpu:json" in both.detail
+    assert "waiting for hardware: tpu:io" in both.detail

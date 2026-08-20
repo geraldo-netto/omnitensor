@@ -135,8 +135,8 @@ def test_backend_and_executor_private_seams_are_live(monkeypatch):
     calls = []
     monkeypatch.setattr(
         checks,
-        "_runtime_verdict",
-        lambda module: calls.append(module) or None,
+        "runtime_state",
+        lambda module: calls.append(module) or (probes.USABLE, ""),
     )
     assert checks.check_backends((("gpu", "json", "unused"),)).ok is True
     assert calls == ["json"]
@@ -144,6 +144,7 @@ def test_backend_and_executor_private_seams_are_live(monkeypatch):
     available = SimpleNamespace(available=False, code="runtime-unusable", reason="broken")
     executor = SimpleNamespace(availability=lambda: available)
     monkeypatch.setattr(probes, "_executor_for", lambda module: executor)
+    assert probes.runtime_state("sample-runtime") == (probes.UNUSABLE, "broken")
     assert probes._runtime_verdict("sample-runtime") == "broken"
 
     def explode():
@@ -151,7 +152,16 @@ def test_backend_and_executor_private_seams_are_live(monkeypatch):
 
     exploding = SimpleNamespace(availability=explode)
     monkeypatch.setattr(probes, "_executor_for", lambda module: exploding)
+    assert probes.runtime_state("sample-runtime") == (probes.UNUSABLE, "OSError")
     assert probes._runtime_verdict("sample-runtime") == "OSError"
+
+    # Absent hardware is its own state: the install is waiting, not wrong.
+    absent = SimpleNamespace(available=False, code="device-absent", reason="no Coral is present")
+    monkeypatch.setattr(
+        probes, "_executor_for", lambda module: SimpleNamespace(availability=lambda: absent)
+    )
+    assert probes.runtime_state("sample-runtime") == (probes.DEVICE_MISSING, "no Coral is present")
+    assert probes._runtime_verdict("sample-runtime") is None
 
 
 def test_workload_root_failure_stays_a_failed_check(monkeypatch):

@@ -15,7 +15,7 @@ from .acceptance_contracts import (
     InstallationReport,
     ServiceProbe,
 )
-from .acceptance_probes import _runtime_verdict
+from .acceptance_probes import DEVICE_MISSING, UNUSABLE, USABLE, runtime_state
 from .registry import (
     ManifestError,
     _schema_path,
@@ -411,27 +411,40 @@ def check_applet_contract(applet_root: Path, snapshot_path: Path) -> Check:
     )
 
 
-def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) -> Check:
-    import importlib.util  # noqa: PLC0415 - only needed for this probe
-
-    usable: list[str] = []
-    present: list[str] = []
-    reasons: list[str] = []
-    verdict_for = _runtime_verdict
+def _grouped_runtime_states(
+    runtimes: Sequence[tuple[str, str, str]], find_spec
+) -> dict[str, list[str]]:
+    """Every importable runtime, labelled by what it can actually do."""
+    grouped: dict[str, list[str]] = {USABLE: [], DEVICE_MISSING: [], UNUSABLE: []}
     for backend, module, _remedy in runtimes:
         try:
-            if importlib.util.find_spec(module) is None:
+            if find_spec(module) is None:
                 continue
         except (ImportError, ValueError):
             continue
-        present.append(f"{backend}:{module}")
-        verdict = verdict_for(module)
-        if verdict is None:
-            usable.append(f"{backend}:{module}")
-        else:
-            reasons.append(f"{backend}:{module} ({verdict})")
-    if usable:
-        return Check("backends", True, f"accelerator runtimes usable: {', '.join(usable)}")
+        state, reason = runtime_state(module)
+        label = f"{backend}:{module}" if state == USABLE else f"{backend}:{module} ({reason})"
+        grouped[state].append(label)
+    return grouped
+
+
+def check_backends(runtimes: Sequence[tuple[str, str, str]] = BACKEND_RUNTIMES) -> Check:
+    import importlib.util  # noqa: PLC0415 - only needed for this probe
+
+    grouped = _grouped_runtime_states(runtimes, importlib.util.find_spec)
+    usable = grouped[USABLE]
+    waiting = grouped[DEVICE_MISSING]
+    reasons = grouped[UNUSABLE]
+    present = usable + waiting + reasons
+    if usable or waiting:
+        # An install waiting for hardware passes, but says so: reporting it as
+        # "usable" promised a lane that refuses the first job it is given.
+        parts = []
+        if usable:
+            parts.append(f"accelerator runtimes usable: {', '.join(usable)}")
+        if waiting:
+            parts.append(f"installed but waiting for hardware: {', '.join(waiting)}")
+        return Check("backends", True, "; ".join(parts))
     if present:
         return Check(
             "backends",

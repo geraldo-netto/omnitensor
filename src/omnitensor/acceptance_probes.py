@@ -22,21 +22,46 @@ def _executor_for(module: str):
     return None if builder is None else builder(True)
 
 
-def _runtime_verdict(module: str) -> str | None:
-    """Why this runtime cannot be used, or ``None`` when it can."""
+USABLE = "usable"
+DEVICE_MISSING = "device-missing"
+UNUSABLE = "unusable"
+
+
+def runtime_state(module: str) -> tuple[str, str]:
+    """What this runtime is: usable, waiting for its device, or unusable.
+
+    Three states, not two. Absent hardware and a broken runtime used to give
+    the same answer — ``None``, "nothing wrong" — so a machine with no Coral
+    plugged in reported "accelerator runtimes usable: tpu:tflite_runtime" and
+    then refused the first job with ``device-absent``. An install waiting for
+    hardware is not an install that is wrong, but it is not a usable lane
+    either, and the report has to be able to say which.
+    """
     from .executors.base import DEVICE_ABSENT  # noqa: PLC0415 - probe-only import
 
     executor_for = _executor_for
     executor = executor_for(module)
     if executor is None:
-        return None
+        return USABLE, ""
     try:
         availability = executor.availability()
     except Exception as error:  # noqa: BLE001 - a probe must not fail the report
-        return type(error).__name__
-    if availability.available or availability.code == DEVICE_ABSENT:
-        return None
-    return availability.reason
+        return UNUSABLE, type(error).__name__
+    if availability.available:
+        return USABLE, ""
+    if availability.code == DEVICE_ABSENT:
+        return DEVICE_MISSING, availability.reason
+    return UNUSABLE, availability.reason
+
+
+def _runtime_verdict(module: str) -> str | None:
+    """Why this runtime cannot be used, or ``None`` when it can.
+
+    Kept for callers that only branch on usable/unusable; ``runtime_state``
+    is the one that can tell absent hardware apart.
+    """
+    state, reason = runtime_state(module)
+    return reason if state == UNUSABLE else None
 
 
 class SystemdUserServiceProbe:
