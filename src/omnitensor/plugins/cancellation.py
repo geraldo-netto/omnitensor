@@ -303,18 +303,34 @@ class JsonCancellationJournal:
             document = read_json_bounded(self._path, MAX_JOURNAL_BYTES)
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError, JsonTooLargeError):
+        except (OSError, ValueError, JsonTooLargeError) as error:
             # A journal we cannot read tells us nothing about what was running,
             # and refusing to start over it would be worse than starting clean.
-            return {}
+            # Saying nothing is the part that was wrong: "no job was
+            # interrupted" and "the record of what was interrupted is
+            # unreadable" are different facts, and the runtime reported the
+            # first for both.
+            return self._discarded(f"it could not be read: {error}")
         if not isinstance(document, dict) or document.get("version") != JOURNAL_VERSION:
-            return {}
+            return self._discarded(
+                f"it is not a version {JOURNAL_VERSION} in-flight journal document"
+            )
         jobs = document.get("jobs")
         if not isinstance(jobs, dict):
-            return {}
+            return self._discarded("its job map is missing or not a map")
         return {
             str(job_id): str(profile) for job_id, profile in jobs.items() if isinstance(job_id, str)
         }
+
+    def _discarded(self, reason: str) -> dict[str, str]:
+        """Start clean, having said which record was thrown away and why."""
+        _LOGGER.warning(
+            "in-flight journal %s was discarded because %s;"
+            " a job the previous process left running is not reported as interrupted",
+            self._path,
+            reason,
+        )
+        return {}
 
     def save(self, entries: Mapping[str, str]) -> None:
         write_json_atomic(

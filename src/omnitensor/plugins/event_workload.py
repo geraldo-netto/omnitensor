@@ -9,6 +9,7 @@ leaves the worker.  Paths and source text are never journalled.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -66,6 +67,8 @@ from .protocol import (
 )
 from .spans import estimate_tokens
 from .text_encoding import TextEncodingError, decode_plain_text
+
+_LOGGER = logging.getLogger(__name__)
 
 PLUGIN_ID = "event-extraction"
 READ_PERMISSION = "files:read-selected"
@@ -195,10 +198,28 @@ class EventRecoveryJournal:
             return {}
         try:
             document = read_json_bounded(self._path, MAX_JOURNAL_BYTES)
-        except (JsonTooLargeError, OSError, UnicodeError, ValueError):
-            return {}
+        except (JsonTooLargeError, OSError, UnicodeError, ValueError) as error:
+            return self._discarded(f"it could not be read: {error}")
         active = document.get("active", {}) if isinstance(document, dict) else {}
-        return dict(active) if isinstance(active, dict) else {}
+        if not isinstance(active, dict):
+            return self._discarded("its active map is missing or not a map")
+        return dict(active)
+
+    def _discarded(self, reason: str) -> dict[str, str]:
+        """Start clean, having said which record was thrown away and why.
+
+        "Nothing was interrupted" and "the record of what was interrupted is
+        unreadable" are different facts, and this reported the first for both
+        — including on the write paths, where the unreadable document is then
+        replaced by one holding this request alone.
+        """
+        _LOGGER.warning(
+            "event recovery journal %s was discarded because %s;"
+            " a request the previous process left running is not reported as interrupted",
+            self._path,
+            reason,
+        )
+        return {}
 
     def _lock(self):
         return store_lock(self._path.parent, f".{self._path.name}.lock")

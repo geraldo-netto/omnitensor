@@ -124,10 +124,15 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # that were pure delegation are gone, and the ten methods that now hold the
     # behaviour are tracked instead — in one place rather than in each workload
     # that qualifies.
+    #
+    # `event-workload` moved 56 -> 57 when the recovery journal stopped
+    # answering "nothing was interrupted" for a document it could not read
+    # (OMNI-0548): the discard is a statement now, and a statement is
+    # behaviour.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         49,
         3,
-        56,
+        57,
         34,
         18,
         2,
@@ -136,7 +141,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         13,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 224
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 225
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

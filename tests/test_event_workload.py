@@ -554,3 +554,33 @@ def valid_event_document():
             }
         ],
     }
+
+
+def test_an_unreadable_recovery_journal_is_discarded_out_loud(tmp_path, caplog):
+    """OMNI-0548: and the write paths then replace it with one entry.
+
+    `_active()` answered `{}` for a document it could not read, so `stage()`
+    read nothing, added its own request, and wrote that back — a journal
+    holding four in-flight requests became one holding this one, silently.
+    Starting clean is still the right answer; doing it without a word was not.
+    """
+    path = tmp_path / "recovery.json"
+    path.write_bytes(b"x" * (event_workload.MAX_JOURNAL_BYTES + 1))
+    journal = EventRecoveryJournal(path)
+
+    with caplog.at_level("WARNING", logger="omnitensor.plugins.event_workload"):
+        assert journal.recover() == ()
+
+    [record] = caplog.records
+    assert "could not be read" in record.getMessage()
+    assert "not reported as interrupted" in record.getMessage()
+
+
+def test_a_recovery_journal_that_reads_cleanly_says_nothing(tmp_path, caplog):
+    journal = EventRecoveryJournal(tmp_path / "recovery.json")
+
+    with caplog.at_level("WARNING", logger="omnitensor.plugins.event_workload"):
+        journal.stage("one", "select")
+        assert journal.recover() == ("one",)
+
+    assert caplog.records == []

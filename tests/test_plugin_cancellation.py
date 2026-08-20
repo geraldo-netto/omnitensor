@@ -343,3 +343,43 @@ def test_the_journal_is_read_once_rather_than_on_every_job():
     # 8 tracks, then 7 releases with content left plus a final clear.
     assert journal.loads == 1
     assert journal.saves == 15
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
+    [
+        (b"{", "could not be read"),
+        (b'{"version":99,"jobs":{"job-1":""}}', "in-flight journal document"),
+        (b'{"version":1,"jobs":[]}', "job map is missing or not a map"),
+    ],
+)
+def test_a_journal_that_cannot_be_read_is_discarded_out_loud(tmp_path, caplog, content, reason):
+    """OMNI-0548: "nothing was interrupted" is not what an unreadable file says.
+
+    Starting clean over a journal nobody can parse is right — refusing to
+    start would be worse. Saying nothing about it was the defect: the operator
+    of a host that lost a job to a crash saw a runtime reporting, confidently,
+    that no job had been interrupted.
+    """
+    journal = tmp_path / "in-flight.json"
+    journal.write_bytes(content)
+
+    with caplog.at_level("WARNING", logger="omnitensor.plugins.cancellation"):
+        assert JobCancellationRegistry(journal).recover() == ()
+
+    [record] = caplog.records
+    assert reason in record.getMessage()
+    assert str(journal) in record.getMessage()
+    assert "not reported as interrupted" in record.getMessage()
+
+
+def test_a_journal_that_reads_cleanly_says_nothing(tmp_path, caplog):
+    """The warning has to mean something, so it must not fire on the good path."""
+    journal = tmp_path / "in-flight.json"
+    JobCancellationRegistry(journal).track("job-1", "hardware-health")
+
+    with caplog.at_level("WARNING", logger="omnitensor.plugins.cancellation"):
+        assert len(JobCancellationRegistry(journal).recover()) == 1
+        assert JobCancellationRegistry(journal).recover() == ()
+
+    assert caplog.records == []

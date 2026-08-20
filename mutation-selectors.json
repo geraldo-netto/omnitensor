@@ -140,6 +140,7 @@
         "omnitensor.plugins.event_workload.x\u01c1EventExtractionPlugin\u01c1on_start",
         "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1__init__",
         "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1_active",
+        "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1_discarded",
         "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1_lock",
         "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1_write",
         "omnitensor.plugins.event_workload.x\u01c1EventRecoveryJournal\u01c1finish",
