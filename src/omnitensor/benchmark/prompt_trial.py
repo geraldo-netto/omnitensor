@@ -41,10 +41,11 @@ from .harness import (
     Run,
     SilentProgress,
     asyncio_run,
-    lease_file,
+    case_line,
+    loaded_model,
     run_cases,
 )
-from .vulkan_devices import DeviceError, confirm
+from .vulkan_devices import DeviceError
 from .vulkan_devices import devices as vulkan_devices
 from .vulkan_devices import select as select_device
 
@@ -122,69 +123,25 @@ def trial(
     say,
 ) -> Run:
     """Load the model once and run every selected case on one wording."""
-    import os  # noqa: PLC0415 - set before the runtime initialises Vulkan
-
-    from omnitensor_vulkan_runtime.runtime import (  # noqa: PLC0415
-        MAX_RUNTIME_CONTEXT_TOKENS,
-        LlamaVulkanRuntime,
-    )
-
-    from omnitensor.plugins.event_workload import MemoryFragmentStore  # noqa: PLC0415
-
-    os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
-    store = MemoryFragmentStore()
-    runtime = LlamaVulkanRuntime(
-        store, lease_file(Path.home() / ".cache/omnitensor-bench", device.index)
-    )
-    try:
-        path = model_path(artifact_root, model_id)
-        say(f"loading {model_id} on {device.name}")
-        started = time.monotonic()
-        report = asyncio_run(runtime.load((path,), "gpu"))
-        load_seconds = time.monotonic() - started
-        confirm(device, runtime.physical_device)
-
-        loaded = case_files.load(workload, case_root)
+    with loaded_model(model_path(artifact_root, model_id), device, say=say) as loaded:
+        cases = case_files.load(workload, case_root)
         if answerable_only:
-            # A wording that refuses everything scores well on cases that expect a
-            # refusal, which is how a broken task can look half right.
-            loaded = tuple(case for case in loaded if case.answerable)
-        say(f"{len(loaded)} cases")
+            # A wording that refuses everything scores well on cases that expect
+            # a refusal, which is how a broken task can look half right.
+            cases = tuple(case for case in cases if case.answerable)
+        say(f"{len(cases)} cases")
         outcomes = asyncio_run(
             run_cases(
-                runtime,
+                loaded.runtime,
                 task,
-                loaded,
-                store,
+                cases,
+                loaded.store,
                 progress=SilentProgress(),
                 cancellation=NoCancellation(),
-                on_case=lambda outcome: say(
-                    f"  {outcome.case_id:32} {'ok  ' if outcome.judgement.correct else 'FAIL'} "
-                    f"{outcome.timing.seconds:6.1f}s"
-                    + (f"  {outcome.error}" if outcome.error else "")
-                    + (
-                        ""
-                        if outcome.judgement.correct
-                        else "  failed: " + ", ".join(outcome.judgement.failed)
-                    )
-                ),
+                on_case=lambda outcome: say(case_line(outcome, width=32)),
             )
         )
-        return Run(
-            workload=workload,
-            model_id=model_id,
-            device=device.name,
-            outcomes=outcomes,
-            load_seconds=load_seconds,
-            layers_offloaded=report.accelerator_layers,
-            context_tokens=MAX_RUNTIME_CONTEXT_TOKENS,
-            cache="q8_0",
-        )
-    finally:
-        # The runtime holds the VRAM and the cross-worker lease; a raising
-        # `confirm()`, `case_files.load()` or `run_cases()` must not leave
-        # either behind for the next process that wants the card.
-        asyncio_run(runtime.terminate("__startup__"))
+        return loaded.run_of(workload, model_id, outcomes)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

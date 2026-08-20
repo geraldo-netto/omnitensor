@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from collections.abc import Sequence
@@ -30,11 +29,12 @@ from .harness import (
     Run,
     SilentProgress,
     asyncio_run,
-    lease_file,
+    case_line,
+    loaded_model,
     run_cases,
 )
 from .report import write_results
-from .vulkan_devices import DeviceError, VulkanDevice, confirm
+from .vulkan_devices import DeviceError, VulkanDevice
 from .vulkan_devices import devices as vulkan_devices
 from .vulkan_devices import select as select_device
 
@@ -75,37 +75,8 @@ def run_model(
     say,
 ) -> tuple[Run, ...]:
     """Load one model once, then every case of every workload on it."""
-    from omnitensor_vulkan_runtime.runtime import (  # noqa: PLC0415
-        MAX_RUNTIME_CONTEXT_TOKENS,
-        LlamaVulkanRuntime,
-    )
-
-    from omnitensor.plugins.event_workload import MemoryFragmentStore  # noqa: PLC0415
-
     path = model_path(artifact_root, model_id)
-    # Vulkan device selection, done the way llama.cpp offers it: the provider
-    # always takes device 0, so the choice is which device *is* 0. Set before
-    # the runtime loads anything, and confirmed against the card that answers.
-    os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
-
-    store = MemoryFragmentStore()
-    runtime = LlamaVulkanRuntime(
-        store, lease_file(Path.home() / ".cache/omnitensor-bench", device.index)
-    )
-
-    try:
-        say(f"loading {model_id} from {path.name} on {device.name}")
-        started = time.monotonic()
-        report = asyncio_run(runtime.load((path,), "gpu"))
-        load_seconds = time.monotonic() - started
-        say(
-            f"loaded in {load_seconds:.1f}s — {report.accelerator_layers}/"
-            f"{report.total_model_layers} layers on {report.device}"
-        )
-        # The measurement is worthless if it describes a card nobody asked for,
-        # and that has happened: refuse rather than write it down.
-        confirm(device, runtime.physical_device)
-
+    with loaded_model(path, device, say=say) as loaded:
         every_task = tasks()
         runs = []
         for workload in workloads:
@@ -113,39 +84,20 @@ def run_model(
             if task_factory is None:
                 say(f"skipping {workload}: this provider does not run it")
                 continue
-            loaded = case_files.load(workload, case_root)
-            say(f"{model_id} · {workload}: {len(loaded)} cases")
+            cases = case_files.load(workload, case_root)
+            say(f"{model_id} · {workload}: {len(cases)} cases")
             outcomes = asyncio_run(
                 run_cases(
-                    runtime,
+                    loaded.runtime,
                     task_factory(),
-                    loaded,
-                    store,
+                    cases,
+                    loaded.store,
                     progress=SilentProgress(),
                     cancellation=NoCancellation(),
-                    on_case=lambda outcome: say(
-                        f"  {outcome.case_id:34} "
-                        f"{'ok  ' if outcome.judgement.correct else 'FAIL'} "
-                        f"{outcome.timing.seconds:6.1f}s"
-                        + (f"  {outcome.error}" if outcome.error else "")
-                        + (
-                            ""
-                            if outcome.judgement.correct
-                            else "  failed: " + ", ".join(outcome.judgement.failed)
-                        )
-                    ),
+                    on_case=lambda outcome: say(case_line(outcome)),
                 )
             )
-            run = Run(
-                workload=workload,
-                model_id=model_id,
-                device=device.name,
-                outcomes=outcomes,
-                load_seconds=load_seconds,
-                layers_offloaded=report.accelerator_layers,
-                context_tokens=MAX_RUNTIME_CONTEXT_TOKENS,
-                cache="q8_0",
-            )
+            run = loaded.run_of(workload, model_id, outcomes)
             tally = run.tally
             say(
                 f"{model_id} · {workload}: {tally.correct}/{tally.total} correct "
@@ -155,15 +107,7 @@ def run_model(
             if tally.failures():
                 say(f"  what failed: {json.dumps(tally.failures())}")
             runs.append(run)
-
         return tuple(runs)
-    finally:
-        # The lease and the VRAM belong to the runtime, not to this call
-        # frame. `measure()` treats one model failing as a result and goes
-        # on to the next, so a `confirm()`, `case_files.load()` or
-        # `run_cases()` that raises must still give the card back — or the
-        # next `load()` runs beside a model that never let go.
-        asyncio_run(runtime.terminate("__startup__"))
 
 
 def fit_note(model_id: str, artifact_root: Path, device: VulkanDevice, say) -> bool:

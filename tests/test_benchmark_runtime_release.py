@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-from omnitensor.benchmark import bench_cli, prompt_trial
+from omnitensor.benchmark import bench_cli, harness, prompt_trial
 from omnitensor.benchmark.vulkan_devices import DeviceError, VulkanDevice
 
 DEVICE = VulkanDevice(index=0, name="AMD Radeon RX 6600 XT", integrated=False)
@@ -68,7 +68,7 @@ def test_a_refused_device_confirmation_still_releases_the_model(provider, monkey
     def refuse(device, answered):
         raise DeviceError("asked for the integrated card, the discrete one answered")
 
-    monkeypatch.setattr(bench_cli, "confirm", refuse)
+    monkeypatch.setattr(harness, "confirm", refuse)
 
     with pytest.raises(DeviceError):
         bench_cli.run_model(
@@ -85,7 +85,7 @@ def test_a_refused_device_confirmation_still_releases_the_model(provider, monkey
 
 def test_unreadable_cases_still_release_the_model(provider, monkeypatch, tmp_path):
     monkeypatch.setattr(bench_cli, "model_path", lambda root, model_id: tmp_path / "m.gguf")
-    monkeypatch.setattr(bench_cli, "confirm", lambda device, answered: None)
+    monkeypatch.setattr(harness, "confirm", lambda device, answered: None)
     monkeypatch.setattr(bench_cli, "tasks", lambda: {"event-extraction": object})
 
     def unreadable(workload, root):
@@ -108,7 +108,7 @@ def test_unreadable_cases_still_release_the_model(provider, monkeypatch, tmp_pat
 
 def test_a_prompt_trial_that_fails_still_releases_the_model(provider, monkeypatch, tmp_path):
     monkeypatch.setattr(prompt_trial, "model_path", lambda root, model_id: tmp_path / "m.gguf")
-    monkeypatch.setattr(prompt_trial, "confirm", lambda device, answered: None)
+    monkeypatch.setattr(harness, "confirm", lambda device, answered: None)
 
     def unreadable(workload, root):
         raise OSError("cases are gone")

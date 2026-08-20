@@ -20,7 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +30,11 @@ from ..plugins.fragments import SourceFragment
 from ..plugins.generation import GenerationRequest
 from .cases import Case
 from .scoring import Judgement, Tally, judge
+from .vulkan_devices import confirm
+
+# The KV cache the provider itself uses; recorded in every Run so a receipt
+# says what was measured rather than what was assumed.
+BENCHMARK_CACHE_TYPE = "q8_0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,19 +217,116 @@ def lease_file(directory: Path, device_index: int = 0) -> Path:
     return path
 
 
+@dataclass(frozen=True, slots=True)
+class LoadedModel:
+    """One model on one card, with what its load reported."""
+
+    runtime: object
+    store: MemoryFragmentStore
+    load_seconds: float
+    layers_offloaded: int
+    total_layers: int
+    device_name: str
+    context_tokens: int
+
+    def run_of(self, workload: str, model_id: str, outcomes) -> Run:
+        """The Run these outcomes make, with the load's own figures attached."""
+        return Run(
+            workload=workload,
+            model_id=model_id,
+            device=self.device_name,
+            outcomes=tuple(outcomes),
+            load_seconds=self.load_seconds,
+            layers_offloaded=self.layers_offloaded,
+            context_tokens=self.context_tokens,
+            cache=BENCHMARK_CACHE_TYPE,
+        )
+
+
+@contextmanager
+def loaded_model(
+    model_path: Path,
+    device,
+    *,
+    lease_root: Path | None = None,
+    say: Callable[[str], None] = lambda _line: None,
+) -> Iterator[LoadedModel]:
+    """Load one model on one card, and give the card back however this ends.
+
+    Both benchmark entry points need exactly this - the visible-device
+    variable set before the runtime initialises Vulkan, the lease taken per
+    card, the load timed, the physical device confirmed against the one asked
+    for, and `terminate` in a `finally` so a raising caller does not leave a
+    model holding the VRAM. It was written twice, and the copies had already
+    begun to differ.
+    """
+    import os  # noqa: PLC0415 - set before the runtime initialises Vulkan
+
+    from omnitensor_vulkan_runtime.runtime import (  # noqa: PLC0415 - provider is optional
+        MAX_RUNTIME_CONTEXT_TOKENS,
+        LlamaVulkanRuntime,
+    )
+
+    # Vulkan device selection, done the way llama.cpp offers it: the provider
+    # always takes device 0, so the choice is which device *is* 0.
+    os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
+    store = MemoryFragmentStore()
+    runtime = LlamaVulkanRuntime(
+        store, lease_file(lease_root or Path.home() / ".cache/omnitensor-bench", device.index)
+    )
+    try:
+        say(f"loading {model_path.name} on {device.name}")
+        started = time.monotonic()
+        report = asyncio_run(runtime.load((model_path,), "gpu"))
+        load_seconds = time.monotonic() - started
+        say(
+            f"loaded in {load_seconds:.1f}s — {report.accelerator_layers}/"
+            f"{report.total_model_layers} layers on {report.device}"
+        )
+        # The measurement is worthless if it describes a card nobody asked for,
+        # and that has happened: refuse rather than write it down.
+        confirm(device, runtime.physical_device)
+        yield LoadedModel(
+            runtime,
+            store,
+            load_seconds,
+            report.accelerator_layers,
+            report.total_model_layers,
+            device.name,
+            MAX_RUNTIME_CONTEXT_TOKENS,
+        )
+    finally:
+        # The lease and the VRAM belong to the runtime, not to this frame.
+        asyncio_run(runtime.terminate("__startup__"))
+
+
+def case_line(outcome, width: int = 34) -> str:
+    """The one-line verdict both benchmarks print per case."""
+    verdict = "ok  " if outcome.judgement.correct else "FAIL"
+    detail = f"  {outcome.error}" if outcome.error else ""
+    failures = (
+        "" if outcome.judgement.correct else "  failed: " + ", ".join(outcome.judgement.failed)
+    )
+    return f"  {outcome.case_id:{width}} {verdict} {outcome.timing.seconds:6.1f}s{detail}{failures}"
+
+
 def asyncio_run(coroutine):
     """One place to change if this ever needs its own loop policy."""
     return asyncio.run(coroutine)
 
 
 __all__ = [
+    "BENCHMARK_CACHE_TYPE",
+    "LoadedModel",
     "NoCancellation",
     "Outcome",
     "Run",
     "SilentProgress",
     "Timing",
     "asyncio_run",
+    "case_line",
     "fragments",
+    "loaded_model",
     "lease_file",
     "run_case",
     "run_cases",
