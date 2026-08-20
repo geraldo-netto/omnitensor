@@ -661,8 +661,9 @@ def test_svg_document_and_slide_failure_branches_are_bounded(monkeypatch, tmp_pa
         provider._svg_output_size(
             b"<svg xmlns='http://www.w3.org/2000/svg' width='0' height='10'/>"
         )
-    with pytest.raises(MediaTranscriptionError, match="exceeds its limit"):
-        provider._joined_slide_text(("x" * 16_385,))
+    # No ceiling on what a page says: a slide of 16,385 characters is a slide
+    # somebody wrote, and it used to lose the whole job.
+    assert provider._joined_slide_text(("x" * 16_385,)) == "x" * 16_385
 
     unsupported = tmp_path / "document.bin"
     unsupported.write_bytes(b"x")

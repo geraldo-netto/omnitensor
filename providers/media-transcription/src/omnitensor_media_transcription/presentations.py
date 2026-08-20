@@ -283,13 +283,18 @@ def _write_presentation_image(
 
 
 def _slide_description(text: str, descriptions: Sequence[str]) -> str:
+    """What the pictures on this slide are, each said once.
+
+    No ceiling on the length: a slide of twenty images is a slide somebody
+    made, and refusing the whole transcription over the size of its own
+    description is a wrong answer waiting for a busy enough slide. An empty
+    description is still not a description, so that case falls through to the
+    sentence below it.
+    """
     if descriptions:
         description = "; ".join(dict.fromkeys(descriptions))
-        if 0 < len(description) <= 16_384:
+        if description:
             return description
-        raise MediaTranscriptionError(
-            "presentation-invalid", "presentation image descriptions exceed their limit"
-        )
     return "Presentation slide containing text." if text else "Blank presentation slide."
 
 

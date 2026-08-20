@@ -559,33 +559,48 @@ def test_qwen_runtime_and_whisper_context_failures_are_exact(monkeypatch):
 @given(
     st.lists(st.text(alphabet=st.characters(exclude_characters="\x00"), max_size=24), max_size=8)
 )
-def test_visible_text_normalization_matches_bounded_reference(parts):
-    expected = "\n".join(part.strip() for part in parts if part.strip())
+def test_visible_text_normalization_matches_its_reference(parts):
+    """Same order, same content, and nothing said twice."""
+    stripped = [part.strip() for part in parts if part.strip()]
+    expected = "\n".join(dict.fromkeys(stripped))
     assert visible_text.joined_visible_text(parts) == expected
 
 
-def test_visible_text_and_slide_descriptions_enforce_exact_boundaries():
+def test_visible_text_says_everything_once_and_refuses_only_what_is_not_text():
     assert visible_text.joined_visible_text([" alpha ", "", 0, None]) == "alpha\n0\nNone"
-    assert visible_text.joined_visible_text(["x" * 16_384]) == "x" * 16_384
-    for candidate in ("x" * 16_385, "safe\x00unsafe"):
-        with pytest.raises(MediaTranscriptionError) as error:
-            visible_text.joined_visible_text([candidate])
-        _assert_media_error(
-            error, "presentation-invalid", "presentation slide text exceeds its limit"
-        )
+
+    # However long the page is. A dense page of a book used to lose the whole
+    # transcription at 16,385 characters, with a message about a slide.
+    assert visible_text.joined_visible_text(["x" * 16_385]) == "x" * 16_385
+
+    # A page read twice — its text layer, then the model looking at the
+    # rendered picture — said the same sentence twice in the answer.
+    assert visible_text.joined_visible_text(("Page 60: a line.", "Page 60: a line.")) == (
+        "Page 60: a line."
+    )
+    # What the model saw and extraction missed is still kept.
+    assert visible_text.joined_visible_text(("printed", "printed\nhandwritten")) == (
+        "printed\nprinted\nhandwritten"
+    )
+
+    with pytest.raises(MediaTranscriptionError) as error:
+        visible_text.joined_visible_text(["safe\x00unsafe"])
+    _assert_media_error(
+        error, "presentation-invalid", "transcribed text is not text: it contains a NUL"
+    )
 
     assert presentations._slide_description("", ("one", "two", "one")) == "one; two"
     assert presentations._slide_description("text", ()) == "Presentation slide containing text."
     assert presentations._slide_description("", ()) == "Blank presentation slide."
-    assert presentations._slide_description("", ("x" * 16_384,)) == "x" * 16_384
-    for descriptions in (("",), ("x" * 16_385,)):
-        with pytest.raises(MediaTranscriptionError) as error:
-            presentations._slide_description("", descriptions)
-        _assert_media_error(
-            error,
-            "presentation-invalid",
-            "presentation image descriptions exceed their limit",
-        )
+    # However busy the slide is: a description of twenty images used to lose
+    # the whole transcription past 16,384 characters.
+    assert presentations._slide_description("", ("x" * 16_385,)) == "x" * 16_385
+    # An empty description is not a description, so the slide is described by
+    # what it is rather than by nothing.
+    assert presentations._slide_description("", ("",)) == "Blank presentation slide."
+    assert presentations._slide_description("text", ("",)) == (
+        "Presentation slide containing text."
+    )
 
 
 class _ArchiveInfo:
