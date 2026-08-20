@@ -1583,3 +1583,34 @@ def test_gpu_external_data_paths_names_only_the_model_s_own_siblings(tmp_path):
         str(tmp_path / "alpha.onnx_data"),
     )
     assert external_data_paths(str(tmp_path / "absent" / "model.onnx")) == ()
+
+
+def test_npu_availability_is_not_re_enumerated_on_every_dispatch():
+    """OMNI-0465: OpenVINO enumeration stalled the event loop per job."""
+    enumerations = []
+
+    class Core:
+        @property
+        def available_devices(self):
+            enumerations.append(1)
+            return ["NPU"]
+
+    class Runtime:
+        pass
+
+    Runtime.Core = Core
+    ticks = iter([0.0, 0.1, 0.2, 9.0, 9.1])
+    executor = NpuExecutor(
+        device_present=True,
+        runtime=Runtime(),
+        health_ttl_seconds=5.0,
+        health_clock=lambda: next(ticks),
+    )
+
+    for _index in range(3):
+        assert executor.availability().available is True
+    assert len(enumerations) == 1
+
+    # Past the TTL it asks again, so a card that appears is still noticed.
+    assert executor.availability().available is True
+    assert len(enumerations) == 2

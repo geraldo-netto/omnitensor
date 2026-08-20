@@ -20,6 +20,10 @@ from .base import (
     require_available,
 )
 
+# How long a device-enumeration verdict may be reused. Short enough that a
+# card appearing is noticed within a snapshot tick or two, long enough that a
+# burst of dispatches costs one enumeration rather than one each.
+HEALTH_TTL_SECONDS = 5.0
 OPENVINO_DEVICE = "NPU"
 
 
@@ -45,6 +49,8 @@ class NpuExecutor(CachingExecutor):
         *,
         max_cached_models: int = DEFAULT_MAX_CACHED_MODELS,
         clock=time.monotonic,
+        health_ttl_seconds: float = HEALTH_TTL_SECONDS,
+        health_clock=time.monotonic,
     ):
         super().__init__(
             device_present,
@@ -54,6 +60,12 @@ class NpuExecutor(CachingExecutor):
         )
         self._core = None
         self._core_lock = threading.Lock()
+        self._health: tuple[Availability, float] | None = None
+        # Its own clock: the inherited one measures inference latency, and a
+        # cache expiry that consumed those ticks would report the wrong one.
+        self._health_clock = health_clock
+        self._health_ttl_seconds = health_ttl_seconds
+        self._health_lock = threading.Lock()
 
     def _ensure_core(self):
         # availability() runs on the event loop thread while run() executes in
@@ -65,6 +77,23 @@ class NpuExecutor(CachingExecutor):
             return self._core
 
     def _runtime_health(self) -> Availability:
+        # Cached for a few seconds: enumerating OpenVINO's plugins takes tens
+        # of milliseconds, and this is asked once per profile per snapshot tick
+        # and again synchronously on the event loop for every dispatch - an
+        # event-loop stall on the job submission path for an answer that only
+        # changes when hardware does. A device that appears or leaves rebuilds
+        # this executor (`build_executors` reuses one only while its device is
+        # unchanged), so the cache cannot outlive the hardware it describes.
+        with self._health_lock:
+            cached = self._health
+            if cached is not None and self._health_clock() - cached[1] < self._health_ttl_seconds:
+                return cached[0]
+        health = self._measured_health()
+        with self._health_lock:
+            self._health = (health, self._health_clock())
+        return health
+
+    def _measured_health(self) -> Availability:
         try:
             devices = self._ensure_core().available_devices
         except Exception as error:  # noqa: BLE001 - plugin discovery can fail arbitrarily
