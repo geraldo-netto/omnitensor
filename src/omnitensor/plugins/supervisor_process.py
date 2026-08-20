@@ -14,8 +14,6 @@ from .budgets import (
     ProcfsWorkerUsageProbe,
     WorkerBudgetLimits,
     WorkerResourceUsage,
-    kill_worker_cgroup,
-    remove_worker_cgroup,
 )
 from .ipc import HandshakeOffer, handshake_frame
 from .sandbox import FilesystemSandbox
@@ -83,7 +81,6 @@ class _SubprocessWorker:
         self,
         process: asyncio.subprocess.Process,
         usage_probe: Callable[[], WorkerResourceUsage],
-        cgroup: Path | None = None,
     ) -> None:
         if process.stdout is None or process.stdin is None:
             raise RuntimeError("worker pipes are unavailable")
@@ -93,29 +90,18 @@ class _SubprocessWorker:
         self.diagnostics = process.stderr
         self.pid = process.pid
         self.usage_probe = usage_probe
-        self._cgroup = cgroup
 
     @property
     def returncode(self) -> int | None:
         return self._process.returncode
 
     async def wait(self) -> int:
-        returncode = await self._process.wait()
-        if self._cgroup is not None:
-            with suppress(OSError):
-                remove_worker_cgroup(self._cgroup)
-        return returncode
+        return await self._process.wait()
 
     def terminate(self) -> None:
         self._process.terminate()
 
     def kill(self) -> None:
-        if self._cgroup is not None:
-            try:
-                kill_worker_cgroup(self._cgroup)
-                return
-            except OSError:
-                pass
         self._process.kill()
 
 
@@ -152,7 +138,7 @@ class AsyncioSubprocessLauncher:
             start_new_session=True,
         )
         probe = ProcfsWorkerUsageProbe(process.pid, proc_root=self._proc_root)
-        return _SubprocessWorker(process, probe, None)
+        return _SubprocessWorker(process, probe)
 
 
 async def drain_worker_diagnostics(

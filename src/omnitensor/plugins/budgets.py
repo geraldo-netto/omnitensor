@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import errno
 import math
-import os
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -19,7 +17,7 @@ DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
 # had loaded — and the in-process check was already observe-only for that
 # reason. What protects the machine now is host pressure, measured across the
 # whole host rather than guessed per worker. A caller may still set any of
-# these; ``None`` means no ceiling, and the worker cgroup is told "max".
+# these; ``None`` means no ceiling.
 DEFAULT_MAX_PROCESSES = None
 DEFAULT_MAX_MEMORY_BYTES = None
 DEFAULT_MAX_DESCRIPTORS = None
@@ -30,11 +28,6 @@ MAX_MEMORY_BYTES_LIMIT = 64 * 1024 * 1024 * 1024
 MAX_DESCRIPTORS_LIMIT = 65_536
 MAX_CONCURRENCY_LIMIT = 32
 MAX_PROCFS_PROCESSES = 4096
-CGROUP_PROCS_FILE = "cgroup.procs"
-CGROUP_MEMORY_FILE = "memory.current"
-CGROUP_MEMORY_LIMIT_FILE = "memory.max"
-CGROUP_PROCESS_LIMIT_FILE = "pids.max"
-CGROUP_KILL_FILE = "cgroup.kill"
 
 
 class WorkerBudgetCode(StrEnum):
@@ -107,9 +100,8 @@ class WorkerBudgetEnforcer:
     started killing work that was about to succeed, and the observation that
     replaced them sampled the whole process tree every 50 ms for the life of
     every call — 12,000 walks of ``/proc`` for one 600-second generative call —
-    and dropped every sample on the floor. What accounts for a worker's
-    resources now is its cgroup, which the kernel maintains whether or not
-    anything reads it.
+    and dropped every sample on the floor. What protects the machine now is
+    host pressure, measured across the whole host rather than per worker.
     """
 
     def __init__(self, limits: WorkerBudgetLimits) -> None:
@@ -255,122 +247,8 @@ class ProcfsWorkerUsageProbe:
         return _descriptor_count(self._root, pid)
 
 
-class CgroupWorkerUsageProbe:
-    """Account one worker by cgroup membership instead of process parentage.
-
-    Walking ``children`` links cannot see a process that double-forked or was
-    reparented: severing the parent link is precisely what daemonising does,
-    so a plugin that daemonises escapes every process, memory, and descriptor
-    limit.  Cgroup membership survives both, so a worker cannot leave its
-    accounting by forking.
-
-    The service must run with a delegated cgroup subtree (``Delegate=yes``)
-    and place each worker in its own sub-cgroup for this to observe anything.
-    """
-
-    def __init__(self, cgroup: Path, *, proc_root: Path = Path("/proc")) -> None:
-        self._cgroup = Path(cgroup)
-        self._root = Path(proc_root)
-
-    def __call__(self) -> WorkerResourceUsage:
-        members = self._members()
-        descriptors = sum(_descriptor_count(self._root, pid) for pid in members)
-        return WorkerResourceUsage(len(members), self._memory_bytes(), descriptors)
-
-    def _members(self) -> tuple[int, ...]:
-        text = (self._cgroup / CGROUP_PROCS_FILE).read_text(encoding="ascii")
-        members = tuple(int(entry) for entry in text.split())
-        if len(members) > MAX_PROCFS_PROCESSES:
-            raise OSError(f"worker cgroup exceeds {MAX_PROCFS_PROCESSES} entries")
-        return members
-
-    def _memory_bytes(self) -> int:
-        text = (self._cgroup / CGROUP_MEMORY_FILE).read_text(encoding="ascii").strip()
-        # The controller reports "max" when it is enabled but unbounded; that
-        # is a configuration state, not a measurement.
-        if not text.isdigit():
-            raise OSError(f"cgroup memory accounting is unavailable: {text!r}")
-        return int(text)
-
-
-def create_worker_cgroup(parent: Path, name: str) -> Path:
-    """Create the sub-cgroup one worker will be confined to.
-
-    ``parent`` is the service's own delegated cgroup.  The directory is the
-    entire creation protocol: the kernel populates its interface files.
-    """
-    if not name or "/" in name or name in (".", ".."):
-        raise ValueError(f"invalid worker cgroup name: {name!r}")
-    cgroup = Path(parent) / name
-    cgroup.mkdir(parents=False, exist_ok=True)
-    return cgroup
-
-
-def configure_worker_cgroup(cgroup: Path, limits: WorkerBudgetLimits) -> None:
-    """Install whatever ceilings this worker was given, or none.
-
-    ``max`` is the kernel's own word for no limit, so a worker with no declared
-    ceiling is still placed in its own cgroup — the accounting is what
-    telemetry reads, and what a future pressure control would act on — without
-    a number that would kill it mid-model-load.
-    """
-    root = Path(cgroup)
-    (root / CGROUP_PROCESS_LIMIT_FILE).write_text(
-        _cgroup_limit(limits.max_processes), encoding="ascii"
-    )
-    (root / CGROUP_MEMORY_LIMIT_FILE).write_text(
-        _cgroup_limit(limits.max_memory_bytes), encoding="ascii"
-    )
-
-
-def _cgroup_limit(value: int | None) -> str:
-    return "max" if value is None else str(value)
-
-
-def current_process_cgroup(
-    *,
-    membership_path: Path = Path("/proc/self/cgroup"),
-    cgroup_root: Path = Path("/sys/fs/cgroup"),
-) -> Path | None:
-    """Resolve this process's unified cgroup-v2 directory, if available."""
-    try:
-        membership = Path(membership_path).read_text(encoding="ascii")
-    except OSError:
-        return None
-    root = Path(cgroup_root).resolve()
-    for line in membership.splitlines():
-        try:
-            hierarchy, controllers, member = line.split(":", 2)
-        except ValueError:
-            continue
-        if hierarchy != "0" or controllers:
-            continue
-        candidate = (root / member.lstrip("/")).resolve()
-        if (candidate == root or root in candidate.parents) and os.access(candidate, os.W_OK):
-            return candidate
-        return None
-    return None
-
-
-def join_worker_cgroup(cgroup: Path) -> None:
-    """Move the calling process into ``cgroup``.
-
-    Written from the child between fork and exec, this closes the window in
-    which a worker could fork before it has been confined.
-    """
-    with open(Path(cgroup) / CGROUP_PROCS_FILE, "w", encoding="ascii") as stream:
-        stream.write("0")
-
-
-def kill_worker_cgroup(cgroup: Path) -> None:
-    """Kill every process retained in a worker's cgroup-v2 subtree."""
-    (Path(cgroup) / CGROUP_KILL_FILE).write_text("1", encoding="ascii")
-
-
-def remove_worker_cgroup(cgroup: Path) -> None:
-    """Remove an empty worker cgroup, tolerating one that is already gone."""
-    with contextlib.suppress(FileNotFoundError):
-        Path(cgroup).rmdir()
+def _descriptor_count(self, pid: int) -> int:
+    return _descriptor_count(self._root, pid)
 
 
 def _descriptor_count(proc_root: Path, pid: int) -> int:

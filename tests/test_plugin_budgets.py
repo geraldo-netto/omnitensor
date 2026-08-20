@@ -22,8 +22,6 @@ from omnitensor.plugins import (
     MAX_DESCRIPTORS_LIMIT,
     MAX_MEMORY_BYTES_LIMIT,
     MAX_PROCESSES_LIMIT,
-    MAX_PROCFS_PROCESSES,
-    CgroupWorkerUsageProbe,
     ProcfsWorkerUsageProbe,
     WorkerBudgetCode,
     WorkerBudgetEnforcer,
@@ -31,11 +29,7 @@ from omnitensor.plugins import (
     WorkerBudgetLimits,
     WorkerBudgetSnapshot,
     WorkerResourceUsage,
-    create_worker_cgroup,
-    join_worker_cgroup,
-    remove_worker_cgroup,
 )
-from omnitensor.plugins.budgets import current_process_cgroup
 from omnitensor.plugins.protocol import PluginResult, PluginResultStatus
 
 T = TypeVar("T")
@@ -365,94 +359,3 @@ def _write_cgroup(root, *, pids=(), memory_bytes=0):
     (root / "cgroup.procs").write_text("".join(f"{pid}\n" for pid in pids), encoding="ascii")
     (root / "memory.current").write_text(f"{memory_bytes}\n", encoding="ascii")
     return root
-
-
-def test_current_process_cgroup_accepts_only_a_writable_path_below_the_mount(tmp_path):
-    cgroup_root = tmp_path / "cgroup"
-    member = cgroup_root / "user.slice" / "omnitensor.service"
-    member.mkdir(parents=True)
-    membership = tmp_path / "membership"
-    membership.write_text("0::/user.slice/omnitensor.service\n", encoding="ascii")
-
-    assert (
-        current_process_cgroup(
-            membership_path=membership,
-            cgroup_root=cgroup_root,
-        )
-        == member
-    )
-
-    membership.write_text("0::/../../escape\n", encoding="ascii")
-    assert (
-        current_process_cgroup(
-            membership_path=membership,
-            cgroup_root=cgroup_root,
-        )
-        is None
-    )
-
-
-def test_cgroup_probe_counts_a_daemonised_process_the_tree_walk_cannot_see(tmp_path):
-    """A double-forked child loses its parent link but keeps its cgroup."""
-    proc_root = tmp_path / "proc"
-    _write_process(proc_root, 10, children="", rss_kb=2, descriptors=1)
-    _write_process(proc_root, 99, children="", rss_kb=8, descriptors=4)
-    cgroup = _write_cgroup(tmp_path / "cgroup/worker", pids=(10, 99), memory_bytes=10 * 1024)
-
-    assert ProcfsWorkerUsageProbe(10, proc_root=proc_root)() == WorkerResourceUsage(1, 2 * 1024, 1)
-    assert CgroupWorkerUsageProbe(cgroup, proc_root=proc_root)() == WorkerResourceUsage(
-        2, 10 * 1024, 5
-    )
-
-
-def test_cgroup_probe_reports_an_empty_cgroup_as_no_usage(tmp_path):
-    cgroup = _write_cgroup(tmp_path / "cgroup/worker")
-    assert CgroupWorkerUsageProbe(cgroup, proc_root=tmp_path)() == WorkerResourceUsage(0, 0, 0)
-
-
-def test_cgroup_probe_rejects_unavailable_memory_accounting(tmp_path):
-    cgroup = _write_cgroup(tmp_path / "cgroup/worker", pids=())
-    (cgroup / "memory.current").write_text("max\n", encoding="ascii")
-    with pytest.raises(OSError, match="memory accounting is unavailable"):
-        CgroupWorkerUsageProbe(cgroup, proc_root=tmp_path)()
-
-
-def test_cgroup_probe_rejects_an_implausible_membership(tmp_path):
-    cgroup = _write_cgroup(
-        tmp_path / "cgroup/worker",
-        pids=range(MAX_PROCFS_PROCESSES + 1),
-    )
-    with pytest.raises(OSError, match="exceeds"):
-        CgroupWorkerUsageProbe(cgroup, proc_root=tmp_path)()
-
-
-def test_cgroup_probe_ignores_a_member_that_exits_mid_probe(tmp_path):
-    proc_root = tmp_path / "proc"
-    _write_process(proc_root, 10, children="", rss_kb=2, descriptors=3)
-    cgroup = _write_cgroup(tmp_path / "cgroup/worker", pids=(10, 404), memory_bytes=99)
-    assert CgroupWorkerUsageProbe(cgroup, proc_root=proc_root)() == WorkerResourceUsage(2, 99, 3)
-
-
-def test_worker_cgroup_is_created_joined_and_removed(tmp_path):
-    parent = tmp_path / "delegated"
-    parent.mkdir()
-
-    cgroup = create_worker_cgroup(parent, "omnitensor-worker-alpha")
-    assert cgroup == parent / "omnitensor-worker-alpha"
-    assert cgroup.is_dir()
-    assert create_worker_cgroup(parent, "omnitensor-worker-alpha") == cgroup
-
-    (cgroup / "cgroup.procs").write_text("", encoding="ascii")
-    join_worker_cgroup(cgroup)
-    assert (cgroup / "cgroup.procs").read_text(encoding="ascii") == "0"
-
-    (cgroup / "cgroup.procs").unlink()
-    remove_worker_cgroup(cgroup)
-    assert not cgroup.exists()
-    remove_worker_cgroup(cgroup)
-
-
-@pytest.mark.parametrize("name", ["", ".", "..", "a/b", "../escape"])
-def test_worker_cgroup_names_cannot_escape_the_delegated_subtree(tmp_path, name):
-    with pytest.raises(ValueError, match="invalid worker cgroup name"):
-        create_worker_cgroup(tmp_path, name)
