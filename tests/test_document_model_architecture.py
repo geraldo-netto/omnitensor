@@ -163,3 +163,18 @@ def test_document_model_cli_entrypoint_remains_on_stable_facade():
     assert (
         'omnitensor-install-document-model = "omnitensor.training.document_model:main"' in project
     )
+
+
+def test_every_installation_dependency_says_what_it_must_accept():
+    """OMNI-0471: seventeen fields annotated `object` documented nothing."""
+    import typing
+
+    from omnitensor.training.document_model_installation import (
+        DocumentModelInstallationDependencies,
+    )
+
+    hints = typing.get_type_hints(DocumentModelInstallationDependencies)
+    assert hints, "the dataclass must carry resolvable annotations"
+    assert object not in hints.values()
+    for name, hint in hints.items():
+        assert "Callable" in str(hint), f"{name} is not described as a call"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,23 +42,49 @@ from .production_pipeline import run_production_pipeline
 
 @dataclass(frozen=True, slots=True)
 class DocumentModelInstallationDependencies:
-    tokenizer_factory: object = BgeTokenizer
-    source_resolver: object = source_path
-    holdout_loader: object = load_bge_holdout
-    portable_exporter_type: object = SentenceEmbeddingOnnxExporter
-    native_exporter: object = export_bge_ncnn
-    portable_runner_factory: object = _producer_cpu_reference_runner
-    native_runner_factory: object = VulkanBgeRunner
-    gate_evaluator: object = evaluate_embedding_gate
-    maximum_error: object = maximum_embedding_error
-    expected_hits: object = expected_retrieval_hits
-    preparer: object = prepare_artifact
-    digest: object = file_digest
-    report_builder: object = report_document
-    report_writer: object = write_document_model_report
-    installer: object = install_prepared
-    binding_builder: object = None
-    atomic_writer: object = write_json_atomic
+    """Everything the document-model build calls out to, named and typed.
+
+    Every field was annotated ``object``, which says nothing: a caller
+    substituting one had to read the call site to learn what it must accept,
+    and a wrong shape failed somewhere inside the build. The annotations below
+    are the contract each collaborator is actually held to.
+    """
+
+    #: ``(tokenizer_path) -> BgeTokenizer``
+    tokenizer_factory: Callable[[Path], object] = BgeTokenizer
+    #: ``(source, name) -> Path`` for one file inside the fetched source
+    source_resolver: Callable[[object, str], Path] = source_path
+    #: ``(corpus_path) -> (holdout, expected)``
+    holdout_loader: Callable[[Path | str], tuple[object, object]] = load_bge_holdout
+    #: Constructed with no arguments; the instance exposes ``export(source, path)``
+    portable_exporter_type: Callable[[], object] = SentenceEmbeddingOnnxExporter
+    #: ``(source, output_dir, sample) -> Path`` of the native graph
+    native_exporter: Callable[..., Path] = export_bge_ncnn
+    #: ``(model_path, tokenizer) -> runner`` exposing ``embed(text)``
+    portable_runner_factory: Callable[[Path, object], object] = _producer_cpu_reference_runner
+    #: ``(model_path, tokenizer, *, device_index) -> runner``
+    native_runner_factory: Callable[..., object] = VulkanBgeRunner
+    #: ``(holdout, portable_runner, native_runner) -> EmbeddingGateEvidence``
+    gate_evaluator: Callable[[object, object, object], object] = evaluate_embedding_gate
+    #: ``(holdout, portable_runner, native_runner) -> float``
+    maximum_error: Callable[[object, object, object], float] = maximum_embedding_error
+    #: ``(holdout, expected, native_runner) -> int``
+    expected_hits: Callable[[object, object, object], int] = expected_retrieval_hits
+    #: ``(path, *, artifact_id, version, model_format) -> PreparedArtifact``
+    preparer: Callable[..., object] = prepare_artifact
+    #: ``(path) -> sha256 hex``
+    digest: Callable[[Path], str] = file_digest
+    #: ``(source, portable_sha, native_sha, holdout, evidence) -> dict``
+    report_builder: Callable[..., dict] = report_document
+    #: ``(path, document) -> None``
+    report_writer: Callable[[Path, dict], None] = write_document_model_report
+    #: ``(prepared, artifact_root) -> Path`` where it landed
+    installer: Callable[[object, Path | str], Path] = install_prepared
+    #: ``(source, artifact, portable_sha, report_sha, evidence, bundled_root) -> dict``;
+    #: ``None`` uses this module's own :func:`binding_document`.
+    binding_builder: Callable[..., dict] | None = None
+    #: ``(path, document, *, prefix) -> None``
+    atomic_writer: Callable[..., None] = write_json_atomic
 
 
 def install_document_model(
