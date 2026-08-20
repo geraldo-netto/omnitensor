@@ -195,6 +195,20 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
     # local this function assigns four lines down, and every closure below is
     # called long after that — when a worker is built, not while one is.
     control: ControlService | None = None
+    # The same late-binding shape, for the same reason: a plugin's progress is
+    # reported to the job service, and the job service is built from what this
+    # function returns. Without this the production runtime was constructed
+    # with no sink at all — `service.py` wires one, but only on the path where
+    # nobody injected a runtime, which is tests — so every plugin job ran to
+    # completion while the person watching was told "Job accepted and queued"
+    # at 0% from the first second to the last.
+    reports_to: dict[str, object] = {}
+
+    def report_progress(progress) -> None:
+        jobs = reports_to.get("jobs")
+        if jobs is not None:
+            jobs.note_progress(progress.job_id, progress.stage, progress.fraction, progress.detail)
+
     plugin_runtime = InstalledPluginRuntime(
         bundled_workloads_path(),
         grant_source=grants,
@@ -211,6 +225,7 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
         ),
         profile_model_choice=lambda profile_id: control.state.model_choices.get(profile_id),
         settings_store=settings,
+        progress_sink=report_progress,
     )
     artifacts.reads_plugins_from(lambda: plugin_runtime.snapshot.catalog.plugins)
     control = ControlService(
@@ -232,6 +247,7 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
         "artifacts": artifacts,
         "plugin_settings": settings,
         "plugin_runtime": plugin_runtime,
+        "plugin_progress_binding": reports_to,
         "control": control,
         "grants": grants,
         "job_results": JobResultStore(),
@@ -257,7 +273,16 @@ def build_service(
         service_factory = import_module(".service", __package__).OmniTensorService
     adapters = build_adapters(options)
     adapters.update(options)
-    return service_factory(**adapters)
+    # Popped rather than passed on: it is this root's own wiring, not a
+    # constructor argument. The plugin runtime reports a job's progress to the
+    # job service, and the job service does not exist until the line below.
+    binding = adapters.pop("plugin_progress_binding", None)
+    service = service_factory(**adapters)
+    if binding is not None:
+        jobs = getattr(service, "jobs", None)
+        if jobs is not None:
+            binding["jobs"] = jobs
+    return service
 
 
 def build_service_from_env(

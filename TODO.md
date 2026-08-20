@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0584 | open | high | s | **No plugin job ever reports progress to anybody watching, because the composition root drops the sink.** `service.py` builds an `InstalledPluginRuntime` with a `progress_sink` that feeds `jobs.note_progress`, but that only runs when no runtime is injected — which is tests. The production path, `composition.build_adapters`, constructs the runtime **without** `progress_sink`, so `_ProgressSink` holds `None` and throws every report away. Observed live on 2026-08-20: a 220-page PDF ran for 12m45s and the client printed `0% Job accepted and queued` 1,526 times, because the stored record was still the one written when the job was queued. Every one of the six plugin workloads is affected. Wire the sink in the composition root, and add a gate that fails when the root builds a runtime that cannot report — the two constructions have been out of step with nothing noticing. |
 
 ## Blocked
 

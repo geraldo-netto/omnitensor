@@ -54,6 +54,7 @@ from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
 from omnitensor.plugins.grants import GrantLedger
 from omnitensor.plugins.job_results import JobResultStore
 from omnitensor.plugins.kernel_telemetry import UnixSocketAggregateSource
+from omnitensor.plugins.protocol import PluginProgress
 from omnitensor.plugins.settings import PluginSettingsStore
 from omnitensor.plugins.summaries import ResultSummaryRegistry
 from omnitensor.plugins.telemetry import PluginTelemetryRegistry
@@ -1163,3 +1164,40 @@ def test_an_artifact_source_missing_resolve_fails_at_wiring_time():
     assert isinstance(
         dispatch_routing.CachedArtifactSource(lambda *_arguments: None), dispatch.ArtifactSource
     )
+
+
+def test_the_root_wires_plugin_progress_to_the_job_service(tmp_path):
+    """OMNI-0584: it did not, and nothing said so for as long as that lasted.
+
+    `service.py` builds a runtime with a progress sink, but only on the path
+    where nobody injected one — which is tests. Production goes through this
+    root, which built a runtime with no sink at all, so every report a plugin
+    made was thrown away: a 220-page document ran for twelve minutes while the
+    person watching was told "Job accepted and queued" at 0% throughout.
+    """
+    options = ServiceEnvironment.read(
+        {"OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json")}
+    ).service_options()
+    noted = []
+    given = {}
+
+    class Jobs:
+        def note_progress(self, job_id, stage, fraction, detail):
+            noted.append((job_id, stage, fraction, detail))
+
+    class Service:
+        def __init__(self, **passed):
+            given.update(passed)
+            self.jobs = Jobs()
+
+    built = build_service(Service, **options)
+
+    # The wiring is the root's own, so the constructor never sees it.
+    assert "plugin_progress_binding" not in given
+    sink = given["plugin_runtime"]._progress_sink
+    assert sink is not None, "the production runtime cannot report progress at all"
+
+    sink(PluginProgress("job-1", "pages", 0.75, "page 165 of 220", 1_700_000_000_000))
+
+    assert noted == [("job-1", "pages", 0.75, "page 165 of 220")]
+    assert isinstance(built.jobs, Jobs)
