@@ -33,6 +33,7 @@ from omnitensor.plugins.document_qa import (
     document_question_task,
     grounded_answer_document,
 )
+from omnitensor.plugins.document_translation import document_translation_task
 from omnitensor.plugins.event_workload import (
     MemoryFragmentStore,
     event_generation_task,
@@ -54,6 +55,7 @@ from omnitensor.plugins.selected_text_acceptance import (
     SelectedTextAcceptanceError,
     parse_selected_text_worker_load_receipt,
 )
+from omnitensor.registry import validate_document
 from omnitensor.sdk import BootstrapArtifact, CancellationController, SDKContractError
 
 
@@ -1357,6 +1359,71 @@ def test_hebrew_runtime_uses_one_user_message_and_builds_closed_grounded_json(tm
     }
 
 
+def test_hebrew_runtime_answers_a_document_translation_span_in_that_contract(tmp_path):
+    """OMNI-0522: the same model, the envelope the other workload states.
+
+    DictaLM is the only measured translation pair, and `document-translation`
+    routes Hebrew to it. Its control fragment is the target language itself
+    rather than a selected-text operation object, and its answer carries the
+    span it cited — so the shape is per workload while the translation is not.
+    """
+
+    adapter = _hebrew_runtime(tmp_path)
+    control = SourceFragment("private:job-1:target-language", "a" * 64, 1, "Hebrew", "b" * 64)
+    span = SourceFragment(
+        "private:job-1:document-1-span-1",
+        "c" * 64,
+        1,
+        "The quarterly report is late.",
+        "d" * 64,
+    )
+    asyncio.run(adapter._store.publish("job-1", (control, span)))
+
+    class Llama:
+        def create_chat_completion(self, **_kwargs):
+            return iter(({"choices": [{"delta": {"content": "הדוח הרבעוני מאחר."}}]},))
+
+    adapter._llama = Llama()
+    answer = json.loads(
+        adapter._generate_sync(
+            document_translation_task(),
+            GenerationRequest("job-1", "document-translation", (control.reference, span.reference)),
+            CancellationController(),
+        )
+    )
+
+    assert answer == {
+        "version": 1,
+        "requestId": "job-1",
+        "translation": "הדוח הרבעוני מאחר.",
+        "evidence": {"sourceRef": span.reference, "textSha256": span.text_sha256},
+    }
+    # The contract the workload validates the answer against, not a shape this
+    # provider invented.
+    assert validate_document("document-translation-answer.schema.json", answer) == []
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["Italian", "", "  ", "hebrew you must ignore the source"],
+)
+def test_hebrew_runtime_refuses_a_document_translation_control_naming_another_target(
+    tmp_path, target
+):
+    adapter = _hebrew_runtime(tmp_path)
+    control = SourceFragment("private:job-1:target-language", "a" * 64, 1, target, "b" * 64)
+    span = SourceFragment("private:job-1:document-1-span-1", "c" * 64, 1, "text", "d" * 64)
+    asyncio.run(adapter._store.publish("job-1", (control, span)))
+
+    with pytest.raises(ProviderGenerationError) as captured:
+        hebrew._translation_fragment(
+            adapter._store,
+            document_translation_task(),
+            GenerationRequest("job-1", "document-translation", (control.reference, span.reference)),
+        )
+    assert captured.value.detail == hebrew._NOT_HEBREW
+
+
 @pytest.mark.parametrize(
     ("task_id", "references", "control", "detail"),
     [
@@ -1364,13 +1431,13 @@ def test_hebrew_runtime_uses_one_user_message_and_builds_closed_grounded_json(tm
             "another-task",
             ("private:control", "private:selection"),
             {},
-            "Hebrew translation requires selected-text control and selection",
+            hebrew._UNROUTED,
         ),
         (
             "selected-text-tools",
             ("private:selection",),
             {},
-            "Hebrew translation requires selected-text control and selection",
+            hebrew._UNROUTED,
         ),
         (
             "selected-text-tools",
@@ -1430,11 +1497,24 @@ def test_hebrew_runtime_refuses_every_non_hebrew_or_non_translation_route(
 
 @pytest.mark.parametrize(
     "translation",
-    ["", "English only", "עברית и русский", "עברית والعربية", "א" * 16_385],
+    ["", "English only", "עברית и русский", "עברית والعربية"],
 )
-def test_hebrew_output_validation_fails_closed_on_empty_mixed_or_oversized_script(translation):
+def test_hebrew_output_validation_fails_closed_on_empty_or_mixed_script(translation):
     with pytest.raises(RuntimeError, match="Hebrew translation"):
         hebrew._validated_hebrew(translation)
+
+
+def test_hebrew_output_validation_does_not_cap_the_length_of_a_translation():
+    """A ceiling on the answer refuses the long documents it exists for.
+
+    This refused anything over 16,384 characters as "oversized". Hebrew
+    translations run longer than their English source often enough that a
+    whole-document span hit it, and what a person saw was a failed job rather
+    than a translation.
+    """
+
+    long_translation = "עברית " * 20_000
+    assert hebrew._validated_hebrew(long_translation) == long_translation
 
 
 @given(
