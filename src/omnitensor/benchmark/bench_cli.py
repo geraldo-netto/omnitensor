@@ -39,7 +39,7 @@ from .vulkan_devices import devices as vulkan_devices
 from .vulkan_devices import select as select_device
 
 DEFAULT_ARTIFACT_ROOT = Path.home() / ".local/share/omnitensor/artifacts"
-DEFAULT_RESULT_ROOT = Path(__file__).resolve().parents[3] / "benchmarks" / "results"
+
 DEFAULT_MODELS = ("qwen3-8b-q4-k-m", "qwen3-4b-q4-k-m")
 
 
@@ -238,10 +238,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Accuracy and speed per (workload, model). Changes nothing.",
     )
     parser.add_argument("--models", default=",".join(DEFAULT_MODELS))
-    parser.add_argument("--workloads", default=",".join(case_files.available()))
+    parser.add_argument("--workloads", default="")
     parser.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACT_ROOT)
-    parser.add_argument("--cases", type=Path, default=case_files.CASE_ROOT)
-    parser.add_argument("--results", type=Path, default=DEFAULT_RESULT_ROOT)
+    parser.add_argument("--cases", type=Path, default=None)
+    parser.add_argument("--results", type=Path, default=None)
     parser.add_argument(
         "--device",
         default="",
@@ -275,7 +275,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     say(f"measuring on {device}")
 
     models = [name for name in arguments.models.split(",") if name.strip()]
-    workloads = [name for name in arguments.workloads.split(",") if name.strip()]
+    case_root = arguments.cases or case_files.case_root()
+    # Resolved here rather than as an argparse default, so a machine without
+    # the corpus is told which directory is missing instead of measuring
+    # nothing and reporting success.
+    requested = arguments.workloads or ",".join(case_files.available(case_root))
+    workloads = [name for name in requested.split(",") if name.strip()]
     say(f"models: {', '.join(models)}")
     say(f"workloads: {', '.join(workloads)}")
 
@@ -284,8 +289,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         workloads,
         device=device,
         artifact_root=arguments.artifacts,
-        case_root=arguments.cases,
-        result_root=arguments.results,
+        case_root=case_root,
+        result_root=arguments.results or case_files.benchmark_root() / "results",
         say=say,
     )
 

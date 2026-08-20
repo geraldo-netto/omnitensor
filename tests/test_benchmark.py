@@ -645,3 +645,24 @@ class TestARuleThatDoesNotExist:
         )
 
         assert case_files.load("fine", tmp_path)
+
+
+class TestWhereTheCorpusLives:
+    """OMNI-0444: an installed package measured nothing and called it success."""
+
+    def test_an_absent_corpus_is_named_rather_than_reported_as_no_workloads(self, tmp_path):
+        with pytest.raises(case_files.CaseError) as refused:
+            case_files.available(tmp_path / "not-installed")
+
+        assert "not-installed" in str(refused.value)
+        assert case_files.BENCHMARK_ROOT_VARIABLE in str(refused.value)
+
+    def test_an_environment_variable_names_the_corpus_on_a_host_without_the_tree(self, tmp_path):
+        cases = tmp_path / "cases"
+        cases.mkdir()
+        (cases / "sample-workload.json").write_text('{"cases": []}', encoding="utf-8")
+        environ = {case_files.BENCHMARK_ROOT_VARIABLE: str(tmp_path)}
+
+        assert case_files.benchmark_root(environ) == tmp_path
+        assert case_files.case_root(environ) == cases
+        assert case_files.available(cases) == ("sample-workload",)

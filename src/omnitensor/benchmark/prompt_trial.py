@@ -199,7 +199,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--model", default="qwen3-4b-q4-k-m")
     parser.add_argument("--device", default="0")
     parser.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACT_ROOT)
-    parser.add_argument("--cases", type=Path, default=case_files.CASE_ROOT)
+    parser.add_argument("--cases", type=Path, default=None)
     parser.add_argument(
         "--all-cases",
         action="store_true",
@@ -243,7 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_id=arguments.model,
         device=device,
         artifact_root=arguments.artifacts,
-        case_root=arguments.cases,
+        case_root=arguments.cases or case_files.case_root(),
         answerable_only=not arguments.all_cases,
         say=say,
     )

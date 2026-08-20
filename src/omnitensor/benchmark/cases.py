@@ -13,11 +13,29 @@ score means anything.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CASE_ROOT = Path(__file__).resolve().parents[3] / "benchmarks" / "cases"
+# The benchmark corpus is not packaged: `omnitensor.benchmark` ships in the
+# wheel and `benchmarks/` does not, so from an installed package this path
+# does not exist. `OMNITENSOR_BENCHMARK_ROOT` names it on such a host; without
+# it the source-tree location is used and, when that is absent too, every
+# reader refuses with the path it looked in rather than reporting no cases.
+BENCHMARK_ROOT_VARIABLE = "OMNITENSOR_BENCHMARK_ROOT"
+SOURCE_BENCHMARK_ROOT = Path(__file__).resolve().parents[3] / "benchmarks"
+
+
+def benchmark_root(environ: Mapping[str, str] | None = None) -> Path:
+    """Where the benchmark corpus lives on this machine."""
+    configured = (environ if environ is not None else os.environ).get(BENCHMARK_ROOT_VARIABLE)
+    return Path(configured).expanduser() if configured else SOURCE_BENCHMARK_ROOT
+
+
+def case_root(environ: Mapping[str, str] | None = None) -> Path:
+    return benchmark_root(environ) / "cases"
+
 
 # A case file that is larger than this is not a case file.
 MAX_CASE_BYTES = 4 * 1024 * 1024
@@ -54,9 +72,9 @@ class Case:
         return self.expect.get("refuses") is not True
 
 
-def load(workload: str, root: Path = CASE_ROOT) -> tuple[Case, ...]:
+def load(workload: str, root: Path | None = None) -> tuple[Case, ...]:
     """Every case for one workload, in file order."""
-    path = Path(root) / f"{workload}.json"
+    path = (Path(root) if root is not None else case_root()) / f"{workload}.json"
     try:
         raw = path.read_bytes()
     except OSError as error:
@@ -108,13 +126,33 @@ def _case(workload: str, entry: object, index: int) -> Case:
     )
 
 
-def available(root: Path = CASE_ROOT) -> tuple[str, ...]:
-    """Every workload that has a case file."""
-    return tuple(sorted(path.stem for path in Path(root).glob("*.json")))
+def available(root: Path | None = None) -> tuple[str, ...]:
+    """Every workload that has a case file.
+
+    Refuses when the corpus is not where it was looked for: this is an
+    argparse default, so answering ``()`` made an installed package report
+    "nothing was measured" instead of naming the directory it could not find.
+    """
+    resolved = Path(root) if root is not None else case_root()
+    if not resolved.is_dir():
+        raise CaseError(
+            f"benchmark cases are not installed at {resolved}; "
+            f"set {BENCHMARK_ROOT_VARIABLE} to the checkout's benchmarks/ directory"
+        )
+    return tuple(sorted(path.stem for path in resolved.glob("*.json")))
 
 
-def counted(workloads: Iterable[str], root: Path = CASE_ROOT) -> dict[str, int]:
+def counted(workloads: Iterable[str], root: Path | None = None) -> dict[str, int]:
     return {workload: len(load(workload, root)) for workload in workloads}
 
 
-__all__ = ["CASE_ROOT", "Case", "CaseError", "available", "counted", "load"]
+__all__ = [
+    "BENCHMARK_ROOT_VARIABLE",
+    "Case",
+    "CaseError",
+    "available",
+    "benchmark_root",
+    "case_root",
+    "counted",
+    "load",
+]
