@@ -220,11 +220,20 @@ def device_kwargs(index: int = 0) -> dict:
     )
 
 
-def test_snapshot_truncates_devices_to_the_contract_maximum():
+def test_snapshot_publishes_every_device_it_is_given():
+    """A seventeenth card is published, not hidden.
+
+    `462f708` removed `MAX_DEVICE_ENTRIES` and the schema's matching
+    `maxItems`: a device the snapshot cannot name is one no consumer can use,
+    and silently cutting the list reported a healthy machine as a smaller one.
+    """
+
     devices = [device_kwargs(index) for index in range(17)]
     snapshot = build_snapshot(devices=devices, metrics={}, profiles={})
-    assert len(snapshot["devices"]) == 16
+    assert len(snapshot["devices"]) == 17
     assert snapshot["devices"][0]["id"] == "gpu-renderD128"
+    assert snapshot["devices"][-1]["id"] == "gpu-renderD144"
+    assert validate_document("runtime-snapshot.schema.json", snapshot) == []
 
 
 def test_snapshot_defaults_are_exact():
@@ -338,13 +347,22 @@ def test_tpu_pcie_index_and_naming_are_exact(tmp_path):
     assert device.vendor == ""
 
 
-def test_tpu_pcie_candidate_count_is_bounded_but_ids_are_not(tmp_path):
+def test_tpu_pcie_selection_survives_lower_numbered_nodes_appearing(tmp_path):
+    """A ninth apex node no longer evicts the selected one.
+
+    `_numbered_nodes` used to slice to eight, so `apex_80` fell off the end as
+    soon as `apex_0..7` existed and the runtime lost the device it had already
+    selected.
+    """
+
     nodes = paths(tmp_path)
     (nodes.dev / "apex_80").touch()
     assert detect_tpu(nodes).id == "tpu-pcie-80"
     for index in range(8):
         (nodes.dev / f"apex_{index}").touch()
-    assert detect_tpu(nodes, "tpu-pcie-80") is None
+    assert detect_tpu(nodes, "tpu-pcie-80").id == "tpu-pcie-80"
+    # Unselected, the lowest-numbered node still wins, so the default is stable.
+    assert detect_tpu(nodes).id == "tpu-pcie-0"
 
 
 def test_tpu_usb_identities_are_exact(tmp_path):
@@ -372,7 +390,9 @@ def test_vendor_read_truncates_to_32_characters_and_replaces_bad_bytes(tmp_path)
     assert detect_npu(nodes).vendor == "��"
 
 
-def test_gpu_candidate_count_is_bounded_but_render_ids_are_not(tmp_path):
+def test_gpu_selection_survives_lower_numbered_render_nodes_appearing(tmp_path):
+    """A ninth render node no longer evicts the selected card."""
+
     nodes = paths(tmp_path)
     (nodes.dev / "dri").mkdir()
     (nodes.dev / "dri/renderD913").touch()
@@ -381,7 +401,8 @@ def test_gpu_candidate_count_is_bounded_but_render_ids_are_not(tmp_path):
     assert device.kind == "dri"
     for node in range(128, 136):
         (nodes.dev / f"dri/renderD{node}").touch()
-    assert detect_gpu(nodes, "gpu-renderD913") is None
+    assert detect_gpu(nodes, "gpu-renderD913").id == "gpu-renderD913"
+    assert detect_gpu(nodes).id == "gpu-renderD128"
 
 
 def test_utilization_clamps_negative_and_overflow_values(tmp_path):

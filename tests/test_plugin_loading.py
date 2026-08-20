@@ -46,6 +46,7 @@ from omnitensor.plugins import (
     execute_frame,
     external_worker_specs,
     handshake_frame,
+    offloop,
 )
 from omnitensor.plugins import loading as loading_module
 from omnitensor.plugins import worker as worker_module
@@ -943,6 +944,13 @@ def test_off_loop_reuses_one_pool_instead_of_a_thread_per_call():
 
     `_refresh_permission_grants` alone runs every GRANT_REFRESH_SECONDS = 0.25,
     and every received IPC frame adds one more.
+
+    The property is reuse, not thread identity: `ThreadPoolExecutor` spawns a
+    spare whenever a submit lands before the previous worker has re-parked on
+    the queue, so pinning an exact ident made this test fail intermittently for
+    a pool behaving exactly as intended. Assert instead that fifty sequential
+    calls are served by a handful of pooled threads rather than fifty new ones,
+    and that they all came from the one executor installed on this loop.
     """
 
     threads = []
@@ -950,14 +958,22 @@ def test_off_loop_reuses_one_pool_instead_of_a_thread_per_call():
     def note():
         threads.append(threading.current_thread())
 
+    executors = []
+
     async def scenario():
         for _ in range(50):
             await loading_module._run_off_loop(note)
+        executors.append(offloop._executor(asyncio.get_running_loop()))
 
     asyncio.run(scenario())
 
     assert len(threads) == 50
-    assert len({thread.ident for thread in threads}) == 1
+    distinct = {thread.ident for thread in threads}
+    # A thread per call would be fifty; reuse keeps it near one. The bound is
+    # loose on purpose — it fails for a regression, not for a scheduling race.
+    assert 1 <= len(distinct) <= 5
+    assert all(thread.name.startswith(offloop.THREAD_NAME_PREFIX) for thread in threads)
+    assert len(executors) == 1
 
 
 def test_loading_off_loop_propagates_failure_and_remains_cancellable():
