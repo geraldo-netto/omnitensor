@@ -17,6 +17,7 @@ from __future__ import annotations
 
 STATE_DIRECTORY = "~/.local/state/omnitensor"
 DATA_DIRECTORY = "~/.local/share/omnitensor"
+CACHE_DIRECTORY = "~/.cache"
 
 #: The published runtime snapshot the applet reads.
 SNAPSHOT_PATH = "~/.local/state/xpu-workload-manager/state.json"
@@ -31,8 +32,16 @@ MODEL_SOURCES_ROOT = f"{DATA_DIRECTORY}/model-sources"
 TRAINING_OUTPUT_ROOT = f"{DATA_DIRECTORY}/training"
 DOCUMENT_MODEL_BUILD_ROOT = f"{DATA_DIRECTORY}/document-model-build"
 
+#: Where the benchmark takes its per-card GPU lease.  Kept under its own
+#: `omnitensor-bench` name rather than moved into `DATA_DIRECTORY`, because a
+#: lease is a lock and not data: it is disposable, and a host that clears its
+#: cache should lose it.
+BENCHMARK_LEASE_ROOT = f"{CACHE_DIRECTORY}/omnitensor-bench"
+
 __all__ = [
     "ARTIFACT_ROOT",
+    "BENCHMARK_LEASE_ROOT",
+    "CACHE_DIRECTORY",
     "DATA_DIRECTORY",
     "DOCUMENT_MODEL_BUILD_ROOT",
     "GRANTS_PATH",

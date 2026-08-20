@@ -40,6 +40,7 @@ from .vulkan_devices import devices as vulkan_devices
 from .vulkan_devices import select as select_device
 
 DEFAULT_ARTIFACT_ROOT = Path(paths.ARTIFACT_ROOT).expanduser()
+DEFAULT_LEASE_ROOT = paths.BENCHMARK_LEASE_ROOT
 
 DEFAULT_MODELS = ("qwen3-8b-q4-k-m", "qwen3-4b-q4-k-m")
 
@@ -73,11 +74,12 @@ def run_model(
     artifact_root: Path,
     case_root: Path,
     device: VulkanDevice,
+    lease_root: Path,
     say,
 ) -> tuple[Run, ...]:
     """Load one model once, then every case of every workload on it."""
     path = model_path(artifact_root, model_id)
-    with loaded_model(path, device, say=say) as loaded:
+    with loaded_model(path, device, lease_root=lease_root, say=say) as loaded:
         every_task = tasks()
         runs = []
         for workload in workloads:
@@ -152,6 +154,7 @@ def measure(
     artifact_root: Path,
     case_root: Path,
     result_root: Path,
+    lease_root: Path,
     say,
 ) -> list[Run]:
     """Every model in turn, writing results after each so nothing is lost."""
@@ -167,6 +170,7 @@ def measure(
                     artifact_root=artifact_root,
                     case_root=case_root,
                     device=device,
+                    lease_root=lease_root,
                     say=say,
                 )
             )
@@ -187,6 +191,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--cases", type=Path, default=None)
     parser.add_argument("--results", type=Path, default=None)
+    parser.add_argument(
+        "--lease-root",
+        type=Path,
+        default=Path(DEFAULT_LEASE_ROOT).expanduser(),
+        help="where the per-card GPU lease is taken",
+    )
     parser.add_argument(
         "--device",
         default="",
@@ -236,6 +246,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         artifact_root=arguments.artifacts,
         case_root=case_root,
         result_root=arguments.results or case_files.benchmark_root() / "results",
+        lease_root=arguments.lease_root,
         say=say,
     )
 

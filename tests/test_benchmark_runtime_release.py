@@ -77,6 +77,7 @@ def test_a_refused_device_confirmation_still_releases_the_model(provider, monkey
             artifact_root=tmp_path,
             case_root=tmp_path,
             device=DEVICE,
+            lease_root=tmp_path / "leases",
             say=lambda _message: None,
         )
 
@@ -100,6 +101,7 @@ def test_unreadable_cases_still_release_the_model(provider, monkeypatch, tmp_pat
             artifact_root=tmp_path,
             case_root=tmp_path,
             device=DEVICE,
+            lease_root=tmp_path / "leases",
             say=lambda _message: None,
         )
 
@@ -123,6 +125,7 @@ def test_a_prompt_trial_that_fails_still_releases_the_model(provider, monkeypatc
             device=DEVICE,
             artifact_root=tmp_path,
             case_root=tmp_path,
+            lease_root=tmp_path / "leases",
             answerable_only=False,
             say=lambda _message: None,
         )

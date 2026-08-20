@@ -248,7 +248,7 @@ def loaded_model(
     model_path: Path,
     device,
     *,
-    lease_root: Path | None = None,
+    lease_root: Path,
     say: Callable[[str], None] = lambda _line: None,
 ) -> Iterator[LoadedModel]:
     """Load one model on one card, and give the card back however this ends.
@@ -271,9 +271,7 @@ def loaded_model(
     # always takes device 0, so the choice is which device *is* 0.
     os.environ["GGML_VK_VISIBLE_DEVICES"] = str(device.index)
     store = MemoryFragmentStore()
-    runtime = LlamaVulkanRuntime(
-        store, lease_file(lease_root or Path.home() / ".cache/omnitensor-bench", device.index)
-    )
+    runtime = LlamaVulkanRuntime(store, lease_file(lease_root, device.index))
     try:
         say(f"loading {model_path.name} on {device.name}")
         started = time.monotonic()

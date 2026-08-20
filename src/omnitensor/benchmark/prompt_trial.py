@@ -35,7 +35,7 @@ from pathlib import Path
 
 from ..plugins.generation import GenerationTask
 from . import cases as case_files
-from .bench_cli import DEFAULT_ARTIFACT_ROOT, model_path, tasks
+from .bench_cli import DEFAULT_ARTIFACT_ROOT, DEFAULT_LEASE_ROOT, model_path, tasks
 from .harness import (
     NoCancellation,
     Run,
@@ -119,11 +119,14 @@ def trial(
     device,
     artifact_root: Path,
     case_root: Path,
+    lease_root: Path,
     answerable_only: bool,
     say,
 ) -> Run:
     """Load the model once and run every selected case on one wording."""
-    with loaded_model(model_path(artifact_root, model_id), device, say=say) as loaded:
+    with loaded_model(
+        model_path(artifact_root, model_id), device, lease_root=lease_root, say=say
+    ) as loaded:
         cases = case_files.load(workload, case_root)
         if answerable_only:
             # A wording that refuses everything scores well on cases that expect
@@ -157,6 +160,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--device", default="0")
     parser.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--cases", type=Path, default=None)
+    parser.add_argument(
+        "--lease-root",
+        type=Path,
+        default=Path(DEFAULT_LEASE_ROOT).expanduser(),
+        help="where the per-card GPU lease is taken",
+    )
     parser.add_argument(
         "--all-cases",
         action="store_true",
@@ -201,6 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         device=device,
         artifact_root=arguments.artifacts,
         case_root=arguments.cases or case_files.case_root(),
+        lease_root=arguments.lease_root,
         answerable_only=not arguments.all_cases,
         say=say,
     )
