@@ -108,8 +108,8 @@ def _hebrew_runtime(tmp_path):
     return hebrew.HebrewTranslationRuntime(MemoryFragmentStore(), lease)
 
 
-def _qualification(*, device=QUALIFIED_DEVICE, layers=4):
-    return qualification.Qualification(device, layers, "0.3.34", ())
+def _qualification(*, device=QUALIFIED_DEVICE, covers=""):
+    return qualification.Qualification(device, covers)
 
 
 def _receipt():
@@ -409,16 +409,16 @@ def test_grammar_projection_refuses_unbounded_or_invalid_references(schema):
 
 
 @pytest.mark.parametrize(
-    ("plugin_id", "model_id", "task_factory", "layers"),
+    ("plugin_id", "model_id", "task_factory"),
     [
-        ("event-extraction", "qwen3-8b-q4-k-m", event_generation_task, 37),
-        ("ask-selected-files", "qwen3-8b-q4-k-m", document_question_task, 37),
-        ("selected-text-tools", "qwen3-8b-q4-k-m", selected_text_task, 37),
-        ("file-organizer", "qwen3-8b-q4-k-m", file_organizer_task, 37),
+        ("event-extraction", "qwen3-8b-q4-k-m", event_generation_task),
+        ("ask-selected-files", "qwen3-8b-q4-k-m", document_question_task),
+        ("selected-text-tools", "qwen3-8b-q4-k-m", selected_text_task),
+        ("file-organizer", "qwen3-8b-q4-k-m", file_organizer_task),
     ],
 )
 def test_receipt_binds_each_exact_task_and_model(
-    monkeypatch, tmp_path, plugin_id, model_id, task_factory, layers
+    monkeypatch, tmp_path, plugin_id, model_id, task_factory
 ):
     """One model's load record, read by whichever workload asks for it.
 
@@ -438,12 +438,7 @@ def test_receipt_binds_each_exact_task_and_model(
         task_factory(),
     )
 
-    assert receipt == qualification.Qualification(
-        document["device"],
-        layers,
-        document["runtime"]["version"],
-        tuple(sorted(document["runtime"]["binaries"].items())),
-    )
+    assert receipt == qualification.Qualification(document["device"])
 
 
 def test_receipt_binds_the_operation_specific_hebrew_model_without_replacing_qwen(
@@ -455,28 +450,25 @@ def test_receipt_binds_the_operation_specific_hebrew_model_without_replacing_qwe
 
     receipt = qualification.load_model_qualification(factories.HEBREW_ARTIFACT_ID, model["sha256"])
 
-    assert receipt == qualification.Qualification(
-        document["device"],
-        33,
-        document["runtime"]["version"],
-        tuple(sorted(document["runtime"]["binaries"].items())),
-    )
+    assert receipt == qualification.Qualification(document["device"])
     qwen = qualification.load_qualification(
         "selected-text-tools",
         factories.SHIPPED_ARTIFACT_ID,
         document["models"][factories.SHIPPED_ARTIFACT_ID]["sha256"],
         selected_text_task(),
     )
-    assert qwen.model_layers == 37
+    assert qwen.covers == ""
 
 
-def test_a_tampered_model_identity_still_refuses(monkeypatch, tmp_path):
-    """Model identity is not a preference: the digest names the exact bytes.
+def test_a_model_the_receipt_never_saw_runs_and_says_it_was_not_measured(monkeypatch, tmp_path):
+    """Installing a model is what the client's model chooser is for.
 
-    Coverage of a workload became a report rather than a refusal, but which
-    file this is did not. A receipt entry that names other bytes is a broken
-    install, and running against it would attribute somebody else's
-    measurements to a model nobody measured.
+    This used to refuse: an unlisted id was `model has no qualification` and a
+    moved digest was `model differs from qualification`, so every generation
+    workload stopped the day somebody replaced a GGUF — which the maintainer
+    has said is expected. Nothing downstream read the receipt's numbers about
+    the model, so the refusal protected nothing. What survives is the
+    statement: the evidence on the answer says this pair was not measured.
     """
     document = _receipt()
     _load_receipt(monkeypatch, tmp_path, document)
@@ -484,12 +476,13 @@ def test_a_tampered_model_identity_still_refuses(monkeypatch, tmp_path):
     model = "qwen3-8b-q4-k-m"
     digest = document["models"][model]["sha256"]
 
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification("event-extraction", model, "0" * 64, task)
-    assert str(excinfo.value) == "model differs from qualification"
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.load_qualification("event-extraction", "unknown-model", digest, task)
-    assert str(excinfo.value) == "model has no qualification"
+    moved = qualification.load_qualification("event-extraction", model, "0" * 64, task)
+    unknown = qualification.load_qualification("event-extraction", "a-new-model", digest, task)
+    measured = qualification.load_qualification("event-extraction", model, digest, task)
+
+    assert "has changed since it was measured" in moved.covers
+    assert "was not among the models measured" in unknown.covers
+    assert measured.covers == ""
 
 
 def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp_path):
@@ -514,7 +507,6 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
 
     assert moved.covers == unmeasured.covers == ""
     assert moved.device == unmeasured.device == document["device"]
-    assert moved.model_layers == unmeasured.model_layers
 
 
 @pytest.mark.parametrize(
@@ -535,35 +527,6 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
         (
             lambda value: value.update(device=""),
             "qualification device is invalid",
-        ),
-        (lambda value: value.update(runtime=[]), "qualification runtime is invalid"),
-        (
-            lambda value: value["runtime"].update(version="moving"),
-            "qualification runtime identity is invalid",
-        ),
-        (
-            lambda value: value["runtime"].update(wheelSha256="bad"),
-            "qualification wheel digest is invalid",
-        ),
-        (
-            lambda value: value["runtime"].update(binaries={}),
-            "qualification native inventory is invalid",
-        ),
-        (
-            lambda value: value["runtime"]["binaries"].update({"libllama.so": "bad"}),
-            "qualification native digest is invalid",
-        ),
-        (
-            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(extra=True),
-            "model qualification is invalid",
-        ),
-        (
-            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=0),
-            "layer qualification is invalid",
-        ),
-        (
-            lambda value: value["models"]["qwen3-8b-q4-k-m"].update(fullyOffloadedLayers=True),
-            "model differs from qualification",
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(extra=True),
@@ -753,47 +716,29 @@ def test_receipt_refuses_invalid_json_and_oversized_resource(tmp_path, monkeypat
     assert str(excinfo.value) == "qualification receipt is oversized"
 
 
-def test_native_runtime_verification_binds_version_and_binary_bytes(tmp_path, monkeypatch):
-    library = tmp_path / "lib"
-    library.mkdir()
-    first = library / "libggml-vulkan.so"
-    second = library / "libllama.so"
-    first.write_bytes(b"vulkan")
-    second.write_bytes(b"llama")
-    expected = qualification.Qualification(
-        QUALIFIED_DEVICE,
-        29,
-        "0.3.34",
-        (
-            ("libggml-vulkan.so", qualification.file_digest(first)),
-            ("libllama.so", qualification.file_digest(second)),
-        ),
-    )
-    package = SimpleNamespace(joinpath=lambda *parts: tmp_path.joinpath(*parts))
-    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.34")
-    monkeypatch.setattr(qualification.importlib.resources, "files", lambda _name: package)
+def test_native_runtime_verification_reports_the_version_that_is_installed(monkeypatch):
+    """It used to require 0.3.34 and two exact `.so` digests.
 
-    assert qualification.verify_native_runtime(expected) == "llama-cpp-python-0.3.34"
+    That made any upgrade of `llama-cpp-python` — a security one included —
+    stop all five generation workloads until somebody re-measured on a GPU.
+    The version is a label on the evidence, so it is read from what is
+    installed and reported.
+    """
+    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.99")
 
-    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.35")
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.verify_native_runtime(expected)
-    assert str(excinfo.value) == "llama.cpp runtime version differs from qualification"
-    monkeypatch.setattr(qualification.importlib.metadata, "version", lambda _name: "0.3.34")
-    second.write_bytes(b"substituted")
-    with pytest.raises(RuntimeError) as excinfo:
-        qualification.verify_native_runtime(expected)
-    assert str(excinfo.value) == "llama.cpp native bytes differ from qualification"
+    assert qualification.verify_native_runtime(_qualification()) == "llama-cpp-python-0.3.99"
 
 
 def test_native_runtime_verification_refuses_missing_distribution(monkeypatch):
+    """No llama.cpp is not something to carry on from: there is no CPU path."""
+
     def missing(_name):
         raise qualification.importlib.metadata.PackageNotFoundError
 
     monkeypatch.setattr(qualification.importlib.metadata, "version", missing)
     with pytest.raises(RuntimeError) as excinfo:
         qualification.verify_native_runtime(_qualification())
-    assert str(excinfo.value) == "qualified llama.cpp runtime is not installed"
+    assert str(excinfo.value) == "the llama.cpp runtime is not installed"
 
 
 def test_an_interrupted_lease_acquisition_closes_the_file(tmp_path, monkeypatch):
@@ -2373,7 +2318,7 @@ def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
             return model
 
     monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
-    monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification(layers=37))
+    monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification())
 
     with pytest.raises(RuntimeError, match="load receipt state is unavailable"):
         factories.create_selected_text_tools()
@@ -2498,6 +2443,7 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
         "https://example.invalid/dictalm.gguf",
         "Apache-2.0",
     )
+
     class Bootstrap:
         model_choice = ""
 
@@ -2512,9 +2458,7 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
 
     monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
     monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification())
-    monkeypatch.setattr(
-        factories, "load_model_qualification", lambda *_args: _qualification(layers=33)
-    )
+    monkeypatch.setattr(factories, "load_model_qualification", lambda *_args: _qualification())
 
     created = (
         factories.create_event_extraction(),
@@ -2692,7 +2636,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
     monkeypatch.setattr(
         factories,
         "verify_native_runtime",
-        lambda value: f"llama-cpp-python-{value.runtime_version}",
+        lambda _value: "llama-cpp-python-0.3.34",
     )
     monkeypatch.setattr(factories, "write_json_atomic", write_receipt)
     monkeypatch.setattr(factories, "remove_durable", remove_receipt)
@@ -2700,8 +2644,8 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
         Plugin(),
         qwen,
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=((hebrew_runtime, Path("hebrew.gguf"), _qualification(layers=33)),),
+        _qualification(),
+        additional_runtimes=((hebrew_runtime, Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", PRIMARY_MODEL_SHA256),
@@ -2799,10 +2743,8 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
         Plugin(),
         Native(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 37, 37, False)),
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=(
-            (Native(hebrew_report), Path("hebrew.gguf"), _qualification(layers=33)),
-        ),
+        _qualification(),
+        additional_runtimes=((Native(hebrew_report), Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", PRIMARY_MODEL_SHA256),
@@ -2866,8 +2808,8 @@ def test_a_receipt_records_the_load_that_happened_rather_than_a_frozen_identity(
         Plugin(),
         Native(28),
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=((Native(24), Path("hebrew.gguf"), _qualification(layers=33)),),
+        _qualification(),
+        additional_runtimes=((Native(24), Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(("primary", "0" * 64), ("hebrewTranslation", "1" * 64)),
     )
@@ -2919,8 +2861,8 @@ def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(tmp_pat
         Plugin(),
         Native(37),
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
+        _qualification(),
+        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", PRIMARY_MODEL_SHA256),
@@ -2987,8 +2929,8 @@ def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
         Plugin(),
         FailingNative(),
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=((HebrewNative(), Path("hebrew.gguf"), _qualification(layers=33)),),
+        _qualification(),
+        additional_runtimes=((HebrewNative(), Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", PRIMARY_MODEL_SHA256),
@@ -3041,8 +2983,8 @@ def test_selected_stop_attempts_every_cleanup_and_raises_the_first_failure(tmp_p
         Plugin(),
         Native(37, fail=True),
         Path("qwen.gguf"),
-        _qualification(layers=37),
-        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification(layers=33)),),
+        _qualification(),
+        additional_runtimes=((Native(33), Path("hebrew.gguf"), _qualification()),),
         load_receipt_path=receipt_path,
         load_receipt_models=(
             ("primary", PRIMARY_MODEL_SHA256),
@@ -3122,9 +3064,7 @@ def test_a_workload_starts_on_a_device_the_receipt_never_measured(
             calls.append(request_id)
 
     monkeypatch.setattr(factories, "verify_native_runtime", lambda _value: None)
-    wrapper = factories.QualifiedWorkload(
-        Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
-    )
+    wrapper = factories.QualifiedWorkload(Plugin(), Native(), Path("model.gguf"), _qualification())
 
     asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
 
@@ -3156,9 +3096,7 @@ def test_a_load_that_falls_back_to_the_cpu_is_still_refused(monkeypatch):
             calls.append(request_id)
 
     monkeypatch.setattr(factories, "verify_native_runtime", lambda _value: None)
-    wrapper = factories.QualifiedWorkload(
-        Plugin(), Native(), Path("model.gguf"), _qualification(layers=4)
-    )
+    wrapper = factories.QualifiedWorkload(Plugin(), Native(), Path("model.gguf"), _qualification())
 
     with pytest.raises(ProviderGenerationError) as refused:
         asyncio.run(wrapper.start(PluginContext("sample", 1, {}, frozenset())))
@@ -3667,9 +3605,7 @@ def test_the_adapter_sends_the_system_rules_the_workload_hint_and_the_request(tm
 def test_a_workload_that_adds_nothing_sends_the_task_and_the_request_alone(tmp_path):
     """`NO_PROMPTING` is a workload whose own prompt says everything."""
     adapter = _runtime(tmp_path)
-    source = SourceFragment(
-        "private:job-1:source:1", "a" * 64, 1, "invoice-2026-08.pdf", "b" * 64
-    )
+    source = SourceFragment("private:job-1:source:1", "a" * 64, 1, "invoice-2026-08.pdf", "b" * 64)
     asyncio.run(adapter._store.publish("job-1", (source,)))
     observed = []
     adapter._llama = _stub_llama(observed, json.dumps({"version": 1, "requestId": "job-1"}))

@@ -1,4 +1,22 @@
-"""Fail-closed binding between accepted tasks, native bytes, models, and GPU."""
+"""What was measured on this workload, and which model it runs by default.
+
+This file used to be a gate. It refused to build a worker when the mounted
+GGUF was not one of the three the receipt lists, when its sha256 had moved,
+or when `llama-cpp-python` was any version but 0.3.34 with two exact `.so`
+digests — so replacing a model or upgrading the wheel turned all five
+generation workloads off at once, with a message about qualification.
+
+None of the refusals protected anything. `fullyOffloadedLayers` has no
+reader; the context window and the cache types are `runtime.py`'s own
+constants rather than anything read from here; the device and the version
+are labels on the evidence a job carries. The no-CPU rule is enforced where
+it can actually be observed — `validate_gpu_load` on the report of the load
+that just happened.
+
+So what is left is a record and a default: the receipt says what somebody
+measured and which model a workload runs when nobody chose one, and it does
+not decide what this machine is allowed to run.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +26,8 @@ import importlib.resources
 import json
 import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
 from omnitensor.plugins.generation import GenerationTask
-from omnitensor.preparation import file_digest
 
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _RECORDED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -36,9 +52,6 @@ _MAX_RECEIPT_BYTES = 64 * 1024
 @dataclass(frozen=True, slots=True)
 class Qualification:
     device: str
-    model_layers: int
-    runtime_version: str
-    runtime_binaries: tuple[tuple[str, str], ...]
     # Kept as a field so nothing downstream changes shape, and always empty
     # since 2026-08-20: the receipt stopped being a claim about the task. See
     # `load_qualification`.
@@ -69,14 +82,15 @@ def load_qualification(
     the model what it was reviewed asking (`tests/test_workload_prompt_contract.py`
     in `omnitensor`, and the message-assembly tests here).
 
-    `task` stays in the signature: every caller has one, and the day a model
-    changes is the day this may need it again.
+    `task`, `model_id` and `model_sha256` stay in the signature: every caller
+    has them, and the day this needs to say something about a particular pair
+    again is the day it will want them.
     """
     return _model_qualification(_qualification_document(), model_id, model_sha256)
 
 
 def load_model_qualification(model_id: str, model_sha256: str) -> Qualification:
-    """Bind an operation-specific model to the same native GPU receipt."""
+    """The same record, for a model that is chosen per operation."""
     return _model_qualification(_qualification_document(), model_id, model_sha256)
 
 
@@ -114,75 +128,43 @@ def _qualification_document() -> dict:
 
 
 def _model_qualification(document: dict, model_id: str, model_sha256: str) -> Qualification:
-    device = document["device"]
-    runtime = _runtime(document["runtime"])
-    model_layers = _model(document["models"], model_id, model_sha256)
-    return Qualification(device, model_layers, runtime[0], runtime[1])
+    """The device the numbers came from, and whether they are about this model.
+
+    A GGUF the receipt has never seen, or one whose digest has moved, is a
+    model somebody installed — which is what the client's model chooser is
+    for — and it runs. What it is not is measured, and the answer says so
+    rather than the worker refusing to exist.
+    """
+    return Qualification(
+        document["device"], _unmeasured(document["models"], model_id, model_sha256)
+    )
 
 
-def verify_native_runtime(qualification: Qualification) -> str:
+def _unmeasured(models: object, model_id: str, model_sha256: str) -> str:
+    """Empty when this exact model was measured; why not, when it was not."""
+    if not isinstance(models, dict):
+        return "the receipt lists no measured model"
+    recorded = models.get(model_id)
+    if not isinstance(recorded, dict):
+        return f"{model_id} was not among the models measured on this device"
+    if recorded.get("sha256") != model_sha256:
+        return f"{model_id} has changed since it was measured on this device"
+    return ""
+
+
+def verify_native_runtime(_qualification: Qualification) -> str:
+    """That llama.cpp is installed, and which version answered.
+
+    The version and the two native digests used to have to equal the
+    receipt's, so every upgrade of `llama-cpp-python` — including a security
+    one — stopped all five generation workloads until somebody re-measured on
+    a GPU. What the version is used for is labelling the evidence, so it is
+    now read from what is installed and reported.
+    """
     try:
-        version = importlib.metadata.version("llama-cpp-python")
-        package = importlib.resources.files("llama_cpp")
-    except (importlib.metadata.PackageNotFoundError, ModuleNotFoundError) as error:
-        raise RuntimeError("qualified llama.cpp runtime is not installed") from error
-    if version != qualification.runtime_version:
-        raise RuntimeError("llama.cpp runtime version differs from qualification")
-    for name, digest in qualification.runtime_binaries:
-        path = Path(str(package.joinpath("lib", name)))
-        if not path.is_file() or file_digest(path) != digest:
-            raise RuntimeError("llama.cpp native bytes differ from qualification")
-    return f"llama-cpp-python-{version}"
-
-
-def _runtime(value: object) -> tuple[str, tuple[tuple[str, str], ...]]:
-    if not isinstance(value, dict) or set(value) != {
-        "distribution",
-        "version",
-        "wheelSha256",
-        "binaries",
-    }:
-        raise RuntimeError("qualification runtime is invalid")
-    if value["distribution"] != "llama-cpp-python" or value["version"] != "0.3.34":
-        raise RuntimeError("qualification runtime identity is invalid")
-    if not _is_digest(value["wheelSha256"]):
-        raise RuntimeError("qualification wheel digest is invalid")
-    binaries = value["binaries"]
-    if not isinstance(binaries, dict) or set(binaries) != {
-        "libggml-vulkan.so",
-        "libllama.so",
-    }:
-        raise RuntimeError("qualification native inventory is invalid")
-    if any(not _is_digest(digest) for digest in binaries.values()):
-        raise RuntimeError("qualification native digest is invalid")
-    return str(value["version"]), tuple(sorted(binaries.items()))
-
-
-def _model(value: object, model_id: str, digest: str) -> int:
-    if not isinstance(value, dict) or model_id not in value:
-        raise RuntimeError("model has no qualification")
-    model = value[model_id]
-    if not isinstance(model, dict) or set(model) != {
-        "sha256",
-        "fullyOffloadedLayers",
-        "contextTokens",
-        "keyCache",
-        "valueCache",
-    }:
-        raise RuntimeError("model qualification is invalid")
-    layers = model["fullyOffloadedLayers"]
-    if (
-        model["sha256"] != digest
-        or model["contextTokens"] != 32_768
-        or model["keyCache"] != "q8_0"
-        or model["valueCache"] != "q8_0"
-        or isinstance(layers, bool)
-        or not isinstance(layers, int)
-    ):
-        raise RuntimeError("model differs from qualification")
-    if layers < 1:
-        raise RuntimeError("layer qualification is invalid")
-    return layers
+        return f"llama-cpp-python-{importlib.metadata.version('llama-cpp-python')}"
+    except importlib.metadata.PackageNotFoundError as error:
+        raise RuntimeError("the llama.cpp runtime is not installed") from error
 
 
 def default_model(plugin_id: str) -> str:

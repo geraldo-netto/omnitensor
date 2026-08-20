@@ -377,9 +377,7 @@ class LlamaVulkanRuntime:
         if tuning_message is not None:
             messages.append(tuning_message)
         raw = _complete_json(llama, messages, task, cancellation, self._stopping)
-        reconsideration = self._prompting.reconsideration(
-            task, hint, raw, request, self._store
-        )
+        reconsideration = self._prompting.reconsideration(task, hint, raw, request, self._store)
         if reconsideration is not None:
             messages.extend(
                 (

@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0577 | open | high | m | **Generation refuses to start when the installed model or the llama.cpp wheel is not the one on the 2026-08-17 receipt.** `providers/vulkan-runtime/.../qualification.py` refuses with `model has no qualification` for any GGUF the receipt does not list, `model differs from qualification` when its sha256 moved, and `llama.cpp runtime version differs from qualification` / `native bytes differ from qualification` for any `llama-cpp-python` other than 0.3.34 with those two exact `.so` digests. The five generation workloads all go through it, so swapping a model or upgrading the wheel turns them all off. The receipt's numbers are read nowhere else: `model_layers` has no reader, the context window and cache types are hard-coded in `runtime.py`, and `device` and the version are only labels on the evidence. Keep the receipt as the record of what was measured and as the source of each workload's default model; stop letting it refuse a machine that has moved on. |
 
 ## Blocked
 
