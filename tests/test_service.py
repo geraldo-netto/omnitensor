@@ -1016,3 +1016,27 @@ def test_unpersistable_plugin_adoption_is_retried_on_the_next_publish(fake_nodes
 
     assert service._plugin_adoption_pending is False
     assert "file-organizer" in service.control.state.profiles
+
+
+def test_a_tuned_workload_gets_its_worker_replaced(fake_nodes, tmp_path):
+    """OMNI-0542: a worker reads its configuration once, at `start()`."""
+    service = build_service(fake_nodes, tmp_path)
+    scheduled = []
+    service._plugins.schedule_reload = scheduled.append
+    service._plugin_ids = lambda: frozenset({"external-example"})
+
+    service._configuration_changed("external-example")
+
+    assert scheduled == [{"external-example"}]
+
+
+def test_a_bundled_workload_has_no_worker_to_replace(fake_nodes, tmp_path):
+    """Bundled workloads run in this process; only plugins have workers."""
+    service = build_service(fake_nodes, tmp_path)
+    scheduled = []
+    service._plugins.schedule_reload = scheduled.append
+    service._plugin_ids = frozenset
+
+    service._configuration_changed("hardware-health")
+
+    assert scheduled == []

@@ -84,6 +84,7 @@ class ControlService:
         profile_models=None,
         profile_configuration=None,
         settings_store=None,
+        on_configuration_applied=None,
     ):
         self._store = store
         self._on_applied = on_applied
@@ -100,6 +101,12 @@ class ControlService:
         # pretend to have stored something.
         self._profile_configuration = profile_configuration
         self._settings_store = settings_store
+        # A worker holds its configuration from `start()`, so a change nobody
+        # restarts on is a setting that appears to apply and does not. Named
+        # separately from `on_applied` because the listener needs to know
+        # *which* workload changed: restarting every worker on every policy
+        # command would throw away work that has nothing to do with it.
+        self._on_configuration_applied = on_configuration_applied
         self._state: PolicyState = store.load()
         self._lock = asyncio.Lock()
 
@@ -190,13 +197,24 @@ class ControlService:
             rejection = await self._apply_locked(command, command_id)
         if rejection is not None:
             return rejection
+        self._notify(command)
+        return self._acknowledgement(command_id, "applied", "Policy applied")
+
+    def _notify(self, command: dict) -> None:
+        """Tell the runtime what was committed.
+
+        Both listeners are runtime nudges — wake the scheduler, replace the
+        worker holding an old configuration — and neither may break the
+        acknowledgement contract for a command that is already committed.
+        """
         if self._on_applied is not None:
-            # The listener is a runtime nudge (e.g. wake scheduler workers);
-            # it must never break the acknowledgement contract for an already
-            # committed command.
             with contextlib.suppress(Exception):
                 self._on_applied()
-        return self._acknowledgement(command_id, "applied", "Policy applied")
+        if command["operation"] == SET_PROFILE_CONFIGURATION and (
+            self._on_configuration_applied is not None
+        ):
+            with contextlib.suppress(Exception):
+                self._on_configuration_applied(command["profileId"])
 
     async def _apply_locked(self, command: dict, command_id: str) -> dict | None:
         """Check the revision, apply the command, and commit — or say no.
@@ -468,6 +486,7 @@ def build_control_service(
     profile_configuration=None,
     settings_store=None,
     on_applied=None,
+    on_configuration_applied=None,
 ) -> ControlService:
     """Wire a control service over a policy file.
 
@@ -483,6 +502,7 @@ def build_control_service(
         gpu_device_ids=gpu_device_ids,
         profile_configuration=profile_configuration,
         settings_store=settings_store,
+        on_configuration_applied=on_configuration_applied,
         **({} if profile_models is None else {"profile_models": profile_models}),
         **({} if on_applied is None else {"on_applied": on_applied}),
     )

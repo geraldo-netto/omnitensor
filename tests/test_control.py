@@ -212,6 +212,7 @@ def test_control_service_holds_no_dead_defaults_state():
         "profile_models",
         "profile_configuration",
         "settings_store",
+        "on_configuration_applied",
     ]
 
 
@@ -874,3 +875,59 @@ def test_the_operation_may_not_carry_a_batch_or_a_null_profile(tmp_path):
     document = json.loads(command("set-profile-configuration", "hardware-health", {}))
     document["changes"] = [{"profileId": "hardware-health", "enabled": True}]
     assert validate_document("runtime-command.schema.json", document) != []
+
+
+def test_a_stored_configuration_replaces_the_worker_that_holds_it(tmp_path):
+    """A worker reads its configuration once, at start()."""
+    restarted = []
+    from omnitensor.plugins import PluginSettingsStore, manifest_configuration_spec
+
+    manifest = {
+        "plugin": {
+            "schemas": {
+                "configuration": CONFIGURATION_SCHEMA,
+                "input": {"type": "object"},
+                "output": {"type": "object"},
+            }
+        }
+    }
+    service = build_control_service(
+        tmp_path / "policy.json",
+        {"hardware-health": ProfilePolicy(enabled=True, weight=2)},
+        profile_configuration=lambda profile_id: manifest_configuration_spec(profile_id, manifest),
+        settings_store=PluginSettingsStore(tmp_path / "plugin-settings"),
+        on_configuration_applied=restarted.append,
+    )
+    apply(service, command("set-profile-configuration", "hardware-health", {"guidance": "a"}))
+    assert restarted == ["hardware-health"]
+
+
+def test_no_worker_is_replaced_for_a_command_that_changed_no_configuration(tmp_path):
+    """Restarting every worker on every policy command would throw away work."""
+    restarted = []
+    service, _settings = configuration_control(tmp_path)
+    service._on_configuration_applied = restarted.append
+    apply(service, command("set-profile-enabled", "hardware-health", False))
+    assert restarted == []
+
+
+def test_a_refused_configuration_replaces_no_worker(tmp_path):
+    restarted = []
+    service, _settings = configuration_control(tmp_path)
+    service._on_configuration_applied = restarted.append
+    apply(service, command("set-profile-configuration", "hardware-health", {"length": 99}))
+    assert restarted == []
+
+
+def test_a_listener_that_raises_cannot_break_a_committed_acknowledgement(tmp_path):
+    def explode(_profile_id):
+        raise RuntimeError("listener is broken")
+
+    service, settings = configuration_control(tmp_path)
+    service._on_configuration_applied = explode
+    acknowledgement = apply(
+        service, command("set-profile-configuration", "hardware-health", {"guidance": "kept"})
+    )
+    assert acknowledgement["status"] == "applied"
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).configuration == {"guidance": "kept"}

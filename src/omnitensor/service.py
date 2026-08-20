@@ -267,6 +267,7 @@ class OmniTensorService:
             profile_models=self._profile_models,
             profile_configuration=self._profile_configuration,
             settings_store=self._plugin_settings,
+            on_configuration_applied=self._configuration_changed,
         )
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
@@ -406,6 +407,17 @@ class OmniTensorService:
         plugin_profiles = changed_profiles & self._plugin_ids()
         if plugin_profiles:
             self._schedule_plugin_reload(plugin_profiles)
+
+    def _configuration_changed(self, profile_id: str) -> None:
+        """Replace the worker that is holding the configuration just replaced.
+
+        A worker reads its configuration once, at `start()`, so without this a
+        person would tune a workload, see the command accepted, and go on
+        getting answers from the settings they just changed — the same failure
+        changing a model or a card would have, and it is repaired the same way.
+        """
+        if profile_id in self._plugin_ids():
+            self._schedule_plugin_reload({profile_id})
 
     def _changed_choices(self) -> set[str]:
         choices = dict(self.control.state.device_choices)
