@@ -286,6 +286,10 @@ class Scheduler:
         await asyncio.gather(*workers, return_exceptions=True)
         self._workers.clear()
         self._retired.clear()
+        # Stale evidence: nothing is scheduling any more, so no backend is
+        # degraded. Left behind, a restarted scheduler reported every profile
+        # on that backend as unavailable for a failure that predated it.
+        self._degraded.clear()
         for queue in self._queues.values():
             self._cancel_queued(queue)
 

@@ -966,6 +966,9 @@ def test_profile_statuses_expose_machine_readable_states():
         def profile_stats(self):
             return {}
 
+        def degraded_backends(self):
+            return {}
+
     policy = PolicyState()
     manifest = sample_manifest(acceleratorPreference=["tpu"])
     workloads = {manifest["id"]: Workload(id=manifest["id"], manifest=manifest)}

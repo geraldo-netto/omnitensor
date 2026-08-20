@@ -964,18 +964,22 @@ def test_building_a_snapshot_reads_the_scheduler_without_mutating_it():
 def test_a_scheduler_observation_ticks_once_on_the_loop_and_then_only_reads():
     """The off-loop reader gets frozen figures, not the live mappings."""
     live_profiles = {"alpha": {"queued": 1, "running": 0}}
+    live_degraded = {"gpu": "ZeroDivisionError"}
     calls = []
     scheduler = SimpleNamespace(
         tick=lambda: calls.append("tick"),
         stats=lambda: {"queueDepth": 1, "runningProfiles": 0, "loads": {}},
         profile_stats=lambda: dict(live_profiles),
+        degraded_backends=lambda: dict(live_degraded),
     )
 
     view = SchedulerObservation.of(scheduler)
     live_profiles.clear()
+    live_degraded.clear()
 
     assert calls == ["tick"]
     assert view.profile_stats() == {"alpha": {"queued": 1, "running": 0}}
+    assert view.degraded_backends() == {"gpu": "ZeroDivisionError"}
     assert view.stats()["queueDepth"] == 1
     assert not hasattr(view, "tick")
 

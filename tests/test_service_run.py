@@ -1036,6 +1036,9 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
                 return {}
             return {"sample-workload": {"queued": self._queued, "running": self._running}}
 
+        def degraded_backends(self):
+            return {}
+
     manifest = sample_manifest(
         model={
             "id": "sample-model",
@@ -1071,6 +1074,20 @@ def test_profile_statuses_with_model_track_running_state(tmp_path):
         "queued": 5,
         "detail": "Serving on tpu",
         "reason": "serving",
+    }
+
+    # OMNI-0434: a backend that failed outside job execution used to publish
+    # "Serving on tpu" while failing every job handed to it.
+    class DegradedScheduler(StatsOnlyScheduler):
+        def degraded_backends(self):
+            return {"tpu": "ZeroDivisionError"}
+
+    degraded = profile_statuses(workloads, executors, DegradedScheduler(0), policy)
+    assert degraded["sample-workload"] == {
+        "status": "unavailable",
+        "queued": 0,
+        "detail": "tpu scheduling failed: ZeroDivisionError",
+        "reason": "runtime-unusable",
     }
 
 
@@ -1227,6 +1244,9 @@ def test_profile_statuses_do_not_leak_running_state_across_profiles():
     class OneBusyScheduler:
         def profile_stats(self):
             return {"busy-profile": {"queued": 2, "running": 1}}
+
+        def degraded_backends(self):
+            return {}
 
     model = {
         "id": "sample-model",

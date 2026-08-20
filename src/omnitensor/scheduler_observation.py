@@ -21,14 +21,19 @@ class SchedulerObservation:
 
     _stats: dict
     _profile_stats: dict
+    _degraded: dict
 
     @classmethod
     def of(cls, scheduler) -> SchedulerObservation:
         scheduler.tick()
-        return cls(scheduler.stats(), scheduler.profile_stats())
+        return cls(scheduler.stats(), scheduler.profile_stats(), scheduler.degraded_backends())
 
     def stats(self) -> dict:
         return self._stats
 
     def profile_stats(self) -> dict:
         return self._profile_stats
+
+    def degraded_backends(self) -> dict:
+        """Backends that failed outside job execution, frozen with the rest."""
+        return self._degraded

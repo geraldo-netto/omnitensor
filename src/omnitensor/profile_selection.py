@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from .execution import ExecutorSet
@@ -24,6 +24,8 @@ CONSENT_MISSING = "consent-missing"
 # schema, so a profile whose accelerator lease could not be re-established
 # reports the closest published code rather than inventing one.
 DEVICE_UNAVAILABLE = "device-absent"
+# The device is there; its scheduling loop is not usable any more.
+BACKEND_DEGRADED = "runtime-unusable"
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ class ReasonCodes:
     serving: str = SERVING
     consent_missing: str = CONSENT_MISSING
     device_unavailable: str = DEVICE_UNAVAILABLE
+    backend_degraded: str = BACKEND_DEGRADED
 
 
 DEFAULT_REASONS = ReasonCodes()
@@ -59,6 +62,7 @@ def profile_statuses(
 ) -> dict[str, dict]:
     """Runtime status per profile for the snapshot document."""
     per_profile = scheduler.profile_stats()
+    degraded = scheduler.degraded_backends()
     return {
         workload_id: profile_status(
             workload,
@@ -68,9 +72,37 @@ def profile_statuses(
             artifact_ready,
             permissions_missing,
             reasons,
+            degraded=degraded,
         )
         for workload_id, workload in workloads.items()
     }
+
+
+def policy_hold(
+    profile_id: str, queued: int, policy: PolicyState, reasons: ReasonCodes
+) -> dict | None:
+    """The status of a profile policy is holding, or ``None`` when it is not.
+
+    One rule for both kinds of profile: a paused runtime and a disabled profile
+    read the same to a person whether the work runs on an accelerator lane or
+    in a plugin worker.
+    """
+    if policy.paused:
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Runtime paused by policy",
+            "reason": reasons.paused_by_policy,
+        }
+    profile_policy = policy.profiles.get(profile_id)
+    if profile_policy is not None and not profile_policy.enabled:
+        return {
+            "status": "paused",
+            "queued": queued,
+            "detail": "Profile disabled by policy",
+            "reason": reasons.profile_disabled,
+        }
+    return None
 
 
 def profile_status(
@@ -81,23 +113,13 @@ def profile_status(
     artifact_ready: Callable[[Workload], tuple[bool, str]] | None = None,
     permissions_missing: Callable[[Workload], tuple[str, ...]] | None = None,
     reasons: ReasonCodes = DEFAULT_REASONS,
+    *,
+    degraded: Mapping[str, str] | None = None,
 ) -> dict:
     queued = counts["queued"]
-    profile_policy = policy.profiles.get(workload.id)
-    if policy.paused:
-        return {
-            "status": "paused",
-            "queued": queued,
-            "detail": "Runtime paused by policy",
-            "reason": reasons.paused_by_policy,
-        }
-    if profile_policy is not None and not profile_policy.enabled:
-        return {
-            "status": "paused",
-            "queued": queued,
-            "detail": "Profile disabled by policy",
-            "reason": reasons.profile_disabled,
-        }
+    held = policy_hold(workload.id, queued, policy, reasons)
+    if held is not None:
+        return held
     routed_executors = (
         executors.for_device(policy.device_choices.get(workload.id))
         if isinstance(executors, ExecutorSet)
@@ -110,6 +132,17 @@ def profile_status(
             "queued": queued,
             "detail": choice.reason,
             "reason": choice.code,
+        }
+    failure = (degraded or {}).get(choice.backend)
+    if failure is not None:
+        # The backend loop failed outside job execution and every queued job
+        # was failed with it. Saying "Serving on gpu" here showed a healthy
+        # profile that refuses every job it is given.
+        return {
+            "status": "unavailable",
+            "queued": queued,
+            "detail": f"{choice.backend} scheduling failed: {failure}",
+            "reason": reasons.backend_degraded,
         }
     if not workload.models:
         return {
@@ -193,20 +226,9 @@ def plugin_profile_status(
             "detail": "Accelerator lease could not be re-established; not accepting work",
             "reason": reasons.device_unavailable,
         }
-    if policy.paused:
-        return {
-            "status": "paused",
-            "queued": queued,
-            "detail": "Runtime paused by policy",
-            "reason": reasons.paused_by_policy,
-        }
-    if profile_policy is not None and not profile_policy.enabled:
-        return {
-            "status": "paused",
-            "queued": queued,
-            "detail": "Profile disabled by policy",
-            "reason": reasons.profile_disabled,
-        }
+    held = policy_hold(profile_id, queued, policy, reasons)
+    if held is not None:
+        return held
     running = counts["running"]
     weight = profile_policy.weight if profile_policy is not None else 1
     detail = (
@@ -223,6 +245,8 @@ def plugin_profile_status(
 
 
 __all__ = [
+    "BACKEND_DEGRADED",
+    "policy_hold",
     "ARTIFACT_UNAVAILABLE",
     "DEVICE_UNAVAILABLE",
     "DEFAULT_REASONS",
