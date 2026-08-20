@@ -18,3 +18,6 @@ packages = ["src/omnitensor_ask_selected_files"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "../../plugin-manifests/ask-selected-files.json" = "omnitensor_ask_selected_files/omnitensor-plugin.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

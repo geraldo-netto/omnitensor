@@ -18,3 +18,6 @@ packages = ["src/omnitensor_file_organizer"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "../../plugin-manifests/file-organizer.json" = "omnitensor_file_organizer/omnitensor-plugin.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
