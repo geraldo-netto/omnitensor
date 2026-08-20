@@ -28,7 +28,7 @@ import asyncio
 import logging
 import secrets
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from . import artifact_readiness as artifacts
@@ -202,6 +202,8 @@ class OmniTensorService:
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
         accelerator_device_ids: dict[str, str] | None = None,
         plugin_slots: int = DEFAULT_MAX_CONCURRENT,
+        workloads: Mapping[str, Workload] | None = None,
+        artifacts: ArtifactResolver | None = None,
     ):
         self._callers = CallerIdentityResolver()
         host = build_host_ports(
@@ -221,18 +223,25 @@ class OmniTensorService:
         # constructed, so `active_permissions` came from a deny-all stub: every
         # declared permission read as ungranted and nothing could change that.
         self._grants = grants if grants is not None else GrantLedger(grants_path)
-        self._artifacts = ArtifactResolver(
+        # The catalog and the resolver need only paths and each other, so the
+        # composition root builds both; what is left here is the wiring a
+        # caller who built neither still needs.
+        self._workloads = (
+            load_workload_catalog(workloads_path, model_bindings_root=model_bindings_path)
+            if workloads is None
+            else workloads
+        )
+        self._artifacts = artifacts or ArtifactResolver(
             artifact_root,
             ArtifactInstaller(artifact_root) if artifact_root else None,
             workloads_of=lambda: self._workloads,
-            plugins_of=lambda: self._plugin_runtime.snapshot.catalog.plugins,
         )
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
             selected_files_root=snapshot_path.parent / "plugin-inputs",
             worker_state_root=snapshot_path.parent / "plugin-state",
-            resolve_artifact=self._resolve_plugin_artifact,
+            resolve_artifact=self._artifacts.resolve_plugin,
             accelerator_devices=self._plugin_accelerator_devices,
             profile_accelerator_devices=self._plugin_accelerator_devices,
             profile_model_choice=self._plugin_model_choice,
@@ -244,12 +253,13 @@ class OmniTensorService:
                 progress.detail,
             ),
         )
+        # Whoever owns the plugin runtime names it to the resolver: a resolver
+        # built before it would report every plugin artifact as undeclared.
+        self._artifacts.reads_plugins_from(
+            lambda: self._plugin_runtime.snapshot.catalog.plugins
+        )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
-        self._workloads = load_workload_catalog(
-            workloads_path,
-            model_bindings_root=model_bindings_path,
-        )
         defaults = {
             workload_id: workload.default_policy()
             for workload_id, workload in self._workloads.items()
@@ -652,12 +662,6 @@ class OmniTensorService:
 
     def _resolve_artifact(self, artifact_id: str) -> ArtifactResolution:
         return self._artifacts.resolve(artifact_id)
-
-    def _resolve_plugin_artifact(
-        self,
-        reference: ArtifactReference,
-    ) -> ArtifactResolution:
-        return self._artifacts.resolve_plugin(reference)
 
     def _plugin_accelerator_devices(self, profile_id: str | None = None) -> dict[str, Path]:
         return artifacts.plugin_accelerator_devices(

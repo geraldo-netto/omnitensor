@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
+from .artifact_readiness import ArtifactResolver
 from .plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
+from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.grants import GrantLedger
 from .plugins.job_results import JobResultStore
 from .plugins.kernel_telemetry import UnixSocketAggregateSource
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
+from .registry import load_workload_catalog
 from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
 
 DEFAULT_STATE_PATH = paths.SNAPSHOT_PATH
@@ -142,7 +145,22 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
     given.
     """
     snapshot_path = Path(options["snapshot_path"])
+    # The workload catalog and the artifact resolver need only the paths and
+    # each other, so they are built here rather than by a constructor reading
+    # its own arguments. The resolver is told where plugins come from by
+    # whoever owns the plugin runtime, which is later than this.
+    workloads = load_workload_catalog(
+        options["workloads_path"],
+        model_bindings_root=options.get("model_bindings_path"),
+    )
+    artifact_root = options.get("artifact_root")
     return {
+        "workloads": workloads,
+        "artifacts": ArtifactResolver(
+            artifact_root,
+            ArtifactInstaller(artifact_root) if artifact_root else None,
+            workloads_of=lambda: workloads,
+        ),
         "grants": GrantLedger(options["grants_path"]),
         "job_results": JobResultStore(),
         "plugin_telemetry": PluginTelemetryRegistry(),

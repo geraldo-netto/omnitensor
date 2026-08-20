@@ -25,6 +25,7 @@ from omnitensor import (
     telemetry_observation,
 )
 from omnitensor import host as host_module
+from omnitensor.artifact_readiness import ArtifactResolver
 from omnitensor.composition import (
     ServiceEnvironment,
     _env_accelerator_device_ids,
@@ -746,6 +747,52 @@ def test_the_composition_root_constructs_the_adapters_the_runtime_used_to_build(
     assert isinstance(passed["kernel_telemetry_source"], UnixSocketAggregateSource)
     assert passed["cancellation_journal_path"] == tmp_path / "state" / "cancellations.json"
     assert passed["result_summaries"]._alert_id_factory().startswith("alert-")
+
+
+def test_the_root_builds_the_catalog_and_the_resolver_the_constructor_used_to(tmp_path):
+    """OMNI-0550: both need only the paths and each other.
+
+    The constructor read `workloads_path` and `artifact_root` to build them
+    for itself, so every caller got whatever a path argument implied rather
+    than what the root chose.
+    """
+    options = ServiceEnvironment.read(
+        {
+            "OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json"),
+            "OMNITENSOR_WORKLOADS": str(service.bundled_workloads_path()),
+            "OMNITENSOR_ARTIFACT_ROOT": str(tmp_path / "artifacts"),
+        }
+    ).service_options()
+    calls = []
+
+    build_service(lambda **given: calls.append(given), **options)
+
+    passed = calls[0]
+    assert isinstance(passed["artifacts"], ArtifactResolver)
+    assert "hardware-health" in passed["workloads"]
+    # Nothing named the plugin catalog yet, and a resolver that guessed one
+    # would answer for artifacts no plugin has declared.
+    assert passed["artifacts"]._plugins_of() == ()
+
+
+def test_a_service_given_a_catalog_and_a_resolver_builds_neither(fake_nodes, tmp_path):
+    resolver = ArtifactResolver(None, None, workloads_of=dict)
+    workloads = {}
+
+    built = service.OmniTensorService(
+        snapshot_path=tmp_path / "state/snapshot.json",
+        policy_path=tmp_path / "state/policy.json",
+        workloads_path=tmp_path / "unread",
+        discovery_paths=fake_nodes,
+        workloads=workloads,
+        artifacts=resolver,
+    )
+
+    assert built._artifacts is resolver
+    assert built._workloads is workloads
+    # And the runtime that owns the plugins named them to the resolver it was
+    # handed, rather than the resolver having to know where they live.
+    assert resolver._plugins_of() == built._plugin_runtime.snapshot.catalog.plugins
 
 
 def test_an_adapter_a_caller_supplies_wins_over_the_root_default(tmp_path):

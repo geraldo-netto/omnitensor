@@ -186,7 +186,9 @@ class ArtifactResolver:
     again.
 
     Workloads and the plugin catalog arrive as callables because both are
-    built after the resolver they hand to their collaborators.
+    built after the resolver they hand to their collaborators. The plugin
+    catalog may arrive later still — `reads_plugins_from` — because whoever
+    owns the plugin runtime builds it with this resolver in hand.
     """
 
     __slots__ = ("_plugins_of", "_resolutions", "_root", "_store", "_workloads_of")
@@ -197,13 +199,23 @@ class ArtifactResolver:
         store,
         *,
         workloads_of: Callable[[], Mapping[str, Workload]],
-        plugins_of: Callable[[], Sequence[object]],
+        plugins_of: Callable[[], Sequence[object]] = tuple,
     ) -> None:
         self._root = artifact_root
         self._store = store
         self._workloads_of = workloads_of
         self._plugins_of = plugins_of
         self._resolutions: dict[str, tuple] = {}
+
+    def reads_plugins_from(self, plugins_of: Callable[[], Sequence[object]]) -> None:
+        """Name the plugin catalog once whoever owns it exists.
+
+        A resolver with no catalog answers for workloads and reports every
+        plugin artifact as undeclared, which is the right answer for a runtime
+        that has no plugins and the wrong one for a runtime whose plugins were
+        built after it.
+        """
+        self._plugins_of = plugins_of
 
     @property
     def store(self):

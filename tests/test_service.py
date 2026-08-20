@@ -100,7 +100,7 @@ def test_plugin_artifact_resolution_is_fail_closed_without_a_store(fake_nodes, t
     service = build_service(fake_nodes, tmp_path)
     reference = ArtifactReference("provider-model", "1.0.0", "gguf", "a" * 64)
 
-    resolution = service._resolve_plugin_artifact(reference)
+    resolution = service._artifacts.resolve_plugin(reference)
 
     assert resolution == ArtifactResolution(
         False,
@@ -123,7 +123,7 @@ def test_plugin_artifact_resolution_delegates_the_exact_reference(fake_nodes, tm
 
     service._artifact_store = Store()
 
-    assert service._resolve_plugin_artifact(reference) is expected
+    assert service._artifacts.resolve_plugin(reference) is expected
     assert calls == [reference]
 
 
@@ -395,7 +395,7 @@ def test_default_plugin_runtime_receives_exact_host_owned_resources(
     assert observed["grant_source"] is service._grants
     assert observed["selected_files_root"] == snapshot.parent / "plugin-inputs"
     assert observed["worker_state_root"] == snapshot.parent / "plugin-state"
-    assert observed["resolve_artifact"] == service._resolve_plugin_artifact
+    assert observed["resolve_artifact"] == service._artifacts.resolve_plugin
     assert observed["accelerator_devices"] == service._plugin_accelerator_devices
     progress = SimpleNamespace(job_id="job", stage="load", fraction=0.5, detail="working")
     calls = []
