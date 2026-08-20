@@ -110,19 +110,27 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # was removed rather than kept in sync. `grounded-answer` gained the pass
     # planner that replaced the top-eight span cut, which is arithmetic over
     # the context window and worth mutating.
+    #
+    # The counts moved again when the shape those callables had was collapsed:
+    # four `…Errorǁ__init__` selectors were the same three lines, and mutating
+    # them four times measured one behaviour four times, so `runtime-contract`
+    # tracks `StableError.__init__` once instead. `grounded-answer` follows
+    # `document_qa`'s split into the span index and the answer contract, and
+    # `scheduler` follows `_BackendQueue`'s arithmetic into `stride`, where the
+    # weighting and the held-out clamp actually live now.
     assert [len(shard.selectors) for shard in manifest.shards] == [
-        44,
+        43,
         3,
-        53,
-        21,
-        17,
+        56,
+        34,
+        18,
         2,
-        5,
-        24,
-        10,
+        6,
+        31,
+        13,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 191
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 218
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
@@ -135,7 +143,9 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.outputcontract",
         "omnitensor.plugins.acceptance_kit",
         "omnitensor.plugins.document_acceptance",
+        "omnitensor.plugins.document_answer",
         "omnitensor.plugins.document_qa",
+        "omnitensor.plugins.document_spans",
         "omnitensor.plugins.event_calendar",
         "omnitensor.plugins.event_confirmation",
         "omnitensor.plugins.event_passes",
@@ -143,6 +153,8 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         "omnitensor.plugins.fragments",
         "omnitensor.scheduler",
         "omnitensor.snapshot",
+        "omnitensor.stable_error",
+        "omnitensor.stride",
         "omnitensor.tensorcontract",
         "omnitensor.training.binding",
     }
@@ -170,7 +182,11 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
             "omnitensor.plugins.event_workload",
             "omnitensor.plugins.fragments",
         },
-        "grounded-answer": {"omnitensor.plugins.document_qa"},
+        "grounded-answer": {
+            "omnitensor.plugins.document_answer",
+            "omnitensor.plugins.document_qa",
+            "omnitensor.plugins.document_spans",
+        },
         "mutation-launcher": {"omnitensor.mutation_engine"},
     }
     for name, modules in expected_hotspots.items():
@@ -596,8 +612,13 @@ def test_campaign_cli_gates_selected_shard_and_validates_mode_options(
             {"threshold": 90.0, "executable": "/venv/bin/mutmut"},
         )
     ]
+    selectors = (
+        load_mutation_manifest(MANIFEST, source_root=ROOT / "src")
+        .shard("runtime-contract")
+        .selectors
+    )
     assert capsys.readouterr().out == (
-        "mutation shard runtime-contract: 5 callables at or above 90%\n"
+        f"mutation shard runtime-contract: {len(selectors)} callables at or above 90%\n"
     )
 
     monkeypatch.setattr(
@@ -643,7 +664,11 @@ def test_mutation_quality_accepts_the_same_manifest_shard(tmp_path, capsys):
         )
         == 0
     )
-    assert capsys.readouterr().out == ("per-callable mutation score: 5 callables at or above 80%\n")
+    # Derived, not pinned: a shard gaining a callable is not a defect in the
+    # quality gate, and pinning the count made this test fail for refactors.
+    assert capsys.readouterr().out == (
+        f"per-callable mutation score: {len(shard.selectors)} callables at or above 80%\n"
+    )
     assert (
         mutation_quality_main(
             [str(report), "--selector-file", str(MANIFEST), "--source-root", str(ROOT / "src")]

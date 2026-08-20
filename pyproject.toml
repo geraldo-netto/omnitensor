@@ -111,7 +111,9 @@ only_mutate = [
     "src/omnitensor/outputcontract.py",
     "src/omnitensor/plugins/acceptance_kit.py",
     "src/omnitensor/plugins/document_acceptance.py",
+    "src/omnitensor/plugins/document_answer.py",
     "src/omnitensor/plugins/document_qa.py",
+    "src/omnitensor/plugins/document_spans.py",
     "src/omnitensor/plugins/event_calendar.py",
     "src/omnitensor/plugins/event_confirmation.py",
     "src/omnitensor/plugins/event_passes.py",
@@ -119,6 +121,8 @@ only_mutate = [
     "src/omnitensor/plugins/fragments.py",
     "src/omnitensor/scheduler.py",
     "src/omnitensor/snapshot.py",
+    "src/omnitensor/stable_error.py",
+    "src/omnitensor/stride.py",
     "src/omnitensor/tensorcontract.py",
     # Still mutated: the campaign reads this source tree, which holds both
     # distributions. Only the wheel boundary moved.
