@@ -20,7 +20,6 @@ DEFAULT_BUILD_ROOT = "~/.local/share/omnitensor/document-model-build"
 DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
 DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
 DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
-PRODUCER_CPU_REFERENCE_BACKEND = "producer-cpu-reference"
 
 _PORTABLE_INPUT_NAMES = ("input_ids", "attention_mask", "token_type_ids")
 _NATIVE_DTYPES = {

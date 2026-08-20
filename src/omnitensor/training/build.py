@@ -23,7 +23,7 @@ from .tabular import (
     BuildExample,
     JsonlPolicy,
     chronological_split,
-    fit_balanced_logistic,
+    fit_output,
     load_bounded_jsonl,
     load_onnx_dependency,
     normalized_logistic_model,
@@ -35,8 +35,6 @@ from .tabular import (
 )
 from .tabular import binary_auc as _auc
 from .tabular import normalization as _normalization
-from .tabular import normalized_features as _normalized_features
-from .tabular import stable_sigmoid as _sigmoid
 from .tabular import unit_interval as _unit_interval
 
 BUILD_RECIPE = "metadata-risk-ranking-v1"
@@ -180,7 +178,7 @@ class BuildAdvisorTrainer:
         _require_binary_classes(training, self._minimum_class_examples, "training build risk")
         _require_binary_classes(holdout, self._minimum_class_examples, "holdout build risk")
         means, scales = _normalization(training)
-        outputs = [_fit_output(training, lambda item: item.build_failed, means, scales)]
+        outputs = [fit_output(training, lambda item: item.build_failed, means, scales)]
         for check in self._optional:
             check_training = tuple(item for item in training if check in item.executed_optional)
             _require_check_classes(
@@ -189,7 +187,7 @@ class BuildAdvisorTrainer:
                 self._minimum_check_class_examples,
             )
             outputs.append(
-                _fit_output(
+                fit_output(
                     check_training,
                     lambda item, selected=check: int(selected in item.failed_optional),
                     means,
@@ -428,24 +426,6 @@ def _require_check_classes(examples: Sequence[BuildExample], check: str, minimum
             "class-imbalance",
             f"optional check {check} needs at least {minimum} failed and passed examples",
         )
-
-
-def _fit_output(
-    examples: Sequence[BuildExample],
-    label_of,
-    means: tuple[float, ...],
-    scales: tuple[float, ...],
-) -> tuple[tuple[float, ...], float]:
-    return fit_balanced_logistic(
-        examples,
-        label_of,
-        lambda item: item.features,
-        means,
-        scales,
-        iterations=240,
-        normalize=_normalized_features,
-        sigmoid=_sigmoid,
-    )
 
 
 def _risk_auc(model: BuildAdvisorModel, examples: Sequence[BuildExample]) -> float:

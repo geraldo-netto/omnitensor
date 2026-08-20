@@ -27,9 +27,9 @@ from omnitensor.training.contracts import TrainingError, TrainingReport, Trainin
 from omnitensor.training.forecast import ForecastTrainer, forecast_dataset
 from omnitensor.training.installation import (
     _binding_manifest,
-    _validated_targets,
     available_targets,
     install_training,
+    validated_targets,
 )
 
 
@@ -139,14 +139,14 @@ def test_dataset_refuses_duplicate_or_decreasing_observation_time(timestamp):
 )
 def test_target_validation_has_stable_failures(targets, detail):
     with pytest.raises(TrainingError) as captured:
-        _validated_targets(targets)
+        validated_targets(targets)
 
     assert captured.value.code == "targets-invalid"
     assert captured.value.detail == detail
 
 
 def test_target_validation_returns_canonical_lane_order():
-    assert _validated_targets(("tpu", "gpu", "npu")) == ("gpu", "npu", "tpu")
+    assert validated_targets(("tpu", "gpu", "npu")) == ("gpu", "npu", "tpu")
 
 
 @given(

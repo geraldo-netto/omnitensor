@@ -19,13 +19,13 @@ from omnitensor.telemetry_types import (
     hardware_sample_error,
 )
 
-from .build import _fit_output
 from .contracts import MAX_INPUT_WIDTH, TrainingError, write_training_report
 from .tabular import (
     BuildAdvisorModel,
     BuildExample,
     JsonlPolicy,
     chronological_split,
+    fit_output,
     load_bounded_jsonl,
     load_onnx_dependency,
     normalized_logistic_model,
@@ -351,7 +351,7 @@ class HardwareHealthTrainer:
         _require_classes(training, self._minimum_class_examples, "training")
         _require_classes(holdout, self._minimum_class_examples, "holdout")
         means, scales = _normalization(training)
-        weights, intercept = _fit_output(training, lambda item: item.build_failed, means, scales)
+        weights, intercept = fit_output(training, lambda item: item.build_failed, means, scales)
         model = BuildAdvisorModel(
             means,
             scales,

@@ -30,10 +30,8 @@ from omnitensor.training.build import (
     OnnxBuildExporter,
     _auc,
     _build_examples,
-    _fit_output,
     _history_line,
     _normalization,
-    _normalized_features,
     _path_features,
     _positive_integer,
     _ranking_mrr,
@@ -41,7 +39,6 @@ from omnitensor.training.build import (
     _require_binary_classes,
     _require_check_classes,
     _risk_auc,
-    _sigmoid,
     _time_split,
     _unit_interval,
     _validate_checks,
@@ -50,6 +47,9 @@ from omnitensor.training.build import (
 )
 from omnitensor.training.cli import build_train_main
 from omnitensor.training.contracts import TrainingError
+from omnitensor.training.tabular import fit_output
+from omnitensor.training.tabular import normalized_features as _normalized_features
+from omnitensor.training.tabular import stable_sigmoid as _sigmoid
 
 MANDATORY = ("security",)
 OPTIONAL = ("lint", "integration")
@@ -677,7 +677,7 @@ def test_fit_prediction_auc_and_ranking_contract():
         lambda item: int("lint" in item.failed_optional),
         lambda item: int("integration" in item.failed_optional),
     ):
-        weight, intercept = _fit_output(examples, label_of, means, scales)
+        weight, intercept = fit_output(examples, label_of, means, scales)
         weights.append(weight)
         intercepts.append(intercept)
     model = BuildAdvisorModel(
@@ -714,7 +714,7 @@ def test_fit_output_numeric_regression_is_deterministic():
         for index in range(10)
     )
     means, scales = _normalization(examples)
-    weights, intercept = _fit_output(
+    weights, intercept = fit_output(
         examples,
         lambda item: item.build_failed,
         means,

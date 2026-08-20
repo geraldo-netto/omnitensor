@@ -5,32 +5,31 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..document_model_runners import BgeTokenizer
-from ..document_model_types import (
-    PRODUCER_CPU_REFERENCE_BACKEND,
-    DocumentModelError,
-)
+from ..document_model_types import DocumentModelError
 
-_PRODUCER_CAPABILITY = object()
+# Build-time only, and named here rather than in the service's core types: it
+# identifies the numerical-equivalence oracle a producer runs once, and having
+# a CPU backend identifier one import away from the runtime made it read like
+# an execution path the service could take. There is none.
+PRODUCER_CPU_REFERENCE_BACKEND = "producer-cpu-reference"
 
 
 class PortableBgeRunner:
-    """CPU ONNX oracle restricted to the one-shot producer parity gate."""
+    """CPU ONNX oracle for the one-shot producer parity gate.
+
+    **Producer-only, by invariant.** This runs while a model is being built,
+    to prove the ncnn export agrees numerically with its ONNX source; the
+    service never constructs it, and this module ships in the training
+    distribution rather than the runtime one. It was guarded by a module-level
+    sentinel passed as a private keyword, which restricted nothing: the
+    factory that held it is importable by anyone and re-exported from the
+    facade, so the guard only made the honest call site longer.
+    """
 
     backend = PRODUCER_CPU_REFERENCE_BACKEND
     producer_only = True
 
-    def __init__(
-        self,
-        model: Path,
-        tokenizer: BgeTokenizer,
-        *,
-        _capability=None,
-    ):
-        if _capability is not _PRODUCER_CAPABILITY:
-            raise DocumentModelError(
-                "cpu-reference-forbidden",
-                "CPU reference execution is restricted to document-model production",
-            )
+    def __init__(self, model: Path, tokenizer: BgeTokenizer):
         try:
             import numpy  # noqa: PLC0415
             import onnxruntime  # noqa: PLC0415
@@ -68,11 +67,7 @@ class PortableBgeRunner:
 
 def _producer_cpu_reference_runner(model: Path, tokenizer: BgeTokenizer) -> PortableBgeRunner:
     """Construct the CPU oracle for document-model production only."""
-    return PortableBgeRunner(
-        model,
-        tokenizer,
-        _capability=_PRODUCER_CAPABILITY,
-    )
+    return PortableBgeRunner(model, tokenizer)
 
 
 ProducerCpuBgeReferenceRunner = PortableBgeRunner

@@ -11,13 +11,13 @@ from typing import Protocol
 import omnitensor.training.desktop_history as _desktop_history
 from omnitensor.preparation import file_digest
 
-from .build import _fit_output
 from .contracts import TrainingError, write_training_report
 from .tabular import (
     BuildAdvisorModel,
     BuildExample,
     JsonlPolicy,
     chronological_split,
+    fit_output,
     load_bounded_jsonl,
     load_onnx_dependency,
     normalized_logistic_model,
@@ -231,7 +231,7 @@ class DesktopSuggestionTrainer:
         build_examples = tuple(_build_example(item, suggestions) for item in training)
         means, scales = _normalization(build_examples)
         fitted = tuple(
-            _fit_output(
+            fit_output(
                 build_examples,
                 lambda item, index=index: int(item.executed_optional[index] == "1"),
                 means,

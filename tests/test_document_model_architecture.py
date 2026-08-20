@@ -91,12 +91,12 @@ def test_document_model_private_facade_factories_resolve_live_legacy_seams(monke
     monkeypatch.setattr(facade, "fixed_bge_model", lambda torch, encoder: (torch, encoder))
     assert facade._fixed_bge_model("torch", "encoder") == ("torch", "encoder")
 
+    # One factory, resolved live: the branch that chose between this and a
+    # rebound PortableBgeRunner could never take its second arm, since both
+    # names are bound to the same object by the module that defines them.
     monkeypatch.setattr(facade, "_canonical_cpu_reference_factory", lambda model, tokenizer: fixed)
     assert facade._portable_reference_factory(tmp_path / "model", object()) is fixed
-
-    alternate = object()
-    monkeypatch.setattr(facade, "PortableBgeRunner", lambda model, tokenizer: alternate)
-    assert facade._portable_reference_factory(tmp_path / "model", object()) is alternate
+    assert facade.PortableBgeRunner is facade.ProducerCpuBgeReferenceRunner
 
 
 def test_document_model_leaves_import_before_facade_and_never_import_it():

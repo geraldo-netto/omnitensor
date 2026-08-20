@@ -93,7 +93,7 @@ def install_training(
     """Compile, digest-install, then atomically publish a restricted binding."""
     report_file = Path(report_path)
     report = TrainingReport.load(report_file)
-    selected = _validated_targets(targets)
+    selected = validated_targets(targets)
     providers = tuple(compilers) if compilers is not None else default_target_compilers(_tool)
     try:
         catalog = compiler_catalog(providers)
@@ -136,7 +136,7 @@ def install_training(
     return InstalledTraining(report.spec.profile_id, binding_path, tuple(installed))
 
 
-def _validated_targets(targets: Sequence[str]) -> tuple[str, ...]:
+def validated_targets(targets: Sequence[str]) -> tuple[str, ...]:
     if isinstance(targets, (str, bytes)) or not targets:
         raise TrainingError("targets-invalid", "at least one target is required")
     selected = tuple(targets)

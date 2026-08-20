@@ -25,7 +25,6 @@ from ..document_model_types import (
     MAX_TEXT_BYTES,
     MIN_NATIVE_COSINE,
     MIN_RETRIEVAL_OVERLAP,
-    PRODUCER_CPU_REFERENCE_BACKEND,
     PROFILE_ID,
     QUERY_PREFIX,
     RECIPE_ID,
@@ -183,9 +182,8 @@ def _binding_document(source, artifact, portable_sha, report_sha, evidence, bund
 
 
 def _portable_reference_factory(model: Path, tokenizer: BgeTokenizer):
-    if PortableBgeRunner is ProducerCpuBgeReferenceRunner:
-        return _canonical_cpu_reference_factory(model, tokenizer)
-    return PortableBgeRunner(model, tokenizer)
+    """The producer's CPU oracle; the only portable runner this path builds."""
+    return _canonical_cpu_reference_factory(model, tokenizer)
 
 
 def install_document_model(

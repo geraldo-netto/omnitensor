@@ -69,10 +69,10 @@ def test_legacy_build_symbols_are_canonical_shared_objects():
     example = BuildExample(1, (2.0,), 0, (), ())
     assert repr(example).startswith("BuildExample(")
     assert pickle.loads(pickle.dumps(example)) == example
-    assert build._fit_output is hardware._fit_output is desktop._fit_output
+    assert build.fit_output is hardware.fit_output is desktop.fit_output
     assert build._normalization is hardware._normalization is desktop._normalization
     assert build._auc is hardware._auc is binary_auc
-    assert build._sigmoid is stable_sigmoid
+    assert BuildAdvisorModel._probability is stable_sigmoid
 
 
 def test_model_prediction_uses_the_package_functions_not_a_patched_module():
@@ -81,29 +81,6 @@ def test_model_prediction_uses_the_package_functions_not_a_patched_module():
     assert BuildAdvisorModel._probability is stable_sigmoid
     model = BuildAdvisorModel((1.0,), (2.0,), ((2.0,),), (1.0,))
     assert model.predict((9.0,)) == (stable_sigmoid(9.0),)
-
-
-def test_legacy_build_fit_callbacks_are_resolved_at_fit_time(monkeypatch):
-    normalized = []
-    probabilities = []
-
-    def normalize(features, means, scales):
-        normalized.append((features, means, scales))
-        return (3.0,)
-
-    def probability(value):
-        probabilities.append(value)
-        return 0.25
-
-    monkeypatch.setattr(build, "_normalized_features", normalize)
-    monkeypatch.setattr(build, "_sigmoid", probability)
-    examples = (
-        BuildExample(0, (0.0,), 0, (), ()),
-        BuildExample(1, (1.0,), 1, (), ()),
-    )
-    build._fit_output(examples, lambda item: item.build_failed, (0.5,), (0.5,))
-    assert len(normalized) == 480
-    assert len(probabilities) == 480
 
 
 @pytest.mark.parametrize(

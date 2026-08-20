@@ -38,7 +38,7 @@ from .compilers import (
     compiler_catalog,
 )
 from .contracts import TrainingError, validate_training_report_document
-from .installation import InstalledTraining, InstalledVariant, _validated_targets
+from .installation import InstalledTraining, InstalledVariant, validated_targets
 
 MAX_NUMERIC_REPORT_BYTES = 1024 * 1024
 MAX_PARITY_ERROR = 1e-4
@@ -122,15 +122,7 @@ def _load_numeric_document(report_path: Path) -> dict:
         raise TrainingError("report-invalid", "numeric report version is unsupported")
     if document.get("recipe") not in NUMERIC_RECIPES:
         raise TrainingError("report-invalid", "numeric report recipe is unsupported")
-    model = document.get("model")
-    if (
-        not isinstance(model, dict)
-        or any(name not in model for name in ("format", "filename", "sha256"))
-        or not isinstance(model.get("sha256"), str)
-    ):
-        raise TrainingError("report-invalid", "portable model declaration is invalid")
-    if model.get("format") != "onnx" or model.get("filename") != "model.onnx":
-        raise TrainingError("report-invalid", "numeric report must declare model.onnx")
+    _validate_portable_model(document.get("model"))
     _validate_numeric_contract(document.get("tensorContract"), document.get("outputContract"))
     if document.get("targets") != {
         "tpu": "uncompiled",
@@ -142,9 +134,13 @@ def _load_numeric_document(report_path: Path) -> dict:
     return document
 
 
-def _portable_model_identity(report_path: Path, document: dict) -> tuple[Path, str]:
-    """Bind one exact local ONNX file to its report declaration."""
-    model = document.get("model")
+def _validate_portable_model(model: object) -> dict:
+    """The report's own model declaration, or a stable refusal.
+
+    One block, checked once in the document load and once again where the file
+    is bound: they were character-for-character identical, so a change to one
+    silently disagreed with the other.
+    """
     if (
         not isinstance(model, dict)
         or any(name not in model for name in ("format", "filename", "sha256"))
@@ -153,6 +149,12 @@ def _portable_model_identity(report_path: Path, document: dict) -> tuple[Path, s
         raise TrainingError("report-invalid", "portable model declaration is invalid")
     if model["format"] != "onnx" or model["filename"] != "model.onnx":
         raise TrainingError("report-invalid", "numeric report must declare model.onnx")
+    return model
+
+
+def _portable_model_identity(report_path: Path, document: dict) -> tuple[Path, str]:
+    """Bind one exact local ONNX file to its report declaration."""
+    model = _validate_portable_model(document.get("model"))
     model_path = report_path.parent / "model.onnx"
     try:
         observed_model_digest = file_digest(model_path)
@@ -203,7 +205,7 @@ def promote_numeric_training(
 ) -> InstalledTraining:
     """Compile, parity-gate, sign, install, and bind one numeric report."""
     report = NumericTrainingReport.load(report_path)
-    selected = _validated_targets(targets)
+    selected = validated_targets(targets)
     if "tpu" in selected:
         raise TrainingError(
             "source-incompatible",

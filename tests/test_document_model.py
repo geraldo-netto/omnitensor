@@ -544,17 +544,19 @@ def test_portable_runner_uses_only_cpu_reference_provider(monkeypatch, tmp_path)
     )
 
 
-def test_portable_cpu_reference_requires_producer_capability_before_import(monkeypatch, tmp_path):
+def test_the_portable_cpu_reference_says_it_is_producer_only(monkeypatch, tmp_path):
+    """OMNI-0469: the sentinel restricted nobody; the invariant is the point."""
+    assert PortableBgeRunner.backend == "producer-cpu-reference"
+    assert PortableBgeRunner.producer_only is True
+    assert PortableBgeRunner.__module__ == "omnitensor.training.document_model_cpu_reference"
+    assert "roducer-only" in PortableBgeRunner.__doc__
+
     monkeypatch.setitem(sys.modules, "onnxruntime", None)
     with pytest.raises(DocumentModelError) as refused:
         PortableBgeRunner(tmp_path / "reference.onnx", _StaticTokenizer())
-    _assert_document_error(
-        refused.value,
-        "cpu-reference-forbidden",
-        "CPU reference execution is restricted to document-model production",
-    )
-    assert PortableBgeRunner.backend == "producer-cpu-reference"
-    assert PortableBgeRunner.producer_only is True
+    # Without onnxruntime it fails as a missing producer dependency, not as a
+    # capability check nothing enforced.
+    assert refused.value.code in {"producer-dependency-missing", "portable-invalid"}
 
 
 def test_native_tensor_contract_is_derived_without_mutating_portable_recipe(tmp_path):
@@ -1131,7 +1133,9 @@ def test_install_document_model_publishes_restricted_gpu_binding(  # noqa: C901
         observed["portable_runner"] = (path, received_tokenizer)
         return portable_runner
 
-    monkeypatch.setattr("omnitensor.training.document_model.PortableBgeRunner", portable_factory)
+    monkeypatch.setattr(
+        "omnitensor.training.document_model._canonical_cpu_reference_factory", portable_factory
+    )
     native = SimpleNamespace(device_index=1, device_name="RX 6600 XT")
 
     def native_factory(path, received_tokenizer, *, device_index):
