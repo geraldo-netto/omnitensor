@@ -204,6 +204,7 @@ class OmniTensorService:
         plugin_slots: int = DEFAULT_MAX_CONCURRENT,
         workloads: Mapping[str, Workload] | None = None,
         artifacts: ArtifactResolver | None = None,
+        plugin_settings: PluginSettingsStore | None = None,
     ):
         self._callers = CallerIdentityResolver()
         host = build_host_ports(
@@ -260,15 +261,16 @@ class OmniTensorService:
         )
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
-        defaults = {
-            workload_id: workload.default_policy()
-            for workload_id, workload in self._workloads.items()
-        }
-        storage = policy_storage or PolicyStore(policy_path, defaults)
-        # Beside the policy store rather than in it: a workload's tuning is
-        # validated against that workload's own schema, and a policy document
-        # holding documents no schema here describes could not be validated.
-        self._plugin_settings = PluginSettingsStore(snapshot_path.parent / "plugin-settings")
+        storage = policy_storage or PolicyStore(
+            policy_path,
+            {
+                workload_id: workload.default_policy()
+                for workload_id, workload in self._workloads.items()
+            },
+        )
+        self._plugin_settings = plugin_settings or PluginSettingsStore(
+            snapshot_path.parent / "plugin-settings"
+        )
         self.control = ControlService(
             storage,
             on_applied=self._policy_changed,

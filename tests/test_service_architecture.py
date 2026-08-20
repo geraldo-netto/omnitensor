@@ -53,6 +53,7 @@ from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
 from omnitensor.plugins.grants import GrantLedger
 from omnitensor.plugins.job_results import JobResultStore
 from omnitensor.plugins.kernel_telemetry import UnixSocketAggregateSource
+from omnitensor.plugins.settings import PluginSettingsStore
 from omnitensor.plugins.summaries import ResultSummaryRegistry
 from omnitensor.plugins.telemetry import PluginTelemetryRegistry
 from omnitensor.ports import (
@@ -66,6 +67,7 @@ from omnitensor.ports import (
 )
 from omnitensor.scheduler_observation import SchedulerObservation
 from omnitensor.socket_transport import SocketControlTransport, default_socket_path
+from omnitensor.state import PolicyStore
 
 MUTMUT_TRAMPOLINE_MODULE = "mutmut.mutation.trampoline"
 MUTMUT_MAIN_WRAPPER_PREFIX = "x_main__mutmut_"
@@ -773,6 +775,26 @@ def test_the_root_builds_the_catalog_and_the_resolver_the_constructor_used_to(tm
     # Nothing named the plugin catalog yet, and a resolver that guessed one
     # would answer for artifacts no plugin has declared.
     assert passed["artifacts"]._plugins_of() == ()
+
+
+def test_the_root_builds_the_policy_store_from_the_catalog_it_holds(tmp_path):
+    """OMNI-0551: the store's defaults are the catalog's default policies."""
+    options = ServiceEnvironment.read(
+        {
+            "OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json"),
+            "OMNITENSOR_WORKLOADS": str(service.bundled_workloads_path()),
+            "OMNITENSOR_POLICY_PATH": str(tmp_path / "state" / "policy.json"),
+        }
+    ).service_options()
+    calls = []
+
+    build_service(lambda **given: calls.append(given), **options)
+
+    passed = calls[0]
+    assert isinstance(passed["policy_storage"], PolicyStore)
+    assert isinstance(passed["plugin_settings"], PluginSettingsStore)
+    assert "hardware-health" in passed["policy_storage"].load().profiles
+    assert passed["plugin_settings"]._root == tmp_path / "state" / "plugin-settings"
 
 
 def test_a_service_given_a_catalog_and_a_resolver_builds_neither(fake_nodes, tmp_path):
