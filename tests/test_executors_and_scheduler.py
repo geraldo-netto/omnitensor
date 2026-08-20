@@ -851,11 +851,11 @@ def test_stride_late_joiner_alternates_instead_of_bursting():
 
     queue = _BackendQueue()
     for index in range(20):
-        queue.push(_Job("a", f"a-{index}", [], future=None))
+        queue.push_job(_Job("a", f"a-{index}", [], future=None))
     for _ in range(10):
         assert queue.pop_weighted(lambda _p: 1).workload_id == "a"
     for index in range(10):
-        queue.push(_Job("b", f"b-{index}", [], future=None))
+        queue.push_job(_Job("b", f"b-{index}", [], future=None))
     served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(20)]
     # Regression (OMNI-0008): with equal weights the late joiner used to be
     # served ten times in a row ("catching up" from pass 0).
@@ -866,14 +866,14 @@ def test_queue_prunes_drained_profiles_and_rejoins_at_virtual_time():
     from omnitensor.scheduler import _BackendQueue, _Job
 
     queue = _BackendQueue()
-    queue.push(_Job("a", "a-0", [], future=None))
-    queue.push(_Job("b", "b-0", [], future=None))
+    queue.push_job(_Job("a", "a-0", [], future=None))
+    queue.push_job(_Job("b", "b-0", [], future=None))
     assert queue.pop_weighted(lambda _p: 1) is not None
     assert queue.pop_weighted(lambda _p: 1) is not None
     assert queue.profiles == {}
     assert queue.order == []
     assert queue.passes == {}
-    queue.push(_Job("a", "a-1", [], future=None))
+    queue.push_job(_Job("a", "a-1", [], future=None))
     assert queue.passes == {"a": 0.0}
 
 
@@ -1092,8 +1092,8 @@ def test_backend_queue_initial_state_and_exact_bounded_stride():
     queue = _BackendQueue()
     assert queue.busy_ms == 0.0
     assert queue.load is None
-    queue.push(_Job("alpha", "first", [], future=None))
-    queue.push(_Job("alpha", "second", [], future=None))
+    queue.push_job(_Job("alpha", "first", [], future=None))
+    queue.push_job(_Job("alpha", "second", [], future=None))
 
     def oversized_weight(profile_id):
         assert profile_id == "alpha"
@@ -1108,8 +1108,8 @@ def test_a_profile_held_out_by_policy_does_not_burst_when_re_enabled():
     eligible for, then monopolize the device catching up."""
     queue = _BackendQueue()
     for index in range(10):
-        queue.push(_Job("held", f"held-{index}", [], future=None))
-        queue.push(_Job("served", f"served-{index}", [], future=None))
+        queue.push_job(_Job("held", f"held-{index}", [], future=None))
+        queue.push_job(_Job("served", f"served-{index}", [], future=None))
 
     for _ in range(8):
         assert queue.pop_weighted(lambda _p: 1, lambda p: p == "served").workload_id == ("served")
@@ -1123,9 +1123,9 @@ def test_holding_out_a_profile_does_not_starve_it_either():
     """Clamping raises a stale pass to virtual time and never past it, so a
     re-admitted profile is served next rather than pushed to the back."""
     queue = _BackendQueue()
-    queue.push(_Job("held", "held-0", [], future=None))
-    queue.push(_Job("served", "served-0", [], future=None))
-    queue.push(_Job("served", "served-1", [], future=None))
+    queue.push_job(_Job("held", "held-0", [], future=None))
+    queue.push_job(_Job("served", "served-0", [], future=None))
+    queue.push_job(_Job("served", "served-1", [], future=None))
 
     queue.pop_weighted(lambda _p: 1, lambda p: p == "served")
 
@@ -1137,8 +1137,8 @@ def test_clamping_leaves_an_ordinary_unserved_profile_alone():
     """Not yet served is not the same as held out; stride must still apply."""
     queue = _BackendQueue()
     for index in range(4):
-        queue.push(_Job("a", f"a-{index}", [], future=None))
-        queue.push(_Job("b", f"b-{index}", [], future=None))
+        queue.push_job(_Job("a", f"a-{index}", [], future=None))
+        queue.push_job(_Job("b", f"b-{index}", [], future=None))
 
     served = [queue.pop_weighted(lambda _p: 1).workload_id for _ in range(4)]
 

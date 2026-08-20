@@ -34,10 +34,10 @@ Tuning lives in ``docs/plugin-admission.md``.
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from collections.abc import Callable
 
 from .job_ports import JobDispatchError
+from .stride import StrideQueue
 
 # How many plugin jobs may run at once, across every plugin.  Four: wide enough
 # that ordinary use does not queue behind one long answer, narrow enough that
@@ -51,8 +51,6 @@ MAX_CONCURRENT_LIMIT = 32
 # at admission, before an id is minted, rather than waiting forever.
 DEFAULT_MAX_WAITING = 64
 MAX_WAITING_LIMIT = 1024
-# The stride ceiling, matching the scheduler: policy weights are 1..5.
-MAX_STRIDE_WEIGHT = 5
 
 
 def _bounded(value: object, name: str, limit: int) -> int:
@@ -81,9 +79,9 @@ class PluginAdmissionQueue:
         self._pressure = pressure
         self._max_concurrent = _bounded(max_concurrent, "max_concurrent", MAX_CONCURRENT_LIMIT)
         self._max_waiting = _bounded(max_waiting, "max_waiting", MAX_WAITING_LIMIT)
-        self._waiting: dict[str, deque[asyncio.Future]] = {}
-        self._order: list[str] = []
-        self._passes: dict[str, float] = {}
+        # The stride rule itself lives in one place; this pool only decides
+        # how many may run and what waits.
+        self._queue: StrideQueue[asyncio.Future] = StrideQueue()
         self._running: dict[str, int] = {}
 
     @property
@@ -91,7 +89,7 @@ class PluginAdmissionQueue:
         return self._max_concurrent
 
     def waiting(self) -> int:
-        return sum(len(queue) for queue in self._waiting.values())
+        return self._queue.depth()
 
     def running(self) -> int:
         return sum(self._running.values())
@@ -103,7 +101,7 @@ class PluginAdmissionQueue:
     def profile_stats(self) -> dict[str, dict[str, int]]:
         """Queued and running counts per profile, shaped as the scheduler's are."""
         stats: dict[str, dict[str, int]] = {}
-        for profile_id, queue in self._waiting.items():
+        for profile_id, queue in self._queue.items.items():
             stats.setdefault(profile_id, {"queued": 0, "running": 0})["queued"] += len(queue)
         for profile_id, count in self._running.items():
             stats.setdefault(profile_id, {"queued": 0, "running": 0})["running"] += count
@@ -159,31 +157,10 @@ class PluginAdmissionQueue:
             raise JobDispatchError(
                 "plugin-queue-full", "Too many plugin jobs are waiting for a worker slot"
             )
-        if profile_id not in self._waiting:
-            self._waiting[profile_id] = deque()
-            self._order.append(profile_id)
-            # A newcomer joins at the pool's current virtual time rather than
-            # at zero, so it cannot monopolise the pool catching up on service
-            # it never waited for.
-            self._passes[profile_id] = min(self._passes.values(), default=0.0)
-        self._waiting[profile_id].append(waiter)
+        self._queue.push(profile_id, waiter)
 
     def _discard(self, profile_id: str, waiter: asyncio.Future) -> None:
-        queue = self._waiting.get(profile_id)
-        if queue is None:
-            return
-        try:
-            queue.remove(waiter)
-        except ValueError:
-            return
-        if not queue:
-            self._prune(profile_id)
-
-    def _prune(self, profile_id: str) -> None:
-        self._waiting.pop(profile_id, None)
-        if profile_id in self._order:
-            self._order.remove(profile_id)
-        self._passes.pop(profile_id, None)
+        self._queue.discard(profile_id, waiter)
 
     def _release(self, profile_id: str) -> None:
         remaining = self._running.get(profile_id, 0) - 1
@@ -210,50 +187,13 @@ class PluginAdmissionQueue:
 
     def _pump(self) -> None:
         while self.running() < self.width():
-            profile_id = self._next_profile()
-            if profile_id is None:
+            served = self._queue.pop(self._weight_of, self._admits)
+            if served is None:
                 return
-            waiter = self._waiting[profile_id].popleft()
-            if not self._waiting[profile_id]:
-                self._prune(profile_id)
+            profile_id, waiter = served
             if waiter.cancelled():
                 # Cancelled between being queued and being chosen: it never
                 # took the slot, so the next waiter gets it instead.
                 continue
             self._running[profile_id] = self._running.get(profile_id, 0) + 1
             waiter.set_result(None)
-
-    def _next_profile(self) -> str | None:
-        """Stride selection: smallest pass first, advanced by ``1 / weight``."""
-        pending = [
-            profile_id
-            for profile_id in self._order
-            if self._waiting[profile_id] and (self._admits is None or self._admits(profile_id))
-        ]
-        if not pending:
-            return None
-        chosen = min(
-            pending,
-            key=lambda profile_id: (self._passes[profile_id], self._order.index(profile_id)),
-        )
-        weight = self._weight_of(chosen)
-        weight = weight if isinstance(weight, int) and not isinstance(weight, bool) else 1
-        self._passes[chosen] += 1.0 / max(1, min(MAX_STRIDE_WEIGHT, weight))
-        self._clamp_held_out()
-        return chosen
-
-    def _clamp_held_out(self) -> None:
-        """Keep a policy-held profile level with the pool's virtual time."""
-        if self._admits is None:
-            return
-        admitted = [
-            profile_id
-            for profile_id, queue in self._waiting.items()
-            if queue and self._admits(profile_id)
-        ]
-        if not admitted:
-            return
-        virtual_time = min(self._passes[profile_id] for profile_id in admitted)
-        for profile_id, queue in self._waiting.items():
-            if queue and not self._admits(profile_id):
-                self._passes[profile_id] = max(self._passes[profile_id], virtual_time)

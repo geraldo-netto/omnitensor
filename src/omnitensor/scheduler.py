@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import Counter, deque
+from collections import Counter
 from dataclasses import dataclass
 from functools import partial
 
@@ -29,6 +29,7 @@ from .executors.base import (
 )
 from .plugins.offloop import run_off_loop
 from .registry import Workload
+from .stride import StrideQueue
 
 LOGGER = logging.getLogger(__name__)
 
@@ -126,88 +127,27 @@ class _Job:
     model_format: str | None = None
 
 
-class _BackendQueue:
-    """Mutable backend scheduling state.
+class _BackendQueue(StrideQueue["_Job"]):
+    """One accelerator lane's stride queue, plus its measured load."""
 
-    Kept as a regular class because mutmut 3.7 skips methods on decorated
-    classes; explicit initialization keeps stride logic inside mutation scope.
-    """
+    __slots__ = ("busy_ms", "load")
 
     def __init__(self) -> None:
-        self.profiles: dict[str, deque] = {}
-        self.order: list[str] = []
-        self.passes: dict[str, float] = {}
+        super().__init__()
         self.busy_ms = 0.0
         self.load: float | None = None
 
-    def push(self, job: _Job) -> None:
-        if job.workload_id not in self.profiles:
-            self.profiles[job.workload_id] = deque()
-            self.order.append(job.workload_id)
-            # Anti-burst: a newcomer joins at the device's current virtual
-            # time (the smallest tracked pass) rather than 0, so it cannot
-            # monopolize the device "catching up" on service it never queued
-            # for while others advanced their passes.
-            self.passes[job.workload_id] = min(self.passes.values(), default=0.0)
-        self.profiles[job.workload_id].append(job)
+    @property
+    def profiles(self) -> dict:
+        """The per-profile queues, under the name this lane calls them."""
+        return self.items
 
-    def depth(self) -> int:
-        # Over a snapshot of the values: the snapshot publisher reads this from
-        # a worker thread while the event loop pops and prunes profiles, and a
-        # live view raises "dictionary changed size during iteration" there.
-        return sum(len(queue) for queue in list(self.profiles.values()))
+    def push_job(self, job: _Job) -> None:
+        self.push(job.workload_id, job)
 
     def pop_weighted(self, weight_of, admits=None) -> _Job | None:
-        """Stride scheduling: the pending profile with the smallest pass value
-        runs next, and its pass advances by 1/weight — so a weight-5 profile
-        is served roughly five times per weight-1 serve under contention.
-        Profiles the ``admits`` policy predicate rejects stay queued."""
-        pending = [
-            profile_id
-            for profile_id in self.order
-            if self.profiles[profile_id] and (admits is None or admits(profile_id))
-        ]
-        if not pending:
-            return None
-        chosen = min(
-            pending,
-            key=lambda profile_id: (self.passes[profile_id], self.order.index(profile_id)),
-        )
-        stride = 1.0 / max(1, min(5, weight_of(chosen)))
-        self.passes[chosen] += stride
-        job = self.profiles[chosen].popleft()
-        if not self.profiles[chosen]:
-            # Prune drained profiles so profiles/order/passes cannot grow
-            # without bound; a returning profile re-joins at virtual time.
-            del self.profiles[chosen]
-            self.order.remove(chosen)
-            del self.passes[chosen]
-        self._clamp_held_out(admits)
-        return job
-
-    def _clamp_held_out(self, admits) -> None:
-        """Keep a policy-held profile level with the device's virtual time.
-
-        A profile held out by ``admits`` keeps its queue and its pass while the
-        admitted ones advance theirs.  Left alone it banks credit for service
-        it was never eligible for and monopolizes the device catching up the
-        moment it is re-enabled — the same burst the newcomer clamp in
-        :meth:`push` exists to prevent.  Raising it to virtual time (never
-        past it) neither rewards nor penalizes being held.
-        """
-        if admits is None:
-            return
-        admitted = [
-            profile_id
-            for profile_id, queue in self.profiles.items()
-            if queue and admits(profile_id)
-        ]
-        if not admitted:
-            return
-        virtual_time = min(self.passes[profile_id] for profile_id in admitted)
-        for profile_id, queue in self.profiles.items():
-            if queue and not admits(profile_id):
-                self.passes[profile_id] = max(self.passes[profile_id], virtual_time)
+        served = self.pop(weight_of, admits)
+        return None if served is None else served[1]
 
 
 class Scheduler:
@@ -318,7 +258,7 @@ class Scheduler:
                 f"{backend} queue is full ({self._max_backend_queue_depth} jobs)",
             )
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        queue.push(_Job(workload_id, model_path, inputs, future, model_format))
+        queue.push_job(_Job(workload_id, model_path, inputs, future, model_format))
         self._wakeups[backend].set()
         return future
 

@@ -312,7 +312,7 @@ def test_stride_scheduling_is_proportionally_fair_and_drains(plan, data):
     order = data.draw(st.permutations(submissions))
     queue = _BackendQueue()
     for index, profile_id in enumerate(order):
-        queue.push(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
+        queue.push_job(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
 
     weights = {profile_id: weight for profile_id, (weight, _jobs) in plan.items()}
     served = dict.fromkeys(plan, 0)
@@ -357,11 +357,11 @@ def test_stride_late_joiner_gets_no_catchup_burst(
     weights = {"a": weight_a, "b": weight_b}
     queue = _BackendQueue()
     for index in range(pre_served + a_jobs):
-        queue.push(_Job("a", f"a-{index}", [], future=None))
+        queue.push_job(_Job("a", f"a-{index}", [], future=None))
     for _ in range(pre_served):
         assert queue.pop_weighted(lambda p: weights[p]).workload_id == "a"
     for index in range(b_jobs):
-        queue.push(_Job("b", f"b-{index}", [], future=None))
+        queue.push_job(_Job("b", f"b-{index}", [], future=None))
 
     served_since_join = {"a": 0, "b": 0}
     while True:
@@ -385,7 +385,7 @@ def test_stride_scheduling_serves_only_admitted_profiles_and_holds_the_rest(plan
     queue = _BackendQueue()
     submissions = [profile_id for profile_id, (_weight, jobs) in plan.items() for _ in range(jobs)]
     for index, profile_id in enumerate(data.draw(st.permutations(submissions))):
-        queue.push(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
+        queue.push_job(_Job(profile_id, f"{profile_id}-{index}", [], future=None))
 
     weights = {profile_id: weight for profile_id, (weight, _jobs) in plan.items()}
     served = dict.fromkeys(plan, 0)
