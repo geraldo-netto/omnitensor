@@ -3431,3 +3431,55 @@ def test_the_workload_hands_its_runtimes_what_the_person_configured(tmp_path):
         )
 
     assert applied == [WorkloadTuning(guidance="cite pages", answer_length="thorough")]
+
+
+def test_an_untuned_hebrew_translation_sends_exactly_one_turn(tmp_path):
+    """OMNI-0557: an untuned workload sends what it sent before tuning existed."""
+    adapter = _hebrew_runtime(tmp_path)
+    control_text = json.dumps({"language": "hebrew", "operation": "translate"})
+    control = SourceFragment("private:job-1:control", "a" * 64, 1, control_text, "b" * 64)
+    source = SourceFragment("private:job-1:selection", "c" * 64, 1, "The kit is here.", "d" * 64)
+    asyncio.run(adapter._store.publish("job-1", (control, source)))
+    observed = {}
+
+    class Llama:
+        def create_chat_completion(self, **kwargs):
+            observed.update(kwargs)
+            return iter(({"choices": [{"delta": {"content": "הערכה כאן."}}]},))
+
+    adapter._llama = Llama()
+    adapter._generate_sync(
+        selected_text_task(),
+        GenerationRequest("job-1", "selected-text-tools", (control.reference, source.reference)),
+        CancellationController(),
+    )
+
+    assert [message["role"] for message in observed["messages"]] == ["user"]
+
+
+def test_a_tuned_hebrew_translation_carries_the_guidance_too(tmp_path):
+    """The tuning turn used to reach every target language except this one."""
+    adapter = _hebrew_runtime(tmp_path)
+    adapter.tune(WorkloadTuning(guidance="keep the formal register"))
+    control_text = json.dumps({"language": "hebrew", "operation": "translate"})
+    control = SourceFragment("private:job-1:control", "a" * 64, 1, control_text, "b" * 64)
+    source = SourceFragment("private:job-1:selection", "c" * 64, 1, "The kit is here.", "d" * 64)
+    asyncio.run(adapter._store.publish("job-1", (control, source)))
+    observed = {}
+
+    class Llama:
+        def create_chat_completion(self, **kwargs):
+            observed.update(kwargs)
+            return iter(({"choices": [{"delta": {"content": "הערכה כאן."}}]},))
+
+    adapter._llama = Llama()
+    adapter._generate_sync(
+        selected_text_task(),
+        GenerationRequest("job-1", "selected-text-tools", (control.reference, source.reference)),
+        CancellationController(),
+    )
+
+    messages = observed["messages"]
+    assert [message["role"] for message in messages] == ["user", "user"]
+    assert "keep the formal register" in messages[-1]["content"]
+    assert messages[0]["content"].startswith(hebrew._TRANSLATION_PROMPT)

@@ -50,6 +50,7 @@ class HebrewTranslationRuntime(LlamaVulkanRuntime):
             prompt,
             _output_token_limit(task.limits.output_tokens),
             cancellation,
+            self._tuning.message(),
         )
         return json.dumps(
             answer(request, selection, _validated_hebrew(translation)),
@@ -142,9 +143,20 @@ def _complete_translation(
     prompt: str,
     output_tokens: int,
     cancellation: CancellationToken,
+    tuning: dict[str, str] | None = None,
 ) -> str:
+    """One user turn, plus the person's own tuning when they set any.
+
+    This runtime assembles its own messages rather than going through
+    `_generate_locked`, so the tuning turn appended there reached every
+    workload except the one served here: guidance a person set was honoured
+    for every target language but Hebrew, with nothing saying so.
+    """
+    messages = [{"role": "user", "content": prompt}]
+    if tuning is not None:
+        messages.append(tuning)
     reply = llama.create_chat_completion(
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0.0,
         top_p=1.0,
         seed=0,
