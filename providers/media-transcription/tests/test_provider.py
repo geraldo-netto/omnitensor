@@ -584,16 +584,26 @@ def test_duration_sampling_frame_and_audio_helpers_enforce_bounds():
         def to_ndarray(self):
             return np.ones((1, self.size), dtype=np.float64)
 
-    chunks = []
-    assert provider._append_audio_frames(chunks, AudioFrame(2), 0, np) == 2
-    assert provider._append_audio_frames(chunks, None, 2, np) == 2
-    with pytest.raises(MediaTranscriptionError, match="does not fit in one pass"):
-        provider._append_audio_frames(
-            chunks,
-            [AudioFrame(2)],
-            provider.MAX_DECODED_AUDIO_SAMPLES,
-            np,
-        )
+    (chunk,) = provider._resampled_chunks(AudioFrame(2), np)
+    assert chunk.tolist() == [1.0, 1.0]
+    assert chunk.dtype == np.float32
+    assert provider._resampled_chunks(None, np) == ()
+    assert len(provider._resampled_chunks([AudioFrame(2), AudioFrame(3)], np)) == 2
+    # No ceiling on a recording: more than one window's worth is split, and
+    # every sample comes out with the offset it belongs to.
+    buffer = provider._WindowBuffer(provider.AUDIO_WINDOW_SAMPLES, np)
+    windows = list(buffer.add(np.ones(provider.AUDIO_WINDOW_SAMPLES * 2 + 5, dtype=np.float32)))
+    windows.extend(buffer.flush())
+    assert [start for start, _ in windows] == [
+        0,
+        provider.AUDIO_WINDOW_SAMPLES,
+        provider.AUDIO_WINDOW_SAMPLES * 2,
+    ]
+    assert [int(samples.size) for _, samples in windows] == [
+        provider.AUDIO_WINDOW_SAMPLES,
+        provider.AUDIO_WINDOW_SAMPLES,
+        5,
+    ]
 
 
 @pytest.mark.asyncio
@@ -729,16 +739,18 @@ def test_whisper_vulkan_proves_device_transcribes_and_releases(monkeypatch, tmp_
     native = _install_fake_whisper(monkeypatch)
     lease_path = tmp_path / "lease"
     lease_path.touch()
-    decoder = SimpleNamespace()
+    decoder = SimpleNamespace(
+        decode_audio_windows=lambda _source, _cancellation: iter(
+            ((0, np.ones(160, dtype=np.float32)),)
+        )
+    )
     transcriber = provider.WhisperVulkanTranscriber(
         tmp_path / "model.bin",
         decoder,
         provider.VulkanLease(lease_path),
         "AMD Radeon RX 6600 XT",
     )
-    transcript = transcriber._transcribe_sync(
-        np.ones(160, dtype=np.float32), CancellationController()
-    )
+    transcript = transcriber._transcribe_sync(tmp_path / "voice.wav", CancellationController())
     assert transcript.language == "he"
     assert transcript.segments[0].text == " שלום "
     assert transcript.segments[0].end_ms == 10
@@ -777,6 +789,11 @@ async def test_whisper_async_preflight_and_empty_or_spoken_audio(monkeypatch, tm
         async def decode_audio(self, _source, cancellation):
             cancellation.raise_if_cancelled()
             return self.audio
+
+        def decode_audio_windows(self, _source, cancellation):
+            cancellation.raise_if_cancelled()
+            if self.audio.size:
+                yield 0, self.audio
 
     decoder = Decoder()
     transcriber = provider.WhisperVulkanTranscriber(

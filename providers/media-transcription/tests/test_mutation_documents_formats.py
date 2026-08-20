@@ -500,27 +500,54 @@ class _AudioFrame:
         return self.array
 
 
-def test_append_audio_frames_flattens_without_copy_and_enforces_exact_boundary():
+def test_resampled_chunks_flattens_every_result_shape_without_copying():
     original = np.array([[1.5, 2.5]], dtype=np.float32)
-    chunks = []
-    assert formats._append_audio_frames(chunks, _AudioFrame(original), 0, np) == 2
-    assert chunks[0].shape == (2,)
-    assert chunks[0].dtype == np.float32
-    assert np.shares_memory(chunks[0], original)
-    assert chunks[0].tolist() == [1.5, 2.5]
 
-    boundary = formats.MAX_DECODED_AUDIO_SAMPLES - 2
-    assert (
-        formats._append_audio_frames([], [_AudioFrame(original)], boundary, np)
-        == formats.MAX_DECODED_AUDIO_SAMPLES
-    )
-    with pytest.raises(MediaTranscriptionError) as error:
-        formats._append_audio_frames([], [_AudioFrame(original)], boundary + 1, np)
-    _assert_media_error(
-        error,
-        "media-too-long",
-        "decoded audio does not fit in one pass; transcription in windows is not built yet",
-    )
+    (single,) = formats._resampled_chunks(_AudioFrame(original), np)
+    assert single.shape == (2,)
+    assert single.dtype == np.float32
+    assert np.shares_memory(single, original)
+    assert single.tolist() == [1.5, 2.5]
+
+    # A list of frames, and a flush that produced nothing: the three shapes
+    # `AudioResampler.resample` returns.
+    assert len(formats._resampled_chunks([_AudioFrame(original)] * 3, np)) == 3
+    assert formats._resampled_chunks(None, np) == ()
+
+
+def test_windows_are_exact_and_carry_their_offset_however_chunks_arrive():
+    """A recording is split, never refused: no length reaches a ceiling."""
+
+    buffer = formats._WindowBuffer(4, np)
+    produced = []
+    for size in (3, 3, 1, 6):
+        produced.extend(buffer.add(np.arange(size, dtype=np.float32)))
+    produced.extend(buffer.flush())
+
+    assert [start for start, _ in produced] == [0, 4, 8, 12]
+    assert [int(samples.size) for _, samples in produced] == [4, 4, 4, 1]
+    # Every decoded sample comes out exactly once and in order.
+    assert np.concatenate([samples for _, samples in produced]).tolist() == [
+        0.0,
+        1.0,
+        2.0,
+        0.0,
+        1.0,
+        2.0,
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        5.0,
+    ]
+    assert list(buffer.flush()) == []
+
+
+def test_a_window_must_hold_a_sample():
+    with pytest.raises(ValueError, match="at least one sample"):
+        formats._WindowBuffer(0, np)
 
 
 @pytest.mark.parametrize("milliseconds", [1, 600_000, 3 * 60 * 60 * 1000])
@@ -652,6 +679,16 @@ def test_decode_audio_sync_uses_exact_resampler_flush_and_concatenation(monkeypa
         "cancel",
         ("resample", decoded[1]),
         ("resample", None),
+    ]
+
+    windows = list(
+        formats.AvMediaAdapter.decode_audio_windows(
+            tmp_path / "voice.wav", cancellation, window_samples=2
+        )
+    )
+    assert [(start, samples.tolist()) for start, samples in windows] == [
+        (0, [1.0, 2.0]),
+        (2, [3.0]),
     ]
 
 

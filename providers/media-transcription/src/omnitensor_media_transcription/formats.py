@@ -26,11 +26,12 @@ from .documents import _document_page_count
 from .presentations import _presentation_slide_count
 from .text import joined_visible_text
 
-# The one bound left on a recording's length, and it is about memory rather
-# than policy: a decode pass currently holds every resampled sample at once.
-# It disappears once transcription runs in windows (OMNI-0505); nothing else
-# here refuses a recording for being long.
-MAX_DECODED_AUDIO_SAMPLES = 600_000 * 16
+AUDIO_SAMPLE_RATE = 16_000
+# One piece of a recording, not a limit on one: five minutes of 16 kHz mono,
+# a whole number of whisper's thirty-second frames. A recording of any length
+# is decoded and transcribed a window at a time, so nothing here holds more
+# than this at once and nothing refuses a recording for being long.
+AUDIO_WINDOW_SAMPLES = AUDIO_SAMPLE_RATE * 300
 FRAME_INTERVAL_MS = 15_000
 _IMAGE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".svg", ".webp"})
 _AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"})
@@ -40,6 +41,47 @@ _DOCUMENT_SUFFIXES = frozenset({".pdf", ".tif", ".tiff"})
 MAX_SVG_BYTES = 8 * 1024 * 1024
 MAX_RENDER_DIMENSION = 1600
 MAX_INFERENCE_DIMENSION = 768
+
+
+class _WindowBuffer:
+    """Accumulates decoded chunks and hands out fixed-size windows.
+
+    Separate from the decode loop because it is the only arithmetic there:
+    a chunk arrives at whatever size the codec produced, and a window leaves
+    at the size transcription asked for, carrying its offset in the stream.
+    """
+
+    __slots__ = ("_np", "_pending", "_held", "_start", "_window")
+
+    def __init__(self, window_samples: int, np) -> None:
+        if window_samples < 1:
+            raise ValueError("an audio window must hold at least one sample")
+        self._np = np
+        self._window = int(window_samples)
+        self._pending: list = []
+        self._held = 0
+        self._start = 0
+
+    def _joined(self):
+        return self._np.concatenate(self._pending) if len(self._pending) > 1 else self._pending[0]
+
+    def add(self, chunk):
+        self._pending.append(chunk)
+        self._held += int(chunk.size)
+        while self._held >= self._window:
+            block = self._joined()
+            yield self._start, block[: self._window]
+            self._start += self._window
+            rest = block[self._window :]
+            self._pending = [rest] if rest.size else []
+            self._held = int(rest.size)
+
+    def flush(self):
+        if self._held:
+            yield self._start, self._joined()
+            self._start += self._held
+            self._pending = []
+            self._held = 0
 
 
 class AvMediaAdapter(MediaProbe, FrameSampler):
@@ -122,27 +164,53 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
         return MediaInfo(MediaModality.IMAGE, None, int(width), int(height), False)
 
     async def decode_audio(self, source: Path, cancellation: CancellationToken):
+        """The whole recording as one array, for callers that want it that way.
+
+        Transcription does not: it drives `decode_audio_windows` so a
+        three-hour recording never exists in memory at once.
+        """
         return await asyncio.to_thread(self._decode_audio_sync, source, cancellation)
 
     @staticmethod
     def _decode_audio_sync(source: Path, cancellation: CancellationToken):
+        np = _require("numpy", "install numpy")
+        windows = [
+            samples for _start, samples in AvMediaAdapter.decode_audio_windows(source, cancellation)
+        ]
+        if not windows:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(windows) if len(windows) > 1 else windows[0]
+
+    @staticmethod
+    def decode_audio_windows(
+        source: Path,
+        cancellation: CancellationToken,
+        window_samples: int = AUDIO_WINDOW_SAMPLES,
+    ):
+        """Yield `(start_sample, samples)` for one recording, window by window.
+
+        Blocking, and meant to be driven from a worker thread: the container
+        stays open across yields, so the next window is decoded only once the
+        caller has finished with the last one. `start_sample` is the window's
+        offset in the resampled stream, which is what turns a window-relative
+        segment time into an absolute one.
+        """
         av = _require("av", "install the av media decoder")
         np = _require("numpy", "install numpy")
         try:
-            chunks = []
-            samples = 0
             with av.open(str(source), mode="r") as container:
                 stream = next(iter(container.streams.audio), None)
                 if stream is None:
                     raise MediaTranscriptionError("audio-missing", "media has no audio stream")
-                resampler = av.AudioResampler(format="fltp", layout="mono", rate=16_000)
+                resampler = av.AudioResampler(format="fltp", layout="mono", rate=AUDIO_SAMPLE_RATE)
+                buffer = _WindowBuffer(window_samples, np)
                 for decoded in container.decode(stream):
                     cancellation.raise_if_cancelled()
-                    samples = _append_audio_frames(chunks, resampler.resample(decoded), samples, np)
-                samples = _append_audio_frames(chunks, resampler.resample(None), samples, np)
-            if not chunks:
-                return np.zeros(0, dtype=np.float32)
-            return np.concatenate(chunks)
+                    for chunk in _resampled_chunks(resampler.resample(decoded), np):
+                        yield from buffer.add(chunk)
+                for chunk in _resampled_chunks(resampler.resample(None), np):
+                    yield from buffer.add(chunk)
+                yield from buffer.flush()
         except MediaTranscriptionError:
             raise
         except Exception as error:
@@ -324,20 +392,16 @@ def _svg_url_fetcher(url: str, resource_type: str):
     return fetch(url, resource_type)
 
 
-def _append_audio_frames(chunks, resampled, samples: int, np) -> int:
+def _resampled_chunks(resampled, np) -> tuple:
+    """One resampler result as flat float32 arrays.
+
+    `AudioResampler.resample` returns a frame, a list of frames, or nothing
+    depending on the version and on whether it is being flushed.
+    """
     frames = resampled if isinstance(resampled, list) else (resampled,)
     if resampled is None:
         frames = ()
-    for frame in frames:
-        chunk = frame.to_ndarray().reshape(-1).astype(np.float32, copy=False)
-        samples += int(chunk.size)
-        if samples > MAX_DECODED_AUDIO_SAMPLES:
-            raise MediaTranscriptionError(
-                "media-too-long",
-                "decoded audio does not fit in one pass; transcription in windows is not built yet",
-            )
-        chunks.append(chunk)
-    return samples
+    return tuple(frame.to_ndarray().reshape(-1).astype(np.float32, copy=False) for frame in frames)
 
 
 def _duration_ms(container, stream) -> int:

@@ -198,13 +198,22 @@ def test_whisper_transcription_preserves_exact_inference_and_segment_bounds(tmp_
             ]
 
     model = Model()
+
+    class Decoder:
+        @staticmethod
+        def decode_audio_windows(source, cancellation):
+            observed["source"] = source
+            cancellation.raise_if_cancelled()
+            yield 0, audio
+
     transcriber = provider.WhisperVulkanTranscriber(
-        tmp_path / "whisper.bin", object(), _Lease(), "Qualified GPU"
+        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
     )
     transcriber._load = lambda: (model, ())
     cancellation = CancellationController()
-    transcript = transcriber._transcribe_sync(audio, cancellation)
+    transcript = transcriber._transcribe_sync(tmp_path / "voice.wav", cancellation)
 
+    assert observed["source"] == tmp_path / "voice.wav"
     assert observed["detected_audio"] is audio
     assert observed["transcribed_audio"] is audio
     assert set(observed["kwargs"]) == {
@@ -234,6 +243,70 @@ def test_whisper_transcription_preserves_exact_inference_and_segment_bounds(tmp_
             SpeechSegment(900, 1_000, "bounded"),
         ),
     )
+
+
+def test_every_window_is_transcribed_and_its_times_are_absolute(tmp_path):
+    """OMNI-0505: a recording longer than one window is answered, not refused.
+
+    The language is detected once, on the first window that carries audio, and
+    every later window's centisecond times are moved by that window's offset —
+    otherwise minute six reads as minute zero.
+    """
+
+    detections = []
+    transcribed = []
+
+    class Model:
+        def auto_detect_language(self, candidate):
+            detections.append(candidate)
+            return (("he", 0.99), {"he": 0.99})
+
+        def transcribe(self, candidate, **_kwargs):
+            transcribed.append(candidate)
+            return [SimpleNamespace(t0=10, t1=50, text=f"window {len(transcribed)}")]
+
+    window = SimpleNamespace(size=16_000 * 300)
+
+    class Decoder:
+        @staticmethod
+        def decode_audio_windows(_source, _cancellation):
+            yield 0, SimpleNamespace(size=0)
+            yield 0, window
+            yield 16_000 * 300, window
+            yield 16_000 * 600, SimpleNamespace(size=16_000 * 5)
+
+    transcriber = provider.WhisperVulkanTranscriber(
+        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
+    )
+    transcriber._load = lambda: (Model(), ())
+    transcript = transcriber._transcribe_sync(tmp_path / "long.wav", CancellationController())
+
+    assert len(detections) == 1
+    assert len(transcribed) == 3
+    assert transcript.language == "he"
+    assert [(segment.start_ms, segment.end_ms) for segment in transcript.segments] == [
+        (100, 500),
+        (300_100, 300_500),
+        (600_100, 600_500),
+    ]
+
+
+def test_a_recording_with_no_audio_never_loads_a_model(tmp_path):
+    loads = []
+
+    class Decoder:
+        @staticmethod
+        def decode_audio_windows(_source, _cancellation):
+            return iter(())
+
+    transcriber = provider.WhisperVulkanTranscriber(
+        tmp_path / "whisper.bin", Decoder(), _Lease(), "Qualified GPU"
+    )
+    transcriber._load = lambda: loads.append(True) or (None, ())
+    assert transcriber._transcribe_sync(
+        tmp_path / "silent.wav", CancellationController()
+    ) == SpeechTranscript(None, ())
+    assert loads == []
 
 
 def _qwen_transcriber(tmp_path) -> provider.QwenVulkanVisualTranscriber:

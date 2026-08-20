@@ -9,6 +9,7 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from itertools import chain
 from pathlib import Path
 
 from omnitensor.plugins.media_transcription import (
@@ -23,12 +24,28 @@ from omnitensor.plugins.media_transcription import (
 from omnitensor.plugins.protocol import CancellationToken
 
 from .errors import QualifiedMediaError
-from .formats import AvMediaAdapter, _visual_payload
+from .formats import AUDIO_SAMPLE_RATE, AvMediaAdapter, _visual_payload
 
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.I)
 _LLAMA_DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.I)
 _WHISPER_DEVICE = re.compile(r"ggml_vulkan:\s*\d+\s*=\s*(.+?)\s*\(", re.I)
 _WHISPER_BACKEND = re.compile(r"using Vulkan(\d+) backend", re.I)
+
+
+def _window_segments(spoken, offset_ms: int, window_ms: int):
+    """One window's segments, moved to their place in the whole recording.
+
+    `t0`/`t1` are centiseconds from the start of what the model was given,
+    which is the window rather than the file, so every time needs the
+    window's own offset added to it.
+    """
+    for item in spoken:
+        if not isinstance(item.text, str) or not item.text.strip():
+            continue
+        start_ms = min(window_ms, max(0, int(item.t0) * 10))
+        end_ms = min(window_ms, max(start_ms, int(item.t1) * 10))
+        if end_ms > start_ms:
+            yield SpeechSegment(offset_ms + start_ms, offset_ms + end_ms, item.text)
 
 
 class VulkanLease:
@@ -91,43 +108,58 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
             _close_whisper(model)
 
     async def transcribe(self, source: Path, cancellation: CancellationToken) -> SpeechTranscript:
-        audio = await self._decoder.decode_audio(source, cancellation)
-        if audio.size == 0:
-            return SpeechTranscript(None, ())
-        return await asyncio.to_thread(self._transcribe_sync, audio, cancellation)
+        return await asyncio.to_thread(self._transcribe_sync, source, cancellation)
 
-    def _transcribe_sync(self, audio, cancellation: CancellationToken) -> SpeechTranscript:
+    def _transcribe_sync(self, source: Path, cancellation: CancellationToken) -> SpeechTranscript:
+        """Transcribe a recording of any length, one decoded window at a time.
+
+        The first window is decoded before the lease is taken, so a recording
+        with no audio in it never loads a model or holds the card. After that
+        the lease covers the whole loop: one model load serves every window,
+        and the decode of window n+1 costs far less than the inference on
+        window n that it overlaps with.
+        """
+        windows = self._decoder.decode_audio_windows(source, cancellation)
+        first = next(iter(windows), None)
+        if first is None:
+            return SpeechTranscript(None, ())
         with self._lease.hold():
             model, _logs = self._load()
             try:
-                detected, _probabilities = model.auto_detect_language(audio)
-                language = detected[0]
-                segments = model.transcribe(
-                    audio,
-                    abort_callback=lambda: cancellation.cancelled,
-                    language=language,
-                    no_context=True,
-                    print_progress=False,
-                    print_realtime=False,
-                    suppress_blank=True,
-                    suppress_non_speech_tokens=True,
-                )
-                cancellation.raise_if_cancelled()
-                duration_ms = max(1, int(audio.size) * 1000 // 16_000)
-                bounded = []
-                for item in segments:
-                    if not isinstance(item.text, str) or not item.text.strip():
-                        continue
-                    start_ms = min(duration_ms, max(0, int(item.t0) * 10))
-                    end_ms = min(duration_ms, max(start_ms, int(item.t1) * 10))
-                    if end_ms > start_ms:
-                        bounded.append(SpeechSegment(start_ms, end_ms, item.text))
-                return SpeechTranscript(
-                    language,
-                    tuple(bounded),
-                )
+                return self._transcribe_windows(model, chain((first,), windows), cancellation)
             finally:
                 _close_whisper(model)
+
+    def _transcribe_windows(self, model, windows, cancellation) -> SpeechTranscript:
+        language: str | None = None
+        segments: list[SpeechSegment] = []
+        for start_sample, samples in windows:
+            cancellation.raise_if_cancelled()
+            if int(samples.size) == 0:
+                continue
+            if language is None:
+                # Detected once, on the first window that carries audio: the
+                # language of a recording does not change at minute five, and
+                # re-detecting per window would let it appear to.
+                detected, _probabilities = model.auto_detect_language(samples)
+                language = detected[0]
+            spoken = model.transcribe(
+                samples,
+                abort_callback=lambda: cancellation.cancelled,
+                language=language,
+                no_context=True,
+                print_progress=False,
+                print_realtime=False,
+                suppress_blank=True,
+                suppress_non_speech_tokens=True,
+            )
+            cancellation.raise_if_cancelled()
+            offset_ms = int(start_sample) * 1000 // AUDIO_SAMPLE_RATE
+            window_ms = max(1, int(samples.size) * 1000 // AUDIO_SAMPLE_RATE)
+            segments.extend(_window_segments(spoken, offset_ms, window_ms))
+        if language is None:
+            return SpeechTranscript(None, ())
+        return SpeechTranscript(language, tuple(segments))
 
     def _load(self):
         try:

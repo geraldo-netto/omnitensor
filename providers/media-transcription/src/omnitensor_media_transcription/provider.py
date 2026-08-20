@@ -23,15 +23,17 @@ from .documents import (
 )
 from .errors import QualifiedMediaError
 from .formats import (
-    MAX_DECODED_AUDIO_SAMPLES,
+    AUDIO_SAMPLE_RATE,
+    AUDIO_WINDOW_SAMPLES,
     MAX_RENDER_DIMENSION,
     AvMediaAdapter,
-    _append_audio_frames,
     _demux_duration_ms,
     _duration_ms,
     _frame_at_or_after,
+    _resampled_chunks,
     _sample_timestamps,
     _svg_output_size,
+    _WindowBuffer,
 )
 from .models import (
     QwenVulkanVisualTranscriber,
