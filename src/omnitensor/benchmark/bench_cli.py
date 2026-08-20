@@ -37,6 +37,7 @@ from .harness import (
 from .report import write_results
 from .vulkan_devices import DeviceError, VulkanDevice
 from .vulkan_devices import devices as vulkan_devices
+from .vulkan_devices import preferred as preferred_device
 from .vulkan_devices import select as select_device
 
 DEFAULT_ARTIFACT_ROOT = Path(paths.ARTIFACT_ROOT).expanduser()
@@ -223,7 +224,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             say(str(card))
         return 0 if available else 1
     try:
-        device = select_device(arguments.device or "0", available)
+        device = (
+            select_device(arguments.device, available)
+            if arguments.device
+            else preferred_device(available)
+        )
     except DeviceError as refusal:
         say(str(refusal))
         return 1

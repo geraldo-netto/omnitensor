@@ -113,6 +113,23 @@ def devices(python: str | None = None) -> tuple[VulkanDevice, ...]:
     return tuple(found)
 
 
+def preferred(available: tuple[VulkanDevice, ...]) -> VulkanDevice:
+    """The card to measure on when nobody named one.
+
+    Index 0 is whatever the driver enumerated first, which on a laptop with a
+    discrete card beside an integrated one is usually the integrated one — and
+    a run on that card produces numbers that cannot be compared with the ones
+    it is replacing, silently, because nothing in the output says which card
+    "0" was. The discrete card is the one a person means; when every card is
+    integrated, or every card is discrete, the first is as good an answer as
+    there is.
+    """
+    if not available:
+        raise DeviceError("no Vulkan device answered; is a driver installed?")
+    discrete = [device for device in available if not device.integrated]
+    return discrete[0] if discrete else available[0]
+
+
 def select(wanted: str, available: tuple[VulkanDevice, ...]) -> VulkanDevice:
     """The one device the name asks for — never a guess between two.
 

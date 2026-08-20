@@ -18,13 +18,22 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# The benchmark corpus is not packaged: `omnitensor.benchmark` ships in the
-# wheel and `benchmarks/` does not, so from an installed package this path
-# does not exist. `OMNITENSOR_BENCHMARK_ROOT` names it on such a host; without
-# it the source-tree location is used and, when that is absent too, every
-# reader refuses with the path it looked in rather than reporting no cases.
+# Where the labelled cases are, in the order they are looked for.
+#
+# The corpus used to be source-tree only: `omnitensor.benchmark` shipped in
+# the wheel and `benchmarks/` did not, so the one command that can say whether
+# a workload still answers correctly refused on every installed host — "no
+# case file for selected-text-tools" naming a path under `site-packages` that
+# was never going to exist. Twenty-four kilobytes of JSON is not what kept it
+# out; nothing did. They ship beside this module now.
+#
+# The source tree still wins when it is there, because that is the copy
+# somebody edits, and `OMNITENSOR_BENCHMARK_ROOT` still outranks both for a
+# corpus kept somewhere else entirely.
 BENCHMARK_ROOT_VARIABLE = "OMNITENSOR_BENCHMARK_ROOT"
 SOURCE_BENCHMARK_ROOT = Path(__file__).resolve().parents[3] / "benchmarks"
+# Where `pyproject.toml` force-includes `benchmarks/cases` in the wheel.
+PACKAGED_CASE_ROOT = Path(__file__).resolve().parent / "cases"
 
 
 def benchmark_root(environ: Mapping[str, str] | None = None) -> Path:
@@ -34,7 +43,12 @@ def benchmark_root(environ: Mapping[str, str] | None = None) -> Path:
 
 
 def case_root(environ: Mapping[str, str] | None = None) -> Path:
-    return benchmark_root(environ) / "cases"
+    """The cases directory: configured, then the source tree, then packaged."""
+    configured = (environ if environ is not None else os.environ).get(BENCHMARK_ROOT_VARIABLE)
+    if configured:
+        return Path(configured).expanduser() / "cases"
+    source = SOURCE_BENCHMARK_ROOT / "cases"
+    return source if source.is_dir() else PACKAGED_CASE_ROOT
 
 
 # A case file that is larger than this is not a case file.
@@ -78,7 +92,10 @@ def load(workload: str, root: Path | None = None) -> tuple[Case, ...]:
     try:
         raw = path.read_bytes()
     except OSError as error:
-        raise CaseError(f"no case file for {workload}: {path}") from error
+        raise CaseError(
+            f"no case file for {workload}: {path}"
+            f" (set {BENCHMARK_ROOT_VARIABLE} to a corpus that carries one)"
+        ) from error
     if len(raw) > MAX_CASE_BYTES:
         raise CaseError(f"case file for {workload} is oversized")
     try:

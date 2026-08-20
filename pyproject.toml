@@ -99,6 +99,11 @@ exclude = ["src/omnitensor/training"]
 "evaluation-corpora" = "omnitensor/evaluation-corpora"
 "plugin-manifests" = "omnitensor/plugin-manifests"
 "acceptance-evidence" = "omnitensor/acceptance-evidence"
+# The labelled cases, so the one command that can say whether a workload still
+# answers correctly works on a machine with no checkout. One copy in the
+# repository, carried into the wheel at build time — the same arrangement the
+# schemas and the manifests already have.
+"benchmarks/cases" = "omnitensor/benchmark/cases"
 
 [tool.mutmut]
 source_paths = ["src/omnitensor/"]
