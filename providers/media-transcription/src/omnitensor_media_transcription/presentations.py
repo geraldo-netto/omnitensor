@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from omnitensor.plugins.media_transcription import (
     MediaTranscriptionError,
+    PartObserver,
     PresentationTranscriber,
     VisualFrame,
     VisualTranscriber,
@@ -26,6 +27,7 @@ from .archives import (
     read_archive_entry,
     xml_root,
 )
+from .documents import _reported
 from .text import joined_visible_text as _joined_slide_text
 
 # What this module calls itself in a refusal, which is the only thing that
@@ -51,7 +53,10 @@ class PresentationArchiveTranscriber(PresentationTranscriber):
         self._vision = vision
 
     async def transcribe(
-        self, source: Path, cancellation: CancellationToken
+        self,
+        source: Path,
+        cancellation: CancellationToken,
+        on_part: PartObserver | None = None,
     ) -> tuple[VisualTranscript, ...]:
         root = Path(tempfile.mkdtemp(prefix="omnitensor-presentation-"))
         try:
@@ -77,6 +82,7 @@ class PresentationArchiveTranscriber(PresentationTranscriber):
                         slide.number,
                     )
                 )
+                await _reported(on_part, len(results), len(slides))
             return tuple(results)
         finally:
             await asyncio.to_thread(shutil.rmtree, root, True)

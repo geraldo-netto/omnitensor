@@ -106,10 +106,17 @@ class Presentations:
     def __init__(self, transcripts=()):
         self.transcripts = tuple(transcripts)
         self.sources = []
+        self.reported = []
 
-    async def transcribe(self, source, cancellation):
+    async def transcribe(self, source, cancellation, on_part=None):
         cancellation.raise_if_cancelled()
         self.sources.append(source)
+        # What a real one does between parts: a long document that says
+        # nothing looks to both deadline clocks like a worker that stopped.
+        for index, _transcript in enumerate(self.transcripts, start=1):
+            if on_part is not None:
+                await on_part(index, len(self.transcripts))
+                self.reported.append((index, len(self.transcripts)))
         return self.transcripts
 
 
@@ -255,6 +262,44 @@ async def test_presentation_transcribes_exact_ordered_slides_without_frame_sampl
     assert ports["speech"].sources == []
     assert ports["frames"].discards == [()]
     assert ports["vision"].frames == []
+
+
+@pytest.mark.asyncio
+async def test_a_document_reports_every_page_as_it_finishes(tmp_path):
+    """Silence is what the deadline now measures, so a long read must speak.
+
+    A document used to report `pages` once and then nothing until it was
+    done. On a few hundred pages that is minutes of silence: the window sat
+    at one percentage, and the flow controller and the worker budget — which
+    since OMNI-0578 give up on a call that reports nothing — saw exactly what
+    a stopped worker looks like.
+    """
+    source = tmp_path / "long.pdf"
+    source.write_bytes(b"document")
+    documents = Documents(
+        tuple(
+            VisualTranscript(None, f"page {number}", "A page.", None, number)
+            for number in range(1, 5)
+        )
+    )
+    plugin, _ports = await running(
+        tmp_path,
+        MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 4),
+        documents=documents,
+    )
+    progress = Progress()
+
+    result = await plugin.execute(request(source), CancellationController(), progress)
+
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert documents.reported == [(1, 4), (2, 4), (3, 4), (4, 4)]
+    pages = [item for item in progress.items if item.stage == "pages"]
+    # One before the work and one per page, rising, and never past the end.
+    assert len(pages) == 5
+    fractions = [item.fraction for item in pages]
+    assert fractions == sorted(fractions)
+    assert fractions[0] == pytest.approx(0.55)
+    assert fractions[-1] == pytest.approx(0.95)
 
 
 @pytest.mark.asyncio

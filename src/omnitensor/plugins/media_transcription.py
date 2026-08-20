@@ -6,7 +6,7 @@ import contextlib
 import hashlib
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -132,17 +132,30 @@ class VisualTranscriber(Protocol):
     async def release(self) -> None: ...
 
 
+# Told how far through a multi-part source the work is: (finished, total).
+# Awaited between parts, so a transcriber that reports is also a transcriber
+# that can be timed out for going quiet — which is what the flow controller
+# and the worker budget now measure.
+PartObserver = Callable[[int, int], Awaitable[None]]
+
+
 @runtime_checkable
 class PresentationTranscriber(Protocol):
     async def transcribe(
-        self, source: Path, cancellation: CancellationToken
+        self,
+        source: Path,
+        cancellation: CancellationToken,
+        on_part: PartObserver | None = None,
     ) -> tuple[VisualTranscript, ...]: ...
 
 
 @runtime_checkable
 class DocumentTranscriber(Protocol):
     async def transcribe(
-        self, source: Path, cancellation: CancellationToken
+        self,
+        source: Path,
+        cancellation: CancellationToken,
+        on_part: PartObserver | None = None,
     ) -> tuple[VisualTranscript, ...]: ...
 
 
@@ -272,13 +285,17 @@ class MediaTranscriptionPlugin(ManagedPlugin):
                 await self._report(request, progress, "slides", 0.55)
                 visuals = tuple(
                     _validated_visual(item)
-                    for item in await self._presentations.transcribe(source, cancellation)
+                    for item in await self._presentations.transcribe(
+                        source, cancellation, self._part_observer(request, progress, "slides")
+                    )
                 )
             elif media.modality is MediaModality.DOCUMENT:
                 await self._report(request, progress, "pages", 0.55)
                 visuals = tuple(
                     _validated_visual(item)
-                    for item in await self._documents.transcribe(source, cancellation)
+                    for item in await self._documents.transcribe(
+                        source, cancellation, self._part_observer(request, progress, "pages")
+                    )
                 )
             elif media.modality is not MediaModality.AUDIO:
                 await self._report(request, progress, "frames", 0.55)
@@ -352,6 +369,27 @@ class MediaTranscriptionPlugin(ManagedPlugin):
                 0.6 + (0.35 * (index + 1) / len(frames)),
             )
         return tuple(result)
+
+    def _part_observer(
+        self,
+        request: PluginRequest,
+        progress: ProgressReporter,
+        stage: str,
+    ) -> PartObserver:
+        """Report each finished page or slide, the way frames already are.
+
+        A document used to say `pages` once and then nothing until it
+        finished, so a long one sat at the same percentage for minutes — and,
+        since the call deadline became a measure of silence rather than of
+        work, went quiet for long enough to be cut off. The one that needed
+        the deadline lifted was the one that never lifted it.
+        """
+
+        async def observe(finished: int, total: int) -> None:
+            fraction = 0.55 + (0.4 * finished / total) if total > 0 else 0.55
+            await self._report(request, progress, stage, fraction)
+
+        return observe
 
     async def _report(
         self,

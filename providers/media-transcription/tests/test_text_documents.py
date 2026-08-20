@@ -228,3 +228,51 @@ def test_a_page_nobody_rendered_says_so_instead_of_describing_nothing():
     assert documents._page_description("") == (
         "Document page with no extractable text, read without rendering."
     )
+
+
+@pytest.mark.asyncio
+async def test_every_page_is_reported_as_it_is_read(tmp_path, monkeypatch):
+    """The reader's half of OMNI-0583: one report per page, with the total.
+
+    Without it a long document is silence, and silence is what the flow
+    controller and the worker budget now end a call for.
+    """
+
+    class Pages(documents._OpenDocument):
+        def __init__(self):
+            super().__init__(3)
+
+        def page(self, root, page_number):
+            return f"page {page_number}", None
+
+    monkeypatch.setattr(documents, "_open_document", lambda _source: Pages())
+    reported = []
+
+    async def observe(finished, total):
+        reported.append((finished, total))
+
+    read = await documents.DocumentPageTranscriber(None).transcribe(
+        tmp_path / "long.pdf", CancellationController(), observe
+    )
+
+    assert [item.page_number for item in read] == [1, 2, 3]
+    assert reported == [(1, 3), (2, 3), (3, 3)]
+
+
+@pytest.mark.asyncio
+async def test_a_text_document_is_one_part_and_says_so(tmp_path):
+    """It is quick, but a job that reports nothing at all is a job that looks
+    stopped to whatever is timing it."""
+    source = tmp_path / "notes.txt"
+    source.write_text("a line", encoding="utf-8")
+    reported = []
+
+    async def observe(finished, total):
+        reported.append((finished, total))
+
+    read = await documents.DocumentPageTranscriber(None).transcribe(
+        source, CancellationController(), observe
+    )
+
+    assert len(read) == 1
+    assert reported == [(1, 1)]

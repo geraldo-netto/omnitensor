@@ -28,6 +28,7 @@ from pathlib import Path
 from omnitensor.plugins.media_transcription import (
     DocumentTranscriber,
     MediaTranscriptionError,
+    PartObserver,
     VisualFrame,
     VisualTranscriber,
     VisualTranscript,
@@ -58,10 +59,13 @@ class DocumentPageTranscriber(DocumentTranscriber):
         self._vision = vision
 
     async def transcribe(
-        self, source: Path, cancellation: CancellationToken
+        self,
+        source: Path,
+        cancellation: CancellationToken,
+        on_part: PartObserver | None = None,
     ) -> tuple[VisualTranscript, ...]:
         if source.suffix.lower() in _TEXT_SUFFIXES:
-            return await self._transcribe_text(source, cancellation)
+            return await self._transcribe_text(source, cancellation, on_part)
         document = await asyncio.to_thread(_open_document, source)
         root = Path(tempfile.mkdtemp(prefix="omnitensor-document-pages-"))
         try:
@@ -76,6 +80,7 @@ class DocumentPageTranscriber(DocumentTranscriber):
                     results.append(
                         VisualTranscript(None, text, _page_description(text), None, page_number)
                     )
+                    await _reported(on_part, page_number, document.page_count)
                     continue
                 visual = await self._vision.transcribe(VisualFrame(path, None), cancellation)
                 results.append(
@@ -87,13 +92,17 @@ class DocumentPageTranscriber(DocumentTranscriber):
                         page_number,
                     )
                 )
+                await _reported(on_part, page_number, document.page_count)
             return tuple(results)
         finally:
             await asyncio.to_thread(document.close)
             await asyncio.to_thread(shutil.rmtree, root, True)
 
     async def _transcribe_text(
-        self, source: Path, cancellation: CancellationToken
+        self,
+        source: Path,
+        cancellation: CancellationToken,
+        on_part: PartObserver | None = None,
     ) -> tuple[VisualTranscript, ...]:
         """A document that has text and no pages, as one entry with no page number.
 
@@ -104,7 +113,20 @@ class DocumentPageTranscriber(DocumentTranscriber):
         cancellation.raise_if_cancelled()
         text = await asyncio.to_thread(_extract_text_document, source)
         cancellation.raise_if_cancelled()
+        await _reported(on_part, 1, 1)
         return (VisualTranscript(None, text, _text_description(source, text), None, None),)
+
+
+async def _reported(on_part: PartObserver | None, finished: int, total: int) -> None:
+    """Say another page is done, when anybody is listening.
+
+    A page is minutes of work on a long document, and the reader used to say
+    nothing between the first page and the last: the window sat at one
+    percentage, and the call looked to both deadline clocks exactly like a
+    worker that had stopped.
+    """
+    if on_part is not None:
+        await on_part(finished, total)
 
 
 def _extract_text_document(source: Path) -> str:
