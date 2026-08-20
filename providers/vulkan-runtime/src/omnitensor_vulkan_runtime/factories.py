@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from omnitensor_ncnn_embeddings import BgeVulkanEmbedder
+
 from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_answer import document_question_task
@@ -46,7 +48,6 @@ from omnitensor.plugins.selected_text_acceptance import (
 from omnitensor.plugins.tuning import TunableGenerationRuntime, WorkloadTuning
 from omnitensor.sdk import current_plugin_bootstrap
 
-from .bge import BgeVulkanEmbedder
 from .hebrew import HebrewTranslationRuntime
 from .qualification import (
     Qualification,

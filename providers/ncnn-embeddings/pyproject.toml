@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-ncnn-embeddings"
+version = "0.2.0"
+description = "GPU-only BGE embeddings on ncnn for OmniTensor document workloads"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "omnitensor>=0.1,<1",
+  "ncnn>=1.0.20260526",
+  "numpy>=1.24",
+  "tokenizers>=0.22",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnitensor_ncnn_embeddings"]
+
+[tool.mutmut]
+source_paths = ["src/omnitensor_ncnn_embeddings/"]
+pytest_add_cli_args_test_selection = ["tests/"]
+
+# The floor this distribution's own suite must hold. The root `--cov-fail-under`
+# measures `src/omnitensor` only, so without this a provider module no test loads
+# is indistinguishable from one at 100%.
+[tool.coverage.report]
+fail_under = 95
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../../src"]
+asyncio_mode = "auto"
