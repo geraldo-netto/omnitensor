@@ -27,6 +27,13 @@ from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressRe
 
 PLUGIN_ID = "media-transcription"
 READ_PERMISSION = "files:read-selected"
+# What a person may set about the speech in their own recordings. `auto` is
+# the default and the old behaviour; any other value is a language code the
+# transcriber is told rather than left to guess. Not an enumeration of the
+# languages this service approves of — whisper's own set is large and is not
+# this repository's to narrow.
+SPEECH_LANGUAGE_SETTING = "speechLanguage"
+AUTOMATIC_LANGUAGE = "auto"
 # A bound on what a person selected, which is legitimate; there are
 # deliberately no bounds on how much of it they are told back. A ten-minute
 # ceiling on a recording, or sixty-four pages on a deck, refused the eleventh
@@ -155,6 +162,17 @@ def _validate_identity(identity: MediaProviderIdentity) -> MediaProviderIdentity
     return identity
 
 
+@runtime_checkable
+class LanguageDirectedTranscriber(Protocol):
+    """A speech transcriber that can be told what language to expect.
+
+    A Protocol rather than a required method: a transcriber that only detects
+    is one this plugin drives exactly as it did before the setting existed.
+    """
+
+    def prefer_language(self, language: str | None) -> None: ...
+
+
 class MediaTranscriptionPlugin(ManagedPlugin):
     """One selected media file in; one immutable text representation out."""
 
@@ -192,6 +210,15 @@ class MediaTranscriptionPlugin(ManagedPlugin):
 
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
+        # What language the speech in a recording is in, when the person knows
+        # and the detector need not guess. Auto-detection reads the first
+        # window that carries audio, and a window of noise, music or one
+        # borrowed English word is where it picks the wrong one — after which
+        # the whole recording is transcribed as that language. Absent, and for
+        # `auto`, nothing changes: the detector answers as it always did.
+        chosen = self.configuration.optional(SPEECH_LANGUAGE_SETTING, str, AUTOMATIC_LANGUAGE)
+        if isinstance(self._speech, LanguageDirectedTranscriber):
+            self._speech.prefer_language(None if chosen == AUTOMATIC_LANGUAGE else chosen)
         outcome = self._preflight()
         if hasattr(outcome, "__await__"):
             await outcome
@@ -616,6 +643,7 @@ def media_result(
 
 
 __all__ = [
+    "AUTOMATIC_LANGUAGE",
     "DocumentTranscriber",
     "FrameSampler",
     "MAX_IMAGE_PIXELS",
@@ -623,10 +651,12 @@ __all__ = [
     "MediaInfo",
     "MediaModality",
     "MediaProbe",
+    "LanguageDirectedTranscriber",
     "MediaProviderIdentity",
     "MediaTranscriptionError",
     "MediaTranscriptionPlugin",
     "PresentationTranscriber",
+    "SPEECH_LANGUAGE_SETTING",
     "SpeechSegment",
     "SpeechTranscript",
     "SpeechTranscriber",

@@ -13,6 +13,13 @@ Supported inputs:
 - paged documents: PDF and multipage TIFF;
 - presentations: PowerPoint `.pptx` and LibreOffice Impress `.odp`.
 
+The language of the speech is detected from the first window that carries
+audio, and a person who knows better can say so: the `speechLanguage` setting
+takes any code the speech model understands, and `auto` — the default — keeps
+the detection. It is worth setting for a recording that opens with noise, with
+music, or with one borrowed English word, because detection reads that opening
+and transcribes everything after it as whatever it decided.
+
 Audio returns timestamped speech. Images return exact visible text plus a
 scene description. Videos combine timestamped speech with at most twelve
 sampled-frame transcriptions. PDF/TIFF results retain page order. PPTX/ODP

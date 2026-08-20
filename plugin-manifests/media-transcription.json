@@ -18,7 +18,19 @@
       "capabilities": ["cancel", "execute", "health", "progress"]
     },
     "schemas": {
-      "configuration": {"type": "object", "additionalProperties": false},
+      "configuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "speechLanguage": {
+            "description": "The language the speech in a recording is in, when the person knows it. `auto` detects it from the first window that carries audio, which is where a recording of noise, music, or one borrowed English word gets the whole transcript in the wrong language. Any language code the speech model understands is accepted; this is not a list of the languages the service approves of.",
+            "type": "string",
+            "pattern": "^(auto|[a-z]{2,3}(-[A-Za-z]{2,4})?)$",
+            "maxLength": 12,
+            "default": "auto"
+          }
+        }
+      },
       "input": {
         "type": "object",
         "additionalProperties": false,

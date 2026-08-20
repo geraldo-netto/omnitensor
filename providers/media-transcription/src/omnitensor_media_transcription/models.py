@@ -95,6 +95,9 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
     ) -> None:
         self._model_path = model_path
         self._decoder = decoder
+        # None means detect, which is what this did before the setting and
+        # what it still does unless somebody says otherwise.
+        self._language: str | None = None
         self._lease = lease
         self._expected_device = expected_device
         self._device_proven = False
@@ -106,6 +109,14 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
         with self._lease.hold():
             model, _logs = self._load()
             _close_whisper(model)
+
+    def prefer_language(self, language: str | None) -> None:
+        """Transcribe as this language rather than detecting one.
+
+        Held rather than passed per call: a worker reads its configuration
+        once, at `start()`, and is replaced when it changes.
+        """
+        self._language = language or None
 
     async def transcribe(self, source: Path, cancellation: CancellationToken) -> SpeechTranscript:
         return await asyncio.to_thread(self._transcribe_sync, source, cancellation)
@@ -131,12 +142,18 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
                 _close_whisper(model)
 
     def _transcribe_windows(self, model, windows, cancellation) -> SpeechTranscript:
-        language: str | None = None
+        language: str | None = self._language
+        # Whether any window carried audio at all, tracked separately now that
+        # `language` may be set before the loop: a recording with nothing in it
+        # reports no language, and a configured one must not make it look
+        # otherwise.
+        heard = False
         segments: list[SpeechSegment] = []
         for start_sample, samples in windows:
             cancellation.raise_if_cancelled()
             if int(samples.size) == 0:
                 continue
+            heard = True
             if language is None:
                 # Detected once, on the first window that carries audio: the
                 # language of a recording does not change at minute five, and
@@ -157,7 +174,7 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
             offset_ms = int(start_sample) * 1000 // AUDIO_SAMPLE_RATE
             window_ms = max(1, int(samples.size) * 1000 // AUDIO_SAMPLE_RATE)
             segments.extend(_window_segments(spoken, offset_ms, window_ms))
-        if language is None:
+        if language is None or not heard:
             return SpeechTranscript(None, ())
         return SpeechTranscript(language, tuple(segments))
 

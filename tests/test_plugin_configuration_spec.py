@@ -253,11 +253,13 @@ def test_the_declared_defaults_are_what_an_untuned_workload_already_does(workloa
 def test_transcription_declares_no_tunable_it_would_not_honour():
     """`media-transcription` runs whisper, not a generation task.
 
-    Declaring answer guidance there would put a control on a window that
-    changes nothing, which is worse than the control not being there.
+    Answer guidance and answer length would be controls on a window that
+    changes nothing, which is worse than the controls not being there. What
+    it does declare is the one setting it acts on: which language the speech
+    is in, honoured in `on_start` and used in place of detection.
     """
     document = json.loads((MANIFESTS / "media-transcription.json").read_text(encoding="utf-8"))
-    assert document["plugin"]["schemas"]["configuration"] == {
-        "type": "object",
-        "additionalProperties": False,
-    }
+    schema = document["plugin"]["schemas"]["configuration"]
+
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {"speechLanguage"}
