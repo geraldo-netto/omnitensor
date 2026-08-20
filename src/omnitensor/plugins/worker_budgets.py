@@ -27,7 +27,14 @@ from .budgets import DEFAULT_CALL_TIMEOUT_SECONDS, MAX_CALL_TIMEOUT_SECONDS, Wor
 # quantised language model — weights measured in gigabytes, a cold call paying
 # for load and inference together.
 GENERATIVE_FORMATS = frozenset({"gguf"})
-GENERATIVE_CALL_TIMEOUT_SECONDS = 600.0
+# How long a generative call may say nothing before it is treated as stopped.
+# Since OMNI-0578 this measures silence rather than work, so a job that keeps
+# reporting is never cut off by it — but not every call can report: a single
+# generation produces no intermediate frame, and on a large selection or a
+# long answer that stretch of quiet is real work. Ten minutes was not enough
+# for it and was raised to twenty-five on 2026-08-20, after a document run
+# showed what these calls actually cost.
+GENERATIVE_CALL_TIMEOUT_SECONDS = 1500.0
 FLOW_MARGIN_SECONDS = 5.0
 BUDGETS_KEY = "budgets"
 CALL_TIMEOUT_KEY = "callTimeoutSeconds"
