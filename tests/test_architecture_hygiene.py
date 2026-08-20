@@ -134,3 +134,47 @@ def test_no_test_imports_its_helpers_through_a_tests_package():
                 offenders.append(f"{path.relative_to(suite)}:{node.lineno}")
 
     assert offenders == []
+
+
+# The three files that carry a bidirectional or format control on purpose:
+# two fixtures that prove the normaliser strips them, and the normaliser's own
+# table of what it strips. Anything else is a Trojan Source character — text
+# that renders as one thing and compiles as another.
+DELIBERATE_CONTROLS = {
+    "src/omnitensor/plugins/extraction.py",
+    "tests/test_extraction.py",
+    "tests/test_benchmark.py",
+}
+
+
+def test_no_source_file_carries_a_control_character_nobody_asked_for():
+    """A sibling shipped a module carrying one and every gate printed pass.
+
+    Nothing here read a byte of source for this. Derived over the whole tree
+    at any depth, with the deliberate three named — so a fourth is a failing
+    test, and removing the reason from one of the three is too.
+    """
+    import unicodedata
+
+    root = Path(__file__).resolve().parents[1]
+    skipped = {".git", "__pycache__", ".venv", ".pytest_cache", "mutants", "node_modules"}
+    extensions = {".py", ".json", ".toml", ".sh", ".yml", ".yaml", ".cfg", ".ini"}
+    carrying = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix not in extensions:
+            continue
+        if skipped & set(path.relative_to(root).parts):
+            continue
+        text = path.read_text(encoding="utf-8")
+        found = sorted(
+            {
+                f"U+{ord(character):04X}"
+                for character in text
+                if character not in "\n\t"
+                and unicodedata.category(character) in ("Cc", "Cf", "Co", "Cs")
+            }
+        )
+        if found:
+            carrying[str(path.relative_to(root))] = found
+
+    assert set(carrying) == DELIBERATE_CONTROLS

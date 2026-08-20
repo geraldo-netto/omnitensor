@@ -28,7 +28,19 @@ SCRIPTS = ROOT / "scripts"
 
 
 def script_paths() -> list[Path]:
-    return sorted(path for path in SCRIPTS.glob("*.py") if not path.name.startswith("_"))
+    """Every script, at any depth.
+
+    `glob("*.py")` reads one level, and a single-level list is how a sibling
+    repository shipped a module in a subdirectory that every gate reported as
+    fine. There are no subdirectories under `scripts/` today; if one appears,
+    what is in it is covered on the day it lands rather than the day somebody
+    remembers this file.
+    """
+    return sorted(
+        path
+        for path in SCRIPTS.rglob("*.py")
+        if not path.name.startswith("_") and "__pycache__" not in path.parts
+    )
 
 
 def load(name: str):
@@ -44,7 +56,7 @@ def load(name: str):
 
 
 def test_there_are_scripts_to_cover():
-    assert [path.name for path in script_paths()] == [
+    assert [str(path.relative_to(SCRIPTS)) for path in script_paths()] == [
         "benchmark-transport-codecs.py",
         "collect-selected-text-acceptance.py",
         "generate-media-acceptance-fixtures.py",
