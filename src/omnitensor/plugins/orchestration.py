@@ -29,7 +29,7 @@ from typing import Protocol
 
 from ..dispatch_lane import PreparedDispatchLane
 from ..forecastresult import forecast_reading
-from ..job_ports import JobDispatcher
+from ..job_ports import JobDispatcher, PreparedLaneDispatcher
 from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
 from .cancellation import Cancellation, CancellationJournal, CancellationRegistry
@@ -176,13 +176,13 @@ def inference_stages(
         raise OrchestrationError(
             "profile-has-no-model", f"{workload.id} declares no model and cannot run inference"
         )
-    prepare_lane = getattr(dispatcher, "prepare_lane", None)
-    dispatch_prepared = getattr(dispatcher, "dispatch_prepared", None)
-    if not callable(prepare_lane) or not callable(dispatch_prepared):
+    if not isinstance(dispatcher, PreparedLaneDispatcher):
         raise OrchestrationError(
             "prepared-dispatch-unavailable",
             "inference dispatcher must prepare and consume immutable lanes",
         )
+    prepare_lane = dispatcher.prepare_lane
+    dispatch_prepared = dispatcher.dispatch_prepared
     read_selected_labels = _selected_label_reader(resolve_artifact)
     stages = {
         PipelineStage.COLLECT: _collect_stage(),

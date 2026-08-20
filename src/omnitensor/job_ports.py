@@ -31,6 +31,21 @@ class JobAdmission(Protocol):
         """Return normally, or raise :class:`JobDispatchError` with a reason."""
 
 
+@runtime_checkable
+class PreparedLaneDispatcher(Protocol):
+    """A dispatcher that freezes the lane before the job is handed to it.
+
+    Named here rather than probed with ``getattr(..., "prepare_lane")`` at four
+    call sites: the capability is a contract, and an adapter that implements
+    half of it should fail where it is wired, not degrade to the backend name
+    as a lane at the first job.
+    """
+
+    def prepare_lane(self, workload_id: str) -> tuple: ...
+
+    def dispatch_prepared(self, job_id: str, workload_id: str, payload: dict, lane) -> object: ...
+
+
 class JobDispatchError(RuntimeError):
     """Stable admission failure raised before a job becomes active."""
 

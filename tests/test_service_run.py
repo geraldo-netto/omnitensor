@@ -130,10 +130,12 @@ def test_plugin_dispatcher_forwards_prepared_inference_lanes_only():
     with pytest.raises(RuntimeError, match="plugin jobs do not use prepared"):
         dispatcher.dispatch_prepared("job", "events", {}, "lane")
 
+    # One named capability: an adapter implementing neither half - or only
+    # one of them - is refused by the same check rather than by two probes.
     no_prepared = PluginAwareDispatcher(object(), object())
     with pytest.raises(RuntimeError, match="does not prepare lanes"):
         no_prepared.prepare_lane("profile")
-    with pytest.raises(RuntimeError, match="does not consume prepared lanes"):
+    with pytest.raises(RuntimeError, match="does not prepare lanes"):
         no_prepared.dispatch_prepared("job", "profile", {}, "lane")
 
 

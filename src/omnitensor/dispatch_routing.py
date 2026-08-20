@@ -7,7 +7,7 @@ from functools import partial
 from pathlib import Path
 
 from .dispatch import InferenceJobDispatcher, inference_result_payload
-from .job_ports import JobAdmission, JobDispatcher, JobDispatchError
+from .job_ports import JobAdmission, JobDispatcher, JobDispatchError, PreparedLaneDispatcher
 from .jobs import UnavailableJobDispatcher
 from .plugin_admission import PluginAdmissionQueue
 from .plugins.orchestration import RunnerSet, build_plugin_runners, required_permissions
@@ -92,20 +92,18 @@ class PluginAwareDispatcher:
         return self._inference.dispatch(job_id, workload_id, payload)
 
     def prepare_lane(self, workload_id: str):
-        if workload_id in self._plugin_ids():
-            raise RuntimeError("plugin jobs do not use prepared inference lanes")
-        prepare = getattr(self._inference, "prepare_lane", None)
-        if not callable(prepare):
-            raise RuntimeError("inference dispatcher does not prepare lanes")
-        return prepare(workload_id)
+        return self._prepared_inference(workload_id).prepare_lane(workload_id)
 
     def dispatch_prepared(self, job_id: str, workload_id: str, payload: dict, lane):
+        inference = self._prepared_inference(workload_id)
+        return inference.dispatch_prepared(job_id, workload_id, payload, lane)
+
+    def _prepared_inference(self, workload_id: str) -> PreparedLaneDispatcher:
         if workload_id in self._plugin_ids():
             raise RuntimeError("plugin jobs do not use prepared inference lanes")
-        dispatch = getattr(self._inference, "dispatch_prepared", None)
-        if not callable(dispatch):
-            raise RuntimeError("inference dispatcher does not consume prepared lanes")
-        return dispatch(job_id, workload_id, payload, lane)
+        if not isinstance(self._inference, PreparedLaneDispatcher):
+            raise RuntimeError("inference dispatcher does not prepare lanes")
+        return self._inference
 
 
 def policy_weight(state, workload_id: str) -> int:
