@@ -112,11 +112,13 @@ class PipelinePolicyGate:
 
 # Readiness only constrains the stages that actually need the model.  Asking
 # before collection would refuse work that never touches an artifact.
+# Not INFER: by then the resolve stage has already verified and opened the
+# artifact this job will use, so asking again costs a second lane preparation
+# and a second digest verification and can only agree with itself.
 _READINESS_STAGES = frozenset(
     {
         PipelineStage.QUEUED,
         PipelineStage.RESOLVE,
-        PipelineStage.INFER,
     }
 )
 

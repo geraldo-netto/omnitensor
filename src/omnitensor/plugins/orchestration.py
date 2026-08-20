@@ -379,6 +379,35 @@ def _deliver_stage(deliver: Callable[[str, dict], None] | None) -> Callable:
     return deliver_stage
 
 
+def _artifact_readiness(
+    workload: Workload,
+    prepare_lane: Callable[[str], tuple[PreparedDispatchLane, Mapping[str, object]]],
+    resolve_artifact: ArtifactResolver,
+) -> Callable[[str], tuple[bool, str]]:
+    """Whether this profile's declared model is installed, asked at the gate.
+
+    The gate defaulted to "always ready", so uninstalling or corrupting an
+    artifact while the service runs still admitted the job: it took a flow
+    slot, was retried, and only then failed at the resolve stage with
+    artifact-unavailable - the outcome the gate exists to prevent. Asked of
+    the manifest's model rather than of a prepared lane, because the gate runs
+    before several stages and preparing a lane per stage is not free.
+    """
+
+    def ready(_profile_id: str) -> tuple[bool, str]:
+        try:
+            lane, _model = prepare_lane(workload.id)
+            resolution = resolve_artifact(lane.model_reference.id)
+        except Exception as error:  # noqa: BLE001 - a gate reports, never raises
+            return False, f"{workload.id} has no resolvable model: {type(error).__name__}"
+        if not getattr(resolution, "ready", False):
+            detail = str(getattr(resolution, "detail", ""))
+            return False, detail or f"{workload.id} has no ready artifact"
+        return True, ""
+
+    return ready
+
+
 def build_plugin_runners(
     workloads: Mapping[str, Workload],
     *,
@@ -427,7 +456,9 @@ def build_plugin_runners(
                 is_enabled=is_enabled,
                 required_permissions=required_permissions(workload),
                 allows_permission=allows_permission,
-                artifact_ready=lambda _profile: (True, ""),
+                artifact_ready=_artifact_readiness(
+                    workload, dispatcher.prepare_lane, resolve_artifact
+                ),
             ),
             # Each profile gets its own controller so one plugin's backlog
             # cannot consume the admission budget of every other plugin, and

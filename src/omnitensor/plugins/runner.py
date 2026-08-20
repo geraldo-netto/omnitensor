@@ -75,6 +75,14 @@ class PipelineRunner:
         """Produce exactly one terminal result for ``job_id``."""
         key = idempotency_key or job_id
         try:
+            # Before the flow slot, not after it: a job policy will refuse - a
+            # paused runtime, a withdrawn grant, a model that is no longer
+            # installed - used to take a slot, be retried, and only then be
+            # refused at the stage that needed the model.
+            self._policy.require()
+        except PolicyRefusedError as error:
+            return self._refused(job_id, error.detail)
+        try:
             return await self._flow.submit(key, lambda: self._run_stages(job_id, request))
         except FlowRefusedError as error:
             # Flow refusals happen before any stage runs, so there is no
@@ -115,6 +123,12 @@ class PipelineRunner:
     def cancel(self, job_id: str, detail: str = "") -> bool:
         """Withdraw a running job on behalf of its caller."""
         return self._cancellations.cancel(job_id, CancellationReason.CALLER, detail)
+
+    def _refused(self, job_id: str, detail: str) -> PluginResult:
+        """Policy is a refusal, not a fault, wherever it is noticed."""
+        machine = PipelineStateMachine(job_id)
+        machine.cancel(detail, completed_at_ms=self._clock_ms())
+        return machine.terminal_result
 
     def _failed(self, job_id: str, code: str, detail: str) -> PluginResult:
         machine = PipelineStateMachine(job_id)

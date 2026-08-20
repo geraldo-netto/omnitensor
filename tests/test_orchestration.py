@@ -249,7 +249,8 @@ def test_an_unready_artifact_stops_the_job_before_dispatch(tmp_path):
 
     result = run(built)
 
-    assert result.status is PluginResultStatus.FAILED
+    # A refusal, not a fault, and it happens before the job takes a flow slot.
+    assert result.status is PluginResultStatus.CANCELLED
     assert "digest mismatch" in result.detail
     assert dispatcher.calls == []
 
@@ -565,7 +566,9 @@ def test_preferred_lane_owns_resolution_and_labels_end_to_end(tmp_path):
     result = run(built)
 
     assert result.output["reading"]["top"] == [{"index": 1, "score": 0.9, "label": "npu-high"}]
-    assert resolved == ["npu-model", "npu-model"]
+    # Two gate checks (admission and resolve) and two stage resolutions, all
+    # of the lane's own model: the unselected GPU artifact is never touched.
+    assert resolved == ["npu-model"] * 4
 
 
 def test_a_stage_reached_without_a_bound_job_is_refused():
@@ -792,7 +795,9 @@ def test_a_job_that_stops_early_reports_only_the_stages_it_reached(tmp_path):
 
     run(built)
 
-    assert reported == ["collect", "preprocess", "resolve"]
+    # Nothing runs at all now: the model is missing, so the job is refused at
+    # admission instead of walking three stages to discover it.
+    assert reported == []
 
 
 def test_progress_reporting_is_optional(tmp_path):
@@ -821,3 +826,24 @@ def test_an_inline_input_still_reaches_the_dispatcher_unchanged(tmp_path):
 
     [(_job, _profile, payload)] = dispatcher.calls
     assert payload["inputs"] == [[1, 2]]
+
+
+def test_an_artifact_that_disappears_is_refused_before_a_flow_slot(tmp_path):
+    """OMNI-0455: the gate's readiness condition was wired to always-true."""
+    resolutions = []
+
+    def resolve(artifact_id):
+        resolutions.append(artifact_id)
+        return Resolution(False, detail="artifact was uninstalled")
+
+    dispatcher = Dispatcher()
+    built, _registry = runners(tmp_path, dispatcher=dispatcher, resolve=resolve)
+    runner = built.runners["visual-library"]
+
+    result = run(built)
+
+    assert result.status is PluginResultStatus.CANCELLED
+    assert "artifact was uninstalled" in result.detail
+    # Refused at admission: no stage ran, and no flow slot was taken or retried.
+    assert dispatcher.calls == []
+    assert runner._flow.snapshot().accepted == 0

@@ -84,9 +84,7 @@ def test_an_actionable_reason_is_reported_before_readiness():
     assert decision.refusal is PolicyRefusal.CONSENT_MISSING
 
 
-@pytest.mark.parametrize(
-    "stage", [PipelineStage.QUEUED, PipelineStage.RESOLVE, PipelineStage.INFER]
-)
+@pytest.mark.parametrize("stage", [PipelineStage.QUEUED, PipelineStage.RESOLVE])
 def test_readiness_is_required_by_the_stages_that_need_the_model(stage):
     decision = gate(artifact_ready=lambda _profile: (False, "no active version")).evaluate(stage)
     assert decision.refusal is PolicyRefusal.ARTIFACT_NOT_READY
@@ -98,6 +96,8 @@ def test_readiness_is_required_by_the_stages_that_need_the_model(stage):
     [
         PipelineStage.COLLECT,
         PipelineStage.PREPROCESS,
+        # Not INFER: resolve has already verified and opened the artifact.
+        PipelineStage.INFER,
         PipelineStage.POSTPROCESS,
         PipelineStage.DELIVER,
         PipelineStage.TERMINAL,
