@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
 import pickle
@@ -10,6 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from importrules import forbidden_imports, imported_modules
 
 import omnitensor.job_ports as job_ports
 from omnitensor.plugins import loading, worker_specs
@@ -57,15 +57,14 @@ def test_loading_facade_keeps_exact_contract_and_new_owner_identities():
 
 def test_loading_leaves_import_before_facade_without_cycles():
     leaf_names = ("loading_staging", "loading_accelerator", "worker_specs")
-    for name in leaf_names:
-        tree = ast.parse((ROOT / f"src/omnitensor/plugins/{name}.py").read_text(encoding="utf-8"))
-        imports = {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
-        }
-        assert "loading" not in imports
-        assert "omnitensor.plugins.loading" not in imports
+    assert (
+        forbidden_imports(
+            [ROOT / f"src/omnitensor/plugins/{name}.py" for name in leaf_names],
+            ["omnitensor.plugins.loading"],
+            source_root=ROOT / "src",
+        )
+        == []
+    )
 
     statement = ";".join(f"import omnitensor.plugins.{name}" for name in (*leaf_names, "loading"))
     completed = subprocess.run(
@@ -78,18 +77,15 @@ def test_loading_leaves_import_before_facade_without_cycles():
 
 
 def test_consent_uses_canonical_discovery_owners():
-    tree = ast.parse((ROOT / "src/omnitensor/consent.py").read_text(encoding="utf-8"))
-    imports = {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
-    assert "plugins.loading" not in imports
+    consent = ROOT / "src/omnitensor/consent.py"
+    assert (
+        forbidden_imports([consent], ["omnitensor.plugins.loading"], source_root=ROOT / "src") == []
+    )
     assert {
-        "plugins.discovery",
-        "plugins.identity",
-        "plugins.manifest_compatibility",
-    } <= imports
+        "omnitensor.plugins.discovery",
+        "omnitensor.plugins.identity",
+        "omnitensor.plugins.manifest_compatibility",
+    } <= imported_modules(consent, ROOT / "src")
 
 
 def test_staging_cleans_on_base_exception(tmp_path):

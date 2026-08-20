@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import functools
 import pickle
@@ -12,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from importrules import forbidden_imports
 
 from omnitensor import plugins
 from omnitensor.plugins import loading, loading_staging, supervisor, worker_specs
@@ -122,19 +122,14 @@ def test_supervisor_values_preserve_pickle_and_error_failure_contracts():
 
 
 def test_supervisor_leaves_have_no_facade_or_loading_backedge():
-    for owner in (diagnostics, process, recovery, session):
-        tree = ast.parse(Path(owner.__file__).read_text(encoding="utf-8"))
-        assert not any(
-            isinstance(node, ast.ImportFrom)
-            and node.module
-            in {
-                "supervisor",
-                "loading",
-                "omnitensor.plugins.supervisor",
-                "omnitensor.plugins.loading",
-            }
-            for node in ast.walk(tree)
+    assert (
+        forbidden_imports(
+            [Path(owner.__file__) for owner in (diagnostics, process, recovery, session)],
+            ["omnitensor.plugins.supervisor", "omnitensor.plugins.loading"],
+            source_root=Path(__file__).parents[1] / "src",
         )
+        == []
+    )
 
     script = """
 import importlib

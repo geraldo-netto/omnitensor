@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from importrules import forbidden_imports, imported_modules
 
 import omnitensor.registry as core_registry
 import omnitensor.training.recipes as facade
@@ -186,15 +187,14 @@ def test_recipe_leaves_are_independent_and_import_before_facade():
         "recipe_registry",
         "recipe_fetch",
     )
-    for name in leaf_names:
-        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
-        imports = {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
-        }
-        assert "recipes" not in imports
-        assert "omnitensor.training.recipes" not in imports
+    assert (
+        forbidden_imports(
+            [ROOT / f"src/omnitensor/training/{name}.py" for name in leaf_names],
+            ["omnitensor.training.recipes"],
+            source_root=ROOT / "src",
+        )
+        == []
+    )
 
     statement = ";".join(f"import omnitensor.training.{name}" for name in (*leaf_names, "recipes"))
     completed = subprocess.run(
@@ -217,14 +217,13 @@ def test_production_callers_use_leaf_owners_and_facade_remains_class_free():
         "document_model.py": {"recipe_fetch", "recipe_model", "recipe_registry"},
     }
     for filename, required in expected.items():
-        tree = ast.parse((ROOT / "src/omnitensor/training" / filename).read_text(encoding="utf-8"))
-        imports = {
-            node.module.rsplit(".", 1)[-1]
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None
-        }
+        path = ROOT / "src/omnitensor/training" / filename
+        imports = {name.rsplit(".", 1)[-1] for name in imported_modules(path, ROOT / "src")}
         assert required <= imports
-        assert "recipes" not in imports
+        assert (
+            forbidden_imports([path], ["omnitensor.training.recipes"], source_root=ROOT / "src")
+            == []
+        )
 
     facade_tree = ast.parse(
         (ROOT / "src/omnitensor/training/recipes.py").read_text(encoding="utf-8")

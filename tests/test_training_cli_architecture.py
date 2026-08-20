@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import pickle
 import subprocess
 import sys
@@ -8,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from importrules import forbidden_imports
 
 import omnitensor.training.cli as facade
 import omnitensor.training.runner as runner
@@ -151,11 +151,14 @@ def test_cli_leaves_import_before_facade_without_backedges():
         check=True,
     )
 
-    for name in modules:
-        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
-        assert not any(
-            isinstance(node, ast.ImportFrom) and node.module == "cli" for node in ast.walk(tree)
+    assert (
+        forbidden_imports(
+            [ROOT / f"src/omnitensor/training/{name}.py" for name in modules],
+            ["omnitensor.training.cli"],
+            source_root=ROOT / "src",
         )
+        == []
+    )
 
 
 def test_console_targets_stay_on_facade_and_numeric_promotion_stays_separate():

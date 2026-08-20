@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from importrules import forbidden_imports
 
 import omnitensor.training.document_model as facade
 
@@ -124,25 +125,27 @@ def test_document_model_leaves_import_before_facade_and_never_import_it():
         check=True,
     )
 
-    for name in modules:
-        tree = ast.parse((ROOT / f"src/omnitensor/training/{name}.py").read_text(encoding="utf-8"))
-        assert not any(
-            isinstance(node, ast.ImportFrom) and node.module == "document_model"
-            for node in ast.walk(tree)
+    assert (
+        forbidden_imports(
+            [ROOT / f"src/omnitensor/training/{name}.py" for name in modules],
+            ["omnitensor.training.document_model"],
+            source_root=ROOT / "src",
         )
+        == []
+    )
 
 
 def test_cpu_reference_owner_is_absent_from_runtime_and_native_modules():
     allowed = {"document_model.py", "document_model_installation.py"}
-    owners = []
-    for path in (ROOT / "src/omnitensor/training").glob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        if any(
-            isinstance(node, ast.ImportFrom) and node.module == "document_model_cpu_reference"
-            for node in ast.walk(tree)
-        ):
-            owners.append(path.name)
-    assert set(owners) <= allowed
+    owners = {
+        Path(violation.rsplit(":", 1)[0]).name
+        for violation in forbidden_imports(
+            (ROOT / "src/omnitensor/training").glob("*.py"),
+            ["omnitensor.training.document_model_cpu_reference"],
+            source_root=ROOT / "src",
+        )
+    }
+    assert owners <= allowed
 
     provider = (ROOT / "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/bge.py").read_text(
         encoding="utf-8"

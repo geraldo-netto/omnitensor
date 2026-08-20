@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from importrules import forbidden_imports
 
 from omnitensor import (
     artifact_readiness,
@@ -148,12 +149,16 @@ def test_extracted_service_owners_have_no_static_service_backedge():
         runtime_api,
         telemetry_observation,
     )
-    for owner in owners:
-        tree = ast.parse(Path(owner.__file__).read_text(encoding="utf-8"))
-        assert not any(
-            isinstance(node, ast.ImportFrom) and node.module in {"service", "omnitensor.service"}
-            for node in ast.walk(tree)
+    # Every import form, through the shared rule: this read `ast.ImportFrom`
+    # alone, so `import omnitensor.service` in an extracted owner passed it.
+    assert (
+        forbidden_imports(
+            [Path(owner.__file__) for owner in owners],
+            ["omnitensor.service"],
+            source_root=Path(__file__).parents[1] / "src",
         )
+        == []
+    )
 
 
 def test_artifact_resolution_cache_preserves_the_primary_stamp_contract(tmp_path):
