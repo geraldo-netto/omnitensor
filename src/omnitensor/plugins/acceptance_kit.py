@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from re import Pattern
 
-from ..atomicio import read_bytes_bounded
+from ..atomicio import JsonTooLargeError, read_bytes_bounded
 from .generation import ProviderGenerationError
 
 AcceptanceError = Callable[[str, str], Exception]
@@ -198,6 +198,160 @@ def require_boolean(
     if not isinstance(value, bool):
         raise error_type(code, detail)
     return value
+
+
+class BoundChecks:
+    """The ten bound checks an acceptance module makes, bound to its refusals.
+
+    Each qualified workload had its own copy of these — `_bounded_bytes`,
+    `_json_object`, `_mapping`, `_sequence`, `_bounded_text`, `_identifier`,
+    `_digest`, `_integer`, `_boolean` — differing only in the error type they
+    raise and in a handful of words. Ten wrappers per module is ten places to
+    edit whenever a primitive above changes, and the copies had already
+    drifted: one allows whitespace inside bounded text and one does not, one
+    refuses an empty sequence and one does not, and the same oversize refusal
+    reads "exceeds its byte limit" in one and "is oversized" in the other.
+
+    Those differences are real and are contracts a client reads, so they are
+    parameters here rather than something to unify by fiat. What they are not
+    is a reason to keep two sets of wrappers: the disagreement is now one
+    visible constructor call instead of two files that have to be diffed to
+    find it.
+    """
+
+    # Deliberately not a dataclass: the mutation inventory reads undecorated
+    # classes only, and a decorator here would take every check below out of
+    # mutation coverage the moment the wrappers moved in.
+    __slots__ = (
+        "allow_whitespace",
+        "digest_detail",
+        "error_type",
+        "identifier_text_limit",
+        "integer_detail",
+        "optional_sequence_detail",
+        "oversize_detail",
+        "sequence_detail",
+    )
+
+    def __init__(
+        self,
+        error_type: AcceptanceError,
+        *,
+        # The words each module's refusals use: stable text a client may match.
+        oversize_detail: str = "exceeds its byte limit",
+        sequence_detail: str = "must be a non-empty sequence",
+        optional_sequence_detail: str = "must be a sequence",
+        digest_detail: str = "must be lowercase SHA-256",
+        integer_detail: str = "is outside its bound",
+        # Whether bounded text may be blank once stripped.
+        allow_whitespace: bool = True,
+        # When set, an identifier is first required to be bounded text of this
+        # length, so an unbounded value is refused as text, not as a name.
+        identifier_text_limit: int | None = None,
+    ) -> None:
+        self.error_type = error_type
+        self.oversize_detail = oversize_detail
+        self.sequence_detail = sequence_detail
+        self.optional_sequence_detail = optional_sequence_detail
+        self.digest_detail = digest_detail
+        self.integer_detail = integer_detail
+        self.allow_whitespace = allow_whitespace
+        self.identifier_text_limit = identifier_text_limit
+
+    def bounded_bytes(self, path: Path | str, maximum: int, label: str) -> bytes:
+        try:
+            return read_bytes_bounded(Path(path), maximum)
+        except JsonTooLargeError as error:
+            raise self.error_type(f"{label}-invalid", f"{label} {self.oversize_detail}") from error
+        except OSError as error:
+            raise self.error_type(f"{label}-invalid", f"cannot read {label}") from error
+
+    def json_object(self, raw: bytes, label: str) -> Mapping[str, object]:
+        try:
+            value = json.loads(raw)
+        except (UnicodeError, ValueError) as error:
+            raise self.error_type(f"{label}-invalid", f"{label} is not JSON") from error
+        return self.mapping(value, label, f"{label}-invalid")
+
+    def mapping(
+        self, value: object, label: str, code: str = "evidence-invalid"
+    ) -> Mapping[str, object]:
+        return require_mapping(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} must be an object",
+        )
+
+    def sequence(
+        self,
+        value: object,
+        label: str,
+        code: str = "evidence-invalid",
+        *,
+        allow_empty: bool = False,
+    ) -> Sequence[object]:
+        detail = self.optional_sequence_detail if allow_empty else self.sequence_detail
+        return require_sequence(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} {detail}",
+            allow_empty=allow_empty,
+        )
+
+    def text(self, value: object, label: str, maximum: int, code: str) -> str:
+        return require_text(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} must be bounded text",
+            maximum=maximum,
+            allow_whitespace=self.allow_whitespace,
+        )
+
+    def identifier(self, value: object, label: str, code: str) -> str:
+        if self.identifier_text_limit is not None:
+            value = self.text(value, label, self.identifier_text_limit, code)
+        return require_identifier(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} must be a kebab-case identifier",
+        )
+
+    def digest(self, value: object, label: str, code: str = "evidence-invalid") -> str:
+        return require_digest(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} {self.digest_detail}",
+        )
+
+    def integer(
+        self,
+        value: object,
+        label: str,
+        minimum: int,
+        maximum: int | None = None,
+        code: str = "evidence-invalid",
+    ) -> int:
+        return require_integer(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} {self.integer_detail}",
+            minimum=minimum,
+            maximum=maximum,
+        )
+
+    def boolean(self, value: object, label: str, code: str = "evidence-invalid") -> bool:
+        return require_boolean(
+            value,
+            error_type=self.error_type,
+            code=code,
+            detail=f"{label} must be boolean",
+        )
 
 
 def discover_resource(*ordered_candidates: Path | str) -> Path:

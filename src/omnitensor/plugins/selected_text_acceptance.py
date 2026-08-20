@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import re
 import unicodedata
@@ -11,23 +10,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
+from ..atomicio import JsonTooLargeError, write_json_atomic
 from ..registry import validate_document
 from ..stable_error import StableError
 from .acceptance_kit import (
+    BoundChecks,
     BoundedJsonDocument,
     NativeLoadReport,
     discover_resource,
     native_load_report_document,
     parse_native_load_report,
     read_bounded_json,
-    require_boolean,
-    require_digest,
-    require_identifier,
-    require_integer,
-    require_mapping,
-    require_sequence,
-    require_text,
     run_acceptance_cli,
     validate_acceptance_report,
     validate_gpu_load,
@@ -565,40 +558,31 @@ def _valid_hebrew(value: str) -> bool:
     return _HEBREW.search(value) is not None and _DISALLOWED_SCRIPT.search(value) is None
 
 
-def _bounded_bytes(path: Path, maximum: int, label: str) -> bytes:
-    try:
-        return read_bytes_bounded(Path(path), maximum)
-    except JsonTooLargeError as error:
-        raise SelectedTextAcceptanceError(f"{label}-invalid", f"{label} is oversized") from error
-    except OSError as error:
-        raise SelectedTextAcceptanceError(f"{label}-invalid", f"cannot read {label}") from error
-
-
-def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
-    try:
-        value = json.loads(raw)
-    except (UnicodeError, ValueError) as error:
-        raise SelectedTextAcceptanceError(f"{label}-invalid", f"{label} is not JSON") from error
-    return _mapping(value, label, f"{label}-invalid")
-
-
-def _mapping(value: object, label: str, code: str = "evidence-invalid") -> Mapping[str, object]:
-    return require_mapping(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} must be an object",
-    )
+# The bound checks this module makes, bound to its refusal type once. It
+# refuses whitespace-only bounded text, allows an empty sequence, and reads an
+# identifier as a name directly; `document_acceptance` disagrees on all three,
+# and the wording of two refusals differs as well. The disagreement is stated
+# here rather than spread over twenty near-identical wrappers.
+_CHECK = BoundChecks(
+    SelectedTextAcceptanceError,
+    oversize_detail="is oversized",
+    sequence_detail="must be an array",
+    optional_sequence_detail="must be an array",
+    digest_detail="is invalid",
+    integer_detail="is invalid",
+    allow_whitespace=False,
+    identifier_text_limit=None,
+)
+_bounded_bytes = _CHECK.bounded_bytes
+_json_object = _CHECK.json_object
+_mapping = _CHECK.mapping
+_identifier = _CHECK.identifier
+_digest = _CHECK.digest
+_boolean = _CHECK.boolean
 
 
 def _sequence(value: object, label: str) -> Sequence[object]:
-    return require_sequence(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code="evidence-invalid",
-        detail=f"{label} must be an array",
-        allow_empty=True,
-    )
+    return _CHECK.sequence(value, label, allow_empty=True)
 
 
 def _texts(value: object, label: str) -> tuple[str, ...]:
@@ -610,32 +594,7 @@ def _texts(value: object, label: str) -> tuple[str, ...]:
 
 
 def _text(value: object, label: str, maximum: int, code: str) -> str:
-    return require_text(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} must be bounded text",
-        maximum=maximum,
-        allow_whitespace=False,
-    )
-
-
-def _identifier(value: object, label: str, code: str) -> str:
-    return require_identifier(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} must be a kebab-case identifier",
-    )
-
-
-def _digest(value: object, label: str, code: str = "evidence-invalid") -> str:
-    return require_digest(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} is invalid",
-    )
+    return _CHECK.text(value, label, maximum, code)
 
 
 def _integer(
@@ -645,23 +604,7 @@ def _integer(
     maximum: int,
     code: str = "evidence-invalid",
 ) -> int:
-    return require_integer(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} is invalid",
-        minimum=minimum,
-        maximum=maximum,
-    )
-
-
-def _boolean(value: object, label: str, code: str = "evidence-invalid") -> bool:
-    return require_boolean(
-        value,
-        error_type=SelectedTextAcceptanceError,
-        code=code,
-        detail=f"{label} must be boolean",
-    )
+    return _CHECK.integer(value, label, minimum, maximum, code)
 
 
 def _corpus_path() -> Path:

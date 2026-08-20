@@ -118,8 +118,14 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # `document_qa`'s split into the span index and the answer contract, and
     # `scheduler` follows `_BackendQueue`'s arithmetic into `stride`, where the
     # weighting and the held-out clamp actually live now.
+    #
+    # `acceptance` moved 43 -> 49 when the ten per-module bound-check wrappers
+    # became one `BoundChecks` in the kit: four `document_acceptance` wrappers
+    # that were pure delegation are gone, and the ten methods that now hold the
+    # behaviour are tracked instead — in one place rather than in each workload
+    # that qualifies.
     assert [len(shard.selectors) for shard in manifest.shards] == [
-        43,
+        49,
         3,
         56,
         34,
@@ -130,7 +136,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         13,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 218
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 224
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

@@ -11,28 +11,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
+from ..atomicio import JsonTooLargeError, write_json_atomic
 from ..registry import validate_document
 from ..stable_error import StableError
 from .acceptance_kit import (
+    BoundChecks,
     CaseScore,
     JsonDigestMismatchError,
     NativeLoadReport,
     discover_resource,
     read_bounded_json,
-    require_boolean,
-    require_digest,
-    require_identifier,
-    require_integer,
-    require_mapping,
-    require_sequence,
-    require_text,
     run_acceptance_cli,
     validate_acceptance_report,
     validate_gpu_load,
@@ -634,82 +627,45 @@ def _parse_safety(value: object) -> DocumentSafetyEvidence:
     )
 
 
-def _bounded_bytes(path: Path, limit: int, label: str) -> bytes:
-    try:
-        return read_bytes_bounded(path, limit)
-    except JsonTooLargeError as error:
-        raise DocumentAcceptanceError(
-            f"{label}-invalid", f"{label} exceeds its byte limit"
-        ) from error
-    except OSError as error:
-        raise DocumentAcceptanceError(f"{label}-invalid", f"cannot read {label}") from error
-
-
-def _json_object(raw: bytes, label: str) -> Mapping[str, object]:
-    try:
-        value = json.loads(raw)
-    except (UnicodeError, json.JSONDecodeError) as error:
-        raise DocumentAcceptanceError(f"{label}-invalid", f"{label} is not JSON") from error
-    return _mapping(value, label, f"{label}-invalid")
+# The bound checks this module makes, bound to its refusal type once. It
+# allows whitespace inside bounded text, refuses an empty sequence, and reads
+# an identifier as bounded text first; `selected_text_acceptance` disagrees on
+# all three, and that disagreement is now visible here rather than buried in
+# twenty near-identical wrappers.
+_CHECK = BoundChecks(
+    DocumentAcceptanceError,
+    oversize_detail="exceeds its byte limit",
+    sequence_detail="must be a non-empty sequence",
+    optional_sequence_detail="must be a sequence",
+    digest_detail="must be lowercase SHA-256",
+    integer_detail="is outside its bound",
+    allow_whitespace=True,
+    identifier_text_limit=120,
+)
+_bounded_bytes = _CHECK.bounded_bytes
+_json_object = _CHECK.json_object
+_digest = _CHECK.digest
+_boolean = _CHECK.boolean
 
 
 def _mapping(value: object, label: str, code: str) -> Mapping[str, object]:
-    return require_mapping(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be an object",
-    )
+    return _CHECK.mapping(value, label, code)
 
 
 def _sequence(value: object, label: str, code: str) -> Sequence[object]:
-    return require_sequence(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be a non-empty sequence",
-        allow_empty=False,
-    )
+    return _CHECK.sequence(value, label, code, allow_empty=False)
 
 
 def _optional_sequence(value: object, label: str, code: str) -> Sequence[object]:
-    return require_sequence(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be a sequence",
-        allow_empty=True,
-    )
+    return _CHECK.sequence(value, label, code, allow_empty=True)
 
 
 def _bounded_text(value: object, label: str, limit: int, code: str) -> str:
-    return require_text(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be bounded text",
-        maximum=limit,
-        allow_whitespace=True,
-    )
+    return _CHECK.text(value, label, limit, code)
 
 
 def _identifier(value: object, label: str, code: str) -> str:
-    text = _bounded_text(value, label, 120, code)
-    return require_identifier(
-        text,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be a kebab-case identifier",
-    )
-
-
-def _digest(value: object, label: str) -> str:
-    return require_digest(
-        value,
-        error_type=DocumentAcceptanceError,
-        code="evidence-invalid",
-        detail=f"{label} must be lowercase SHA-256",
-    )
+    return _CHECK.identifier(value, label, code)
 
 
 def _integer(
@@ -719,23 +675,7 @@ def _integer(
     maximum: int,
     code: str = "evidence-invalid",
 ) -> int:
-    return require_integer(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} is outside its bound",
-        minimum=minimum,
-        maximum=maximum,
-    )
-
-
-def _boolean(value: object, label: str, code: str = "evidence-invalid") -> bool:
-    return require_boolean(
-        value,
-        error_type=DocumentAcceptanceError,
-        code=code,
-        detail=f"{label} must be boolean",
-    )
+    return _CHECK.integer(value, label, minimum, maximum, code)
 
 
 def _corpus_path() -> Path:
