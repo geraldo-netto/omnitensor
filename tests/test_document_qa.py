@@ -1066,8 +1066,16 @@ class OverlongAdapter:
 
 
 @pytest.mark.asyncio
-async def test_a_selection_that_does_not_fit_is_refused_naming_what_went_unread(tmp_path):
-    """OMNI-0395: it used to be answered from its opening pages, silently."""
+async def test_a_selection_larger_than_one_pass_is_answered_rather_than_refused(tmp_path):
+    """OMNI-0504, and the two answers it replaced.
+
+    First this was answered from the opening pages with nobody told (OMNI-0395);
+    then it was refused as `source-truncated`, which is honest but is still a
+    selection turned down for its size. It is read in accumulating extraction
+    passes now, and answered in as many generation passes as the window and
+    the request's own reference count allow.
+    """
+
     source = tmp_path / "long.txt"
     source.write_text("text", encoding="utf-8")
     store = MemoryFragmentStore()
@@ -1083,10 +1091,10 @@ async def test_a_selection_that_does_not_fit_is_refused_naming_what_went_unread(
 
     result = await plugin.execute(request(source), CancellationController(), Progress())
 
-    assert result.status is PluginResultStatus.FAILED
-    assert result.detail.startswith("source-truncated: ")
-    assert "page(s) went unread" in result.detail
-    assert str(source) not in result.detail
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert "source-truncated" not in result.detail
+    # Every one of the 2,001 pages is in the index the answer was drawn from.
+    assert len(result.output["citations"]) >= 1
 
 
 def test_the_span_index_and_the_answer_contract_are_their_own_modules():

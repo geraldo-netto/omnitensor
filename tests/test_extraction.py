@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -15,6 +16,7 @@ from omnitensor.plugins.extraction import (
     ImageRegion,
     LayoutBlock,
     PageContent,
+    ResumePoint,
     normalise_text,
 )
 from omnitensor.plugins.ingestion import IngestedFile
@@ -55,6 +57,11 @@ def page(number=1, text="Hello", blocks=(), images=()):
 def extract(adapter, **changes):
     limits = ExtractionLimits(**changes) if changes else None
     return asyncio.run(DocumentExtractor(adapter, limits=limits).extract(ITEM))
+
+
+def extract_all(adapter, **changes):
+    limits = ExtractionLimits(**changes) if changes else None
+    return asyncio.run(DocumentExtractor(adapter, limits=limits).extract_all(ITEM))
 
 
 def test_a_well_formed_document_extracts_completely():
@@ -116,24 +123,108 @@ def test_cancellation_is_the_callers_decision_not_an_adapter_failure():
         asyncio.run(scenario())
 
 
-def test_page_output_is_bounded_and_the_adapter_is_closed():
+def test_one_pass_stops_at_the_page_ceiling_and_says_where_to_resume():
     adapter = Adapter([page(number) for number in range(1, 11)])
 
     result = extract(adapter, max_pages=3)
 
     assert result.outcome is ExtractionOutcome.TRUNCATED
     assert len(result.pages) == 3
-    assert result.dropped_pages >= 1
+    # Nothing is dropped: page four is where the next pass starts, and calling
+    # it a loss is what turned a long document into a refusal.
+    assert result.dropped_pages == 0
+    assert result.resume == ResumePoint(3, 0)
     assert adapter.closed
     assert adapter.produced < 10
 
 
-def test_character_output_is_bounded():
+def test_one_pass_stops_mid_page_at_the_character_ceiling():
     result = extract(Adapter([page(1, "x" * 100), page(2, "y" * 100)]), max_characters=120)
 
     assert result.outcome is ExtractionOutcome.TRUNCATED
     assert len(result.text) <= 121
-    assert result.dropped_characters == 80
+    assert result.dropped_characters == 0
+    # Page two was read as far as the ceiling; the rest of it comes next.
+    assert result.resume == ResumePoint(1, 20)
+
+
+def test_a_document_larger_than_one_pass_is_read_whole():
+    """OMNI-0504: a selection too big for a pass is answered, not refused."""
+
+    pages = [page(number, chr(ord("a") + number - 1) * 100) for number in range(1, 6)]
+
+    result = extract_all(Adapter(pages), max_characters=120, max_pages=2)
+
+    assert result.outcome is ExtractionOutcome.SUCCEEDED
+    assert result.complete
+    assert result.resume is None
+    assert [item.page_number for item in result.pages] == [1, 2, 3, 4, 5]
+    assert result.text == "\n".join(item.text for item in pages)
+    assert (result.dropped_pages, result.dropped_characters) == (0, 0)
+
+
+def test_a_page_split_across_passes_is_rejoined_with_its_regions_once():
+    block = LayoutBlock(BlockKind.PARAGRAPH, 0, 0, 10, 10, "region")
+    image = ImageRegion("figure-1", 0, 0, 4, 4)
+
+    result = extract_all(
+        Adapter([page(1, "z" * 250, blocks=(block,), images=(image,))]),
+        max_characters=100,
+    )
+
+    assert result.outcome is ExtractionOutcome.SUCCEEDED
+    assert len(result.pages) == 1
+    assert result.pages[0].text == "z" * 250
+    # Emitted with the page's first part and never repeated.
+    assert len(result.pages[0].blocks) == 1
+    assert len(result.pages[0].images) == 1
+
+
+def test_one_page_far_larger_than_a_pass_is_still_read_whole():
+    result = extract_all(Adapter([page(1, "q" * 40)]), max_characters=1, max_pages=1)
+
+    assert result.outcome is ExtractionOutcome.SUCCEEDED
+    assert result.pages[0].text == "q" * 40
+
+
+def test_an_adapter_that_never_advances_is_stopped_rather_than_looped():
+    """Unreachable from this module, and the loop still must not hang."""
+
+    class Shrinking:
+        kind = AdapterKind.PARSER
+
+        async def pages(self, _item):
+            yield page(1, "")
+            yield page(2, "b" * 50)
+
+    extractor = DocumentExtractor(Shrinking(), limits=ExtractionLimits(max_characters=10))
+    extractor._limits = ExtractionLimits(max_characters=10)
+    seen = []
+
+    original = extractor.extract
+
+    async def frozen(item, **kwargs):
+        result = await original(item, **kwargs)
+        seen.append(result.resume)
+        return replace(result, resume=ResumePoint(1, 0))
+
+    extractor.extract = frozen
+    result = asyncio.run(extractor.extract_all(ITEM))
+
+    assert result.outcome is ExtractionOutcome.TRUNCATED
+    assert result.resume is None
+    assert result.detail == "a page is larger than one extraction pass"
+    assert len(seen) == 2
+
+
+def test_a_failed_pass_keeps_what_earlier_passes_already_read():
+    adapter = Adapter([page(1, "a" * 100), page(2, "b" * 100)], fail_after=1)
+
+    result = extract_all(adapter, max_characters=100)
+
+    assert result.outcome is ExtractionOutcome.CRASHED
+    assert result.partial
+    assert result.pages[0].text == "a" * 100
 
 
 def test_control_characters_are_stripped():
@@ -336,12 +427,14 @@ def test_a_truncated_extraction_can_say_exactly_what_went_unread():
         truncation_summary,
     )
 
-    result = extract(Adapter([page(1, "a" * 10), page(2, "b" * 10)]), max_characters=12)
+    # Genuine loss, not a ceiling: a page the adapter did not produce as a
+    # `PageContent` cannot be resumed, so it is still counted and reported.
+    result = extract(Adapter([page(1, "a" * 10), "not a page", page(2, "b" * 10)]))
 
     assert result.outcome is ExtractionOutcome.TRUNCATED
     summary = truncation_summary(result)
     assert "went unread" in summary
-    assert "character(s)" in summary
+    assert "page(s)" in summary
     # A refusal names counts, never the file it read or anything it contained.
     assert "report.pdf" not in summary
     assert "a" * 10 not in summary

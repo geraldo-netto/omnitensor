@@ -165,6 +165,20 @@ class ExtractionLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class ResumePoint:
+    """Where the next extraction pass starts reading.
+
+    A document larger than one pass is read in several, so a pass that stops
+    at a ceiling says where it stopped rather than reporting the rest lost.
+    The offset is into the *normalised* text of that page, which is what the
+    reader is given and is derived from the raw page deterministically.
+    """
+
+    page_index: int
+    character_offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionResult:
     """Everything extraction produced, and how far it actually got."""
 
@@ -175,6 +189,7 @@ class ExtractionResult:
     dropped_pages: int = 0
     dropped_characters: int = 0
     dropped_regions: int = 0
+    resume: ResumePoint | None = None
 
     @property
     def partial(self) -> bool:
@@ -213,8 +228,22 @@ class ExtractionAdapter(Protocol):
 
 def normalise_text(text: object, limit: int) -> tuple[str, int]:
     """Return safe, bounded text and how many characters were dropped."""
+    stripped = normalised_text(text)
+    if len(stripped) <= limit:
+        return stripped, 0
+    return stripped[:limit], len(stripped) - limit
+
+
+def normalised_text(text: object) -> str:
+    """Safe text, whole. Bounding it is a separate decision from cleaning it.
+
+    Splitting these two apart is what lets a pass resume: an offset into this
+    result is stable, because the same raw page always normalises the same way,
+    while an offset into the raw text would move with every control character
+    the cleaning removed.
+    """
     if not isinstance(text, str):
-        return "", 0
+        return ""
     normalised = unicodedata.normalize("NFC", text)
     kept = [
         character
@@ -228,10 +257,7 @@ def normalise_text(text: object, limit: int) -> tuple[str, int]:
     # Runs of spaces are collapsed but tabs are left alone: a parser emits
     # them to separate columns, and squashing those merges table cells.
     collapsed = _RUNS_OF_SPACES.sub(" ", "".join(kept))
-    stripped = "\n".join(line.strip() for line in collapsed.splitlines()).strip()
-    if len(stripped) <= limit:
-        return stripped, 0
-    return stripped[:limit], len(stripped) - limit
+    return "\n".join(line.strip() for line in collapsed.splitlines()).strip()
 
 
 class DocumentExtractor:
@@ -264,10 +290,55 @@ class DocumentExtractor:
     def limits(self) -> ExtractionLimits:
         return self._limits
 
-    async def extract(
+    async def extract_all(
         self, item: IngestedFile, *, declared_uncompressed_bytes: int | None = None
     ) -> ExtractionResult:
-        """Extract one document, containing every way the adapter can fail."""
+        """Every page of a document, in as many passes as it takes.
+
+        One pass is bounded — in pages, in characters and by a deadline — so a
+        document larger than a pass used to come back `TRUNCATED` and every
+        workload turned that into `source-truncated`: a selection refused for
+        being long. It is answered instead, the way generation is: each pass
+        resumes where the last one stopped and the results accumulate, so the
+        only thing a ceiling now decides is how many passes it takes.
+
+        A pass that lands on the same resume point twice stops the loop and
+        is reported truncated. Nothing in this module can produce that — each
+        pass takes at least one character — but an adapter whose pages change
+        between reads could, and a loop that never ends is worse than a
+        partial answer that says so.
+        """
+        merged: ExtractionResult | None = None
+        resume: ResumePoint | None = None
+        while True:
+            result = await self.extract(
+                item, declared_uncompressed_bytes=declared_uncompressed_bytes, resume=resume
+            )
+            merged = result if merged is None else _merge_passes(merged, result, resume)
+            if result.resume is None:
+                return merged
+            if result.resume == resume:
+                return replace(
+                    merged,
+                    outcome=ExtractionOutcome.TRUNCATED,
+                    detail="a page is larger than one extraction pass",
+                    resume=None,
+                )
+            resume = result.resume
+
+    async def extract(
+        self,
+        item: IngestedFile,
+        *,
+        declared_uncompressed_bytes: int | None = None,
+        resume: ResumePoint | None = None,
+    ) -> ExtractionResult:
+        """Extract one pass over a document, containing every adapter failure.
+
+        `resume` starts the pass at a page and an offset a previous pass
+        reported; the result carries the next such point, or `None` when the
+        document is finished. `extract_all` is the loop over both.
+        """
         if not isinstance(item, IngestedFile):
             raise ExtractionError("item-invalid", "item must be an IngestedFile")
         refusal = self._expansion_refusal(item, declared_uncompressed_bytes)
@@ -275,7 +346,7 @@ class DocumentExtractor:
             # The bomb is refused from what it claims, before a parser is
             # started at all — expanding to find out is the attack.
             return ExtractionResult(ExtractionOutcome.REFUSED, detail=refusal)
-        collector = _Collector(self._limits.for_file(item.size_bytes))
+        collector = _Collector(self._limits.for_file(item.size_bytes), resume)
         try:
             async with asyncio.timeout(self._limits.timeout_seconds):
                 await self._drain(item, collector)
@@ -286,7 +357,12 @@ class DocumentExtractor:
             raise
         except Exception as error:  # noqa: BLE001 - containment is the point
             return collector.result(ExtractionOutcome.CRASHED, f"{type(error).__name__}: {error}")
-        if collector.dropped_pages or collector.dropped_characters or collector.dropped_regions:
+        if (
+            collector.resume is not None
+            or collector.dropped_pages
+            or collector.dropped_characters
+            or collector.dropped_regions
+        ):
             return collector.result(ExtractionOutcome.TRUNCATED, "output exceeded its bounds")
         return collector.result(ExtractionOutcome.SUCCEEDED, "")
 
@@ -313,30 +389,67 @@ class _Collector:
     """Accumulate normalised pages while every ceiling is enforced."""
 
     limits: ExtractionLimits
+    resume_from: ResumePoint | None = None
     pages: list[NormalisedPage] = field(default_factory=list)
     characters: int = 0
     dropped_pages: int = 0
     dropped_characters: int = 0
     dropped_regions: int = 0
+    source_index: int = 0
+    resume: ResumePoint | None = None
 
     def accept(self, page: object) -> bool:
         """Add one page; ``False`` means no further page will be taken."""
+        index = self.source_index
+        self.source_index += 1
+        start = self._offset_for(index)
+        if start is None:
+            # Already read by an earlier pass. Skipped rather than dropped:
+            # nothing was lost, and counting it would report it as loss.
+            return True
         if not isinstance(page, PageContent):
             self.dropped_pages += 1
             return True
         if len(self.pages) >= self.limits.max_pages:
-            self.dropped_pages += 1
+            # Not dropped either. The next pass starts exactly here.
+            self.resume = ResumePoint(index, start)
             return False
+        text = normalised_text(page.text)[start:]
         remaining = self.limits.max_characters - self.characters
-        text, dropped = normalise_text(page.text, max(remaining, 0))
-        self.dropped_characters += dropped
-        blocks, images, dropped_regions = self._regions(page)
+        if len(text) > remaining:
+            taken = text[:remaining]
+            self.resume = ResumePoint(index, start + len(taken))
+            if taken:
+                self._add(page, index, taken, start)
+            return False
+        self._add(page, index, text, start)
+        if self.characters >= self.limits.max_characters:
+            # This page fitted exactly. Stopping without a resume point would
+            # end the document here and call it complete.
+            self.resume = ResumePoint(self.source_index, 0)
+            return False
+        return True
+
+    def _add(self, page: PageContent, index: int, text: str, start: int) -> None:
+        # A page continued from an earlier pass carries no regions: they were
+        # emitted whole with its first part, and repeating them would count
+        # every figure on that page twice.
+        blocks, images, dropped_regions = ((), (), 0) if start else self._regions(page)
         self.dropped_regions += dropped_regions
         self.characters += len(text)
         self.pages.append(
-            NormalisedPage(_page_number(page.page_number, len(self.pages)), text, blocks, images)
+            NormalisedPage(_page_number(page.page_number, index), text, blocks, images)
         )
-        return self.characters < self.limits.max_characters
+
+    def _offset_for(self, index: int) -> int | None:
+        """Where this pass starts inside source page `index`, or `None` to skip."""
+        if self.resume_from is None:
+            return 0
+        if index < self.resume_from.page_index:
+            return None
+        if index == self.resume_from.page_index:
+            return self.resume_from.character_offset
+        return 0
 
     def _regions(
         self, page: PageContent
@@ -386,7 +499,49 @@ class _Collector:
             self.dropped_pages,
             self.dropped_characters,
             self.dropped_regions,
+            self.resume if outcome is ExtractionOutcome.TRUNCATED else None,
         )
+
+
+def _merge_passes(
+    first: ExtractionResult, second: ExtractionResult, resume: ResumePoint | None
+) -> ExtractionResult:
+    """One document's two passes as one result.
+
+    A page split across the boundary is rejoined, so the reader sees the page
+    it would have seen from a single pass rather than two entries claiming the
+    same page number.
+    """
+    pages = list(first.pages)
+    incoming = list(second.pages)
+    if (
+        resume is not None
+        and resume.character_offset
+        and pages
+        and incoming
+        and pages[-1].page_number == incoming[0].page_number
+    ):
+        head = pages.pop()
+        tail = incoming.pop(0)
+        pages.append(
+            NormalisedPage(
+                head.page_number,
+                head.text + tail.text,
+                head.blocks + tail.blocks,
+                head.images + tail.images,
+            )
+        )
+    pages.extend(incoming)
+    return ExtractionResult(
+        second.outcome,
+        tuple(pages),
+        "\n".join(page.text for page in pages if page.text),
+        second.detail,
+        first.dropped_pages + second.dropped_pages,
+        first.dropped_characters + second.dropped_characters,
+        first.dropped_regions + second.dropped_regions,
+        second.resume,
+    )
 
 
 TRUNCATED_SOURCE_CODE = "source-truncated"

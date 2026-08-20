@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 from ..stable_error import StableError
 from .event_workload import SelectedSource, select_sources
 from .fragments import SourceFragment
+from .generation import MAX_CONTENT_REFERENCES
 from .protocol import CancellationToken
 from .search import cosine_similarity
 
@@ -173,6 +174,8 @@ def page_spans(
 def answer_passes(
     spans: Sequence[IndexedSpan],
     context_tokens: int,
+    *,
+    reserved_references: int = 1,
 ) -> tuple[tuple[IndexedSpan, ...], ...]:
     """Split ranked spans into the fewest passes the context window allows.
 
@@ -190,12 +193,20 @@ def answer_passes(
     # remaining window, so a long question about a long document can still be
     # answered at length rather than running out of window mid-object.
     budget = max(MAX_SPAN_CHARACTERS, (usable_tokens // 2) * CHARACTERS_PER_TOKEN)
+    # The caller puts its own references in the same request — the question
+    # fragment, here — so a pass may hold that many fewer.
+    per_pass = max(1, MAX_CONTENT_REFERENCES - max(0, int(reserved_references)))
     passes: list[tuple[IndexedSpan, ...]] = []
     current: list[IndexedSpan] = []
     used = 0
     for span in spans:
         cost = len(span.text)
-        if current and used + cost > budget:
+        # Two arithmetic reasons a pass ends, not one. The window is the
+        # obvious one; the other is that a generation request carries at most
+        # `MAX_CONTENT_REFERENCES` references, so a selection of many short
+        # spans filled no window and was refused outright at the request
+        # boundary — a long document answered as "request-invalid".
+        if current and (used + cost > budget or len(current) >= per_pass):
             passes.append(tuple(current))
             current = []
             used = 0

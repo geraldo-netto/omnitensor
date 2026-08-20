@@ -22,6 +22,7 @@ from .events import (
     GroundedEventResult,
     duplicate_key,
 )
+from .generation import MAX_CONTENT_REFERENCES
 from .spans import estimate_tokens
 
 # What is left for the sources after the prompt and the answer. An event costs
@@ -47,7 +48,11 @@ def plan_passes(
     spent = 0
     for reference, text in fragments:
         cost = estimate_tokens(text)
-        if current and spent + cost > budget:
+        # A pass ends on the window *or* on the number of references a
+        # generation request can carry. Without the second, a selection of
+        # many short sources filled no window and was refused at the request
+        # boundary instead of being read in more passes.
+        if current and (spent + cost > budget or len(current) >= MAX_CONTENT_REFERENCES):
             passes.append(tuple(current))
             current, spent = [], 0
         current.append(reference)

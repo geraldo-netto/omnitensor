@@ -380,7 +380,7 @@ class EventExtractionPlugin(ManagedPlugin):
                 raise EventWorkloadError(
                     "source-unsupported", "selected source type is unsupported"
                 )
-            extraction = await DocumentExtractor(adapter).extract(source.item)
+            extraction = await DocumentExtractor(adapter).extract_all(source.item)
             if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
                 # A truncated extraction used to be read as if whole, so a long
                 # selection was answered from its opening pages and nobody was
