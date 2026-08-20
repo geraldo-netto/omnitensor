@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -82,7 +83,7 @@ def copy_selected_source(
         selected_status = candidate.stat(follow_symlinks=False)
     except OSError as error:
         raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be opened"
+            "selected-file-unavailable", _unreachable_selected_source(candidate, error)
         ) from error
     resolved = canonical_selected_source(candidate)
     # Everything that can raise happens before the descriptor exists: the name
@@ -192,13 +193,41 @@ def staged_source_name(candidate: Path) -> str:
     return f"selected-file{suffix}"
 
 
+def _unreachable_selected_source(candidate: Path, error: OSError) -> str:
+    """Say why a path the caller could see is not there for the worker.
+
+    Staging runs inside the sandbox, where only the brokered input root is
+    mounted.  A file the person picked in their own file manager and can read
+    perfectly well is simply absent here if it lives anywhere else, and the
+    kernel reports that as ENOENT - indistinguishable, in the old wording, from
+    a file that was deleted.  The caller cannot act on "cannot be opened"; it
+    can act on being told the selection has to live under a configured input
+    root.
+    """
+    if error.errno == errno.ENOENT:
+        return (
+            f"selected source is not reachable here: {candidate}. A selected file must "
+            "live under one of the service's configured input roots "
+            "(OMNITENSOR_INPUT_ROOTS); nothing outside them is visible to the worker."
+        )
+    if error.errno in (errno.EACCES, errno.EPERM):
+        return f"selected source cannot be read: {candidate} ({os.strerror(error.errno)})"
+    return f"selected source cannot be opened: {candidate} ({error.strerror or error})"
+
+
 def canonical_selected_source(candidate: Path) -> Path:
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError) as error:
-        raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be opened"
-        ) from error
+        # A relative path never had a chance of naming a real selection, so the
+        # input-root explanation would be a wrong guess there; only an absolute
+        # path that is simply not present gets it.
+        detail = (
+            _unreachable_selected_source(candidate, error)
+            if candidate.is_absolute() and isinstance(error, OSError)
+            else "selected source cannot be opened"
+        )
+        raise PluginWorkerError("selected-file-unavailable", detail) from error
     if not candidate.is_absolute() or resolved != candidate:
         raise PluginWorkerError(
             "selected-file-invalid", "selected source must be a canonical absolute path"
@@ -211,7 +240,7 @@ def open_selected_source(candidate: Path) -> int:
         return os.open(candidate, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError as error:
         raise PluginWorkerError(
-            "selected-file-unavailable", "selected source cannot be opened"
+            "selected-file-unavailable", _unreachable_selected_source(candidate, error)
         ) from error
 
 
@@ -220,9 +249,19 @@ def validate_selected_source_stat(
     *,
     maximum_bytes: int = MAX_SELECTED_SOURCE_BYTES,
 ) -> None:
-    if not stat.S_ISREG(status.st_mode) or not 0 < status.st_size <= maximum_bytes:
+    # Three unrelated things a person can do wrong, and one sentence covering
+    # all of them told none of them apart: an empty file is a regular file and
+    # is bounded, so "must be a bounded regular file" read as a contradiction
+    # of what the user could see in their own file manager.
+    if not stat.S_ISREG(status.st_mode):
+        raise PluginWorkerError("selected-file-invalid", "selected source is not a regular file")
+    if status.st_size == 0:
+        raise PluginWorkerError("selected-file-invalid", "selected source is empty")
+    if status.st_size > maximum_bytes:
         raise PluginWorkerError(
-            "selected-file-invalid", "selected source must be a bounded regular file"
+            "selected-file-invalid",
+            f"selected source is {status.st_size} bytes, over the {maximum_bytes} "
+            "a selected file may be staged at",
         )
 
 

@@ -2103,10 +2103,9 @@ def test_selected_file_helpers_reject_exact_race_and_file_boundaries(tmp_path, m
     monkeypatch.setattr(loading_module.os, "open", open_file)
     with pytest.raises(PluginWorkerError) as unavailable:
         loading_module._open_selected_source(source)
-    assert (unavailable.value.code, unavailable.value.detail) == (
-        "selected-file-unavailable",
-        "selected source cannot be opened",
-    )
+    assert unavailable.value.code == "selected-file-unavailable"
+    assert unavailable.value.detail.startswith("selected source cannot be opened")
+    assert str(source) in unavailable.value.detail
     assert opened == [
         (
             source,
@@ -2131,30 +2130,38 @@ def test_selected_file_helpers_reject_exact_race_and_file_boundaries(tmp_path, m
             )
         )
     )
-    for status in (
-        os.stat_result((regular.st_mode, 1, 1, 1, 1, 1, 0, 1, 1, 1)),
-        os.stat_result(
-            (
-                regular.st_mode,
-                1,
-                1,
-                1,
-                1,
-                1,
-                loading_module.MAX_SELECTED_SOURCE_BYTES + 1,
-                1,
-                1,
-                1,
-            )
+    # Each rejection names its own cause: one sentence for all three said only
+    # that the file was wrong, and an empty file is neither unbounded nor
+    # irregular, so the wording denied what the person could see was true.
+    for status, detail in (
+        (
+            os.stat_result((regular.st_mode, 1, 1, 1, 1, 1, 0, 1, 1, 1)),
+            "selected source is empty",
         ),
-        tmp_path.stat(),
+        (
+            os.stat_result(
+                (
+                    regular.st_mode,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    loading_module.MAX_SELECTED_SOURCE_BYTES + 1,
+                    1,
+                    1,
+                    1,
+                )
+            ),
+            f"selected source is {loading_module.MAX_SELECTED_SOURCE_BYTES + 1} bytes, "
+            f"over the {loading_module.MAX_SELECTED_SOURCE_BYTES} a selected file may "
+            "be staged at",
+        ),
+        (tmp_path.stat(), "selected source is not a regular file"),
     ):
         with pytest.raises(PluginWorkerError) as invalid:
             loading_module._validate_selected_source_stat(status)
-        assert (invalid.value.code, invalid.value.detail) == (
-            "selected-file-invalid",
-            "selected source must be a bounded regular file",
-        )
+        assert (invalid.value.code, invalid.value.detail) == ("selected-file-invalid", detail)
 
     destination = tmp_path / "destination"
     destination.write_text("event", encoding="utf-8")
@@ -3263,3 +3270,22 @@ def test_external_worker_sandbox_mounts_every_canonical_schema(tmp_path):
         assert any(resolved == root or resolved.is_relative_to(root) for root in mounted), (
             f"{name} resolves to {resolved}, which no sandbox runtime path covers"
         )
+
+
+def test_selected_source_outside_the_input_roots_says_so(tmp_path):
+    """The refusal a person gets for picking a file the service may not read.
+
+    Staging runs inside the sandbox, where a path outside the brokered input
+    root simply does not exist, so the kernel says ENOENT.  Reported as
+    "cannot be opened" that is indistinguishable from a deleted file and gives
+    the person nothing to change; the configured-root rule is the one fact
+    that makes the refusal actionable.
+    """
+    absent = tmp_path / "outside-every-root.txt"
+
+    with pytest.raises(PluginWorkerError) as refusal:
+        loading_module._open_selected_source(absent)
+
+    assert refusal.value.code == "selected-file-unavailable"
+    assert "OMNITENSOR_INPUT_ROOTS" in refusal.value.detail
+    assert str(absent) in refusal.value.detail
