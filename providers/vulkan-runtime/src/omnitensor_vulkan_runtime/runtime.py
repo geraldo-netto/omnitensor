@@ -1,8 +1,9 @@
 """In-process llama.cpp/Vulkan adapter: load, lease, decode, and nothing else.
 
-What each workload tells the model lives in :mod:`hints`, and what is bound
-back out of its answer lives in :mod:`grounding`; this module holds the GPU
-lease and the token stream.
+What each workload tells the model arrives through the `TaskPrompting` port
+and is stated beside that workload's task; which references may be cited lives
+in :mod:`hints` and what is bound back out of an answer in :mod:`grounding`.
+This module holds the GPU lease and the token stream.
 """
 
 from __future__ import annotations
@@ -26,12 +27,13 @@ from omnitensor.plugins.generation import (
     GenerationTask,
     ProviderGenerationError,
 )
+from omnitensor.plugins.prompting import NO_PROMPTING, TaskPrompting
 from omnitensor.plugins.protocol import CancellationToken, ProgressReporter
 from omnitensor.plugins.tuning import WorkloadTuning
 
 from .grammar import grammar_schema
 from .grounding import bind_grounding_metadata, fragment_span
-from .hints import grounding_hint, reconsideration_prompt
+from .hints import citable_hint
 
 MAX_RUNTIME_CONTEXT_TOKENS = 32_768
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)
@@ -90,7 +92,13 @@ def _log_offload(text: str) -> tuple[int | None, int | None]:
 class LlamaVulkanRuntime:
     """Load any GGUF only while holding the host's cross-worker GPU lease."""
 
-    def __init__(self, store: PrivateFragmentStore, lease_path: Path) -> None:
+    def __init__(
+        self,
+        store: PrivateFragmentStore,
+        lease_path: Path,
+        *,
+        prompting: TaskPrompting = NO_PROMPTING,
+    ) -> None:
         if not isinstance(store, PrivateFragmentStore):
             raise TypeError("store must satisfy PrivateFragmentStore")
         if not isinstance(lease_path, Path) or not lease_path.is_file():
@@ -104,6 +112,10 @@ class LlamaVulkanRuntime:
         self._physical_device = ""
         self._active_request = ""
         self._tuning = WorkloadTuning()
+        # What the workload adds to the prompt, asked for rather than known:
+        # this adapter loads a model and decodes tokens, and none of that
+        # changes when a workload is added.
+        self._prompting = prompting
         # The model is native memory shared between the event loop and the
         # worker thread running a decode.  `terminate` used to call `_release`
         # -- and so `llama.close()` -- while `create_chat_completion` was still
@@ -344,7 +356,7 @@ class LlamaVulkanRuntime:
     ) -> str:
         content = _private_content(self._store, request)
         instruction = task.instruction_template.replace("{{UNTRUSTED_CONTENT}}", content)
-        hint = grounding_hint(task, request, self._store)
+        hint = citable_hint(task, request) + self._prompting.hint(task, request, self._store)
 
         messages = [
             {
@@ -365,7 +377,7 @@ class LlamaVulkanRuntime:
         if tuning_message is not None:
             messages.append(tuning_message)
         raw = _complete_json(llama, messages, task, cancellation, self._stopping)
-        reconsideration = reconsideration_prompt(task, hint, raw)
+        reconsideration = self._prompting.reconsideration(task, hint, raw)
         if reconsideration is not None:
             messages.extend(
                 (

@@ -15,6 +15,7 @@ from omnitensor.plugins.document_translation import (
 )
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
+    EventPrompting,
     EventRecoveryJournal,
     event_generation_task,
 )
@@ -28,6 +29,7 @@ from omnitensor.plugins.generation import (
     MeasuredEvidence,
 )
 from omnitensor.plugins.generation_workers import LlamaCppVulkanWorker
+from omnitensor.plugins.prompting import NO_PROMPTING, TaskPrompting
 from omnitensor.plugins.protocol import (
     CancellationToken,
     PluginContext,
@@ -37,7 +39,11 @@ from omnitensor.plugins.protocol import (
     ProgressReporter,
     WorkloadPlugin,
 )
-from omnitensor.plugins.selected_text import SelectedTextPlugin, selected_text_task
+from omnitensor.plugins.selected_text import (
+    SelectedTextPlugin,
+    SelectedTextPrompting,
+    selected_text_task,
+)
 from omnitensor.plugins.selected_text_acceptance import (
     SELECTED_TEXT_WORKER_LOAD_RECEIPT,
     ModelEvidence,
@@ -242,7 +248,7 @@ def _provenance(artifact) -> ArtifactProvenance:
     )
 
 
-def generation_context(plugin_id: str):
+def generation_context(plugin_id: str, prompting: TaskPrompting = NO_PROMPTING):
     """Everything a Qwen workload needs before its own plugin is built.
 
     Public because a workload distribution that is more than a re-export —
@@ -267,7 +273,7 @@ def generation_context(plugin_id: str):
         _TASKS[plugin_id](),
     )
     store = MemoryFragmentStore()
-    runtime = LlamaVulkanRuntime(store, bootstrap.accelerator_lease_path)
+    runtime = LlamaVulkanRuntime(store, bootstrap.accelerator_lease_path, prompting=prompting)
     descriptor = GenerationProviderDescriptor(
         provider_id="qwen3-workloads-gpu",
         accelerator="gpu",
@@ -307,7 +313,9 @@ def workload_tasks() -> dict[str, Callable[[], GenerationTask]]:
 
 
 def create_event_extraction() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = generation_context("event-extraction")
+    bootstrap, store, runtime, model, qualification, router = generation_context(
+        "event-extraction", EventPrompting()
+    )
     if bootstrap.state_path is None:
         raise RuntimeError("event recovery state is unavailable")
     plugin = EventExtractionPlugin(
@@ -366,7 +374,7 @@ def create_document_translation() -> QualifiedWorkload:
 
 def create_selected_text_tools() -> QualifiedWorkload:
     bootstrap, store, runtime, model, qualification, router = generation_context(
-        "selected-text-tools"
+        "selected-text-tools", SelectedTextPrompting()
     )
     if bootstrap.state_path is None:
         raise RuntimeError("selected-text load receipt state is unavailable")

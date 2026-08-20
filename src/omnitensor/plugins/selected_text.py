@@ -329,6 +329,62 @@ def selected_text_task():
     )
 
 
+class SelectedTextPrompting:
+    """What this workload tells the model beyond its own task prompt.
+
+    The operation a person chose is in a trusted control fragment, not in the
+    task: one prompt serves five operations, and which one was asked for
+    decides what a correct answer looks like. It used to be assembled inside
+    the GPU adapter, which had to know what a selected-text operation is.
+    """
+
+    __slots__ = ()
+
+    def hint(self, task, request, store) -> str:
+        if task.task_id != PLUGIN_ID or len(request.content_references) != 2:
+            return ""
+        try:
+            control = json.loads(
+                store.resolve(request.request_id, request.content_references[0]).text
+            )
+        except (FragmentStoreError, UnicodeError, json.JSONDecodeError):
+            return ""
+        if not isinstance(control, dict) or set(control) != {"language", "operation"}:
+            return ""
+        instruction = _operation_instruction(control.get("operation"), control.get("language"))
+        if not instruction:
+            return ""
+        return (
+            f"Trusted selected-text operation is {json.dumps(control['operation'])}. "
+            f"{instruction} Return operation exactly as named.\n"
+        )
+
+    def reconsideration(self, task, hint: str, raw: str) -> str | None:
+        """A transformation that refuses has said what it has to say."""
+        return None
+
+
+def _operation_instruction(operation: object, language: object) -> str:
+    translate = (
+        f"Translate the selection into {json.dumps(language)} in result; preserve the exact "
+        "meaning of every noun, verb, number, and name; use only the target language and its "
+        "script; transliterate proper names; do not add a label; tasks must be empty."
+        if isinstance(language, str) and language
+        else ""
+    )
+    return {
+        "explain": "Explain the selection clearly in result; tasks must be empty.",
+        "summarize": "Summarize the selection concisely in result; tasks must be empty.",
+        "rewrite": "Rewrite the selection while preserving its meaning; tasks must be empty.",
+        "translate": translate,
+        "extract-tasks": (
+            "List every explicit actionable item in tasks. If any action is present, tasks "
+            "must not be empty. Result must briefly introduce the extracted tasks, not echo "
+            "the selection."
+        ),
+    }.get(operation, "")
+
+
 __all__ = [
     "MAX_LANGUAGE_CHARACTERS",
     "MAX_SELECTION_CHARACTERS",
@@ -337,6 +393,7 @@ __all__ = [
     "READ_ONCE_PERMISSION",
     "SelectedTextError",
     "SelectedTextPlugin",
+    "SelectedTextPrompting",
     "grounded_selected_text_result",
     "selected_text_task",
 ]

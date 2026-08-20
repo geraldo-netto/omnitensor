@@ -128,11 +128,14 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # `event-workload` moved 56 -> 57 when the recovery journal stopped
     # answering "nothing was interrupted" for a document it could not read
     # (OMNI-0548): the discard is a statement now, and a statement is
-    # behaviour.
+    # behaviour. It moved 57 -> 63 when the event preflight and the one
+    # reconsidered refusal left the GPU adapter for the workload they are
+    # about (OMNI-0519) — the same six callables, now in a module this
+    # manifest covers.
     assert [len(shard.selectors) for shard in manifest.shards] == [
         49,
         3,
-        57,
+        63,
         34,
         18,
         2,
@@ -141,7 +144,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         13,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 225
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 231
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

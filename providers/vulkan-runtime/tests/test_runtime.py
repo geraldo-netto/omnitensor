@@ -26,6 +26,7 @@ from omnitensor_vulkan_runtime import (
     runtime,
 )
 
+from omnitensor.plugins import event_workload
 from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.document_qa import (
     IndexedSpan,
@@ -34,6 +35,9 @@ from omnitensor.plugins.document_qa import (
 )
 from omnitensor.plugins.document_translation import document_translation_task
 from omnitensor.plugins.event_workload import (
+    EVENT_GROUNDING_HINT,
+    EVENT_RECONSIDERATION,
+    EventPrompting,
     MemoryFragmentStore,
     event_generation_task,
 )
@@ -45,8 +49,9 @@ from omnitensor.plugins.generation import (
     GenerationTask,
     ProviderGenerationError,
 )
+from omnitensor.plugins.prompting import NO_PROMPTING
 from omnitensor.plugins.protocol import PluginContext, PluginProgress
-from omnitensor.plugins.selected_text import selected_text_task
+from omnitensor.plugins.selected_text import SelectedTextPrompting, selected_text_task
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
     PRIMARY_MODEL_SHA256,
@@ -86,10 +91,15 @@ def _task(*, output_tokens=128):
     )
 
 
-def _runtime(tmp_path):
+def _runtime(tmp_path, prompting=NO_PROMPTING):
     lease = tmp_path / "generation.lock"
     lease.touch()
-    return runtime.LlamaVulkanRuntime(MemoryFragmentStore(), lease)
+    return runtime.LlamaVulkanRuntime(MemoryFragmentStore(), lease, prompting=prompting)
+
+
+def _hint(task, request, store, prompting=NO_PROMPTING):
+    """What the adapter puts in the system prompt: its own, plus the workload's."""
+    return hints.citable_hint(task, request) + prompting.hint(task, request, store)
 
 
 def _hebrew_runtime(tmp_path):
@@ -137,7 +147,7 @@ def test_grammar_projection_is_recursive_without_weakening_canonical_schema():
 
 
 def test_defensive_runtime_helpers_cover_malformed_empty_and_bounded_inputs():
-    assert hints._is_grounded_event_refusal("not-json") is False
+    assert event_workload._is_grounded_event_refusal("not-json") is False
     assert grounding._organizer_evidence({}) == ()
     assert grounding._organizer_evidence({"suggestions": [None]}) == ()
 
@@ -176,7 +186,9 @@ def test_every_workload_this_provider_creates_declares_one_registry_entry():
     route could not produce a valid answer at all.
     """
     assert set(grounding.TASK_BINDINGS) == set(factories._TASKS)
-    assert set(hints.TASK_HINTS) <= set(grounding.TASK_BINDINGS)
+    # The two workloads that state prompt-side policy of their own state it
+    # beside their task now, not in this wheel; both are still bound here.
+    assert {"event-extraction", "selected-text-tools"} <= set(grounding.TASK_BINDINGS)
 
 
 def test_selected_text_task_normalization_preserves_extraction_results():
@@ -1734,7 +1746,7 @@ def test_document_citation_binding_collapses_only_repeated_exact_sources():
 def test_grounding_hint_lists_only_task_citable_opaque_references(task_id, references, expected):
     request = GenerationRequest("job-1", task_id, references)
 
-    hint = hints.grounding_hint(replace(_task(), task_id=task_id), request, MemoryFragmentStore())
+    hint = _hint(replace(_task(), task_id=task_id), request, MemoryFragmentStore())
 
     if not expected:
         assert hint == ""
@@ -1751,7 +1763,7 @@ def test_grounding_hint_contains_no_private_source_text():
     asyncio.run(store.publish("job-1", (question, span)))
     request = GenerationRequest("job-1", "ask-selected-files", (question.reference, span.reference))
 
-    hint = hints.grounding_hint(document_question_task(), request, store)
+    hint = _hint(document_question_task(), request, store)
 
     assert span.reference in hint
     assert question.reference not in hint
@@ -1779,7 +1791,7 @@ def test_selected_operation_hint_is_explicit_without_selection_text(operation, l
         "job-1", "selected-text-tools", (control.reference, selection.reference)
     )
 
-    hint = hints.grounding_hint(selected_text_task(), request, store)
+    hint = _hint(selected_text_task(), request, store, SelectedTextPrompting())
 
     assert f'Trusted selected-text operation is "{operation}"' in hint
     assert required in hint
@@ -1805,7 +1817,7 @@ def test_selected_operation_hint_refuses_invalid_control(control):
         "job-1", "selected-text-tools", (fragment.reference, "private:selection")
     )
 
-    assert hints._selected_operation_hint(selected_text_task(), request, store) == ""
+    assert SelectedTextPrompting().hint(selected_text_task(), request, store) == ""
 
 
 @pytest.mark.parametrize(
@@ -1999,7 +2011,7 @@ def test_organizer_extension_binding_ignores_non_suggestion_documents():
 
 
 def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candidate(tmp_path):
-    adapter = _runtime(tmp_path)
+    adapter = _runtime(tmp_path, EventPrompting())
     source = SourceFragment(
         "private:job-1:source:1:page:1",
         "a" * 64,
@@ -2033,14 +2045,14 @@ def test_event_runtime_hint_and_binding_produce_a_valid_pending_grounded_candida
     )
 
     assert len(observed) == 2
-    assert hints.EVENT_GROUNDING_HINT in observed[0]["messages"][0]["content"]
+    assert EVENT_GROUNDING_HINT in observed[0]["messages"][0]["content"]
     assert observed[1]["messages"][-2] == {
         "role": "assistant",
         "content": json.dumps(refused),
     }
     assert observed[1]["messages"][-1] == {
         "role": "user",
-        "content": hints.EVENT_RECONSIDERATION,
+        "content": EVENT_RECONSIDERATION,
     }
     # A regular expression used to invent an event here when the model refused
     # twice, and it matched exactly one sentence shape — the one the
@@ -2094,13 +2106,13 @@ def test_event_runtime_does_not_reconsider_an_evidence_based_refusal(tmp_path):
     [
         (
             "Release planning is in Room 2 on 12 August 2026 from 10:00 to 11:00 Europe/Rome.",
-            hints.EVENT_GROUNDING_HINT,
+            EVENT_GROUNDING_HINT,
         ),
         (
             "Revisão trimestral em 18 de agosto de 2026, das 14:00 às 15:30, Europe/Lisbon.",
-            hints.EVENT_GROUNDING_HINT,
+            EVENT_GROUNDING_HINT,
         ),
-        ("Release planning on 2026-08-12 at 10:00 UTC.", hints.EVENT_GROUNDING_HINT),
+        ("Release planning on 2026-08-12 at 10:00 UTC.", EVENT_GROUNDING_HINT),
         ("Release planning on 12 August 2026 in Europe/Rome.", ""),
         ("Release planning at 10:00 Europe/Rome.", ""),
         ("Release planning on 12 August 2026 at 10:00 Fake/Timezone.", ""),
@@ -2114,7 +2126,7 @@ def test_event_grounding_hint_requires_explicit_date_time_and_real_named_zone(co
     asyncio.run(store.publish("job-1", (fragment,)))
 
     assert (
-        hints._event_grounding_hint(
+        EventPrompting().hint(
             event_generation_task(),
             GenerationRequest("job-1", "event-extraction", (fragment.reference,)),
             store,
@@ -2127,7 +2139,7 @@ def test_event_grounding_hint_requires_explicit_date_time_and_real_named_zone(co
 def test_event_grounding_hint_property_accepts_real_numeric_calendar_dates(value):
     text = f"Named activity on {value.isoformat()} at 10:00 UTC."
 
-    assert hints._has_calendar_date(text) is True
+    assert event_workload._has_calendar_date(text) is True
 
 
 def test_sync_generation_requires_a_loaded_native_model(tmp_path):
@@ -3263,7 +3275,7 @@ def test_the_general_route_can_answer_a_document_translation_span(tmp_path):
 
     # The model is told exactly one reference it may cite: the span, never the
     # control fragment.
-    hint = hints.grounding_hint(task, request, store)
+    hint = _hint(task, request, store)
     assert span.reference in hint
     assert control.reference not in hint
 
