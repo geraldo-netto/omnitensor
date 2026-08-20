@@ -37,6 +37,8 @@ import asyncio
 from collections import deque
 from collections.abc import Callable
 
+from .job_ports import JobDispatchError
+
 # How many plugin jobs may run at once, across every plugin.  Four: wide enough
 # that ordinary use does not queue behind one long answer, narrow enough that
 # four model workers still fit while the host-pressure gate decides whether a
@@ -149,6 +151,14 @@ class PluginAdmissionQueue:
             raise
 
     def _push(self, profile_id: str, waiter: asyncio.Future) -> None:
+        if self.waiting() >= self._max_waiting:
+            # Enforced here, not only in has_room(): a dispatcher reached
+            # without going through admit() - the documented admission=None
+            # default, or a runner-driven re-dispatch - used to queue without
+            # any bound at all, so the module's promise above was advisory.
+            raise JobDispatchError(
+                "plugin-queue-full", "Too many plugin jobs are waiting for a worker slot"
+            )
         if profile_id not in self._waiting:
             self._waiting[profile_id] = deque()
             self._order.append(profile_id)

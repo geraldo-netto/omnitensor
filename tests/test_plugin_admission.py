@@ -193,6 +193,30 @@ class TestPolicy:
 
 
 class TestAdmission:
+    async def test_the_bound_holds_even_when_nothing_called_admit(self):
+        """OMNI-0435: the promise above the module was advisory, not enforced."""
+        queue = pool(max_concurrent=1, max_waiting=2)
+        released = asyncio.Event()
+
+        async def blocker():
+            await released.wait()
+
+        running = asyncio.ensure_future(queue.run("a", blocker))
+        waiting = asyncio.ensure_future(queue.run("b", blocker))
+        await asyncio.sleep(0)
+        third = asyncio.ensure_future(queue.run("c", blocker))
+        await asyncio.sleep(0)
+        assert queue.waiting() == 2
+
+        with pytest.raises(JobDispatchError) as error:
+            await queue.run("d", returning(4))
+        assert error.value.code == "plugin-queue-full"
+
+        released.set()
+        await running
+        await waiting
+        await third
+
     async def test_a_full_waiting_list_refuses_before_a_job_id_exists(self):
         queue = pool(max_concurrent=1, max_waiting=1)
         # The state a full pool is in: one job waiting, the bound reached.

@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 from omnitensor import (
     artifact_readiness,
+    dispatch,
     dispatch_routing,
     profile_selection,
     runtime_api,
@@ -194,8 +195,15 @@ def test_dispatch_artifact_source_uses_the_stamp_cached_resolver():
     assert calls == [("model", reference)]
 
 
+class _ArtifactStore:
+    """The narrow contract dispatch asks of an artifact store."""
+
+    def resolve(self, reference):
+        raise AssertionError("not resolved in this test")
+
+
 def test_default_dispatcher_wraps_only_a_configured_store_with_the_cache():
-    raw_store = object()
+    raw_store = _ArtifactStore()
     workloads = {}
     scheduler = object()
     executors = {}
@@ -970,3 +978,14 @@ def test_a_scheduler_observation_ticks_once_on_the_loop_and_then_only_reads():
     assert view.profile_stats() == {"alpha": {"queued": 1, "running": 0}}
     assert view.stats()["queueDepth"] == 1
     assert not hasattr(view, "tick")
+
+
+def test_an_artifact_source_missing_resolve_fails_at_wiring_time():
+    """OMNI-0438: it used to surface as internal-error at the first dispatch."""
+    with pytest.raises(TypeError, match="ArtifactSource"):
+        InferenceJobDispatcher({}, None, {}, object())
+
+    # And the adapter the service always wires does satisfy the contract.
+    assert isinstance(
+        dispatch_routing.CachedArtifactSource(lambda *_arguments: None), dispatch.ArtifactSource
+    )

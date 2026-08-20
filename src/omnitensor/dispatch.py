@@ -60,11 +60,15 @@ def _executor_snapshot(
 
 @runtime_checkable
 class ArtifactSource(Protocol):
-    """The artifact store, narrowed to what dispatch is allowed to ask it."""
+    """The artifact store, narrowed to what dispatch is allowed to ask it.
+
+    ``resolve`` is the whole contract. It once also declared ``resolve_active``,
+    which dispatch never calls and the adapter the service always wires
+    (``CachedArtifactSource``) never implemented, so the protocol described
+    something no participant honoured.
+    """
 
     def resolve(self, reference: ArtifactReference) -> ArtifactResolution: ...
-
-    def resolve_active(self, artifact_id: str) -> ArtifactResolution: ...
 
 
 class InferenceJobDispatcher:
@@ -85,6 +89,10 @@ class InferenceJobDispatcher:
         max_input_elements: int = MAX_TENSOR_ELEMENTS,
         input_roots: InputRootPolicy | None = None,
     ) -> None:
+        if not isinstance(artifacts, ArtifactSource):
+            # Checked at wiring time rather than at the first dispatch, where
+            # a missing method surfaced as an opaque `internal-error`.
+            raise TypeError("artifacts must implement the ArtifactSource protocol")
         if max_input_tensors < 1:
             raise ValueError("max_input_tensors must be positive")
         if max_input_elements < 1:
