@@ -23,6 +23,7 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0576 | open | high | m | **The media provider refuses to start unless the machine matches a receipt frozen on 2026-08-13.** `providers/media-transcription/.../qualification.py` reads a pinned document and refuses the whole plugin when the recorded date, the provider version, the installed `llama-cpp-python` and `pywhispercpp` versions, the three artifact digests or the sha256 of a benchmark report differ from it, and `models.py` additionally requires each runtime to log the exact string `AMD Radeon RX 6600 XT`. So upgrading a dependency, releasing the provider, or swapping the speech or vision model turns transcription off with `media runtimes differ from qualification`, and the model is expected to change. Drop the receipt: keep the proof that the work runs on a Vulkan device with full offload — which is the no-CPU rule and is worth enforcing — and stop asserting *which* device, which version and which digest. |
 
 ## Blocked
 
