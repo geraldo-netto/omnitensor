@@ -22,6 +22,7 @@ from omnitensor.discovery import Device
 from omnitensor.dispatch_routing import PluginAwareDispatcher, admit_plugin_job
 from omnitensor.plugins.artifacts import ArtifactResolution
 from omnitensor.plugins.loading import InstalledPluginRuntime
+from omnitensor.publish_loop import SnapshotPublishLoop
 from omnitensor.registry import bundled_workloads_path, validate_document
 from omnitensor.service import (
     GRANT_REFRESH_INTERVAL_S,
@@ -731,7 +732,7 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
             publish_interval_s=0.01,
             discovery_interval_s=0.01,
         )
-        assert service._snapshot_retracted is False
+        assert service._publish.retracted is False
         runner = asyncio.get_running_loop().create_task(service.run())
         await wait_until(lambda: publisher.published)
         published_before_loss = len(publisher.published)
@@ -752,7 +753,7 @@ def test_publisher_retracts_on_device_loss_and_resumes_on_return(tmp_path, caplo
         discovery.devices.append(tpu_device())
         await wait_until(lambda: len(publisher.published) > stale_count)
         assert len(publisher.published) > stale_count
-        assert service._snapshot_retracted is False
+        assert service._publish.retracted is False
         service._stopping.set()
         await asyncio.wait_for(runner, timeout=2)
 
@@ -2223,8 +2224,8 @@ def test_idle_publisher_still_heartbeats_so_readers_do_not_call_it_stale(tmp_pat
     assert len(publisher.published) >= 3
     stamps = [snapshot["generatedAt"] for snapshot in publisher.published]
     assert stamps == sorted(stamps)
-    assert [OmniTensorService._content_of(snapshot) for snapshot in publisher.published[1:]] == [
-        OmniTensorService._content_of(publisher.published[0])
+    assert [SnapshotPublishLoop.content_of(snapshot) for snapshot in publisher.published[1:]] == [
+        SnapshotPublishLoop.content_of(publisher.published[0])
     ] * (len(publisher.published) - 1)
 
 
@@ -2387,7 +2388,7 @@ def test_a_failed_startup_still_stops_the_scheduler(tmp_path):
 
 
 def test_a_finished_run_leaves_the_service_able_to_run_again(tmp_path):
-    """`_stopping` was never cleared and `_publish_loop` never reset, so a
+    """`_stopping` was never cleared and the publish loop never unbound, so a
     second `run()` returned at once and published nothing, silently."""
     service = build_service(
         tmp_path,
@@ -2400,7 +2401,7 @@ def test_a_finished_run_leaves_the_service_able_to_run_again(tmp_path):
     asyncio.run(service.run())
 
     assert not service._stopping.is_set()
-    assert service._publish_loop is None
+    assert service._publish.loop is None
 
 
 def test_the_publisher_can_be_woken_while_the_transport_is_still_starting(tmp_path):
@@ -2420,7 +2421,7 @@ def test_the_publisher_can_be_woken_while_the_transport_is_still_starting(tmp_pa
             # `request_publish` hands the wake to the loop, so observe the
             # scheduled callback rather than the event it has not set yet.
             self.woke = any(
-                getattr(handle, "_callback", None) == service._publish_wake.set
+                getattr(handle, "_callback", None) == service._publish.wake.set
                 for handle in asyncio.get_running_loop()._ready
             )
 

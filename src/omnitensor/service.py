@@ -130,6 +130,9 @@ from .profile_selection import (
 from .profile_selection import (
     profile_statuses as profile_statuses,
 )
+from .publish_loop import IDLE_PUBLISH_INTERVAL_S as _IDLE_PUBLISH_INTERVAL_S
+from .publish_loop import SNAPSHOT_HEARTBEAT_INTERVAL_S as _SNAPSHOT_HEARTBEAT_INTERVAL_S
+from .publish_loop import SnapshotPublishLoop
 from .readiness import notify_ready, notify_stopping
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .runtime_api import RuntimeAPI as RuntimeAPI
@@ -150,12 +153,12 @@ DISCOVERY_INTERVAL_S = 10.0
 # against the schema — about 6 ms of CPU to conclude that nothing happened.
 # State changes wake the loop through ``request_publish``, so backing an idle
 # machine off this far costs no responsiveness.
-IDLE_PUBLISH_INTERVAL_S = 10.0
+IDLE_PUBLISH_INTERVAL_S = _IDLE_PUBLISH_INTERVAL_S
 # Readers treat a snapshot older than 15 s as stale, so an idle runtime still
 # owes them proof of life — but only that, not a fresh copy of an unchanged
 # document twice a second. Publishing on change, plus this heartbeat, keeps the
 # staleness verdict correct while an idle machine stops writing to disk.
-SNAPSHOT_HEARTBEAT_INTERVAL_S = 10.0
+SNAPSHOT_HEARTBEAT_INTERVAL_S = _SNAPSHOT_HEARTBEAT_INTERVAL_S
 GRANT_REFRESH_INTERVAL_S = 0.25
 # Artifact readiness re-reads and re-digests every declared artifact, which is
 # 0.25 ms for a small model and 25 ms at the 64 MiB ceiling — affordable
@@ -336,16 +339,28 @@ class OmniTensorService:
             clock_ms=lambda: max(1, int(time.time() * 1000)),
             logger=LOGGER,
         )
-        self._snapshot_retracted = False
         self._plugin_adoption_pending = False
-        self._last_published_snapshot: dict | None = None
-        self._next_snapshot_heartbeat = 0.0
-        self._idle = False
-        self._publish_wake = asyncio.Event()
-        self._publish_loop: asyncio.AbstractEventLoop | None = None
         self._next_grant_refresh = 0.0
         self._next_readiness_refresh = 0.0
         self._stopping = asyncio.Event()
+        # What has been published, and when the next document is worth
+        # writing, belongs to the loop that publishes it: the service starts
+        # it rather than being it.
+        self._publish = SnapshotPublishLoop(
+            # Late-bound rather than the bound method, so a caller that
+            # replaces `_build_runtime_snapshot` still replaces what runs.
+            lambda view: self._build_runtime_snapshot(view),
+            self._publisher_port,
+            stopping=self._stopping,
+            interval_s=publish_interval_s,
+            observe=lambda: SchedulerObservation.of(self._scheduler),
+            devices_present=lambda: bool(self._devices),
+            before_tick=self._before_publish_tick,
+            off_loop=run_off_loop,
+            logger=LOGGER,
+            idle_interval_s=IDLE_PUBLISH_INTERVAL_S,
+            heartbeat_interval_s=SNAPSHOT_HEARTBEAT_INTERVAL_S,
+        )
 
     def _device_load(self, device, stats) -> float | None:
         return observation.device_load(self._discovery, device, stats)
@@ -682,128 +697,27 @@ class OmniTensorService:
 
     def publish_once(self) -> dict:
         """Synchronously build and publish one snapshot (test/adapter API)."""
-        snapshot = self._build_runtime_snapshot(SchedulerObservation.of(self._scheduler))
-        self._publisher_port.publish(snapshot)
-        self._record_published(snapshot)
-        return snapshot
-
-    @staticmethod
-    def _content_of(snapshot: dict) -> dict:
-        """The snapshot's content, apart from when it was built."""
-        return {key: value for key, value in snapshot.items() if key != "generatedAt"}
-
-    def _snapshot_changed(self, snapshot: dict) -> bool:
-        """Whether this document says anything the last published one did not.
-
-        ``generatedAt`` moves on every build, so it is compared out: it is the
-        proof of life the heartbeat carries, never a change in its own right.
-        """
-        if self._last_published_snapshot is None:
-            return True
-        return self._content_of(snapshot) != self._content_of(self._last_published_snapshot)
-
-    def _heartbeat_due(self) -> bool:
-        return self._monotonic() >= self._next_snapshot_heartbeat
+        return self._publish.publish_once()
 
     def request_publish(self) -> None:
-        """Ask the publisher for a tick now rather than at its next deadline.
+        """Ask the publisher for a tick now rather than at its next deadline."""
+        self._publish.request_publish()
 
-        Backing an idle runtime off to a slow tick would otherwise delay every
-        state change by that interval. The service knows when it has changed
-        something, so it says so instead of being polled for it.
+    async def _before_publish_tick(self) -> None:
+        """What this service owes the runtime before each published tick.
+
+        Adoption, grants and artifact readiness are the service's business,
+        not the publisher's, so they are handed to the loop rather than living
+        inside it.
         """
-        loop = self._publish_loop
-        if loop is None or self._publish_wake.is_set():
-            return
-        try:
-            # Runners deliver progress from their own threads, and
-            # ``Event.set`` is not safe to call from one.
-            loop.call_soon_threadsafe(self._publish_wake.set)
-        except RuntimeError:
-            # The loop is closed; there is no publisher left to wake.
-            return
-
-    async def _await_next_publish(self) -> None:
-        """Sleep until the next deadline, a state change, or shutdown.
-
-        An idle runtime has nothing to say, so it waits far longer between
-        ticks than a busy one — rebuilding, revalidating, and rewriting an
-        unchanged document costs real power on a machine doing nothing.
-        """
-        interval = IDLE_PUBLISH_INTERVAL_S if self._idle else self._publish_interval_s
-        waits = {
-            asyncio.ensure_future(self._stopping.wait()),
-            asyncio.ensure_future(self._publish_wake.wait()),
-        }
-        try:
-            await asyncio.wait(waits, timeout=interval, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            for wait in waits:
-                wait.cancel()
-            await asyncio.gather(*waits, return_exceptions=True)
-        self._publish_wake.clear()
-
-    def _record_published(self, snapshot: dict) -> None:
-        self._last_published_snapshot = snapshot
-        self._next_snapshot_heartbeat = self._monotonic() + SNAPSHOT_HEARTBEAT_INTERVAL_S
-
-    @staticmethod
-    def _monotonic() -> float:
-        try:
-            return asyncio.get_running_loop().time()
-        except RuntimeError:
-            # ``publish_once`` is a synchronous test/adapter entry point that
-            # can run with no loop; the heartbeat still needs a clock.
-            return time.monotonic()
+        if self._plugin_adoption_pending:
+            await self._adopt_plugin_profiles()
+        if self._devices:
+            await self._refresh_grants()
+            await self._refresh_plugin_readiness()
 
     async def _publisher(self) -> None:
-        # Honest-absence decision (OMNI-0011): with zero devices no
-        # schema-valid snapshot exists (the contract requires >=1 device), so
-        # rather than letting the last document go silently stale we retract
-        # it — readers observe absence, exactly as when the service is down —
-        # and log the outage once.  Publishing resumes when devices return.
-        while not self._stopping.is_set():
-            # A publish failure is an outage of one output, not of the service.
-            # Letting an OSError escape here propagates through the gather that
-            # supervises the loops and takes down job dispatch and D-Bus with
-            # it, so a full disk would stop far more than snapshot publishing.
-            try:
-                if self._plugin_adoption_pending:
-                    await self._adopt_plugin_profiles()
-                if self._devices:
-                    await self._refresh_grants()
-                    if self._snapshot_retracted:
-                        LOGGER.info("Accelerator devices returned; publishing snapshots again")
-                        self._snapshot_retracted = False
-                    await self._refresh_plugin_readiness()
-                    # Ticked and read on the event loop, then handed to the
-                    # worker thread as an immutable value. Reading the live
-                    # scheduler off-loop walked mappings the loop was deleting
-                    # from, and `tick()` reset busy time a running job was
-                    # still adding to.
-                    scheduler_view = SchedulerObservation.of(self._scheduler)
-                    snapshot = await run_off_loop(self._build_runtime_snapshot, scheduler_view)
-                    # An idle runtime rebuilds the same document every tick.
-                    # Rewriting it anyway costs a disk write and wakes every
-                    # reader watching the file, forever, to say nothing changed.
-                    changed = self._snapshot_changed(snapshot)
-                    if changed or self._heartbeat_due():
-                        await run_off_loop(self._publisher_port.publish, snapshot)
-                        self._record_published(snapshot)
-                    self._idle = not changed
-                elif not self._snapshot_retracted:
-                    await run_off_loop(self._publisher_port.retract)
-                    self._snapshot_retracted = True
-                    self._last_published_snapshot = None
-                    self._next_snapshot_heartbeat = 0.0
-                    LOGGER.warning(
-                        "No accelerator devices present; retracted the runtime snapshot"
-                        " so readers observe absence instead of stale data",
-                    )
-            except (OSError, ValueError):
-                LOGGER.exception("Could not publish the runtime snapshot; retrying next tick")
-                self._idle = False
-            await self._await_next_publish()
+        await self._publish.run()
 
     async def _refresh_grants(self) -> None:
         now = asyncio.get_running_loop().time()
@@ -911,9 +825,9 @@ class OmniTensorService:
     async def run(self) -> None:
         # Bound before anything else starts: a transport, a reconciled job or
         # an adopted plugin that asks to publish during startup used to find
-        # `_publish_loop` still None and have its request silently dropped.
+        # the loop still unbound and have its request silently dropped.
         loop = asyncio.get_running_loop()
-        self._publish_loop = loop
+        self._publish.bind(loop)
         try:
             await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
@@ -967,7 +881,7 @@ class OmniTensorService:
             # Leave the service able to run again. Neither of these was
             # reset, so a second `run()` returned at once and published
             # nothing, saying nothing about why.
-            self._publish_loop = None
+            self._publish.bind(None)
             self._stopping.clear()
 
     async def _start_plugin_runtime(self) -> None:
