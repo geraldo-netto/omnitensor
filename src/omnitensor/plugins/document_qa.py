@@ -9,7 +9,6 @@ file/page/span addresses and digests, never source text or absolute paths.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import math
 import re
@@ -22,14 +21,12 @@ from typing import Protocol, runtime_checkable
 from ..registry import load_schema, validate_document
 from ..sdk import (
     ManagedPlugin,
-    PluginCancelledError,
     PluginHealth,
     PluginHealthStatus,
     PluginProgress,
     SDKContractError,
-    cancelled_result,
-    failed_result,
     succeeded_result,
+    workload_result,
 )
 from ..stable_error import StableError
 from .event_workload import (
@@ -196,125 +193,124 @@ class DocumentQuestionPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
-        try:
-            question = self._validate_request(request)
-            selected = select_question_sources(request.job_id, request.payload.get("sources"))
-            await self._progress(request, progress, "extract", 0.05)
-            spans = await self._extract_spans(request, selected, cancellation, progress)
+        return await workload_result(
+            request,
+            lambda: self._answer(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="selected-file question cancelled",
+            failures=(
+                DocumentQuestionError,
+                # EventWorkloadError subclasses FragmentStoreError; naming the
+                # base keeps a store failure inside the plugin result instead
+                # of letting it escape and kill the job with no result at all.
+                FragmentStoreError,
+                GenerationError,
+                SDKContractError,
+            ),
+            detail_of=_answer_failure_detail,
+            discard=self._store.discard,
+        )
+
+    async def _answer(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        """Retrieve, generate in as many passes as the selection needs, cite."""
+        question = self._validate_request(request)
+        selected = select_question_sources(request.job_id, request.payload.get("sources"))
+        await self._progress(request, progress, "extract", 0.05)
+        spans = await self._extract_spans(request, selected, cancellation, progress)
+        cancellation.raise_if_cancelled()
+        await self._progress(request, progress, "retrieve", 0.5)
+        retrieved = await retrieve_spans(question, spans, self._embedder, cancellation=cancellation)
+        question_digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
+        question_fragment = SourceFragment(
+            f"private:{request.job_id}:question",
+            question_digest,
+            1,
+            question,
+            question_digest,
+        )
+        task = document_question_task()
+        passes = answer_passes(retrieved, task.limits.context_tokens)
+        await self._progress(request, progress, "answer", 0.7)
+        answers: list[str] = []
+        citations: list[dict] = []
+        seen_citations: set[tuple] = set()
+        provider_id = ""
+        accelerator = ""
+        # Published once, outside the loop: the store rejects a repeated
+        # reference, so republishing the same question on pass 2 refused
+        # every multi-pass answer.
+        await self._store.publish(request.job_id, (question_fragment,))
+        for index, batch in enumerate(passes):
             cancellation.raise_if_cancelled()
-            await self._progress(request, progress, "retrieve", 0.5)
-            retrieved = await retrieve_spans(
-                question, spans, self._embedder, cancellation=cancellation
+            await self._store.publish(
+                request.job_id,
+                tuple(span.fragment() for span in batch),
             )
-            question_digest = hashlib.sha256(question.encode("utf-8")).hexdigest()
-            question_fragment = SourceFragment(
-                f"private:{request.job_id}:question",
-                question_digest,
-                1,
-                question,
-                question_digest,
-            )
-            task = document_question_task()
-            passes = answer_passes(retrieved, task.limits.context_tokens)
-            await self._progress(request, progress, "answer", 0.7)
-            answers: list[str] = []
-            citations: list[dict] = []
-            seen_citations: set[tuple] = set()
-            provider_id = ""
-            accelerator = ""
-            # Published once, outside the loop: the store rejects a repeated
-            # reference, so republishing the same question on pass 2 refused
-            # every multi-pass answer.
-            await self._store.publish(request.job_id, (question_fragment,))
-            for index, batch in enumerate(passes):
-                cancellation.raise_if_cancelled()
-                await self._store.publish(
+            generated = await self._router.run(
+                task,
+                generation_request(
                     request.job_id,
-                    tuple(span.fragment() for span in batch),
-                )
-                generated = await self._router.run(
-                    task,
-                    generation_request(
-                        request.job_id,
-                        PLUGIN_ID,
-                        (question_fragment.reference, *(span.reference for span in batch)),
-                    ),
-                    cancellation,
-                    ScaledProgressReporter(
-                        request,
-                        progress,
-                        self._clock_ms,
-                        stage="answer",
-                        offset=0.7 + (0.25 * index / len(passes)),
-                        scale=0.25 / len(passes),
-                        error_type=DocumentQuestionError,
-                    ),
-                )
-                partial = grounded_answer_document(
-                    generated.document,
-                    request.job_id,
-                    batch,
-                    provider_id=generated.provider_id,
-                    accelerator=generated.accelerator,
-                )
-                provider_id = partial["providerId"]
-                accelerator = partial["accelerator"]
-                answers.append(str(partial["answer"]).strip())
-                for citation in partial["citations"]:
-                    span = citation["span"]
-                    key = (
-                        citation["sourceSha256"],
-                        citation["page"],
-                        span["start"],
-                        span["end"],
-                    )
-                    if key not in seen_citations:
-                        seen_citations.add(key)
-                        citations.append(citation)
-            output = {
-                "version": 1,
-                "requestId": request.job_id,
-                # Every pass, in the order the document was read. Joined rather
-                # than picked between: each pass answered from spans no other
-                # pass saw, so dropping one drops part of the person's file.
-                "answer": "\n\n".join(answer for answer in answers if answer),
-                "providerId": provider_id,
-                "accelerator": accelerator,
-                "citations": citations,
-            }
-            violations = validate_document("document-question-result.schema.json", output)
-            if violations:
-                raise DocumentQuestionError("answer-invalid", violations[0])
-            await self._progress(request, progress, "terminal", 1.0)
-            return succeeded_result(
-                request,
-                output,
-                completed_at_ms=self._clock_ms(),
-                detail="answer grounded in selected files",
+                    PLUGIN_ID,
+                    (question_fragment.reference, *(span.reference for span in batch)),
+                ),
+                cancellation,
+                ScaledProgressReporter(
+                    request,
+                    progress,
+                    self._clock_ms,
+                    stage="answer",
+                    offset=0.7 + (0.25 * index / len(passes)),
+                    scale=0.25 / len(passes),
+                    error_type=DocumentQuestionError,
+                ),
             )
-        except (PluginCancelledError, asyncio.CancelledError):
-            return cancelled_result(
-                request,
-                "selected-file question cancelled",
-                completed_at_ms=self._clock_ms(),
+            partial = grounded_answer_document(
+                generated.document,
+                request.job_id,
+                batch,
+                provider_id=generated.provider_id,
+                accelerator=generated.accelerator,
             )
-        except (
-            DocumentQuestionError,
-            # EventWorkloadError subclasses FragmentStoreError; naming the base
-            # keeps a store failure inside the plugin result instead of letting
-            # it escape and kill the job with no result at all.
-            FragmentStoreError,
-            GenerationError,
-            SDKContractError,
-        ) as error:
-            code = getattr(error, "code", "document-question-failed")
-            return failed_result(
-                request,
-                measured_failure_detail(code, getattr(error, "detail", "")) or failure_detail(code),
-                completed_at_ms=self._clock_ms(),
-            )
-        finally:
-            await self._store.discard(request.job_id)
+            provider_id = partial["providerId"]
+            accelerator = partial["accelerator"]
+            answers.append(str(partial["answer"]).strip())
+            for citation in partial["citations"]:
+                span = citation["span"]
+                key = (
+                    citation["sourceSha256"],
+                    citation["page"],
+                    span["start"],
+                    span["end"],
+                )
+                if key not in seen_citations:
+                    seen_citations.add(key)
+                    citations.append(citation)
+        output = {
+            "version": 1,
+            "requestId": request.job_id,
+            # Every pass, in the order the document was read. Joined rather
+            # than picked between: each pass answered from spans no other
+            # pass saw, so dropping one drops part of the person's file.
+            "answer": "\n\n".join(answer for answer in answers if answer),
+            "providerId": provider_id,
+            "accelerator": accelerator,
+            "citations": citations,
+        }
+        violations = validate_document("document-question-result.schema.json", output)
+        if violations:
+            raise DocumentQuestionError("answer-invalid", violations[0])
+        await self._progress(request, progress, "terminal", 1.0)
+        return succeeded_result(
+            request,
+            output,
+            completed_at_ms=self._clock_ms(),
+            detail="answer grounded in selected files",
+        )
 
     def _validate_request(self, request: PluginRequest) -> str:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:
@@ -653,6 +649,12 @@ FAILURE_DETAILS = {
         "The embedding model this workload needs is not installed or not qualified on this machine."
     ),
 }
+
+
+def _answer_failure_detail(error: BaseException) -> str:
+    """The sentence this workload shows for one of its refusals."""
+    code = getattr(error, "code", "document-question-failed")
+    return measured_failure_detail(code, getattr(error, "detail", "")) or failure_detail(code)
 
 
 def failure_detail(code: object) -> str:

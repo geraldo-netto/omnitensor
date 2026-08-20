@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -12,14 +11,12 @@ from collections.abc import Callable, Mapping
 from ..registry import load_schema, validate_document
 from ..sdk import (
     ManagedPlugin,
-    PluginCancelledError,
     PluginHealth,
     PluginHealthStatus,
     PluginProgress,
     SDKContractError,
-    cancelled_result,
-    failed_result,
     succeeded_result,
+    workload_result,
 )
 from ..stable_error import StableError
 from .event_workload import MemoryFragmentStore
@@ -95,91 +92,89 @@ class SelectedTextPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
-        try:
-            selection, operation, language = self._validate_request(request)
-            cancellation.raise_if_cancelled()
-            digest = hashlib.sha256(selection.encode("utf-8")).hexdigest()
-            control_text = json.dumps(
-                {"operation": operation, "language": language},
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            control_digest = hashlib.sha256(control_text.encode("utf-8")).hexdigest()
-            control = SourceFragment(
-                f"private:{request.job_id}:control",
-                control_digest,
-                1,
-                control_text,
-                control_digest,
-            )
-            source = SourceFragment(
-                f"private:{request.job_id}:selection",
-                digest,
-                1,
-                selection,
-                digest,
-            )
-            await self._store.publish(request.job_id, (control, source))
-            await progress.report(
-                PluginProgress(request.job_id, "generate", 0.1, "", self._clock_ms())
-            )
-            generated = await self._route(operation, language).run(
-                selected_text_task(),
-                generation_request(
-                    request.job_id,
-                    PLUGIN_ID,
-                    (control.reference, source.reference),
-                ),
-                cancellation,
-                ScaledProgressReporter(
-                    request,
-                    progress,
-                    self._clock_ms,
-                    stage="generate",
-                    offset=0.1,
-                    scale=0.85,
-                    error_type=SelectedTextError,
-                ),
-            )
-            output = grounded_selected_text_result(
-                generated.document,
+        return await workload_result(
+            request,
+            lambda: self._transform(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="selected-text operation cancelled",
+            failures=(
+                SelectedTextError,
+                # EventWorkloadError subclasses FragmentStoreError; naming the
+                # base keeps a store failure inside the plugin result instead
+                # of letting it escape and kill the job with no result at all.
+                FragmentStoreError,
+                GenerationError,
+                SDKContractError,
+            ),
+            detail_of=lambda error: str(getattr(error, "code", "selected-text-failed")),
+            discard=self._store.discard,
+        )
+
+    async def _transform(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        """Publish the selection privately, generate, and ground the result."""
+        selection, operation, language = self._validate_request(request)
+        cancellation.raise_if_cancelled()
+        digest = hashlib.sha256(selection.encode("utf-8")).hexdigest()
+        control_text = json.dumps(
+            {"operation": operation, "language": language},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        control_digest = hashlib.sha256(control_text.encode("utf-8")).hexdigest()
+        control = SourceFragment(
+            f"private:{request.job_id}:control",
+            control_digest,
+            1,
+            control_text,
+            control_digest,
+        )
+        source = SourceFragment(
+            f"private:{request.job_id}:selection",
+            digest,
+            1,
+            selection,
+            digest,
+        )
+        await self._store.publish(request.job_id, (control, source))
+        await progress.report(PluginProgress(request.job_id, "generate", 0.1, "", self._clock_ms()))
+        generated = await self._route(operation, language).run(
+            selected_text_task(),
+            generation_request(
                 request.job_id,
-                operation,
-                source,
-                provider_id=generated.provider_id,
-                accelerator=generated.accelerator,
-            )
-            await progress.report(
-                PluginProgress(request.job_id, "terminal", 1.0, "", self._clock_ms())
-            )
-            return succeeded_result(
+                PLUGIN_ID,
+                (control.reference, source.reference),
+            ),
+            cancellation,
+            ScaledProgressReporter(
                 request,
-                output,
-                completed_at_ms=self._clock_ms(),
-                detail="selected-text result ready for review",
-            )
-        except (PluginCancelledError, asyncio.CancelledError):
-            return cancelled_result(
-                request,
-                "selected-text operation cancelled",
-                completed_at_ms=self._clock_ms(),
-            )
-        except (
-            SelectedTextError,
-            # EventWorkloadError subclasses FragmentStoreError; naming the base
-            # keeps a store failure inside the plugin result instead of letting
-            # it escape and kill the job with no result at all.
-            FragmentStoreError,
-            GenerationError,
-            SDKContractError,
-        ) as error:
-            return failed_result(
-                request,
-                str(getattr(error, "code", "selected-text-failed")),
-                completed_at_ms=self._clock_ms(),
-            )
-        finally:
-            await self._store.discard(request.job_id)
+                progress,
+                self._clock_ms,
+                stage="generate",
+                offset=0.1,
+                scale=0.85,
+                error_type=SelectedTextError,
+            ),
+        )
+        output = grounded_selected_text_result(
+            generated.document,
+            request.job_id,
+            operation,
+            source,
+            provider_id=generated.provider_id,
+            accelerator=generated.accelerator,
+        )
+        await progress.report(PluginProgress(request.job_id, "terminal", 1.0, "", self._clock_ms()))
+        return succeeded_result(
+            request,
+            output,
+            completed_at_ms=self._clock_ms(),
+            detail="selected-text result ready for review",
+        )
 
     def _validate_request(self, request: PluginRequest) -> tuple[str, str, str | None]:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:

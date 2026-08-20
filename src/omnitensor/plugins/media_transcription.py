@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import hashlib
 import re
@@ -16,14 +15,12 @@ from typing import Protocol, runtime_checkable
 from ..registry import validate_document
 from ..sdk import (
     ManagedPlugin,
-    PluginCancelledError,
     PluginHealth,
     PluginHealthStatus,
     PluginProgress,
     SDKContractError,
-    cancelled_result,
-    failed_result,
     succeeded_result,
+    workload_result,
 )
 from ..stable_error import StableError
 from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
@@ -212,6 +209,25 @@ class MediaTranscriptionPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
+        return await workload_result(
+            request,
+            lambda: self._transcribe(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="media transcription cancelled",
+            # Exception last and deliberately: a decoder or a model may raise
+            # anything, and one media file failing is a result, not a dead
+            # worker. The code is kept when the error carries one.
+            failures=(MediaTranscriptionError, SDKContractError, Exception),
+            detail_of=lambda error: str(getattr(error, "code", "media-transcription-failed")),
+        )
+
+    async def _transcribe(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        """Inspect the file, transcribe whatever it holds, and publish it."""
         frames: tuple[VisualFrame, ...] = ()
         try:
             source = self._selected_source(request)
@@ -256,24 +272,6 @@ class MediaTranscriptionPlugin(ManagedPlugin):
                 output,
                 completed_at_ms=self._clock_ms(),
                 detail="media transcription ready",
-            )
-        except (PluginCancelledError, asyncio.CancelledError):
-            return cancelled_result(
-                request,
-                "media transcription cancelled",
-                completed_at_ms=self._clock_ms(),
-            )
-        except (MediaTranscriptionError, SDKContractError) as error:
-            return failed_result(
-                request,
-                str(getattr(error, "code", "media-transcription-failed")),
-                completed_at_ms=self._clock_ms(),
-            )
-        except Exception:
-            return failed_result(
-                request,
-                "media-transcription-failed",
-                completed_at_ms=self._clock_ms(),
             )
         finally:
             with contextlib.suppress(Exception):

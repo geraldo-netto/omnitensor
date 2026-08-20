@@ -62,6 +62,7 @@ from .helpers import (
     cancelled_result,
     failed_result,
     succeeded_result,
+    workload_result,
 )
 from .smoke import (
     MAX_SMOKE_DOCUMENT_BYTES,
@@ -169,4 +170,5 @@ __all__ = [
     "run_plugin_contract",
     "run_installed_plugin_smoke",
     "succeeded_result",
+    "workload_result",
 ]

@@ -8,7 +8,6 @@ groups from host-side file digests. Its public result is only a plan.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -19,14 +18,12 @@ from pathlib import Path, PurePosixPath
 from ..registry import load_schema, validate_document
 from ..sdk import (
     ManagedPlugin,
-    PluginCancelledError,
     PluginHealth,
     PluginHealthStatus,
     PluginProgress,
     SDKContractError,
-    cancelled_result,
-    failed_result,
     succeeded_result,
+    workload_result,
 )
 from ..stable_error import StableError
 from .document_qa import IndexedSpan, page_spans, select_question_sources
@@ -121,73 +118,74 @@ class FileOrganizerPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
-        try:
-            selected = self._validate_request(request)
-            await self._progress(request, progress, "extract", 0.05)
-            spans = await self._extract_spans(request, selected, cancellation, progress)
-            metadata = _metadata_fragments(request.job_id, selected)
-            await self._store.publish(
+        return await workload_result(
+            request,
+            lambda: self._plan(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="file organization cancelled; no files changed",
+            failures=(
+                FileOrganizerError,
+                EventWorkloadError,
+                GenerationError,
+                SDKContractError,
+            ),
+            detail_of=_plan_failure_detail,
+            discard=self._store.discard,
+        )
+
+    async def _plan(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        """Read every selected file, then propose a plan nothing acts on."""
+        selected = self._validate_request(request)
+        await self._progress(request, progress, "extract", 0.05)
+        spans = await self._extract_spans(request, selected, cancellation, progress)
+        metadata = _metadata_fragments(request.job_id, selected)
+        await self._store.publish(
+            request.job_id,
+            (*metadata, *(span.fragment() for span in spans)),
+        )
+        cancellation.raise_if_cancelled()
+        await self._progress(request, progress, "suggest", 0.55)
+        generated = await self._router.run(
+            file_organizer_task(),
+            generation_request(
                 request.job_id,
-                (*metadata, *(span.fragment() for span in spans)),
-            )
-            cancellation.raise_if_cancelled()
-            await self._progress(request, progress, "suggest", 0.55)
-            generated = await self._router.run(
-                file_organizer_task(),
-                generation_request(
-                    request.job_id,
-                    PLUGIN_ID,
-                    (
-                        *(fragment.reference for fragment in metadata),
-                        *(span.reference for span in spans),
-                    ),
+                PLUGIN_ID,
+                (
+                    *(fragment.reference for fragment in metadata),
+                    *(span.reference for span in spans),
                 ),
-                cancellation,
-                ScaledProgressReporter(
-                    request,
-                    progress,
-                    self._clock_ms,
-                    stage="suggest",
-                    offset=0.55,
-                    scale=0.4,
-                    error_type=FileOrganizerError,
-                ),
-            )
-            output = review_only_plan(
-                generated.document,
-                request.job_id,
-                selected,
-                spans,
-                provider_id=generated.provider_id,
-                accelerator=generated.accelerator,
-            )
-            await self._progress(request, progress, "terminal", 1.0)
-            return succeeded_result(
+            ),
+            cancellation,
+            ScaledProgressReporter(
                 request,
-                output,
-                completed_at_ms=self._clock_ms(),
-                detail="organization plan ready for review; no files changed",
-            )
-        except (PluginCancelledError, asyncio.CancelledError):
-            return cancelled_result(
-                request,
-                "file organization cancelled; no files changed",
-                completed_at_ms=self._clock_ms(),
-            )
-        except (
-            FileOrganizerError,
-            EventWorkloadError,
-            GenerationError,
-            SDKContractError,
-        ) as error:
-            code = getattr(error, "code", "file-organizer-failed")
-            return failed_result(
-                request,
-                measured_failure_detail(code, getattr(error, "detail", "")) or str(code),
-                completed_at_ms=self._clock_ms(),
-            )
-        finally:
-            await self._store.discard(request.job_id)
+                progress,
+                self._clock_ms,
+                stage="suggest",
+                offset=0.55,
+                scale=0.4,
+                error_type=FileOrganizerError,
+            ),
+        )
+        output = review_only_plan(
+            generated.document,
+            request.job_id,
+            selected,
+            spans,
+            provider_id=generated.provider_id,
+            accelerator=generated.accelerator,
+        )
+        await self._progress(request, progress, "terminal", 1.0)
+        return succeeded_result(
+            request,
+            output,
+            completed_at_ms=self._clock_ms(),
+            detail="organization plan ready for review; no files changed",
+        )
 
     def _validate_request(self, request: PluginRequest) -> tuple[SelectedSource, ...]:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:
@@ -410,6 +408,12 @@ def _duplicate_groups(selected: Sequence[SelectedSource]) -> dict[str, str]:
             group_number += 1
             grouped[digest] = f"duplicate-group-{group_number}"
     return grouped
+
+
+def _plan_failure_detail(error: BaseException) -> str:
+    """The sentence this workload shows for one of its refusals."""
+    code = getattr(error, "code", "file-organizer-failed")
+    return measured_failure_detail(code, getattr(error, "detail", "")) or str(code)
 
 
 def _metadata_fragments(

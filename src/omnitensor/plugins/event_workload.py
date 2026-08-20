@@ -21,14 +21,12 @@ from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..registry import load_schema, validate_document
 from ..sdk import (
     ManagedPlugin,
-    PluginCancelledError,
     PluginHealth,
     PluginHealthStatus,
     PluginProgress,
     SDKContractError,
-    cancelled_result,
-    failed_result,
     succeeded_result,
+    workload_result,
 )
 from ..storelock import store_lock
 from .event_confirmation import confirm_event_candidates, render_confirmed_ics
@@ -310,53 +308,58 @@ class EventExtractionPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
-        try:
-            self._validate_request(request)
-            cancellation.raise_if_cancelled()
-            await self._report(request, progress, "select", 0.0)
-            self._journal.stage(request.job_id, "select")
-            selected = select_sources(request.job_id, request.payload.get("sources"))
-            self._journal.stage(request.job_id, "extract")
-            references, private_fragments = await self._extract_sources(
-                request, selected, cancellation, progress
-            )
-            cancellation.raise_if_cancelled()
-            self._journal.stage(request.job_id, "generate")
-            await self._report(request, progress, "generate", 0.6)
-            parsed = await self._generate_passes(
-                request, references, private_fragments, progress, cancellation
-            )
-            self._journal.stage(request.job_id, "validate")
-            await self._report(request, progress, "validate", 0.9)
-            grounded = merge(parsed, request.job_id)
-            validate_event_grounding(grounded, request.job_id, private_fragments)
-            await self._report(request, progress, "terminal", 1.0)
-            return succeeded_result(
-                request,
-                grounded_event_document(grounded),
-                completed_at_ms=self._clock_ms(),
-                detail=(
-                    "no grounded event candidate found"
-                    if grounded.outcome == "refused"
-                    else "event candidates require confirmation"
-                ),
-            )
-        except (PluginCancelledError, asyncio.CancelledError):
-            return cancelled_result(
-                request,
-                "event extraction cancelled",
-                completed_at_ms=self._clock_ms(),
-            )
-        except (EventWorkloadError, EventResultError, GenerationError, SDKContractError) as error:
-            code = getattr(error, "code", "event-extraction-failed")
-            return failed_result(
-                request,
-                measured_failure_detail(code, getattr(error, "detail", "")) or str(code),
-                completed_at_ms=self._clock_ms(),
-            )
-        finally:
-            await self._store.discard(request.job_id)
-            self._journal.finish(request.job_id)
+        return await workload_result(
+            request,
+            lambda: self._extract_events(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="event extraction cancelled",
+            failures=(EventWorkloadError, EventResultError, GenerationError, SDKContractError),
+            detail_of=_event_failure_detail,
+            discard=self._finish,
+        )
+
+    async def _finish(self, job_id: str) -> None:
+        """Give back everything this job held, however it ended."""
+        await self._store.discard(job_id)
+        self._journal.finish(job_id)
+
+    async def _extract_events(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        """Select, extract, generate in passes, and ground the candidates."""
+        self._validate_request(request)
+        cancellation.raise_if_cancelled()
+        await self._report(request, progress, "select", 0.0)
+        self._journal.stage(request.job_id, "select")
+        selected = select_sources(request.job_id, request.payload.get("sources"))
+        self._journal.stage(request.job_id, "extract")
+        references, private_fragments = await self._extract_sources(
+            request, selected, cancellation, progress
+        )
+        cancellation.raise_if_cancelled()
+        self._journal.stage(request.job_id, "generate")
+        await self._report(request, progress, "generate", 0.6)
+        parsed = await self._generate_passes(
+            request, references, private_fragments, progress, cancellation
+        )
+        self._journal.stage(request.job_id, "validate")
+        await self._report(request, progress, "validate", 0.9)
+        grounded = merge(parsed, request.job_id)
+        validate_event_grounding(grounded, request.job_id, private_fragments)
+        await self._report(request, progress, "terminal", 1.0)
+        return succeeded_result(
+            request,
+            grounded_event_document(grounded),
+            completed_at_ms=self._clock_ms(),
+            detail=(
+                "no grounded event candidate found"
+                if grounded.outcome == "refused"
+                else "event candidates require confirmation"
+            ),
+        )
 
     async def _extract_sources(
         self,
@@ -412,6 +415,12 @@ class EventExtractionPlugin(ManagedPlugin):
         fraction: float,
     ) -> None:
         await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
+
+
+def _event_failure_detail(error: BaseException) -> str:
+    """The sentence this workload shows for one of its refusals."""
+    code = getattr(error, "code", "event-extraction-failed")
+    return measured_failure_detail(code, getattr(error, "detail", "")) or str(code)
 
 
 def select_sources(request_id: str, value: object) -> tuple[SelectedSource, ...]:

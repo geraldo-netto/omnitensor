@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
 from ..plugins.artifacts import (
@@ -254,6 +254,35 @@ def cancelled_result(
     completed_at_ms: int,
 ) -> PluginResult:
     return _result(request, PluginResultStatus.CANCELLED, {}, detail, completed_at_ms)
+
+
+async def workload_result(
+    request: PluginRequest,
+    body: Callable[[], Awaitable[PluginResult]],
+    *,
+    completed_at_ms: Callable[[], int],
+    cancelled_detail: str,
+    failures: tuple[type[BaseException], ...],
+    detail_of: Callable[[BaseException], str] = lambda error: str(getattr(error, "code", error)),
+    discard: Callable[[str], Awaitable[None]] | None = None,
+) -> PluginResult:
+    """Run one workload body and turn however it ends into exactly one result.
+
+    Five workloads each wrote this envelope out: a cancellation arm returning
+    ``cancelled_result``, a domain-error arm returning ``failed_result``, and a
+    ``finally`` discarding the job's private fragments. The bodies differ; the
+    envelope never did, and a workload that forgot the discard leaked a job's
+    source text into the next one's lifetime.
+    """
+    try:
+        return await body()
+    except (PluginCancelledError, asyncio.CancelledError):
+        return cancelled_result(request, cancelled_detail, completed_at_ms=completed_at_ms())
+    except failures as error:
+        return failed_result(request, detail_of(error), completed_at_ms=completed_at_ms())
+    finally:
+        if discard is not None:
+            await discard(request.job_id)
 
 
 def _result(
