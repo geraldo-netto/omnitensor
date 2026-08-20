@@ -42,6 +42,11 @@ def tables() -> dict[str, list[list[str]]]:
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if cells[0] in ("id", "---"):
+            # The heading is recorded from its schema line rather than from a
+            # row, so a table with nothing in it is still a table. Every open
+            # finding being resolved is the state this ledger exists to reach,
+            # and it used to read here as a missing table.
+            found.setdefault(heading, [])
             continue
         found.setdefault(heading, []).append(cells)
     return found

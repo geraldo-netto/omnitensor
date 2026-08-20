@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| — | — | — | — | No open findings. Everything the seventeenth pass could reach is done: workload tuning end to end (OMNI-0510, 0541, 0511, 0542, 0512, 0513), the embedder split into its own distribution (0517, 0555, 0556), the prompt port (0519), and the composition root now building the catalog, the resolver, the stores, the plugin runtime and the control service (0514, 0550, 0551, 0560, 0561). What is left below needs a decision, another repository, or the GPU. |
 
 ## Blocked
 
