@@ -125,6 +125,11 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # behaviour are tracked instead — in one place rather than in each workload
     # that qualifies.
     #
+    # `snapshot-forecast` moved 13 -> 14 with `selected_files_document`: where
+    # this service can read a file somebody selected is a different answer from
+    # where a caller may stage one, and publishing the wrong one refuses valid
+    # sources (`../xpuwlm` F2).
+    #
     # `event-workload` moved 56 -> 57 when the recovery journal stopped
     # answering "nothing was interrupted" for a document it could not read
     # (OMNI-0548): the discard is a statement now, and a statement is
@@ -141,10 +146,10 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         2,
         6,
         31,
-        13,
+        14,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 231
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 232
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

@@ -199,6 +199,7 @@ class OmniTensorService:
         transport: ControlTransport | None = None,
         cancellation_journal_path: Path | None = None,
         input_roots: Sequence[Path | str] = (),
+        selected_file_roots: Sequence[Path | str] = (),
         publish_interval_s: float = PUBLISH_INTERVAL_S,
         discovery_interval_s: float = DISCOVERY_INTERVAL_S,
         accelerator_device_ids: dict[str, str] | None = None,
@@ -222,6 +223,10 @@ class OmniTensorService:
         self._publisher_port = host.publisher
         self._transport = host.transport
         self._input_roots = tuple(input_roots)
+        # Where this service can reach a file somebody selected, which is not
+        # where a caller may stage one: the unit's own sandbox decides it, so
+        # it is configured rather than discovered.
+        self._selected_file_roots = tuple(selected_file_roots)
         self._kernel_telemetry_source = kernel_telemetry_source or UnixSocketAggregateSource()
         # Consent has a home now.  The ledger was written, tested, and never
         # constructed, so `active_permissions` came from a deny-all stub: every
@@ -664,6 +669,7 @@ class OmniTensorService:
             result_summaries=self.result_summaries,
             plugin_telemetry=self.plugin_telemetry,
             input_roots=self._input_roots,
+            selected_file_roots=self._selected_file_roots,
             kernel_telemetry_source=self._kernel_telemetry_source,
             profile_statuses_of=self._profile_statuses,
         )

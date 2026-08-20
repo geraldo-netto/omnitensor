@@ -70,6 +70,41 @@ def input_roots_document(
     }
 
 
+# What a selected source may weigh, which is the same number the workloads
+# that read one already enforce. A bound on what a person selected rather than
+# on what they are told back: a file too large to read is a refusal that has to
+# arrive before a job exists, not after one has run.
+MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024
+
+
+def selected_files_document(
+    roots: Sequence[Path | str], max_bytes: int = MAX_SELECTED_SOURCE_BYTES
+) -> dict:
+    """Where this service can read a source a person selected.
+
+    The same shape as :func:`input_roots_document` and a different fact. That
+    one says where a caller may stage a buffer it writes; this says where the
+    service can reach a file it is pointed at, and the two answers differ on
+    any machine whose unit is sandboxed — `PrivateTmp=true` and
+    `ProtectHome=read-only` are how, so the roots are a property of how the
+    unit is run rather than something the service can enumerate for itself.
+
+    Empty is the honest answer for the default configuration: this service
+    will read no selected file at all.
+    """
+    declared = list(roots)
+    if len(declared) > MAX_PUBLISHED_INPUT_ROOTS:
+        raise ValueError(
+            f"{len(declared)} selected-file roots are configured; at most "
+            f"{MAX_PUBLISHED_INPUT_ROOTS} can be published, and a root the "
+            "snapshot cannot name is one no client can check a source against"
+        )
+    return {
+        "roots": [str(root) for root in declared],
+        "maxBytes": int(max_bytes),
+    }
+
+
 def build_snapshot(
     devices: list[Device],
     metrics: dict,
@@ -78,6 +113,7 @@ def build_snapshot(
     plugin_telemetry: list[dict] | None = None,
     generated_at_ms: int | None = None,
     inputs: dict | None = None,
+    selected_files: dict | None = None,
     kernel_telemetry: dict | None = None,
     policy: dict | None = None,
 ) -> dict:
@@ -99,6 +135,8 @@ def build_snapshot(
     }
     if inputs is not None:
         snapshot["inputs"] = inputs
+    if selected_files is not None:
+        snapshot["selectedFiles"] = selected_files
     if plugin_telemetry is not None:
         snapshot["pluginTelemetry"] = {
             "version": PLUGIN_TELEMETRY_VERSION,

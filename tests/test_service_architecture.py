@@ -529,6 +529,7 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
     statuses_of = object()
     snapshot_owner = SimpleNamespace(
         _devices=DeviceRegistry(),
+        _selected_file_roots=(),
         _device_load=lambda *_args: None,
         _workloads={},
         _executors={},

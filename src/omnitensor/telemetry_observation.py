@@ -26,7 +26,7 @@ from .ports import (
 )
 from .profile_selection import profile_statuses
 from .runtime_api import no_inventory
-from .snapshot import build_snapshot, input_roots_document
+from .snapshot import build_snapshot, input_roots_document, selected_files_document
 
 LOGGER = logging.getLogger("omnitensor.service")
 
@@ -223,6 +223,10 @@ def runtime_snapshot(
     result_summaries,
     plugin_telemetry,
     input_roots,
+    # Absent is empty rather than an error: a caller that has not been taught
+    # the roots publishes "this service reads no selected file", which is the
+    # true answer for a runtime nobody has configured them on.
+    selected_file_roots=(),
     kernel_telemetry_source,
     profile_statuses_of=None,
 ) -> dict:
@@ -249,6 +253,7 @@ def runtime_snapshot(
         alerts=result_summaries.documents(),
         plugin_telemetry=plugin_telemetry.documents(),
         inputs=input_roots_document(input_roots),
+        selected_files=selected_files_document(selected_file_roots),
         kernel_telemetry=kernel_telemetry_source.read().document(),
         policy=policy.snapshot_document(),
     )

@@ -241,6 +241,32 @@
         }
       }
     },
+    "selectedFiles": {
+      "description": "Where this runtime can read a source a person selected, and how large one may be. The same shape as `inputs` and a different fact: `inputs` is where a caller may stage a buffer it writes, and this is where the service can reach a file it was pointed at — two answers that differ on any machine whose unit is sandboxed, and confusing them refuses valid sources. Absent means the runtime predates the field, and a client that reads nothing here submits exactly as it did before. Empty roots mean this service will read no selected file at all.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roots",
+        "maxBytes"
+      ],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        }
+      }
+    },
     "kernelTelemetry": {
       "description": "Bounded aggregate-only kernel latency telemetry. No process, user, cgroup, path, or payload identity is permitted in this block.",
       "type": "object",

@@ -294,6 +294,7 @@
         "omnitensor.snapshot.x_build_snapshot",
         "omnitensor.snapshot.x_input_roots_document",
         "omnitensor.snapshot.x_remove_snapshot",
+        "omnitensor.snapshot.x_selected_files_document",
         "omnitensor.snapshot.x_write_snapshot"
       ]
     },

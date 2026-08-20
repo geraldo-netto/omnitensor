@@ -55,10 +55,30 @@ def _env_paths(
 
 
 def _env_input_roots(environ: Mapping[str, str] | None = None) -> tuple[Path, ...]:
-    roots = tuple(dict.fromkeys(_env_paths("OMNITENSOR_INPUT_ROOTS", environ)))
+    return _env_published_roots("OMNITENSOR_INPUT_ROOTS", environ)
+
+
+def _env_selected_file_roots(environ: Mapping[str, str] | None = None) -> tuple[Path, ...]:
+    """Where this unit can read a file a person selected.
+
+    Configured rather than detected: `PrivateTmp=true` and
+    `ProtectHome=read-only` are how the unit is run, and a service cannot
+    enumerate what its own sandbox will let it open. Unset means it reads no
+    selected file at all, which is what a client is then told.
+    """
+    return _env_published_roots("OMNITENSOR_SELECTED_FILE_ROOTS", environ)
+
+
+def _env_published_roots(
+    name: str,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, ...]:
+    roots = tuple(dict.fromkeys(_env_paths(name, environ)))
     if len(roots) > MAX_PUBLISHED_INPUT_ROOTS:
+        # A root the snapshot cannot name is one no client can use, so this is
+        # a configuration error said at startup rather than half-honoured.
         raise ValueError(
-            f"OMNITENSOR_INPUT_ROOTS contains {len(roots)} unique roots; "
+            f"{name} contains {len(roots)} unique roots; "
             f"at most {MAX_PUBLISHED_INPUT_ROOTS} are supported"
         )
     return roots
@@ -103,6 +123,7 @@ class ServiceEnvironment:
     model_bindings_path: Path
     grants_path: Path
     input_roots: tuple[Path, ...]
+    selected_file_roots: tuple[Path, ...]
     accelerator_device_ids: dict[str, str]
     plugin_slots: int
 
@@ -118,6 +139,7 @@ class ServiceEnvironment:
             ),
             grants_path=_env_path("OMNITENSOR_GRANTS_PATH", DEFAULT_GRANTS_PATH, environ),
             input_roots=_env_input_roots(environ),
+            selected_file_roots=_env_selected_file_roots(environ),
             accelerator_device_ids=_env_accelerator_device_ids(environ),
             plugin_slots=_env_plugin_slots(environ),
         )
@@ -131,6 +153,7 @@ class ServiceEnvironment:
             "model_bindings_path": self.model_bindings_path,
             "grants_path": self.grants_path,
             "input_roots": self.input_roots,
+            "selected_file_roots": self.selected_file_roots,
             "accelerator_device_ids": self.accelerator_device_ids,
             "plugin_slots": self.plugin_slots,
         }

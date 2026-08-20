@@ -606,6 +606,20 @@ systemctl --user edit omnitensor.service
 # Environment=OMNITENSOR_INPUT_ROOTS=%h/inputs:%h/Pictures
 ```
 
+Where a workload may read a file somebody *selected* is a second, separate
+answer, because the unit's own sandbox decides it — `PrivateTmp=true` and
+`ProtectHome=read-only` mean the service cannot enumerate what it will be
+allowed to open:
+
+```sh
+# Environment=OMNITENSOR_SELECTED_FILE_ROOTS=%h/Documents:%h/Pictures
+```
+
+Unset means this service reads no selected file at all, and the snapshot says
+so in `selectedFiles` — so a client can refuse a source outside the roots
+before submitting a job rather than after one has run. A file larger than 128
+MiB is refused for the same reason.
+
 A path outside those roots is refused, and so is a symlink that leaves them —
 containment is judged by where a path resolves to, not where it sits. A file
 whose size or digest disagrees with the declaration is refused rather than
