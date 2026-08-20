@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 import threading
@@ -55,6 +56,7 @@ from omnitensor.plugins.selected_text_acceptance import (
     SelectedTextAcceptanceError,
     parse_selected_text_worker_load_receipt,
 )
+from omnitensor.plugins.tuning import WorkloadTuning
 from omnitensor.registry import validate_document
 from omnitensor.sdk import BootstrapArtifact, CancellationController, SDKContractError
 
@@ -3614,3 +3616,125 @@ def test_a_translation_citing_the_control_fragment_is_left_unbound():
 
     # Unchanged, so the workload's own citation check refuses it.
     assert json.loads(bound)["evidence"]["textSha256"] == "0" * 64
+
+
+# --- workload tuning (OMNI-0512) ----------------------------------------------
+
+
+def _tuned_completion(observed):
+    def completion(**kwargs):
+        observed.append(kwargs)
+        return iter(
+            (
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": json.dumps(
+                                    {
+                                        "version": 1,
+                                        "requestId": "job-1",
+                                        "answer": "yes",
+                                        "citations": [],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        )
+
+    return completion
+
+
+def _tuning_request(adapter):
+    source = SourceFragment(
+        "private:job-1:source:1:page:1",
+        "a" * 64,
+        1,
+        "The kit is in the shed.",
+        "b" * 64,
+    )
+    asyncio.run(adapter._store.publish("job-1", (source,)))
+    return GenerationRequest("job-1", "ask-selected-files", (source.reference,))
+
+
+def test_an_untuned_workload_sends_the_messages_it_always_sent(tmp_path):
+    adapter = _runtime(tmp_path)
+    request = _tuning_request(adapter)
+    observed = []
+    adapter._llama = SimpleNamespace(create_chat_completion=_tuned_completion(observed))
+
+    with contextlib.suppress(Exception):
+        adapter._generate_sync(document_question_task(), request, CancellationController())
+
+    assert [message["role"] for message in observed[0]["messages"]] == ["system", "user"]
+
+
+def test_tuning_is_appended_to_the_request_and_never_to_the_system_rules(tmp_path):
+    """The grounding and citation rules are the service's and stay authoritative."""
+    adapter = _runtime(tmp_path)
+    adapter.tune(WorkloadTuning(guidance="prefer plain words", answer_length="brief"))
+    request = _tuning_request(adapter)
+    observed = []
+    adapter._llama = SimpleNamespace(create_chat_completion=_tuned_completion(observed))
+
+    with contextlib.suppress(Exception):
+        adapter._generate_sync(document_question_task(), request, CancellationController())
+
+    messages = observed[0]["messages"]
+    assert [message["role"] for message in messages] == ["system", "user", "user"]
+    assert "prefer plain words" in messages[-1]["content"]
+    assert "prefer plain words" not in messages[0]["content"]
+
+
+def test_tuning_never_becomes_an_output_ceiling(tmp_path):
+    """A length preference is words to the model, not a token bound on the answer."""
+    adapter = _runtime(tmp_path)
+    adapter.tune(WorkloadTuning(answer_length="brief"))
+    request = _tuning_request(adapter)
+    observed = []
+    adapter._llama = SimpleNamespace(create_chat_completion=_tuned_completion(observed))
+
+    with contextlib.suppress(Exception):
+        adapter._generate_sync(document_question_task(), request, CancellationController())
+
+    assert observed[0]["max_tokens"] == document_question_task().limits.output_tokens
+
+
+def test_the_workload_hands_its_runtimes_what_the_person_configured(tmp_path):
+    applied = []
+
+    class Runtime:
+        def tune(self, tuning):
+            applied.append(tuning)
+
+        async def load(self, *_args, **_kwargs):  # pragma: no cover - never reached
+            raise AssertionError("this suite never loads a model")
+
+    class Plugin:
+        plugin_id = "ask-selected-files"
+
+        async def start(self, _context):
+            raise RuntimeError("stop after tuning")
+
+    workload = factories.QualifiedWorkload(
+        Plugin(),
+        Runtime(),
+        tmp_path / "model.gguf",
+        _qualification(),
+    )
+    with contextlib.suppress(RuntimeError):
+        asyncio.run(
+            workload.start(
+                PluginContext(
+                    "ask-selected-files",
+                    1,
+                    {"answerGuidance": "cite pages", "answerLength": "thorough"},
+                    frozenset(),
+                )
+            )
+        )
+
+    assert applied == [WorkloadTuning(guidance="cite pages", answer_length="thorough")]

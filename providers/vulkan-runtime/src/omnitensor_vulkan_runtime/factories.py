@@ -43,6 +43,7 @@ from omnitensor.plugins.selected_text_acceptance import (
     ModelEvidence,
     build_selected_text_worker_load_receipt,
 )
+from omnitensor.plugins.tuning import TunableGenerationRuntime, WorkloadTuning
 from omnitensor.sdk import current_plugin_bootstrap
 
 from .bge import BgeVulkanEmbedder
@@ -100,6 +101,12 @@ class QualifiedWorkload:
 
     async def start(self, context: PluginContext) -> None:
         self._clear_load_receipt()
+        # What the person tuned, read once here: a worker holds its
+        # configuration for its whole life and is replaced when it changes.
+        tuning = WorkloadTuning.from_configuration(context.configuration)
+        for runtime, _model_path, _qualification in self._runtimes:
+            if isinstance(runtime, TunableGenerationRuntime):
+                runtime.tune(tuning)
         await self._plugin.start(context)
         measured: list[ModelEvidence] = []
         try:

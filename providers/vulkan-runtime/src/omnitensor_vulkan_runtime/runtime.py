@@ -27,6 +27,7 @@ from omnitensor.plugins.generation import (
     ProviderGenerationError,
 )
 from omnitensor.plugins.protocol import CancellationToken, ProgressReporter
+from omnitensor.plugins.tuning import WorkloadTuning
 
 from .grammar import grammar_schema
 from .grounding import bind_grounding_metadata, fragment_span
@@ -102,6 +103,7 @@ class LlamaVulkanRuntime:
         self._load_report: NativeLoadReport | None = None
         self._physical_device = ""
         self._active_request = ""
+        self._tuning = WorkloadTuning()
         # The model is native memory shared between the event loop and the
         # worker thread running a decode.  `terminate` used to call `_release`
         # -- and so `llama.close()` -- while `create_chat_completion` was still
@@ -113,6 +115,14 @@ class LlamaVulkanRuntime:
         self._in_use = threading.RLock()
         self._stopping = threading.Event()
         self._log_callback = None
+
+    def tune(self, tuning: WorkloadTuning) -> None:
+        """Hold the tuning this workload was configured with.
+
+        Held rather than passed per request because a worker reads its
+        configuration once, at `start()`, and is replaced when it changes.
+        """
+        self._tuning = tuning
 
     async def load(self, artifacts: tuple[Path, ...], accelerator: str) -> NativeLoadReport:
         if accelerator != "gpu" or len(artifacts) != 1:
@@ -348,6 +358,12 @@ class LlamaVulkanRuntime:
             },
             {"role": "user", "content": instruction},
         ]
+        # After the request rather than inside the system turn: the grounding
+        # and citation rules are the service's and stay authoritative, and a
+        # preference somebody typed may not quietly outrank them.
+        tuning_message = self._tuning.message()
+        if tuning_message is not None:
+            messages.append(tuning_message)
         raw = _complete_json(llama, messages, task, cancellation, self._stopping)
         reconsideration = reconsideration_prompt(task, hint, raw)
         if reconsideration is not None:
