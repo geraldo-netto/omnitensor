@@ -216,15 +216,11 @@ class DocumentTranslationPlugin(ManagedPlugin):
             detail="selected documents translated in full",
         )
 
-    def _validate_request(
-        self, request: PluginRequest
-    ) -> tuple[tuple[SelectedSource, ...], str]:
+    def _validate_request(self, request: PluginRequest) -> tuple[tuple[SelectedSource, ...], str]:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:
             raise DocumentTranslationError("request-invalid", "request names another plugin")
         if request.trigger != "manual":
-            raise DocumentTranslationError(
-                "request-invalid", "document translation is manual only"
-            )
+            raise DocumentTranslationError("request-invalid", "document translation is manual only")
         self.permissions.require(READ_PERMISSION)
         language = request.payload.get("targetLanguage")
         if (
@@ -285,9 +281,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
             )
             generated = await self._router.run(
                 task,
-                generation_request(
-                    request.job_id, PLUGIN_ID, (control.reference, reference)
-                ),
+                generation_request(request.job_id, PLUGIN_ID, (control.reference, reference)),
                 cancellation,
                 ScaledProgressReporter(
                     request,
