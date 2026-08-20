@@ -726,6 +726,37 @@ def test_a_store_written_before_companions_existed_still_resolves(tmp_path):
     assert installer.resolve_active("legacy").ready is True
 
 
+@pytest.mark.parametrize(
+    ("rewrite", "reason"),
+    [
+        (lambda document: [], "not a metadata document"),
+        (lambda document: {**document, "companions": None}, "no usable companion digests"),
+        (lambda document: {**document, "companions": ["model.bin"]}, "no usable companion digests"),
+    ],
+)
+def test_a_metadata_record_that_cannot_be_read_is_not_a_record_of_nothing(
+    tmp_path, rewrite, reason
+):
+    """OMNI-0549: the check that notices tampering passed the tampered record.
+
+    A metadata document that had been truncated, replaced with an array, or
+    rewritten with `"companions": null` answered "" — verified — so the very
+    swap this exists to catch was reported as a healthy artifact. An absent
+    `companions` key still resolves: that is an older store, not a broken one.
+    """
+    param, binary = ncnn_pair(tmp_path)
+    installer = ArtifactInstaller(tmp_path / "store")
+    installed = installer.install(ncnn_reference(param), param, companions={"model.bin": binary})
+    metadata_path = installed.path.parent / "artifact.json"
+    metadata_path.write_text(json.dumps(rewrite(json.loads(metadata_path.read_text()))))
+
+    resolution = installer.resolve_active("demo-ncnn")
+
+    assert resolution.ready is False
+    assert reason in resolution.reason
+    assert resolution.path is None
+
+
 def test_a_manifest_declared_reference_resolves_through_the_installer(tmp_path):
     """The path the service takes when a profile actually declares a model.
 

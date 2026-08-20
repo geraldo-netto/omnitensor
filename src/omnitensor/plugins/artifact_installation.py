@@ -183,6 +183,33 @@ def artifact_reference_from_document(document: object) -> ArtifactReference:
     return reference
 
 
+def _recorded_companions(version_root: Path) -> tuple[dict, str]:
+    """The digests an installed artifact recorded for its companions.
+
+    A record this cannot read is not a record of nothing.  A document that had
+    been truncated, replaced with an array, or rewritten with
+    `"companions": null` used to answer "nothing to check" — so the very swap
+    the digests exist to catch was reported as a healthy artifact.  An absent
+    `companions` key is different: that is a store written before companions
+    were recorded at all, and there is genuinely nothing to compare against.
+    """
+    metadata_path = version_root / _ARTIFACT_METADATA_FILE
+    try:
+        document = read_json_bounded(metadata_path, _MAX_METADATA_BYTES)
+    except FileNotFoundError:
+        return {}, ""
+    except (OSError, ValueError, JsonTooLargeError) as error:
+        return {}, f"artifact metadata is unreadable: {error}"
+    if not isinstance(document, dict):
+        return {}, "artifact metadata is not a metadata document"
+    if "companions" not in document:
+        return {}, ""
+    recorded = document["companions"]
+    if not isinstance(recorded, dict):
+        return {}, "artifact metadata records no usable companion digests"
+    return recorded, ""
+
+
 class ArtifactInstaller:
     """Import verified files into an immutable version store."""
 
@@ -304,16 +331,9 @@ class ArtifactInstaller:
         # here would be a cycle at load time.
         from omnitensor.preparation import file_digest  # noqa: PLC0415
 
-        metadata_path = Path(version_root) / _ARTIFACT_METADATA_FILE
-        try:
-            document = read_json_bounded(metadata_path, _MAX_METADATA_BYTES)
-        except FileNotFoundError:
-            return ""
-        except (OSError, ValueError, JsonTooLargeError) as error:
-            return f"artifact metadata is unreadable: {error}"
-        recorded = document.get("companions") if isinstance(document, dict) else None
-        if not isinstance(recorded, dict):
-            return ""
+        recorded, unreadable = _recorded_companions(Path(version_root))
+        if unreadable:
+            return unreadable
         for name, expected in sorted(recorded.items()):
             path = Path(version_root) / name
             if not path.is_file():
