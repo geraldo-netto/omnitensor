@@ -629,11 +629,22 @@ def test_receipt_refuses_identity_and_shape_tampering(tmp_path, monkeypatch, mut
             event_generation_task(),
         )
         qualification.default_model("event-extraction")
-        qualification.measured_models("event-extraction")
 
     with pytest.raises(RuntimeError) as excinfo:
         read_both()
     assert str(excinfo.value) == detail
+
+
+def _passed_models(document, plugin_id):
+    """What the receipt records as passed, read from the document.
+
+    There is no function for this any more: `qualified_models` claimed to be
+    "what a client may offer" and had no caller, while what a client actually
+    offers is decided by `declared_artifacts` and each manifest's `selectable`
+    flag. A claim nothing reads is one nothing keeps true.
+    """
+    models = document["workloads"][plugin_id]["models"]
+    return tuple(model for model, record in models.items() if record["result"] == "passed")
 
 
 def _with_second_model(document, model_id, record):
@@ -659,7 +670,7 @@ def test_a_second_model_that_passed_is_offered_and_runs(tmp_path, monkeypatch):
     )
 
     assert receipt.device == document["device"]
-    assert qualification.qualified_models("event-extraction") == (
+    assert _passed_models(document, "event-extraction") == (
         "qwen3-5-9b-iq4-xs",
         "qwen3-8b-q4-k-m",
         "qwen3-4b-q4-k-m",
@@ -669,10 +680,10 @@ def test_a_second_model_that_passed_is_offered_and_runs(tmp_path, monkeypatch):
 def test_a_pair_that_failed_is_not_offered_but_may_still_be_chosen(tmp_path, monkeypatch):
     """A recorded failure is not offered, and does not forbid.
 
-    `qualified_models` is what a client puts in front of somebody, so a pair
-    that failed stays out of it. Choosing it anyway is theirs to own: the
-    reason travels with the run instead of becoming a worker that will not
-    start.
+    A recorded failure stays out of what the receipt says it measured. What a
+    client offers is decided elsewhere and
+    from a different fact — `declared_artifacts` and the manifest's own
+    `selectable` — so choosing a pair the receipt failed still runs.
     """
     digest = qualification.task_sha256(event_generation_task())
     document = _with_second_model(
@@ -682,7 +693,7 @@ def test_a_pair_that_failed_is_not_offered_but_may_still_be_chosen(tmp_path, mon
     )
     _load_receipt(monkeypatch, tmp_path, document)
 
-    assert qualification.qualified_models("event-extraction") == (
+    assert _passed_models(document, "event-extraction") == (
         "qwen3-5-9b-iq4-xs",
         "qwen3-8b-q4-k-m",
     )
@@ -690,8 +701,8 @@ def test_a_pair_that_failed_is_not_offered_but_may_still_be_chosen(tmp_path, mon
         "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
     )
 
-    # Choosing it anyway still runs: `qualified_models` is a list to offer,
-    # never a gate, and that outlives the coverage report OMNI-0565 dropped.
+    # Choosing it anyway still runs: nothing here is a gate, and that outlives
+    # the coverage report OMNI-0565 dropped.
     assert chosen.device == document["device"]
 
 
@@ -3305,7 +3316,7 @@ def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path
     Otherwise the two are a deadlock — the acceptance run needs the installed
     distribution, and the distribution could not be declared until the run had
     happened. `unmeasured` therefore stays a value the receipt may record and
-    `qualified_models` still declines to offer that pair — what went with
+    the receipt still records it as unmeasured — what went with
     OMNI-0565 is only the sentence the provider used to hand the descriptor.
     """
 
@@ -3323,7 +3334,7 @@ def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path
     )
 
     assert loaded.covers == ""
-    assert "qwen3-8b-q4-k-m" not in qualification.qualified_models("event-extraction")
+    assert "qwen3-8b-q4-k-m" not in _passed_models(document, "event-extraction")
     # And it may still be the workload's default: unmeasured is not rejected.
     document["workloads"]["event-extraction"]["default"] = "qwen3-8b-q4-k-m"
     _load_receipt(monkeypatch, tmp_path, document)

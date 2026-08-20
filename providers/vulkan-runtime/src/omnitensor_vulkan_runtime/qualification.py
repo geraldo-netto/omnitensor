@@ -26,7 +26,8 @@ FAILED = "failed"
 # the alternative is a deadlock: a workload cannot be qualified until its
 # distribution is installed and runnable, and it could not be declared here
 # until it was qualified. What it must never be is a claim — `_covers` reports
-# it as unmeasured, `qualified_models` does not offer it, and an answer says so.
+# it as unmeasured, and `declared_artifacts` in `omnitensor` decides what a
+# client may offer, from the `selectable` flag each manifest declares.
 UNMEASURED = "unmeasured"
 _RESULTS = (PASSED, FAILED, UNMEASURED)
 _MAX_RECEIPT_BYTES = 64 * 1024
@@ -182,19 +183,6 @@ def _model(value: object, model_id: str, digest: str) -> int:
     if layers < 1:
         raise RuntimeError("layer qualification is invalid")
     return layers
-
-
-def qualified_models(plugin_id: str) -> tuple[str, ...]:
-    """Every model this workload passed on, in the order the receipt lists.
-
-    What a client may offer. A pair that failed is deliberately not here: an
-    unqualified model is not a slower answer, it is a worker that refuses to
-    start.
-    """
-    workload = _workload_entry(_qualification_document()["workloads"], plugin_id)
-    return tuple(
-        model_id for model_id, record in workload["models"].items() if record["result"] == PASSED
-    )
 
 
 def default_model(plugin_id: str) -> str:
