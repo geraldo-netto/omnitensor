@@ -43,6 +43,7 @@ MAX_ACTIVE_JOBS_LIMIT = 1024
 DEFAULT_JOB_CANCEL_TIMEOUT_SECONDS = 2.0
 MAX_JOB_CANCEL_TIMEOUT_SECONDS = 30.0
 _UNAVAILABLE_DISPATCHER = "No verified inference dispatcher is ready for this workload"
+STOPPING_MESSAGE = "The runtime is shutting down; the job was not started"
 
 
 @dataclass(slots=True)
@@ -137,6 +138,13 @@ class JobSubmissionService:
         # it was refused before, never earlier and never for a new reason.
         self._admission = admission
         self._observer = observer or NoJobObserver()
+        # Open until `stop()` closes it.  The control socket outlives this
+        # service by design during shutdown — the runtime stops the scheduler
+        # and this service before it stops the transport, so that an in-flight
+        # request gets an answer instead of a severed connection — and for
+        # that whole window a submission would otherwise be accepted, given an
+        # id, and dispatched into a scheduler that has already stopped.
+        self._accepting = True
 
     def note_progress(self, job_id: str, stage: str, fraction: float, detail: str) -> None:
         """Record where a running job has got to, against its owner.
@@ -178,6 +186,17 @@ class JobSubmissionService:
                 document["workloadId"],
                 copy.deepcopy(document["payload"]),
             )
+            if not self._accepting:
+                # Before authorization and before capacity: neither answer is
+                # the true one, and a caller told "not authorized" while the
+                # runtime is simply going away would go and change its grants.
+                return self._reply(
+                    request.request_id,
+                    None,
+                    "rejected",
+                    "service-stopping",
+                    STOPPING_MESSAGE,
+                )
             if not self._authorizer.allows("submit", request.workload_id):
                 return self._reply(
                     request.request_id,
@@ -338,7 +357,14 @@ class JobSubmissionService:
                 "Internal error while cancelling the job",
             )
 
+    def start(self) -> None:
+        """Accept submissions again, for a runtime that is started twice."""
+        self._accepting = True
+
     async def stop(self) -> None:
+        # Closed before anything is cancelled, so a submission racing this is
+        # refused rather than accepted into a service that is already going.
+        self._accepting = False
         tasks = tuple(active.task for active in self._active.values())
         for task in tasks:
             task.cancel()

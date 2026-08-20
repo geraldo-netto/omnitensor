@@ -1404,3 +1404,84 @@ def test_a_long_refusal_reason_survives_the_whole_job_wire_path():
     )
     assert result["message"] == reason
     assert not validate_document("runtime-job-result.schema.json", result)
+
+
+def test_a_job_submitted_during_shutdown_is_refused_rather_than_accepted():
+    """OMNI-0547: the socket outlives the job service, and answered anyway.
+
+    The runtime stops the scheduler and this service before it stops the
+    transport, deliberately, so an in-flight control request gets an answer
+    instead of a severed connection. For that whole window a submission was
+    accepted, given an id, and dispatched into a scheduler that had already
+    stopped — the caller then polled `get-job-result` for a job that would
+    never finish, and the process exited with the id still unresolved.
+    """
+
+    async def scenario():
+        dispatcher = BlockingDispatcher()
+        service = JobSubmissionService(
+            dispatcher,
+            allows_all(),
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 123,
+        )
+
+        await service.stop()
+        reply = decode(await service.submit_job_text(json.dumps(submit_document())))
+
+        assert reply["status"] == "rejected"
+        assert reply["code"] == "service-stopping"
+        assert reply["message"] == job_lifecycle.STOPPING_MESSAGE
+        assert reply["jobId"] is None
+        assert reply["requestId"] == "request-1"
+        # Nothing was dispatched, so nothing is left running or holding a slot.
+        assert dispatcher.calls == []
+        assert service.active_job_ids() == ()
+
+    run_scenario(scenario())
+
+
+def test_shutting_down_is_answered_before_authorization_or_capacity():
+    """Neither of those is the true reason, and both send a caller elsewhere.
+
+    "Not authorized" makes somebody go and change their grants; "capacity
+    exhausted" makes them wait and retry. The runtime is simply going away.
+    """
+
+    async def scenario():
+        service = JobSubmissionService(
+            ImmediateDispatcher(),
+            PredicateJobAuthorizer(lambda action, workload_id: False),
+            max_active_jobs=1,
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 123,
+        )
+
+        await service.stop()
+
+        assert decode(await service.submit_job_text(json.dumps(submit_document())))["code"] == (
+            "service-stopping"
+        )
+
+    run_scenario(scenario())
+
+
+def test_a_runtime_started_a_second_time_accepts_jobs_again():
+    """`stop()` closes submission, so something has to reopen it."""
+
+    async def scenario():
+        service = JobSubmissionService(
+            ImmediateDispatcher(),
+            allows_all(),
+            id_factory=lambda: "job-1",
+            clock_ms=lambda: 123,
+        )
+
+        await service.stop()
+        service.start()
+
+        assert decode(await service.submit_job_text(json.dumps(submit_document())))["status"] == (
+            "accepted"
+        )
+
+    run_scenario(scenario())

@@ -817,8 +817,11 @@ class OmniTensorService:
             await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
             self._scheduler.start()
-            # Only now: the control socket accepts and the scheduler will take
-            # work, so a caller told "ready" can immediately be answered.
+            # Re-opened here, because `stop()` closes it: a second `run()` on
+            # the same service used to refuse every job as shutting down.
+            self.jobs.start()
+            # Only now: the scheduler will take work and submissions are open,
+            # so a caller told "ready" can immediately be answered.
             notify_ready()
             loop_tasks = [
                 loop.create_task(self._publisher()),
