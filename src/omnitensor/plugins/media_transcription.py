@@ -29,12 +29,12 @@ from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressRe
 
 PLUGIN_ID = "media-transcription"
 READ_PERMISSION = "files:read-selected"
+# A bound on what a person selected, which is legitimate; there are
+# deliberately no bounds on how much of it they are told back. A ten-minute
+# ceiling on a recording, or sixty-four pages on a deck, refused the eleventh
+# minute and the sixty-fifth page outright.
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
-MAX_DURATION_MS = 600_000
-MAX_VIDEO_DURATION_MS = 300_000
 MAX_IMAGE_PIXELS = 50_000_000
-MAX_PRESENTATION_SLIDES = 64
-MAX_DOCUMENT_PAGES = 64
 MAX_LANGUAGE_CHARACTERS = 35
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
@@ -370,15 +370,11 @@ def _validate_position_metadata(media: MediaInfo) -> None:
 def _validate_media_duration(media: MediaInfo) -> None:
     duration = media.duration_ms
     if duration is not None and (
-        isinstance(duration, bool)
-        or not isinstance(duration, int)
-        or not 1 <= duration <= MAX_DURATION_MS
+        isinstance(duration, bool) or not isinstance(duration, int) or duration < 1
     ):
-        raise MediaTranscriptionError("media-too-long", "media duration exceeds the bounded limit")
-    if media.modality is MediaModality.VIDEO and (
-        duration is None or duration > MAX_VIDEO_DURATION_MS
-    ):
-        raise MediaTranscriptionError("media-too-long", "video duration exceeds five minutes")
+        raise MediaTranscriptionError("media-invalid", "media duration is invalid")
+    if media.modality is MediaModality.VIDEO and duration is None:
+        raise MediaTranscriptionError("media-invalid", "video duration is missing")
 
 
 def _validate_image_media(media: MediaInfo) -> None:
@@ -396,7 +392,7 @@ def _validate_presentation_media(media: MediaInfo) -> None:
         or media.height is not None
         or isinstance(slide_count, bool)
         or not isinstance(slide_count, int)
-        or not 1 <= slide_count <= MAX_PRESENTATION_SLIDES
+        or slide_count < 1
     ):
         raise MediaTranscriptionError(
             "presentation-invalid", "presentation metadata is inconsistent"
@@ -412,7 +408,7 @@ def _validate_document_media(media: MediaInfo) -> None:
         or media.height is not None
         or isinstance(page_count, bool)
         or not isinstance(page_count, int)
-        or not 1 <= page_count <= MAX_DOCUMENT_PAGES
+        or page_count < 1
     ):
         raise MediaTranscriptionError("document-invalid", "document metadata is inconsistent")
 
@@ -487,14 +483,14 @@ def _validated_visual(value: object) -> VisualTranscript:
         and (
             isinstance(value.timestamp_ms, bool)
             or not isinstance(value.timestamp_ms, int)
-            or not 0 <= value.timestamp_ms <= MAX_VIDEO_DURATION_MS
+            or value.timestamp_ms < 0
         )
         or (
             value.slide_number is not None
             and (
                 isinstance(value.slide_number, bool)
                 or not isinstance(value.slide_number, int)
-                or not 1 <= value.slide_number <= MAX_PRESENTATION_SLIDES
+                or value.slide_number < 1
             )
         )
         or (
@@ -502,7 +498,7 @@ def _validated_visual(value: object) -> VisualTranscript:
             and (
                 isinstance(value.page_number, bool)
                 or not isinstance(value.page_number, int)
-                or not 1 <= value.page_number <= MAX_DOCUMENT_PAGES
+                or value.page_number < 1
             )
         )
     ):
@@ -558,7 +554,7 @@ def _valid_presentation_visuals(
 ) -> bool:
     return (
         len(items) == slide_count
-        and 1 <= len(items) <= MAX_PRESENTATION_SLIDES
+        and len(items) >= 1
         and all(item.timestamp_ms is None for item in items)
         and all(item.page_number is None for item in items)
         and [item.slide_number for item in items] == list(range(1, len(items) + 1))
@@ -568,7 +564,7 @@ def _valid_presentation_visuals(
 def _valid_document_visuals(items: tuple[VisualTranscript, ...], page_count: int | None) -> bool:
     return (
         len(items) == page_count
-        and 1 <= len(items) <= MAX_DOCUMENT_PAGES
+        and len(items) >= 1
         and all(item.timestamp_ms is None for item in items)
         and all(item.slide_number is None for item in items)
         and [item.page_number for item in items] == list(range(1, len(items) + 1))
@@ -628,12 +624,8 @@ def media_result(
 __all__ = [
     "DocumentTranscriber",
     "FrameSampler",
-    "MAX_DOCUMENT_PAGES",
-    "MAX_DURATION_MS",
     "MAX_IMAGE_PIXELS",
     "MAX_SOURCE_BYTES",
-    "MAX_PRESENTATION_SLIDES",
-    "MAX_VIDEO_DURATION_MS",
     "MediaInfo",
     "MediaModality",
     "MediaProbe",

@@ -765,7 +765,6 @@ def test_presentation_blueprint_archive_and_slide_count_failures_are_exact(monke
     bounded = tmp_path / "bounded.pptx"
     with zipfile.ZipFile(bounded, "w"):
         pass
-    monkeypatch.setattr(presentations, "MAX_PRESENTATION_SLIDES", 2)
     monkeypatch.setattr(
         presentations,
         "_pptx_blueprints",

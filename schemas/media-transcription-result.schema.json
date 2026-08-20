@@ -27,7 +27,7 @@
         "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
         "sourceSha256": {"$ref": "#/$defs/digest"},
         "modality": {"enum": ["audio", "document", "image", "video", "presentation"]},
-        "durationMs": {"type": ["integer", "null"], "minimum": 1, "maximum": 600000}
+        "durationMs": {"type": ["integer", "null"], "minimum": 1}
       }
     },
     "speech": {
@@ -47,8 +47,8 @@
       "additionalProperties": false,
       "required": ["startMs", "endMs", "text"],
       "properties": {
-        "startMs": {"type": "integer", "minimum": 0, "maximum": 600000},
-        "endMs": {"type": "integer", "minimum": 1, "maximum": 600000},
+        "startMs": {"type": "integer", "minimum": 0},
+        "endMs": {"type": "integer", "minimum": 1},
         "text": {"type": "string", "minLength": 1}
       }
     },
@@ -57,9 +57,9 @@
       "additionalProperties": false,
       "required": ["timestampMs", "slideNumber", "pageNumber", "visibleText", "description"],
       "properties": {
-        "timestampMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
-        "slideNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
-        "pageNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 64},
+        "timestampMs": {"type": ["integer", "null"], "minimum": 0},
+        "slideNumber": {"type": ["integer", "null"], "minimum": 1},
+        "pageNumber": {"type": ["integer", "null"], "minimum": 1},
         "visibleText": {"type": "string"},
         "description": {"type": "string", "minLength": 1}
       }

@@ -21,8 +21,6 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DURATION_MS,
-    MAX_VIDEO_DURATION_MS,
     MediaInfo,
     MediaModality,
     MediaTranscriptionError,
@@ -555,21 +553,22 @@ def test_duration_sampling_frame_and_audio_helpers_enforce_bounds():
     )
     with pytest.raises(MediaTranscriptionError, match="duration is unavailable"):
         provider._demux_duration_ms(without_timestamps, stream)
-    overlong = SimpleNamespace(
-        demux=lambda _stream: [SimpleNamespace(pts=0, dts=0, duration=(MAX_DURATION_MS + 1) * 2)]
+    # No ceiling: an eleven-minute recording is measured like any other.
+    long_recording = SimpleNamespace(
+        demux=lambda _stream: [SimpleNamespace(pts=0, dts=0, duration=660_000 * 2)]
     )
-    with pytest.raises(MediaTranscriptionError, match="exceeds ten minutes"):
-        provider._demux_duration_ms(overlong, stream)
-    for duration in (None, 0, (MAX_DURATION_MS + 1) * 1000):
+    assert provider._demux_duration_ms(long_recording, stream) == 660_000_000
+    for duration in (None, 0):
         with pytest.raises(MediaTranscriptionError):
             provider._duration_ms(SimpleNamespace(duration=duration), None)
 
     assert provider._sample_timestamps(1) == (0,)
     assert provider._sample_timestamps(30_000) == (0, 29_999)
-    assert len(provider._sample_timestamps(MAX_VIDEO_DURATION_MS)) == 20
-    for duration in (0, MAX_VIDEO_DURATION_MS + 1):
-        with pytest.raises(MediaTranscriptionError, match="video duration is invalid"):
-            provider._sample_timestamps(duration)
+    assert len(provider._sample_timestamps(300_000)) == 20
+    # The cadence carries on past five minutes rather than refusing.
+    assert len(provider._sample_timestamps(600_000)) == 40
+    with pytest.raises(MediaTranscriptionError, match="video duration is invalid"):
+        provider._sample_timestamps(0)
 
     frames = [SimpleNamespace(pts=1), SimpleNamespace(pts=3)]
     stream = SimpleNamespace(time_base=0.5)
@@ -588,7 +587,7 @@ def test_duration_sampling_frame_and_audio_helpers_enforce_bounds():
     chunks = []
     assert provider._append_audio_frames(chunks, AudioFrame(2), 0, np) == 2
     assert provider._append_audio_frames(chunks, None, 2, np) == 2
-    with pytest.raises(MediaTranscriptionError, match="exceeds ten minutes"):
+    with pytest.raises(MediaTranscriptionError, match="does not fit in one pass"):
         provider._append_audio_frames(
             chunks,
             [AudioFrame(2)],
@@ -659,11 +658,11 @@ def test_svg_document_and_slide_failure_branches_are_bounded(monkeypatch, tmp_pa
     with pytest.raises(MediaTranscriptionError, match="could not be decoded"):
         provider._document_page_count(unsupported)
 
-    too_many = tmp_path / "pages.tiff"
-    pages = [Image.new("1", (1, 1)) for _index in range(provider.MAX_DOCUMENT_PAGES + 1)]
-    pages[0].save(too_many, save_all=True, append_images=pages[1:])
-    with pytest.raises(MediaTranscriptionError, match="page count is invalid"):
-        provider._document_page_count(too_many)
+    # A sixty-five page document is read, not refused for its length.
+    many = tmp_path / "pages.tiff"
+    pages = [Image.new("1", (1, 1)) for _index in range(65)]
+    pages[0].save(many, save_all=True, append_images=pages[1:])
+    assert provider._document_page_count(many) == 65
 
     root = tmp_path / "rendered"
     root.mkdir()

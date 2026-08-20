@@ -5,13 +5,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DOCUMENT_PAGES,
-    MAX_DURATION_MS,
     MAX_IMAGE_PIXELS,
     MAX_LANGUAGE_CHARACTERS,
-    MAX_PRESENTATION_SLIDES,
     MAX_SOURCE_BYTES,
-    MAX_VIDEO_DURATION_MS,
     FrameSampler,
     MediaInfo,
     MediaModality,
@@ -420,34 +416,15 @@ async def test_cancelled_request_returns_terminal_cancelled_and_discards_frames(
         MediaInfo(MediaModality.IMAGE, None, 0, 1, False),
         MediaInfo(MediaModality.IMAGE, None, MAX_IMAGE_PIXELS + 1, 1, False),
         MediaInfo(MediaModality.VIDEO, None, 1, 1, False),
-        MediaInfo(MediaModality.VIDEO, MAX_VIDEO_DURATION_MS + 1, 1, 1, False),
-        MediaInfo(MediaModality.AUDIO, MAX_DURATION_MS + 1, None, None, True),
         MediaInfo(MediaModality.AUDIO, True, None, None, True),
         MediaInfo(MediaModality.AUDIO, 1, None, None, True, 1),
         MediaInfo(MediaModality.IMAGE, None, 1, 1, False, None, 1),
         MediaInfo(MediaModality.PRESENTATION, None, None, None, False, None),
         MediaInfo(MediaModality.PRESENTATION, None, None, None, False, 0),
-        MediaInfo(
-            MediaModality.PRESENTATION,
-            None,
-            None,
-            None,
-            False,
-            MAX_PRESENTATION_SLIDES + 1,
-        ),
         MediaInfo(MediaModality.PRESENTATION, None, 1, None, False, 1),
         MediaInfo(MediaModality.PRESENTATION, None, None, None, True, 1),
         MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, None),
         MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 0),
-        MediaInfo(
-            MediaModality.DOCUMENT,
-            None,
-            None,
-            None,
-            False,
-            None,
-            MAX_DOCUMENT_PAGES + 1,
-        ),
         MediaInfo(MediaModality.DOCUMENT, None, 1, None, False, None, 1),
     ],
 )
@@ -495,10 +472,8 @@ def test_transcript_validation_bounds_text_language_timing_and_visuals():
         VisualTranscript(None, "\x00", "cat"),
         VisualTranscript(None, "", "cat", 0),
         VisualTranscript(None, "", "cat", True),
-        VisualTranscript(None, "", "cat", MAX_PRESENTATION_SLIDES + 1),
         VisualTranscript(None, "", "cat", None, 0),
         VisualTranscript(None, "", "cat", None, True),
-        VisualTranscript(None, "", "cat", None, MAX_DOCUMENT_PAGES + 1),
     ]:
         with pytest.raises(MediaTranscriptionError):
             _validated_visual(value)
@@ -589,7 +564,7 @@ def test_image_pixel_boundary_is_total(width, height):
             _validated_media(media)
 
 
-@given(duration=st.integers(min_value=0, max_value=MAX_DURATION_MS))
+@given(duration=st.integers(min_value=0, max_value=24 * 60 * 60 * 1000))
 def test_timed_media_duration_matches_public_schema_minimum(duration):
     media = MediaInfo(MediaModality.AUDIO, duration, None, None, True)
     if duration >= 1:
@@ -639,3 +614,36 @@ def test_speech_segment_boundary_is_total(start, end, text):
 def test_runtime_protocols_remain_structural(tmp_path):
     assert isinstance(Frames(tmp_path), FrameSampler)
     assert MAX_SOURCE_BYTES == 128 * 1024 * 1024
+
+
+def test_a_long_recording_a_big_deck_and_a_long_document_are_all_accepted(tmp_path):
+    """OMNI-0394: 65 pages, 65 slides and the eleventh minute were refused."""
+    hour = 60 * 60 * 1000
+    assert _validated_media(MediaInfo(MediaModality.AUDIO, 3 * hour, None, None, True)) is not None
+    assert _validated_media(MediaInfo(MediaModality.VIDEO, hour, 1, 1, False)) is not None
+
+    deck = MediaInfo(MediaModality.PRESENTATION, None, None, None, False, 512)
+    assert _validated_media(deck) is deck
+    report = MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 2_500)
+    assert _validated_media(report) is report
+
+    slides = tuple(VisualTranscript(None, "", f"slide {n}", n) for n in range(1, 513))
+    assert _validated_visuals(slides, deck) == slides
+    pages = tuple(VisualTranscript(None, "", f"page {n}", None, n) for n in range(1, 2_501))
+    assert _validated_visuals(pages, report) == pages
+
+    # And the published document still validates against its own schema.
+    late = SpeechTranscript(
+        "en", (SpeechSegment(2 * hour, 2 * hour + 5_000, "said in the third hour"),)
+    )
+    source = tmp_path / "recording.wav"
+    source.write_bytes(b"audio")
+    document = media_result(
+        "job-1",
+        source,
+        MediaInfo(MediaModality.AUDIO, 3 * hour, None, None, True),
+        MediaProviderIdentity("media-vulkan", "gpu"),
+        late,
+        (),
+    )
+    assert not validate_document("media-transcription-result.schema.json", document)

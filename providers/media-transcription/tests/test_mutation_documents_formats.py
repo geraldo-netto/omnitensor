@@ -16,8 +16,6 @@ from hypothesis import strategies as st
 from PIL import Image
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DOCUMENT_PAGES,
-    MAX_DURATION_MS,
     MediaInfo,
     MediaModality,
     MediaTranscriptionError,
@@ -103,8 +101,8 @@ async def test_document_transcriber_preserves_every_field_and_cleans_root(monkey
     assert not root.exists()
 
 
-@pytest.mark.parametrize("count", [1, MAX_DOCUMENT_PAGES])
-def test_document_page_count_accepts_exact_boundaries(monkeypatch, tmp_path, count):
+@pytest.mark.parametrize("count", [1, 64, 2_500])
+def test_document_page_count_accepts_any_positive_count(monkeypatch, tmp_path, count):
     source = tmp_path / "document.PDF"
     source.write_bytes(b"stub")
     document = SimpleNamespace(page_count=count, needs_pass=False)
@@ -117,8 +115,8 @@ def test_document_page_count_accepts_exact_boundaries(monkeypatch, tmp_path, cou
     assert documents._document_page_count(source) == count
 
 
-@pytest.mark.parametrize("count", [0, MAX_DOCUMENT_PAGES + 1])
-def test_document_page_count_rejects_exact_outside_boundaries(monkeypatch, tmp_path, count):
+@pytest.mark.parametrize("count", [0, -1])
+def test_document_page_count_rejects_a_document_with_no_pages(monkeypatch, tmp_path, count):
     source = tmp_path / "document.pdf"
     source.write_bytes(b"stub")
     document = SimpleNamespace(page_count=count, needs_pass=False)
@@ -518,11 +516,15 @@ def test_append_audio_frames_flattens_without_copy_and_enforces_exact_boundary()
     )
     with pytest.raises(MediaTranscriptionError) as error:
         formats._append_audio_frames([], [_AudioFrame(original)], boundary + 1, np)
-    _assert_media_error(error, "media-too-long", "decoded audio exceeds ten minutes")
+    _assert_media_error(
+        error,
+        "media-too-long",
+        "decoded audio does not fit in one pass; transcription in windows is not built yet",
+    )
 
 
-@pytest.mark.parametrize("milliseconds", [1, MAX_DURATION_MS])
-def test_duration_ms_accepts_exact_container_boundaries(milliseconds):
+@pytest.mark.parametrize("milliseconds", [1, 600_000, 3 * 60 * 60 * 1000])
+def test_duration_ms_accepts_any_positive_container_duration(milliseconds):
     assert formats._duration_ms(SimpleNamespace(duration=milliseconds * 1000), None) == milliseconds
 
 
@@ -534,10 +536,9 @@ def test_duration_ms_uses_stream_and_has_stable_refusals():
         formats._duration_ms(SimpleNamespace(duration=None), None)
     _assert_media_error(unavailable, "media-invalid", "media duration is unavailable")
 
-    for milliseconds in (0, MAX_DURATION_MS + 1):
-        with pytest.raises(MediaTranscriptionError) as overlong:
-            formats._duration_ms(SimpleNamespace(duration=milliseconds * 1000), None)
-        _assert_media_error(overlong, "media-too-long", "media duration exceeds ten minutes")
+    with pytest.raises(MediaTranscriptionError) as empty:
+        formats._duration_ms(SimpleNamespace(duration=0), None)
+    _assert_media_error(empty, "media-invalid", "media duration is unavailable")
 
 
 def test_demux_duration_uses_requested_stream_skips_unknown_and_accepts_limit():
@@ -545,12 +546,12 @@ def test_demux_duration_uses_requested_stream_skips_unknown_and_accepts_limit():
     packets = [
         SimpleNamespace(pts=None, dts=None, duration=999),
         SimpleNamespace(pts=1, dts=None, duration=None),
-        SimpleNamespace(pts=None, dts=MAX_DURATION_MS - 1, duration=1),
+        SimpleNamespace(pts=None, dts=3 * 60 * 60 * 1000 - 1, duration=1),
     ]
     requested = []
     container = SimpleNamespace(demux=lambda selected: requested.append(selected) or packets)
 
-    assert formats._demux_duration_ms(container, stream) == MAX_DURATION_MS
+    assert formats._demux_duration_ms(container, stream) == 3 * 60 * 60 * 1000
     assert requested == [stream]
 
 
@@ -565,14 +566,14 @@ def test_demux_duration_exact_errors_and_overlong_boundary():
         formats._demux_duration_ms(empty, stream)
     _assert_media_error(zero, "media-invalid", "media duration is unavailable")
 
-    overlong = SimpleNamespace(
+    # A three-hour recording is demuxed, not refused: there is no ceiling on
+    # how long a person's own recording may be.
+    long_recording = SimpleNamespace(
         demux=lambda _stream: [
-            SimpleNamespace(pts=MAX_DURATION_MS, dts=None, duration=1),
+            SimpleNamespace(pts=3 * 60 * 60 * 1000, dts=None, duration=1),
         ]
     )
-    with pytest.raises(MediaTranscriptionError) as too_long:
-        formats._demux_duration_ms(overlong, stream)
-    _assert_media_error(too_long, "media-too-long", "media duration exceeds ten minutes")
+    assert formats._demux_duration_ms(long_recording, stream) == 3 * 60 * 60 * 1000 + 1
 
 
 def test_frame_at_or_after_observes_units_boundary_and_last_fallback():

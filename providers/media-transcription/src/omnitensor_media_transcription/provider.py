@@ -9,7 +9,6 @@ import importlib.metadata
 import importlib.resources
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DOCUMENT_PAGES,
     MediaProviderIdentity,
     MediaTranscriptionPlugin,
     SpeechTranscript,

@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from omnitensor.plugins.media_transcription import (
-    MAX_PRESENTATION_SLIDES,
     MediaTranscriptionError,
     PresentationTranscriber,
     VisualFrame,
@@ -105,7 +104,7 @@ def _presentation_blueprints(source: Path) -> tuple[_SlideBlueprint, ...]:
         raise MediaTranscriptionError(
             "presentation-invalid", "presentation archive could not be decoded"
         ) from error
-    if not 1 <= len(slides) <= MAX_PRESENTATION_SLIDES:
+    if not slides:
         raise MediaTranscriptionError("presentation-invalid", "presentation slide count is invalid")
     return slides
 

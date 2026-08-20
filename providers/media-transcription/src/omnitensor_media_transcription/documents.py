@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DOCUMENT_PAGES,
     DocumentTranscriber,
     MediaTranscriptionError,
     VisualFrame,
@@ -76,7 +75,7 @@ def _document_page_count(source: Path) -> int:
         raise MediaTranscriptionError(
             "document-invalid", "selected document could not be decoded"
         ) from error
-    if not 1 <= count <= MAX_DOCUMENT_PAGES:
+    if count < 1:
         raise MediaTranscriptionError("document-invalid", "document page count is invalid")
     return count
 

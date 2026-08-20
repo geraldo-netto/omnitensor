@@ -13,8 +13,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from omnitensor.plugins.media_transcription import (
-    MAX_DURATION_MS,
-    MAX_VIDEO_DURATION_MS,
     FrameSampler,
     MediaInfo,
     MediaModality,
@@ -28,7 +26,11 @@ from .documents import _document_page_count
 from .presentations import _presentation_slide_count
 from .text import joined_visible_text
 
-MAX_DECODED_AUDIO_SAMPLES = MAX_DURATION_MS * 16
+# The one bound left on a recording's length, and it is about memory rather
+# than policy: a decode pass currently holds every resampled sample at once.
+# It disappears once transcription runs in windows (OMNI-0505); nothing else
+# here refuses a recording for being long.
+MAX_DECODED_AUDIO_SAMPLES = 600_000 * 16
 FRAME_INTERVAL_MS = 15_000
 _IMAGE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".svg", ".webp"})
 _AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"})
@@ -330,7 +332,10 @@ def _append_audio_frames(chunks, resampled, samples: int, np) -> int:
         chunk = frame.to_ndarray().reshape(-1).astype(np.float32, copy=False)
         samples += int(chunk.size)
         if samples > MAX_DECODED_AUDIO_SAMPLES:
-            raise MediaTranscriptionError("media-too-long", "decoded audio exceeds ten minutes")
+            raise MediaTranscriptionError(
+                "media-too-long",
+                "decoded audio does not fit in one pass; transcription in windows is not built yet",
+            )
         chunks.append(chunk)
     return samples
 
@@ -345,8 +350,8 @@ def _duration_ms(container, stream) -> int:
         value = _demux_duration_ms(container, stream)
     else:
         raise MediaTranscriptionError("media-invalid", "media duration is unavailable")
-    if not 0 < value <= MAX_DURATION_MS:
-        raise MediaTranscriptionError("media-too-long", "media duration exceeds ten minutes")
+    if value < 1:
+        raise MediaTranscriptionError("media-invalid", "media duration is unavailable")
     return value
 
 
@@ -360,15 +365,13 @@ def _demux_duration_ms(container, stream) -> int:
             continue
         end = position + (packet.duration or 0)
         observed = max(observed, int(float(end * stream.time_base) * 1000))
-        if observed > MAX_DURATION_MS:
-            raise MediaTranscriptionError("media-too-long", "media duration exceeds ten minutes")
     if observed < 1:
         raise MediaTranscriptionError("media-invalid", "media duration is unavailable")
     return observed
 
 
 def _sample_timestamps(duration_ms: int) -> tuple[int, ...]:
-    if not 0 < duration_ms <= MAX_VIDEO_DURATION_MS:
+    if duration_ms < 1:
         raise MediaTranscriptionError("frames-invalid", "video duration is invalid")
     # The cadence decides how many frames a video needs. Clamping the count to
     # twelve sampled the first 2m45s of anything longer and silently described
