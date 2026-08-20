@@ -23,6 +23,7 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0583 | open | high | m | **A document or a presentation reports nothing while it is being read, so the deadline still kills it.** `plugins/media_transcription.py` reports once before the work (`pages`/`slides`, 0.55) and again at the end; only the video path reports per item (`_transcribe_frames`). OMNI-0578 made both clocks measure silence instead of total work, and silence is exactly what this sends: a 220-page PDF takes minutes and emits no frame in between, so the flow controller and the worker budget still cut it off at their deadline — the fix does not reach the workload that needs it most. The client shows 0% for the whole run for the same reason. Report per page and per slide, as the frame path already does, so the answer is both visible and alive. |
 
 ## Blocked
 
