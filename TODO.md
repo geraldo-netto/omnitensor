@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0571 | open | high | s | **A workload can hand back the selection as its answer and call it an explanation.** Reproduced on the live desk 2026-08-20, before and after the prompt gate: `selected-text-tools` with `operation=explain` and the selection "The mitochondrion is the powerhouse of the cell." returns `result` byte-identical to the selection. The prompt is not the cause — the hint carries "Explain the selection clearly in result", the golden file pins it, and the labelled `text-explain` case passes (9/10 for the workload on the qualified card the same day). What is missing is that nothing checks the answer against the request: for `explain`, `summarize` and `rewrite` a result identical to the selection is a non-answer, and the person cannot tell it from a real one. `event-extraction` already has the shape of the fix — one re-prompt when a trusted check contradicts the answer — and `TaskPrompting.reconsideration` is the hook, though it would need the selection to compare against. Not decided here: whether an identical answer is ever right — a `rewrite` of a sentence that needs no rewriting is the case for it — so the choice is between re-asking once and then returning what comes back, or refusing with a code that names the echo. |
 
 ## Blocked
 

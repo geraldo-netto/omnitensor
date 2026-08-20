@@ -899,7 +899,7 @@ class EventPrompting:
                 return EVENT_GROUNDING_HINT
         return ""
 
-    def reconsideration(self, task, hint: str, raw: str) -> str | None:
+    def reconsideration(self, task, hint: str, raw: str, request=None, store=None) -> str | None:
         if task.task_id != PLUGIN_ID or not hint:
             return None
         return EVENT_RECONSIDERATION if _is_grounded_event_refusal(raw) else None

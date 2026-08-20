@@ -35,8 +35,21 @@ class TaskPrompting(Protocol):
         """
         ...
 
-    def reconsideration(self, task: GenerationTask, hint: str, raw: str) -> str | None:
-        """The one re-prompt a refusal earns, or nothing to take it as final."""
+    def reconsideration(
+        self,
+        task: GenerationTask,
+        hint: str,
+        raw: str,
+        request: GenerationRequest,
+        store: object,
+    ) -> str | None:
+        """The one re-prompt an answer earns, or nothing to take it as final.
+
+        The request and the fragment store are here because judging an answer
+        often means comparing it with what was asked: a selection handed back
+        unchanged is not an explanation of itself, and only the workload knows
+        that. The backend stays ignorant of what any of it means.
+        """
         ...
 
 
@@ -53,7 +66,14 @@ class NoPrompting:
     ) -> str:
         return ""
 
-    def reconsideration(self, task: GenerationTask, hint: str, raw: str) -> str | None:
+    def reconsideration(
+        self,
+        task: GenerationTask,
+        hint: str,
+        raw: str,
+        request: GenerationRequest,
+        store: object,
+    ) -> str | None:
         return None
 
 

@@ -25,7 +25,7 @@ def published(store, *fragments):
 def test_a_workload_that_says_nothing_extra_is_still_a_prompting_port():
     assert isinstance(NO_PROMPTING, TaskPrompting)
     assert NO_PROMPTING.hint(event_generation_task(), None, None) == ""
-    assert NO_PROMPTING.reconsideration(event_generation_task(), "hint", "raw") is None
+    assert NO_PROMPTING.reconsideration(event_generation_task(), "hint", "raw", None, None) is None
 
 
 @pytest.mark.parametrize("prompting", [EventPrompting(), SelectedTextPrompting()])
@@ -54,16 +54,19 @@ def test_a_refusal_the_preflight_contradicts_earns_one_re_prompt():
     )
     prompting = EventPrompting()
 
-    assert prompting.reconsideration(event_generation_task(), "hint", refused) == (
+    assert prompting.reconsideration(event_generation_task(), "hint", refused, None, None) == (
         EVENT_RECONSIDERATION
     )
     # Nothing re-prompts a refusal nobody contradicted.
-    assert prompting.reconsideration(event_generation_task(), "", refused) is None
-    assert prompting.reconsideration(event_generation_task(), "hint", "{}") is None
+    assert prompting.reconsideration(event_generation_task(), "", refused, None, None) is None
+    assert prompting.reconsideration(event_generation_task(), "hint", "{}", None, None) is None
 
 
 def test_a_transformation_that_refuses_has_said_what_it_has_to_say():
-    assert SelectedTextPrompting().reconsideration(selected_text_task(), "hint", "{}") is None
+    assert (
+        SelectedTextPrompting().reconsideration(selected_text_task(), "hint", "{}", None, None)
+        is None
+    )
 
 
 def test_the_selected_operation_reaches_the_model_and_the_selection_never_does():

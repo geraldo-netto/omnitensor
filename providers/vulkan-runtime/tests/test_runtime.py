@@ -3683,3 +3683,59 @@ def test_a_workload_that_adds_nothing_sends_the_task_and_the_request_alone(tmp_p
 
     [call] = observed
     assert [message["role"] for message in call["messages"]] == ["system", "user"]
+
+
+def test_an_answer_the_workload_rejects_is_asked_once_more(tmp_path):
+    """The backend re-asks and returns the second answer, knowing neither.
+
+    Which answers deserve a second attempt is the workload's judgement — here
+    a selection handed back as its own explanation — and this adapter only
+    carries the re-prompt and the reply.
+    """
+    adapter = _runtime(tmp_path, SelectedTextPrompting())
+    selection_text = "The mitochondrion is the powerhouse of the cell."
+    control = SourceFragment(
+        "private:job-1:control",
+        "a" * 64,
+        1,
+        json.dumps({"operation": "explain", "language": None}),
+        "b" * 64,
+    )
+    selection = SourceFragment("private:job-1:selection", "c" * 64, 1, selection_text, "d" * 64)
+    asyncio.run(adapter._store.publish("job-1", (control, selection)))
+
+    def answer(result):
+        return json.dumps(
+            {
+                "version": 1,
+                "requestId": "job-1",
+                "operation": "explain",
+                "result": result,
+                "tasks": [],
+                "evidence": {
+                    "sourceRef": selection.reference,
+                    "sourceSha256": selection.source_sha256,
+                    "span": {"start": 0, "end": len(selection_text)},
+                    "textSha256": selection.text_sha256,
+                },
+            }
+        )
+
+    observed = []
+    replies = iter((answer(selection_text), answer("Mitochondria make the cell's energy.")))
+
+    def completion(**kwargs):
+        observed.append(kwargs)
+        return iter(({"choices": [{"delta": {"content": next(replies)}}]},))
+
+    adapter._llama = SimpleNamespace(create_chat_completion=completion)
+    generated = adapter._generate_sync(
+        selected_text_task(),
+        GenerationRequest("job-1", "selected-text-tools", (control.reference, selection.reference)),
+        CancellationController(),
+    )
+
+    assert len(observed) == 2, "the echo earned exactly one more attempt"
+    assert observed[1]["messages"][-2]["role"] == "assistant"
+    assert "repeats the selection" in observed[1]["messages"][-1]["content"]
+    assert json.loads(generated)["result"] == "Mitochondria make the cell's energy."

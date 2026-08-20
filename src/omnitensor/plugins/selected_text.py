@@ -39,6 +39,10 @@ from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
 PLUGIN_ID = "selected-text-tools"
 READ_ONCE_PERMISSION = "clipboard:read-once"
 OPERATIONS = frozenset({"explain", "summarize", "rewrite", "translate", "extract-tasks"})
+# The three that promise something other than what was handed in. A
+# translation into the language the selection is already in is legitimately
+# the same words, and an extraction that finds nothing says so in `tasks`.
+RESTATEMENT_IS_A_NON_ANSWER = frozenset({"explain", "summarize", "rewrite"})
 MAX_SELECTION_CHARACTERS = 32_768
 
 
@@ -353,9 +357,77 @@ class SelectedTextPrompting:
             f"{instruction} Return operation exactly as named.\n"
         )
 
-    def reconsideration(self, task, hint: str, raw: str) -> str | None:
-        """A transformation that refuses has said what it has to say."""
+    def reconsideration(
+        self, task, hint: str, raw: str, request=None, store=None
+    ) -> str | None:
+        """One re-ask when the answer is the selection handed straight back.
+
+        Measured on the live desk: `explain` on "The mitochondrion is the
+        powerhouse of the cell." returned that sentence as its own
+        explanation. Telling the model not to, in the instruction, did not
+        stop it — so the workload checks. Explaining, summarising and
+        rewriting all promise something *other* than the input; translating
+        into the language it is already in, or extracting nothing when there
+        is nothing, do not, which is why only three are checked.
+
+        A re-ask rather than a refusal: the second answer is returned whatever
+        it is, so this can only replace a non-answer with an answer, never
+        take one away (OMNI-0571).
+        """
+        if task.task_id != PLUGIN_ID or request is None or store is None:
+            return None
+        selection = _selection_text(request, store)
+        answered = _answer_result(raw)
+        if not selection or not answered:
+            return None
+        if _restates(answered, selection):
+            return ECHOED_SELECTION_REPROMPT
         return None
+
+
+# What to say when an answer is the question. Not a refusal and not a rule
+# about length: the model is told what it did and asked once more.
+ECHOED_SELECTION_REPROMPT = (
+    "That answer repeats the selection word for word, which is not the operation you were "
+    "asked for. Answer again in your own words: keep the same closed JSON contract, the same "
+    "operation, and the same evidence, and make result something other than the selection.\n"
+    "/no_think"
+)
+
+
+def _selection_text(request, store) -> str:
+    """The selection this request was about, or nothing readable."""
+    references = getattr(request, "content_references", ())
+    if len(references) != 2:
+        return ""
+    try:
+        return store.resolve(request.request_id, references[1]).text or ""
+    except Exception:  # noqa: BLE001 - a fragment this cannot read is one it cannot judge
+        return ""
+
+
+def _answer_result(raw: str) -> str:
+    """The `result` the model returned, or nothing when it returned no JSON."""
+    try:
+        document = json.loads(raw)
+    except (UnicodeError, ValueError):
+        return ""
+    if not isinstance(document, dict):
+        return ""
+    if document.get("operation") not in RESTATEMENT_IS_A_NON_ANSWER:
+        return ""
+    result = document.get("result")
+    return result if isinstance(result, str) else ""
+
+
+def _restates(answered: str, selection: str) -> str:
+    """Whether the answer is the selection, ignoring surrounding blanks.
+
+    Deliberately exact rather than fuzzy: a rewrite that changed two words is
+    a rewrite, and a similarity threshold would start refusing answers for
+    being close to a short input.
+    """
+    return answered.strip() == selection.strip()
 
 
 def _operation_instruction(operation: object, language: object) -> str:
@@ -370,10 +442,25 @@ def _operation_instruction(operation: object, language: object) -> str:
         if isinstance(language, str) and language
         else ""
     )
+    # Each of the three says not to hand the selection back. A one-sentence
+    # factoid — "The mitochondrion is the powerhouse of the cell." — came back
+    # verbatim as its own explanation, which reads to the person exactly like
+    # an answer and is none: the labelled cases pass because their selections
+    # are long enough that repeating one is obviously not a summary. Saying it
+    # costs a clause and refuses nothing (OMNI-0571).
     return {
-        "explain": "Explain the selection clearly in result; tasks must be empty.",
-        "summarize": "Summarize the selection concisely in result; tasks must be empty.",
-        "rewrite": "Rewrite the selection while preserving its meaning; tasks must be empty.",
+        "explain": (
+            "Explain the selection clearly in result, in your own words; never return the "
+            "selection unchanged, even when it is one sentence; tasks must be empty."
+        ),
+        "summarize": (
+            "Summarize the selection concisely in result; never return the selection "
+            "unchanged; tasks must be empty."
+        ),
+        "rewrite": (
+            "Rewrite the selection while preserving its meaning; never return it unchanged, "
+            "even when it already reads well; tasks must be empty."
+        ),
         "translate": translate,
         "extract-tasks": (
             "List every explicit actionable item in tasks. If any action is present, tasks "

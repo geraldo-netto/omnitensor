@@ -238,3 +238,126 @@ def test_a_translation_names_the_language_it_was_asked_for():
 
     assert '"Português"' in hint
     assert "only the target language" in hint
+
+
+def _answer(operation: str, result: str) -> str:
+    return json.dumps(
+        {
+            "version": 1,
+            "requestId": "job-1",
+            "operation": operation,
+            "result": result,
+            "tasks": [],
+            "evidence": {
+                "sourceRef": "private:job-1:selection",
+                "sourceSha256": "c" * 64,
+                "span": {"start": 0, "end": 4},
+                "textSha256": "d" * 64,
+            },
+        }
+    )
+
+
+def _selected_text_request(selection_text: str):
+    store = MemoryFragmentStore()
+    control = SourceFragment(
+        "private:job-1:control",
+        "a" * 64,
+        1,
+        json.dumps({"operation": "explain", "language": None}),
+        "b" * 64,
+    )
+    selection = SourceFragment("private:job-1:selection", "c" * 64, 1, selection_text, "d" * 64)
+    asyncio.run(store.publish("job-1", (control, selection)))
+    return store, GenerationRequest(
+        "job-1", "selected-text-tools", (control.reference, selection.reference)
+    )
+
+
+SENTENCE = "The mitochondrion is the powerhouse of the cell."
+
+
+@pytest.mark.parametrize("operation", ["explain", "summarize", "rewrite"])
+def test_an_answer_that_is_the_selection_earns_one_re_ask(operation):
+    """OMNI-0571, measured on the desk: `explain` returned the sentence itself.
+
+    Saying "never return the selection unchanged" in the instruction did not
+    stop it, so the workload checks its own answer.
+    """
+    store, request = _selected_text_request(SENTENCE)
+
+    reprompt = SelectedTextPrompting().reconsideration(
+        selected_text_task(), "hint", _answer(operation, SENTENCE), request, store
+    )
+
+    assert reprompt is not None
+    assert "repeats the selection" in reprompt
+
+
+@pytest.mark.parametrize("operation", ["translate", "extract-tasks"])
+def test_an_operation_that_may_answer_with_the_same_words_is_left_alone(operation):
+    """A translation into the language it is already in is a translation."""
+    store, request = _selected_text_request(SENTENCE)
+
+    assert (
+        SelectedTextPrompting().reconsideration(
+            selected_text_task(), "hint", _answer(operation, SENTENCE), request, store
+        )
+        is None
+    )
+
+
+def test_a_real_answer_is_not_re_asked():
+    store, request = _selected_text_request(SENTENCE)
+    answered = _answer("explain", "Mitochondria make most of a cell's usable energy.")
+
+    assert (
+        SelectedTextPrompting().reconsideration(
+            selected_text_task(), "hint", answered, request, store
+        )
+        is None
+    )
+
+
+def test_surrounding_blanks_do_not_make_an_echo_a_different_answer():
+    store, request = _selected_text_request(SENTENCE)
+
+    assert (
+        SelectedTextPrompting().reconsideration(
+            selected_text_task(), "hint", _answer("explain", f"  {SENTENCE}\n"), request, store
+        )
+        is not None
+    )
+
+
+def test_a_rewrite_that_changed_something_is_a_rewrite():
+    """Exact, not fuzzy: two changed words are a rewrite, not an echo."""
+    store, request = _selected_text_request(SENTENCE)
+    reworded = "The mitochondrion is the power plant of the cell."
+
+    assert (
+        SelectedTextPrompting().reconsideration(
+            selected_text_task(), "hint", _answer("rewrite", reworded), request, store
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("raw", ["not json", "[]", '{"operation":"explain"}', "null"])
+def test_an_answer_that_is_not_the_contract_is_not_this_check_s_business(raw):
+    store, request = _selected_text_request(SENTENCE)
+
+    assert (
+        SelectedTextPrompting().reconsideration(selected_text_task(), "hint", raw, request, store)
+        is None
+    )
+
+
+def test_without_the_request_there_is_nothing_to_compare_against():
+    """A backend that passes neither gets the behaviour it had before."""
+    assert (
+        SelectedTextPrompting().reconsideration(
+            selected_text_task(), "hint", _answer("explain", SENTENCE), None, None
+        )
+        is None
+    )
