@@ -83,8 +83,10 @@ def test_service_public_facade_preserves_extracted_object_identity():
     assert service.RuntimeAPI is runtime_api.RuntimeAPI
     assert service.TelemetryJobObserver is telemetry_observation.TelemetryJobObserver
     assert service.profile_statuses is profile_selection.profile_statuses
-    assert service.RuntimeAPI.__module__ == "omnitensor.service"
-    assert service.TelemetryJobObserver.__module__ == "omnitensor.service"
+    # Each says where it is actually defined: claiming the facade made every
+    # traceback and pickle name a module the class is not written in.
+    assert service.RuntimeAPI.__module__ == "omnitensor.runtime_api"
+    assert service.TelemetryJobObserver.__module__ == "omnitensor.telemetry_observation"
     for name in (
         "ARTIFACT_UNAVAILABLE",
         "CONSENT_MISSING",
@@ -382,7 +384,9 @@ def test_bundled_artifact_lookup_does_not_require_a_plugin_snapshot(monkeypatch)
 
 
 def test_public_service_dispatch_seams_remain_live(monkeypatch):
-    monkeypatch.setattr(service, "RUNTIME_METHODS", ("custom-method",))
+    # The vocabulary comes from omnitensor.contract, not from whatever the
+    # composition module happens to re-export at call time.
+    monkeypatch.setattr(runtime_api, "RUNTIME_METHODS", ("custom-method",))
     contract_calls = []
     monkeypatch.setattr(
         runtime_api,

@@ -13,7 +13,6 @@ guard's stable code.
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable
 
 from .callers import CallerIdentityResolver
@@ -22,15 +21,6 @@ from .control import ControlService
 from .guard import ControlGuard, guarded
 from .inspection import PLUGIN_INVENTORY_VERSION
 from .jobs import JobSubmissionService
-
-
-def _runtime_methods() -> tuple[str, ...]:
-    facade = sys.modules.get("omnitensor.service")
-    return (
-        getattr(facade, "RUNTIME_METHODS", RUNTIME_METHODS)
-        if facade is not None
-        else RUNTIME_METHODS
-    )
 
 
 def no_inventory() -> str:
@@ -96,7 +86,7 @@ class RuntimeAPI:
     def describe_contract_text(self) -> str:
         owner = self._callers.owner_token()
         with guarded(self._guard, "describe-contract", owner):
-            return contract_document_text(_runtime_methods())
+            return contract_document_text(RUNTIME_METHODS)
 
     async def _guarded(
         self,
@@ -110,7 +100,5 @@ class RuntimeAPI:
         with guarded(self._guard, method, resolved, text):
             return await call(text)
 
-
-RuntimeAPI.__module__ = "omnitensor.service"
 
 __all__ = ["RuntimeAPI", "no_inventory"]

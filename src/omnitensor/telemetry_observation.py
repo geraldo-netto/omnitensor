@@ -91,9 +91,6 @@ class TelemetryJobObserver:
             LOGGER.debug("plugin telemetry not updated for %s: %s", workload_id, error)
 
 
-TelemetryJobObserver.__module__ = "omnitensor.service"
-
-
 class ResultSummaryObserver:
     """Convert readable results into bounded desktop summaries."""
 
