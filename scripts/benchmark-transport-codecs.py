@@ -38,10 +38,13 @@ import msgpack
 
 REPS_SMALL = 2000
 REPS_TENSOR = 20
-DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
 
 
 def live_snapshot() -> dict | None:
+    # The canonical default, imported rather than copied: a benchmark that
+    # pinned its own copy reported "no readable state file" the day it moved.
+    from omnitensor.composition import DEFAULT_STATE_PATH  # noqa: PLC0415
+
     path = os.path.expanduser(os.environ.get("OMNITENSOR_STATE_PATH", DEFAULT_STATE_PATH))
     try:
         with open(path, "rb") as handle:

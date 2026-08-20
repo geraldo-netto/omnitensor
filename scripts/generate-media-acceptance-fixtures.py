@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import zipfile
 from pathlib import Path
 
 from PIL import Image
+
+from omnitensor.preparation import file_digest
 
 
 def _command(name: str) -> str:
@@ -274,12 +277,12 @@ def _generate_video_fixtures(target: Path, ffmpeg: str) -> None:
 
 def _write_fixture_manifest(target: Path) -> None:
     summary = {
-        path.name: {"bytes": path.stat().st_size, "sha256": _sha256(path)}
+        path.name: {"bytes": path.stat().st_size, "sha256": file_digest(path)}
         for path in sorted(target.iterdir())
         if path.is_file()
     }
     (target / "fixtures.json").write_text(
-        __import__("json").dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -298,16 +301,6 @@ def generate(target: Path) -> None:
     _generate_audio_fixtures(target, ffmpeg)
     _generate_video_fixtures(target, ffmpeg)
     _write_fixture_manifest(target)
-
-
-def _sha256(path: Path) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def main() -> None:
