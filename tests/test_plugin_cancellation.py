@@ -262,3 +262,84 @@ def test_an_empty_registry_is_still_truthy():
     assert len(registry) == 0
     assert bool(registry) is True
     assert (registry or JobCancellationRegistry()) is registry
+
+
+class _MemoryJournal:
+    """A journal store with no filesystem, and a switch to make writes fail."""
+
+    def __init__(self, entries=None, *, failing=False):
+        self.entries = dict(entries or {})
+        self.failing = failing
+        self.loads = 0
+        self.saves = 0
+
+    def load(self):
+        self.loads += 1
+        return dict(self.entries)
+
+    def save(self, entries):
+        self.saves += 1
+        if self.failing:
+            raise OSError("read-only file system")
+        self.entries = dict(entries)
+
+    def clear(self):
+        if self.failing:
+            raise OSError("read-only file system")
+        self.entries = {}
+
+
+def test_the_registry_keeps_no_path_and_journals_through_an_injected_store():
+    """OMNI-0451: cancellation is domain logic, not a file format."""
+    from omnitensor.plugins.cancellation import CancellationJournalStore
+
+    journal = _MemoryJournal()
+    assert isinstance(journal, CancellationJournalStore)
+    registry = JobCancellationRegistry(journal=journal)
+
+    registry.track("job-1", "hardware-health")
+    assert journal.entries == {"job-1": "hardware-health"}
+    registry.release("job-1")
+    assert journal.entries == {}
+
+
+def test_a_journal_that_cannot_be_written_never_refuses_the_job(caplog):
+    """A read-only disk says nothing about whether the job can run."""
+    journal = _MemoryJournal(failing=True)
+    registry = JobCancellationRegistry(journal=journal)
+
+    with caplog.at_level("WARNING"):
+        token = registry.track("job-1", "hardware-health")
+
+    assert registry.get("job-1") is token
+    assert "in-flight journal could not be updated" in caplog.text
+
+
+def test_a_finished_job_leaves_the_journal_before_it_leaves_memory():
+    """A failed write used to report a completed job as interrupted."""
+    journal = _MemoryJournal()
+    registry = JobCancellationRegistry(journal=journal)
+    registry.track("job-1")
+    journal.failing = True
+
+    registry.release("job-1")
+
+    assert registry.get("job-1") is None
+    # The write was attempted while the job was still tracked, so a store that
+    # succeeds - the normal case - can never record a job that already ended.
+    assert journal.entries == {"job-1": ""}
+
+
+def test_the_journal_is_read_once_rather_than_on_every_job():
+    journal = _MemoryJournal()
+    registry = JobCancellationRegistry(journal=journal)
+
+    for index in range(8):
+        registry.track(f"job-{index}")
+    for index in range(8):
+        registry.release(f"job-{index}")
+
+    # One read for the whole registry, and one write per change of state:
+    # 8 tracks, then 7 releases with content left plus a final clear.
+    assert journal.loads == 1
+    assert journal.saves == 15

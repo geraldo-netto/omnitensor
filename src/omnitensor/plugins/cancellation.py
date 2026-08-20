@@ -16,13 +16,16 @@ reported as cancelled with the reason, rather than left claiming to run.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+import logging
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, remove_durable, write_json_atomic
+
+_LOGGER = logging.getLogger(__name__)
 
 JOURNAL_VERSION = 1
 DEFAULT_MAX_TRACKED_JOBS = 256
@@ -144,21 +147,30 @@ class CancellationRegistry(CancellationJournal, Protocol):
 
 
 class JobCancellationRegistry:
-    """Own every live job's token and the record that survives a restart."""
+    """Own every live job's token and the record that survives a restart.
+
+    Where that record is kept is somebody else's problem: this holds a
+    :class:`CancellationJournalStore`, never a path, so cancellation logic can
+    be exercised — and reasoned about — without a filesystem underneath it.
+    """
 
     def __init__(
         self,
         journal_path: Path | None = None,
         *,
         max_tracked_jobs: int = DEFAULT_MAX_TRACKED_JOBS,
+        journal: CancellationJournalStore | None = None,
     ) -> None:
         if isinstance(max_tracked_jobs, bool) or not isinstance(max_tracked_jobs, int):
             raise ValueError("max_tracked_jobs must be a positive integer")
         if max_tracked_jobs < 1:
             raise ValueError("max_tracked_jobs must be a positive integer")
-        self._journal_path = Path(journal_path) if journal_path else None
+        if journal is None and journal_path is not None:
+            journal = JsonCancellationJournal(Path(journal_path))
+        self._journal = journal
         self._max_tracked_jobs = max_tracked_jobs
         self._tokens: dict[str, JobCancellationToken] = {}
+        self._entries: dict[str, str] | None = None
 
     def __len__(self) -> int:
         return len(self._tokens)
@@ -200,9 +212,15 @@ class JobCancellationRegistry:
         return sum(token.cancel(reason, detail) for token in tuple(self._tokens.values()))
 
     def release(self, job_id: str) -> None:
-        """Forget a finished job so neither memory nor the journal grows."""
-        if self._tokens.pop(job_id, None) is not None:
+        """Forget a finished job so neither memory nor the journal grows.
+
+        The journal is updated first: dropping the token first and then failing
+        to write left a finished job recorded as in flight, and the next start
+        reported it as interrupted.
+        """
+        if job_id in self._tokens:
             self._persist(job_id=job_id, adding=False)
+            del self._tokens[job_id]
 
     def recover(self) -> tuple[Cancellation, ...]:
         """Reconcile jobs the previous process left claiming to be in flight.
@@ -211,10 +229,12 @@ class JobCancellationRegistry:
         them as interrupted is the only honest outcome, and clearing the
         journal afterwards stops one crash from haunting every later start.
         """
-        entries = self._read_journal()
+        entries = self._journal_entries()
         if not entries:
             return ()
-        self._clear_journal()
+        self._entries = {}
+        if self._journal is not None:
+            self._journal.clear()
         return tuple(
             Cancellation(
                 job_id,
@@ -226,27 +246,61 @@ class JobCancellationRegistry:
         )
 
     def _persist(self, *, job_id: str, adding: bool, profile_id: str = "") -> None:
-        if self._journal_path is None:
+        """Record the change, or say it could not be — never refuse the job.
+
+        A full or read-only disk says nothing about whether the job can run:
+        the tokens live in memory. Failing here used to fail submission itself.
+        """
+        if self._journal is None:
             return
-        entries = self._read_journal()
+        entries = self._journal_entries()
         if adding:
             entries[job_id] = profile_id
         else:
             entries.pop(job_id, None)
-        if not entries:
-            self._clear_journal()
-            return
-        write_json_atomic(
-            self._journal_path,
-            {"version": JOURNAL_VERSION, "jobs": entries},
-            prefix=".in-flight-",
-        )
-
-    def _read_journal(self) -> dict[str, str]:
-        if self._journal_path is None:
-            return {}
         try:
-            document = read_json_bounded(self._journal_path, MAX_JOURNAL_BYTES)
+            if entries:
+                self._journal.save(entries)
+            else:
+                self._journal.clear()
+        except OSError as error:
+            _LOGGER.warning(
+                "in-flight journal could not be updated for %s: %s; "
+                "an interrupted job may not be reported after a restart",
+                job_id,
+                error,
+            )
+
+    def _journal_entries(self) -> dict[str, str]:
+        """The journal's content, read once rather than on every job start."""
+        if self._entries is None:
+            self._entries = {} if self._journal is None else dict(self._journal.load())
+        return self._entries
+
+
+@runtime_checkable
+class CancellationJournalStore(Protocol):
+    """Where the record of in-flight jobs is kept between two processes."""
+
+    def load(self) -> Mapping[str, str]:
+        """Every job the previous process left in flight, by id to profile."""
+
+    def save(self, entries: Mapping[str, str]) -> None:
+        """Replace the record; raises :class:`OSError` when it cannot."""
+
+    def clear(self) -> None:
+        """Remove the record entirely, durably."""
+
+
+class JsonCancellationJournal:
+    """The in-flight journal as one atomically rewritten JSON file."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+
+    def load(self) -> dict[str, str]:
+        try:
+            document = read_json_bounded(self._path, MAX_JOURNAL_BYTES)
         except FileNotFoundError:
             return {}
         except (OSError, ValueError, JsonTooLargeError):
@@ -262,6 +316,12 @@ class JobCancellationRegistry:
             str(job_id): str(profile) for job_id, profile in jobs.items() if isinstance(job_id, str)
         }
 
-    def _clear_journal(self) -> None:
-        if self._journal_path is not None:
-            remove_durable(self._journal_path)
+    def save(self, entries: Mapping[str, str]) -> None:
+        write_json_atomic(
+            self._path,
+            {"version": JOURNAL_VERSION, "jobs": dict(entries)},
+            prefix=".in-flight-",
+        )
+
+    def clear(self) -> None:
+        remove_durable(self._path)
