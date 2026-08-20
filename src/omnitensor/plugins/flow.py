@@ -43,6 +43,7 @@ class FlowRefusal(StrEnum):
     DEADLINE = "deadline-exceeded"
     RETRIES_EXHAUSTED = "retries-exhausted"
     INVALID_KEY = "idempotency-key-invalid"
+    PRIMARY_CANCELLED = "primary-cancelled"
 
 
 class FlowRefusedError(RuntimeError):
@@ -135,7 +136,11 @@ class PluginFlowController:
             result = await self._run_with_retries(operation)
         except BaseException as error:
             if not future.done():
-                future.set_exception(error)
+                # Never the CancelledError itself: a coalesced caller awaiting
+                # this future would have it raised in its own context, and
+                # asyncio would treat that unrelated task as cancelled - no
+                # stable code, and invisible to every `except Exception`.
+                future.set_exception(_coalesced_failure(error, self._plugin_id))
             # A future nobody awaited would be reported as never-retrieved.
             future.exception()
             raise
@@ -217,6 +222,16 @@ class PluginFlowController:
                 FlowRefusal.INVALID_KEY,
                 f"idempotency key must contain 1-{MAX_IDEMPOTENCY_KEY_CHARS} characters",
             )
+
+
+def _coalesced_failure(error: BaseException, plugin_id: str) -> BaseException:
+    """What a coalesced caller should see when the primary submission ends."""
+    if isinstance(error, asyncio.CancelledError):
+        return FlowRefusedError(
+            FlowRefusal.PRIMARY_CANCELLED,
+            f"{plugin_id} cancelled the submission this call was waiting on",
+        )
+    return error
 
 
 async def _completed(result: object) -> object:

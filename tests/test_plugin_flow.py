@@ -277,3 +277,36 @@ def test_cancelling_a_coalesced_caller_does_not_cancel_the_shared_work():
 
     assert run(scenario()) == "shared"
     assert finished == [1]
+
+
+def test_a_cancelled_primary_refuses_its_coalesced_callers_instead_of_cancelling_them():
+    """OMNI-0420: an unrelated job used to abort silently, with no code."""
+
+    async def scenario():
+        subject = controller(deadline_seconds=30.0)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def operation():
+            started.set()
+            await release.wait()
+            return "never"
+
+        primary = asyncio.ensure_future(subject.submit("key-1", operation))
+        await started.wait()
+        coalesced = asyncio.ensure_future(subject.submit("key-1", operation))
+        await asyncio.sleep(0)
+
+        primary.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await primary
+
+        # The second caller is refused with a stable code, in its own context,
+        # and is emphatically not itself cancelled.
+        with pytest.raises(FlowRefusedError) as refused:
+            await coalesced
+        assert refused.value.code == "primary-cancelled"
+        assert not coalesced.cancelled()
+        release.set()
+
+    asyncio.run(scenario())
