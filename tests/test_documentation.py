@@ -437,3 +437,37 @@ def test_boundary_guide_splits_capability_from_intent_and_records_the_refusals()
 
 def test_readme_links_the_boundary_guide():
     assert "docs/runtime-client-boundary.md" in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def qwen_distributions() -> dict[str, str]:
+    """Every Qwen-family provider distribution in the tree, by workload id.
+
+    Derived rather than listed. The installation guide named four wheels in
+    five places — a table, a build loop, a wheel install, a grant block and an
+    uninstall — and a fifth distribution changed none of them, so a person
+    following the guide installed a workload the service then reported as
+    missing.
+    """
+    found: dict[str, str] = {}
+    for path in sorted((ROOT / "providers").glob("*/pyproject.toml")):
+        project = tomllib.loads(path.read_text(encoding="utf-8"))["project"]
+        if not project["name"].startswith("omnitensor-qwen-"):
+            continue
+        [workload_id] = project["entry-points"]["omnitensor.workloads"]
+        found[workload_id] = project["name"]
+    return found
+
+
+def test_installation_guide_names_every_qwen_distribution_it_installs():
+    guide = (ROOT / "docs/qwen-workload-installation.md").read_text(encoding="utf-8")
+
+    assert len(qwen_distributions()) >= 5
+    for workload_id, name in qwen_distributions().items():
+        wheel = name.replace("-", "_")
+        assert f"`{name}`" in guide, f"{name} is not in the wheel table"
+        assert f"{wheel}-0.2.0-*.whl" in guide, f"{name} is never installed"
+        assert f"grant {workload_id} accelerator:gpu" in guide
+        assert f"revoke {workload_id} accelerator:gpu" in guide
+        assert "providers/$provider" in guide
+        loop = guide.split("for provider in", 1)[1].split("; do", 1)[0]
+        assert workload_id in loop, f"{workload_id} is never built"
