@@ -34,4 +34,4 @@ testpaths = ["tests"]
 # machine that had not installed both wheels, which is every machine that had
 # not read the skip reason, and a coverage floor over a shim that never loads
 # is a floor over nothing.
-pythonpath = ["src", "../vulkan-runtime/src", "../../src"]
+pythonpath = ["src", "..", "../vulkan-runtime/src", "../../src"]

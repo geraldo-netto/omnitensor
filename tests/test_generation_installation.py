@@ -401,3 +401,43 @@ def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
             "frozen per-workload acceptance on the named GPU; arbitrary-domain quality not claimed"
         ),
     }
+
+
+def shim_distributions() -> dict[str, Path]:
+    """Every distribution whose entry point is a re-export of the shared runtime.
+
+    Derived, so a sixth is covered by the rule the moment it exists.
+    `media-transcription` is deliberately not one: its shim re-exports from its
+    own package, and its identity is checked by its own provider suite.
+    """
+    found = {}
+    for provider, project in distributions().values():
+        [module] = project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+        package = module.removeprefix("src/")
+        source = (provider / "src" / package / "__init__.py").read_text(encoding="utf-8")
+        if "from omnitensor_vulkan_runtime import" in source:
+            found[package] = provider
+    return found
+
+
+def test_the_shim_identity_suites_state_their_one_check_once():
+    """OMNI-0539: five byte-identical copies of the same file.
+
+    Each said the same four structural things this module now derives from the
+    tree, plus the one thing only an installed wheel can say. Reduced to that
+    one, imported from `providers/shim_identity.py`, the copies differ in a
+    single package name — so the next change to the shim contract is one edit
+    rather than five that have to agree.
+    """
+    assert len(shim_distributions()) == 5
+
+    bodies = set()
+    for package, provider in shim_distributions().items():
+        suite = provider / "tests" / "test_identity.py"
+        text = suite.read_text(encoding="utf-8")
+        assert f'PACKAGE = "{package}"' in text, f"{suite} does not name its own package"
+        assert "from shim_identity import" in text, f"{suite} restates the shared check"
+        bodies.add(text.replace(f'"{package}"', "<package>"))
+
+    assert len(bodies) == 1, "the copies have drifted apart again"
+    assert (PROVIDERS / "shim_identity.py").is_file()
