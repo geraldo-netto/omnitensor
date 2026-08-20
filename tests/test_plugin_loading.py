@@ -18,6 +18,7 @@ from conftest import sample_plugin_manifest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from omnitensor import registry
 from omnitensor.discovery import Device
 from omnitensor.plugins import (
     DEFAULT_MAX_FRAME_BYTES,
@@ -3236,3 +3237,29 @@ def test_off_loop_wait_costs_no_event_loop_wakeups():
     assert result == "done"
     # One wakeup delivers the result; a couple more absorb loop bookkeeping.
     assert CountingLoop.wakeups <= 5
+
+
+def test_external_worker_sandbox_mounts_every_canonical_schema(tmp_path):
+    """A worker must be able to read the contracts its plugin validates against.
+
+    The regression this pins: the sandbox mounted the import root, which in a
+    packaged build also holds the schemas, but in an editable checkout they sit
+    beside it.  Every contract lookup inside the worker then failed, and the
+    plugin refused to load with a message that read as a missing install while
+    every schema was present on the host.  Asserting reachability rather than a
+    particular directory keeps the check true for both layouts.
+    """
+    site = tmp_path / "site"
+    site.mkdir()
+    plugin = _resolved(tmp_path=tmp_path)
+
+    [spec] = external_worker_specs((plugin,), worker_import_paths=(site,))
+
+    assert spec.sandbox is not None
+    mounted = tuple(Path(path) for path in spec.sandbox.runtime_paths)
+    assert registry.schema_names(), "the build ships no canonical schemas to check"
+    for name in registry.schema_names():
+        resolved = registry._schema_path(name).resolve()
+        assert any(resolved == root or resolved.is_relative_to(root) for root in mounted), (
+            f"{name} resolves to {resolved}, which no sandbox runtime path covers"
+        )

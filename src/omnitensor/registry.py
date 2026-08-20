@@ -41,6 +41,21 @@ DEFAULT_PREFERENCE = tuple(BACKENDS)
 _MODEL_BINDING_FIELDS = frozenset({"accelerator", "acceleratorPreference", "model", "models"})
 
 
+def canonical_data_roots() -> tuple[Path, ...]:
+    """Every directory this build resolves canonical schemas and workloads from.
+
+    A packaged install keeps both inside the package directory, so anything
+    that can import ``omnitensor`` can already read them.  An editable or
+    source checkout keeps them beside ``src/`` instead, where reaching the
+    import path is not enough — a sandboxed worker that mounts only the import
+    path sees an installation with no contracts in it at all.  The roots are
+    published here so a caller that has to make them reachable asks this
+    module rather than re-deriving a layout it would drift from.
+    """
+    candidates = (_PACKAGED_SCHEMAS, _PACKAGED_WORKLOADS, _SOURCE_SCHEMAS, _SOURCE_WORKLOADS)
+    return tuple(sorted({root for root in candidates if root is not None and root.is_dir()}))
+
+
 def _schema_path(name: str) -> Path:
     packaged = _PACKAGED_SCHEMAS / name
     if packaged.is_file():
@@ -49,7 +64,17 @@ def _schema_path(name: str) -> Path:
         source = _SOURCE_SCHEMAS / name
         if source.is_file():
             return source
-    raise FileNotFoundError(f"canonical schema is not installed: {name}")
+    # Naming the directories that were searched separates the two ways this
+    # fails, which look identical from the exception alone: a build genuinely
+    # missing a contract, and a correct build whose contracts were left
+    # outside a sandbox's mounts.  The second is the one that wastes an
+    # afternoon, because every copy of the file is present on the host.
+    searched = ", ".join(str(root) for root in (_PACKAGED_SCHEMAS, _SOURCE_SCHEMAS) if root)
+    raise FileNotFoundError(
+        f"canonical schema is not installed: {name} (searched {searched}; "
+        "a directory that is missing here but present on the host means this "
+        "process cannot reach it, not that the build lacks it)"
+    )
 
 
 def schema_names() -> tuple[str, ...]:

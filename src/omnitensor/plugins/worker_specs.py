@@ -9,6 +9,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Protocol
 
+from ..registry import canonical_data_roots
 from .artifacts import ArtifactReference, ArtifactResolution
 from .discovery import PluginSource
 from .identity import ResolvedPlugin
@@ -293,9 +294,20 @@ def worker_import_paths_tuple(paths: Sequence[Path]) -> tuple[str, ...]:
 
 
 def trusted_runtime_paths(import_paths: Sequence[str]) -> tuple[Path | str, ...]:
+    """Runtime code and data the worker must be able to read to be a runtime.
+
+    ``parents[2]`` is the import root, which in a packaged install also holds
+    the canonical schemas and workload manifests.  In an editable or source
+    checkout they sit beside it instead, and mounting only the import root
+    gives the worker an OmniTensor whose every contract lookup fails — the
+    plugin then refuses to load for a reason that reads like a broken build.
+    The registry is asked where its own data lives rather than that layout
+    being assumed twice.
+    """
     return (
         Path(sys.prefix),
         Path(__file__).resolve().parents[2],
+        *canonical_data_roots(),
         *import_paths,
     )
 
