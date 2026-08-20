@@ -35,17 +35,19 @@ IPC handshake confirms its plugin identity and protocol range. A failed or
 incompatible worker becomes an isolated status record and does not prevent
 later plugins from starting.
 
-The installed service also creates one delegated cgroup per worker before
-launch. A trusted exec shim joins that cgroup before Bubblewrap or plugin code
-can fork, and the kernel enforces its process and aggregate-memory ceilings.
-The supervisor polls cgroup membership, memory, and descriptor use while each
-call runs, and separately bounds call duration and concurrency. Result size is
-not bounded: an answer larger than one IPC frame is carried as ordered result
+Workers are launched without a cgroup and without CPU or memory ceilings. A
+delegated subtree was tried and could not work here: the service's own PID
+stays in the delegated root, the kernel's no-internal-process rule then refuses
+to populate `cgroup.subtree_control`, and every external worker failed at
+launch. What protects the machine is host pressure, measured across the whole
+host, and what confines a worker is the sandbox above plus the seccomp filter,
+which decides whether it may start at all.
+
+The supervisor bounds call duration and concurrency. Result size is not
+bounded: an answer larger than one IPC frame is carried as ordered result
 chunks and reassembled by the supervisor, because refusing it discarded the
 whole answer and cost a model reload on the next request. A non-concurrency
-violation stops the worker before its channel can be reused. External-worker startup fails closed when the systemd-delegated cgroup
-is unavailable; embedders may explicitly select procfs accounting for tests,
-but that fallback cannot contain a daemonised descendant.
+violation stops the worker before its channel can be reused.
 
 Executable workers negotiate `execute`, `progress`, and `cancel` explicitly.
 `SubmitJob` sends one schema-validated request over the authenticated worker

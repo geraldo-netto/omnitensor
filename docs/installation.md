@@ -34,8 +34,12 @@ nothing else can prove a model file is the model a manifest declares. Point
 publishes, and answers the control socket, but refuses every inference job.
 
 The unit uses `StateDirectory=`, so systemd creates the state directories on
-first start; it needs no pre-existing paths. It also declares `Delegate=yes` so
-each plugin worker can be accounted in its own cgroup.
+first start; it needs no pre-existing paths, and `RuntimeDirectory=` gives the
+control socket a directory whose lifetime tracks the service's own. The unit is
+`Type=notify`: the service reports readiness once that socket is accepting, so
+`systemctl --user restart` returns when it can answer rather than when it was
+spawned, and `omnitensor-verify-install` run straight afterwards talks to a
+service that is ready.
 
 ### Where the applet reads the snapshot
 
