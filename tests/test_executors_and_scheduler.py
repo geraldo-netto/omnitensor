@@ -125,7 +125,9 @@ def test_tpu_executor_reuses_one_interpreter_per_model(tmp_path):
     assert executor.run(alpha, [[1]]).outputs == [[2]]
     assert executor.run(alpha, [[3]]).outputs == [[6]]
     assert executor.run(beta, [[4]]).outputs == [[8]]
-    assert runtime.delegate_loads == 2
+    # OMNI-0417: one delegate for the executor, however many models it caches -
+    # the Coral admits one claim, and four cached interpreters used to hold four.
+    assert runtime.delegate_loads == 1
     assert [item.model_path for item in runtime.interpreters] == [alpha, beta]
 
 
@@ -1614,3 +1616,34 @@ def test_npu_availability_is_not_re_enumerated_on_every_dispatch():
     # Past the TTL it asks again, so a card that appears is still noticed.
     assert executor.availability().available is True
     assert len(enumerations) == 2
+
+
+def test_a_tpu_interpreter_that_fails_to_allocate_latches_the_failure(tmp_path):
+    """OMNI-0417: availability stayed True and every run retried the load."""
+
+    class FailingRuntime:
+        def __init__(self):
+            self.delegate_loads = 0
+
+        def load_delegate(self, name):
+            self.delegate_loads += 1
+            return object()
+
+        def Interpreter(self, model_path, experimental_delegates):  # noqa: N802
+            raise RuntimeError("the Coral is busy")
+
+    runtime = FailingRuntime()
+    now = [0.0]
+    executor = TpuExecutor(device_present=True, runtime=runtime, clock=lambda: now[0])
+    model = _model_file(tmp_path, "alpha.tflite")
+
+    with pytest.raises(RuntimeError, match="Could not load"):
+        executor.run(model, [[1]])
+
+    unavailable = executor.availability()
+    assert unavailable.available is False
+    assert "the Coral is busy" in unavailable.reason
+    # And the claim is dropped, so the retry after the window asks afresh.
+    assert executor._edgetpu_delegate is None
+    now[0] = 1_000.0
+    assert executor.availability().available is True

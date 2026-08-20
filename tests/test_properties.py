@@ -476,7 +476,8 @@ def test_executor_model_caches_create_once_per_distinct_path(paths):
             assert tpu.run(path, [[path]]).outputs == [[path]]
             assert npu.run(path, [[path]]).outputs == [[path]]
 
-        assert tflite.delegate_loads == len(set(resolved))
+        # One claim on the device, whatever the model set (OMNI-0417).
+        assert tflite.delegate_loads == 1
         assert npu._core.compile_calls == list(dict.fromkeys(resolved))
 
 

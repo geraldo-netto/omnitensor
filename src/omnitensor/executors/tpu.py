@@ -70,6 +70,9 @@ class TpuExecutor(CachingExecutor):
         # preserves that safety when callers use the executor directly from
         # multiple threads.
         self._interpreter_lock = threading.Lock()
+        # Held for the executor's life and rebuilt only after a failure: the
+        # Coral admits one claim, and this is that claim.
+        self._edgetpu_delegate = None
 
     def _runtime_health(self) -> Availability:
         with self._delegate_error_lock:
@@ -81,22 +84,47 @@ class TpuExecutor(CachingExecutor):
     def _interpreter_for(self, model_path: str):
         return self._models.get_or_build(model_path, lambda: self._build_interpreter(model_path))
 
+    def _delegate(self):
+        """The one Edge TPU delegate this executor holds.
+
+        One per executor, not one per model: the cache keeps up to four
+        interpreters and a delegate each meant four live claims on a device
+        that normally admits one, so the second model built could fail for no
+        reason the operator could see.
+        """
+        if self._edgetpu_delegate is None:
+            self._edgetpu_delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
+        return self._edgetpu_delegate
+
     def _build_interpreter(self, model_path: str):
         try:
-            delegate = self._runtime.load_delegate(EDGETPU_DELEGATE)
-        except (ValueError, OSError) as error:
+            interpreter = self._runtime.Interpreter(
+                model_path=model_path,
+                experimental_delegates=[self._delegate()],
+            )
+            interpreter.allocate_tensors()
+        except (ValueError, OSError, RuntimeError) as error:
+            # Latched around the whole sequence, not around load_delegate
+            # alone: clearing the error before the interpreter was built left
+            # availability() reporting True while every run retried the full
+            # delegate load and failed again.
+            self._forget_delegate()
             message = f"Could not load {EDGETPU_DELEGATE}: {error}"
             with self._delegate_error_lock:
                 self._delegate_error = (message, self._clock())
             raise RuntimeError(message) from error
         with self._delegate_error_lock:
             self._delegate_error = None
-        interpreter = self._runtime.Interpreter(
-            model_path=model_path,
-            experimental_delegates=[delegate],
-        )
-        interpreter.allocate_tensors()
         return interpreter
+
+    def _forget_delegate(self) -> None:
+        """Drop the delegate so the next attempt claims the device afresh."""
+        self._edgetpu_delegate = None
+
+    def close(self) -> None:
+        """Release the cached interpreters, then the device claim itself."""
+        super().close()
+        self._forget_delegate()
 
     def run(self, model_path: str, inputs: list) -> InferenceResult:
         require_available(self)
