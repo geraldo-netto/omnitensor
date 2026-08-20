@@ -9,18 +9,22 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from omnitensor.plugins import document_qa
+from omnitensor.plugins import document_answer, document_qa, document_spans
+from omnitensor.plugins.document_answer import (
+    document_question_task,
+    grounded_answer_document,
+)
 from omnitensor.plugins.document_qa import (
+    DocumentQuestionPlugin,
+    _validate_embedding_provider,
+)
+from omnitensor.plugins.document_spans import (
     EMBEDDING_DIMENSIONS,
     MAX_SPAN_CHARACTERS,
     DocumentQuestionError,
-    DocumentQuestionPlugin,
     EmbeddingProvider,
     IndexedSpan,
     _embedding_vector,
-    _validate_embedding_provider,
-    document_question_task,
-    grounded_answer_document,
     page_spans,
     retrieve_spans,
     select_question_sources,
@@ -1001,7 +1005,7 @@ def test_a_reply_that_stops_mid_object_is_named_as_truncation():
 
 
 def test_every_failure_a_person_sees_says_what_to_do_about_it():
-    from omnitensor.plugins.document_qa import FAILURE_DETAILS, failure_detail
+    from omnitensor.plugins.document_answer import FAILURE_DETAILS, failure_detail
 
     detail = failure_detail("provider-output-truncated")
 
@@ -1016,7 +1020,7 @@ def test_every_failure_a_person_sees_says_what_to_do_about_it():
 @pytest.mark.asyncio
 async def test_a_failure_reaches_the_caller_as_a_sentence_not_a_code(tmp_path):
     """The complaint this fixes: "job failed: provider-output-invalid"."""
-    from omnitensor.plugins.document_qa import failure_detail
+    from omnitensor.plugins.document_answer import failure_detail
 
     # The mapping is what the plugin hands to failed_result, so the surface a
     # person reads is checked here rather than through a whole worker run.
@@ -1083,3 +1087,25 @@ async def test_a_selection_that_does_not_fit_is_refused_naming_what_went_unread(
     assert result.detail.startswith("source-truncated: ")
     assert "page(s) went unread" in result.detail
     assert str(source) not in result.detail
+
+
+def test_the_span_index_and_the_answer_contract_are_their_own_modules():
+    """OMNI-0528: one 731-line module held the plugin and three contracts."""
+    import inspect
+
+    assert inspect.getsourcefile(page_spans).endswith("document_spans.py")
+    assert inspect.getsourcefile(retrieve_spans).endswith("document_spans.py")
+    assert inspect.getsourcefile(grounded_answer_document).endswith("document_answer.py")
+    assert inspect.getsourcefile(document_question_task).endswith("document_answer.py")
+    assert inspect.getsourcefile(DocumentQuestionPlugin).endswith("document_qa.py")
+
+    # And the file organiser depends on the index, not on the question module.
+    organiser = inspect.getsource(__import__("omnitensor.plugins.file_organizer", fromlist=["x"]))
+    assert "from .document_spans import" in organiser
+    assert "from .document_qa import" not in organiser
+
+    # The plugin module publishes the pipeline and nothing else; it uses the
+    # answer contract rather than being where the contract lives.
+    assert document_qa.__all__ == ["DocumentQuestionPlugin"]
+    assert document_qa.grounded_answer_document is document_answer.grounded_answer_document
+    assert document_spans.DocumentQuestionError is document_answer.DocumentQuestionError

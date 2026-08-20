@@ -17,7 +17,7 @@ from pathlib import Path
 from omnitensor.document_model_runners import BgeTokenizer, VulkanBgeRunner
 from omnitensor.document_model_types import QUERY_PREFIX
 from omnitensor.executors.vulkan import VulkanSelectionError, hardware_vulkan_devices
-from omnitensor.plugins.document_qa import EmbeddingProvider
+from omnitensor.plugins.document_spans import EmbeddingProvider
 from omnitensor.plugins.protocol import CancellationToken
 
 # The device the embedder was measured on. A preference, not a requirement:

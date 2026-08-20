@@ -26,7 +26,7 @@ from ..sdk import (
     workload_result,
 )
 from ..stable_error import StableError
-from .document_qa import IndexedSpan, page_spans, select_question_sources
+from .document_spans import IndexedSpan, page_spans, select_question_sources
 from .event_workload import (
     EventWorkloadError,
     MemoryFragmentStore,

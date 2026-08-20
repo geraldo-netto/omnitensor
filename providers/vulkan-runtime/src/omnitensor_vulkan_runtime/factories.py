@@ -7,7 +7,8 @@ from pathlib import Path
 
 from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
-from omnitensor.plugins.document_qa import DocumentQuestionPlugin, document_question_task
+from omnitensor.plugins.document_answer import document_question_task
+from omnitensor.plugins.document_qa import DocumentQuestionPlugin
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
     EventRecoveryJournal,
