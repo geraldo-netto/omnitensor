@@ -31,6 +31,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 DEFAULT_SOCKET_PATH = "/run/omnitensor/bpf-aggregate.sock"
 DEFAULT_MAX_AGGREGATE_BYTES = 256 * 1024
@@ -281,6 +282,20 @@ def _percentile_upper(histogram: LatencyHistogram, percentile: int) -> int:
         if cumulative >= threshold:
             return min(1 << (index + 1), MAX_COUNT)
     return 0
+
+
+@runtime_checkable
+class KernelAggregateSource(Protocol):
+    """Where one kernel-telemetry aggregate comes from.
+
+    A collector depends on this, never on the socket adapter: a domain object
+    that constructs its own transport cannot be exercised - or deployed -
+    without one, and an untyped ``kernel_source`` accepted any object with a
+    ``read`` attribute and failed deep inside a worker thread.
+    """
+
+    def read(self) -> KernelAggregate:
+        """One aggregate, or one that states why there is none."""
 
 
 class UnixSocketAggregateSource:

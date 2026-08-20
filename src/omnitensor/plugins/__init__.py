@@ -390,6 +390,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "KernelCounter": (".kernel_telemetry", "KernelCounter"),
     "UnixSocketAggregateSource": (".kernel_telemetry", "UnixSocketAggregateSource"),
     "AbsentAggregateSource": (".kernel_telemetry", "AbsentAggregateSource"),
+    "KernelAggregateSource": (".kernel_telemetry", "KernelAggregateSource"),
     "parse_aggregate": (".kernel_telemetry", "parse_aggregate"),
     "scheduler_features": (".kernel_telemetry", "scheduler_features"),
 }

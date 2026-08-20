@@ -22,18 +22,19 @@ KERNEL_EXPORTS = (
     "KernelCounter",
     "UnixSocketAggregateSource",
     "AbsentAggregateSource",
+    "KernelAggregateSource",
     "parse_aggregate",
     "scheduler_features",
 )
 # Covers the targets as well as the names, so retargeting an export at its owning
 # module moves it. The surface itself — which names, in which order — is asserted
 # above and did not move when the supervisor facade was retired.
-EXPORT_MAP_SHA256 = "a6df4ede82d0de002c32e276dbc8a2ac5bb8fa258c1c9d77be87be6f0701d8a2"
+EXPORT_MAP_SHA256 = "46bd2c4aff49de68e4ada6b8e38992f948a5cca40f6245f634f88f24c08b5549"
 
 
 def test_export_map_preserves_the_locked_public_surface_and_order():
     assert isinstance(plugins.__all__, list)
-    assert len(plugins.__all__) == len(plugins._EXPORTS) == 363
+    assert len(plugins.__all__) == len(plugins._EXPORTS) == 364
     assert plugins.__all__ == list(plugins._EXPORTS)
     assert set(plugins.__all__) <= set(dir(plugins))
     assert tuple(plugins.__all__[-len(KERNEL_EXPORTS) :]) == KERNEL_EXPORTS
@@ -65,7 +66,7 @@ print(json.dumps({
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == {"count": 363, "owners": []}
+    assert json.loads(completed.stdout) == {"count": 364, "owners": []}
 
 
 def test_dir_lists_lazy_exports_without_resolving_them():

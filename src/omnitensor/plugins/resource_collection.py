@@ -22,7 +22,7 @@ from .collection import (
     CollectionError,
     bounded_number,
 )
-from .kernel_telemetry import UnixSocketAggregateSource
+from .kernel_telemetry import AbsentAggregateSource, KernelAggregateSource
 
 RESOURCE_PLUGIN_ID = "resource-scheduler"
 RESOURCE_METADATA_PERMISSION = "read:resource-metadata"
@@ -115,15 +115,24 @@ class ResourceSchedulerCollector(BoundedCollector[ResourceSample]):
         self,
         *args,
         max_items: int = DEFAULT_MAX_UNITS,
-        kernel_source=None,
+        kernel_source: KernelAggregateSource | None = None,
         **changes,
     ) -> None:
         super().__init__(*args, max_items=max_items, **changes)
-        self._kernel_source = kernel_source or UnixSocketAggregateSource()
+        # Absent unless a helper is wired in: this collector used to construct
+        # the socket adapter itself, so a host with no helper paid a stat and a
+        # thread hop per tick to be told, every time, that there is no helper.
+        if kernel_source is not None and not isinstance(kernel_source, KernelAggregateSource):
+            raise TypeError("kernel_source must implement KernelAggregateSource")
+        self._kernel_source: KernelAggregateSource = kernel_source or AbsentAggregateSource()
 
     async def _output_extensions(self) -> dict[str, object]:
         """Add aggregate run-queue and block-I/O features before validation."""
-        aggregate = await asyncio.to_thread(self._kernel_source.read)
+        if isinstance(self._kernel_source, AbsentAggregateSource):
+            # It answers from a constant; a thread hop would cost more than it.
+            aggregate = self._kernel_source.read()
+        else:
+            aggregate = await asyncio.to_thread(self._kernel_source.read)
         return {
             "kernelTelemetry": aggregate.document(),
             "kernelFeatures": aggregate.scheduler_features(),

@@ -249,3 +249,31 @@ def test_an_invalid_unit_identity_has_no_permission():
 def test_readiness_reports_the_source_health():
     subject = collector(snapshot(status=SourceStatus.DEGRADED))
     assert asyncio.run(subject.readiness()).status is SourceStatus.DEGRADED
+
+
+def test_the_collector_depends_on_the_port_and_defaults_to_no_helper():
+    """OMNI-0457: it constructed the socket adapter as its own default."""
+    from omnitensor.plugins.kernel_telemetry import (
+        AbsentAggregateSource,
+        KernelAggregateSource,
+        KernelTelemetryState,
+    )
+
+    subject = collector()
+    assert isinstance(subject._kernel_source, AbsentAggregateSource)  # noqa: SLF001
+    payload = collect(subject)
+    assert payload["kernelTelemetry"]["state"] == str(KernelTelemetryState.HELPER_ABSENT)
+
+    with pytest.raises(TypeError, match="KernelAggregateSource"):
+        ResourceSchedulerCollector(
+            ReplaySource([snapshot()], label="resource"),
+            permissions(UNIT),
+            (UNIT,),
+            kernel_source=object(),
+        )
+
+    class Helper:
+        def read(self):
+            return AbsentAggregateSource().read()
+
+    assert isinstance(Helper(), KernelAggregateSource)
