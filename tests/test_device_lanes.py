@@ -189,11 +189,38 @@ class TestResolutionIsRememberedButNotStale:
 
         assert resolver.cached("sample-model", REFERENCE).reason == "from the second store"
 
-    def test_a_plugin_reference_goes_straight_to_the_store(self):
-        store = CountingStore()
+    def test_a_plugin_reference_is_remembered_the_way_a_workload_s_is(self, tmp_path):
+        """Asked twice for the same unchanged file, the store is asked once.
 
-        assert self.resolver(store).resolve_plugin(REFERENCE).ready is True
+        Five installed workloads declare the same 4.8 GiB model, and every one
+        of them asks while its worker spec is built. Going straight to the
+        store re-read and re-hashed the whole file for each of them, which is
+        most of the minute a restart spent unable to answer anything.
+        """
+        store = CountingStore()
+        weights = tmp_path / REFERENCE.id / REFERENCE.version
+        weights.mkdir(parents=True)
+        (weights / "model.gguf").write_bytes(b"x" * 17)
+        resolver = self.resolver(store, root=tmp_path)
+
+        assert resolver.resolve_plugin(REFERENCE).ready is True
+        assert resolver.resolve_plugin(REFERENCE).ready is True
         assert store.calls == [REFERENCE]
+
+    def test_a_plugin_artifact_that_changed_on_disk_is_asked_about_again(self, tmp_path):
+        """The stamp is what makes remembering safe: swapped bytes, new answer."""
+        store = CountingStore()
+        weights = tmp_path / REFERENCE.id / REFERENCE.version
+        weights.mkdir(parents=True)
+        model = weights / "model.gguf"
+        model.write_bytes(b"x" * 17)
+        resolver = self.resolver(store, root=tmp_path)
+        resolver.resolve_plugin(REFERENCE)
+
+        model.write_bytes(b"y" * 4096)
+
+        resolver.resolve_plugin(REFERENCE)
+        assert store.calls == [REFERENCE, REFERENCE]
 
     def test_a_plugin_manifest_declares_the_reference_a_workload_does_not(self):
         plugin = SimpleNamespace(

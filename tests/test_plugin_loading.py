@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -3291,3 +3292,72 @@ def test_selected_source_outside_the_input_roots_says_so(tmp_path):
     assert refusal.value.code == "selected-file-unavailable"
     assert "OMNITENSOR_INPUT_ROOTS" in refusal.value.detail
     assert str(absent) in refusal.value.detail
+
+
+class TestStartingWorkersDoesNotStopTheServiceAnswering:
+    """A restart used to leave the service unresponsive for over a minute.
+
+    `external_worker_specs` resolves every artifact a plugin declares, and
+    resolving one reads and hashes the whole file. It was called on the event
+    loop, so with twenty-three gigabytes of installed models the loop could
+    not accept a control connection or publish a snapshot until the hashing
+    finished — while systemd had already been told the service was ready. A
+    faulthandler dump of the running service put the main thread inside
+    `file_digest`, called from `loading.start`.
+    """
+
+    async def test_the_loop_keeps_running_while_specs_are_built(self, tmp_path):
+        import asyncio  # noqa: PLC0415 - local to this test
+
+        from omnitensor.plugins import loading  # noqa: PLC0415
+
+        released = asyncio.Event()
+        ticks = []
+        observed = []
+        # A bound on the block, so this test fails rather than hangs when the
+        # build is back on the loop: without it the ticker never runs, nothing
+        # ever sets `released`, and the run stops instead of reporting.
+        deadline = time.monotonic() + 5.0
+
+        def slow_specs(*_arguments, **_options):
+            # Stands in for hashing gigabytes: blocking, and long enough that
+            # a loop stuck behind it could not tick.
+            while not released.is_set() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            # What the loop managed while this call was in flight. Read here
+            # rather than after the await: afterwards the ticker has run
+            # either way, which is why an assertion on the total passed
+            # against the very code this is about.
+            observed.append(len(ticks))
+            return ()
+
+        async def ticker():
+            while not released.is_set():
+                ticks.append(1)
+                if len(ticks) >= 5:
+                    released.set()
+                await asyncio.sleep(0.005)
+
+        class Supervisor:
+            async def register(self, specs):
+                return ()
+
+            async def start(self, specs):
+                return ()
+
+        runtime = loading.InstalledPluginRuntime(
+            bundled_root=tmp_path,
+            entry_points_provider=lambda **_selection: (),
+            supervisor=Supervisor(),
+        )
+        loading.external_worker_specs_original = loading.external_worker_specs
+        loading.external_worker_specs = slow_specs
+        try:
+            beat = asyncio.ensure_future(ticker())
+            await runtime.start()
+            await beat
+        finally:
+            loading.external_worker_specs = loading.external_worker_specs_original
+
+        # The loop went on running while the blocking build was in flight.
+        assert observed == [5], "the loop was blocked while the worker specs were built"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import shutil
@@ -625,7 +626,15 @@ class InstalledPluginRuntime:
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }
-        specs = external_worker_specs(catalog.plugins, **spec_options)
+        # Off the loop: building a spec resolves every artifact the plugin
+        # declares, and resolving one reads and hashes the whole file. On this
+        # desk that is twenty-three gigabytes of models, and doing it here
+        # left the event loop unable to accept a control connection or publish
+        # a snapshot for over a minute after a restart — while systemd had
+        # already been told the service was ready.
+        specs = await _run_off_loop(
+            functools.partial(external_worker_specs, catalog.plugins, **spec_options)
+        )
         workers = await (
             self._supervisor.register(specs) if self._on_demand else self._supervisor.start(specs)
         )

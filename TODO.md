@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0580 | open | medium | m | **For the first ~45 seconds after a restart the service is ready by systemd and unresponsive in fact.** Observed on 2026-08-20 immediately after `systemctl --user restart`: `omnitensor-verify-install` reported `FAIL control: apply-command raised TimeoutError`, and a second run reported `FAIL snapshot: snapshot is 43990 ms old; limit is 30000`; both passed a minute later with nothing changed. The unit is `Type=notify` and reports readiness once the control socket accepts, so readiness is signalled before the loop can actually answer on it — while six plugin workers are being started and their models preflighted, the publish loop misses its ten-second heartbeat too. So a fresh install looks broken to its own gate, and the desktop draws stale state at exactly the moment somebody is watching. Find what holds the loop during startup (worker launch and preflight are the suspects), keep it off the loop, and make readiness mean the loop can answer. |
 
 ## Blocked
 

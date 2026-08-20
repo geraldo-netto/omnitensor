@@ -110,6 +110,10 @@ def artifact_stamp(
     too.  ``None`` means one of the files could not be read, so nothing may be
     remembered about this artifact at all.
     """
+    if artifact_root is None:
+        # No root means no files to stamp, so nothing may be remembered: the
+        # store is the only thing that can answer, every time it is asked.
+        return None
     try:
         directory = Path(artifact_root) / artifact_id / reference.version
         filenames = [artifact_filename(reference.format)]
@@ -233,7 +237,25 @@ class ArtifactResolver:
         return resolve_artifact(artifact_id, self._store, self.declared_reference, self.cached)
 
     def resolve_plugin(self, reference: ArtifactReference) -> ArtifactResolution:
-        return resolve_plugin_artifact(reference, self._store)
+        """A plugin's declared artifact, remembered the way a workload's is.
+
+        This used to go straight to the store, which re-reads and re-hashes
+        the whole file every time it is asked. Five of the installed workloads
+        declare the same 4.8 GiB model, and every one of them asked at
+        startup, so a restart hashed twenty-three gigabytes several times over
+        before the service could answer anything. The stamp — size and mtime
+        of the artifact and each of its companions — is what makes a
+        remembered answer safe: a file that is swapped gets a new stamp and is
+        hashed again.
+        """
+        if self._store is None:
+            # Fail closed, and say which of the two reasons it is: no store at
+            # all is a service configured without one, not an artifact that
+            # could not be read.
+            return resolve_plugin_artifact(reference, self._store)
+        return cached_resolution(
+            reference.id, reference, self._store, self._resolutions, self.stamp
+        )
 
     def cached(self, artifact_id: str, reference: ArtifactReference) -> ArtifactResolution:
         return cached_resolution(artifact_id, reference, self._store, self._resolutions, self.stamp)
