@@ -931,3 +931,49 @@ def test_a_listener_that_raises_cannot_break_a_committed_acknowledgement(tmp_pat
     assert acknowledgement["status"] == "applied"
     spec = service._profile_configuration("hardware-health")
     assert settings.load(spec).configuration == {"guidance": "kept"}
+
+
+def test_a_listener_may_be_named_after_the_service_that_listens_exists(tmp_path):
+    """OMNI-0560: taking them in the constructor forces the build order.
+
+    Both reach the scheduler, the publisher and the plugin lifecycle, so a
+    control service built with them cannot be built before the runtime that
+    owns those — which is what kept it inside the constructor.
+    """
+    applied = []
+    configured = []
+    service, settings = configuration_control(tmp_path)
+
+    service.notifies(applied=lambda: applied.append(True), configuration_applied=configured.append)
+    apply(service, command("set-profile-configuration", "hardware-health", {"guidance": "a"}))
+
+    assert applied == [True]
+    assert configured == ["hardware-health"]
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).configuration == {"guidance": "a"}
+
+
+def test_naming_one_listener_leaves_the_other_alone(tmp_path):
+    applied = []
+    service, _settings = configuration_control(tmp_path)
+    service.notifies(applied=lambda: applied.append("first"))
+
+    service.notifies(configuration_applied=lambda _profile_id: None)
+    apply(service, command("set-profile-enabled", "hardware-health", False))
+
+    assert applied == ["first"]
+
+
+def test_an_adoption_reaches_the_listener_named_after_the_fact(tmp_path):
+    """Adoption is a policy change like any other and nudges the same way."""
+    applied = []
+    service = build_control_service(
+        tmp_path / "policy.json",
+        {"hardware-health": ProfilePolicy(enabled=True, weight=2)},
+    )
+    service.notifies(applied=lambda: applied.append(True))
+
+    adopted = asyncio.run(service.adopt_profiles(["external-example"]))
+
+    assert adopted == ("external-example",)
+    assert applied == [True]

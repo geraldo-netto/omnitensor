@@ -114,6 +114,21 @@ class ControlService:
     def state(self) -> PolicyState:
         return self._state
 
+    def notifies(self, *, applied=None, configuration_applied=None) -> None:
+        """Name the listeners after both this and they exist.
+
+        Both reach the scheduler, the publisher and the plugin lifecycle, and
+        none of those exists until the runtime that owns them is nearly built
+        — so taking them in the constructor is what forces this object to be
+        built inside that runtime rather than beside it. Passing one is
+        replacing it: there is exactly one runtime listening, and a second
+        registration would be a second nudge for one committed command.
+        """
+        if applied is not None:
+            self._on_applied = applied
+        if configuration_applied is not None:
+            self._on_configuration_applied = configuration_applied
+
     async def adopt_profiles(
         self, profile_ids, default: ProfilePolicy | None = None
     ) -> tuple[str, ...]:
