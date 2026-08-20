@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 
 from omnitensor import acceptance
 from omnitensor.control import _integral_weight
-from omnitensor.jobs import _request_id_from_text
+from omnitensor.job_codec import _request_id_from_text
 from omnitensor.plugins.artifact_installation import (
     ArtifactInstallationError,
     _copy_digested,

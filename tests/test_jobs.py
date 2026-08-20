@@ -37,11 +37,9 @@ def test_jobs_facade_preserves_extracted_contract_identity():
     assert jobs.JobDispatcher is job_ports.JobDispatcher
     assert jobs.JobDispatchError is job_ports.JobDispatchError
     assert jobs.JobLifecycleObserver is job_ports.JobLifecycleObserver
-    assert jobs._parse_request is job_codec._parse_request
-    assert jobs._request_id_from_text is job_codec._request_id_from_text
-    assert jobs._record_reply is job_codec._record_reply
-    assert jobs._result_reply is job_codec._result_reply
-    assert jobs._validated_result_reply is job_codec._validated_result_reply
+    # The facade carries public names only: the implementation is imported
+    # from the module that defines it, not through a second path.
+    assert not [name for name in vars(jobs) if name.startswith("_") and name[1:2].islower()]
 
 
 def test_job_components_own_their_responsibilities_without_a_facade_cycle():
