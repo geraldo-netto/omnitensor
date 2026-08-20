@@ -62,7 +62,6 @@ from omnitensor.plugins.worker import (
     _read_exact,
     _read_frame,
     load_external_plugin,
-    serve_worker,
     serve_worker_requests,
 )
 from omnitensor.sdk import CancellationController, cancelled_result, succeeded_result
@@ -2283,24 +2282,28 @@ def test_worker_contains_enumeration_load_and_contract_failures():
 
 def test_worker_acknowledges_the_handshake_before_starting_the_plugin():
     service_offer = HandshakeOffer("external-example", 1, 3, frozenset({"cancel", "progress"}))
+    # At the negotiated version, not at 1: a frame in a version the worker
+    # never agreed to is refused before its fields are read.
     health = encode_frame(
-        handshake_frame(service_offer).__class__(1, WorkerMessageType.HEALTH, "request-1", {})
+        handshake_frame(service_offer).__class__(3, WorkerMessageType.HEALTH, "request-1", {})
     )
     cancel = encode_frame(
         handshake_frame(service_offer).__class__(
-            1, WorkerMessageType.CANCEL, None, {"reason": "shutdown"}
+            3, WorkerMessageType.CANCEL, None, {"reason": "shutdown"}
         )
     )
     reader = io.BytesIO(encode_frame(handshake_frame(service_offer)) + health + cancel)
     writer = io.BytesIO()
     plugin = TrackingPlugin()
 
-    agreement = serve_worker(
-        plugin,
-        reader,
-        writer,
-        minimum_protocol=2,
-        maximum_protocol=4,
+    agreement = asyncio.run(
+        serve_worker_requests(
+            plugin,
+            reader,
+            writer,
+            minimum_protocol=2,
+            maximum_protocol=4,
+        )
     )
 
     assert agreement.protocol_version == 3
@@ -2320,7 +2323,7 @@ def test_worker_acknowledges_the_handshake_before_starting_the_plugin():
     assert output[2].request_id == "request-1"
     assert output[2].payload == {
         "code": "unsupported-message",
-        "detail": "message is not implemented",
+        "detail": "worker refused the message",
     }
 
 
@@ -2329,11 +2332,13 @@ def test_worker_receives_only_the_service_supplied_active_permissions():
     reader = io.BytesIO(encode_frame(handshake_frame(service_offer)))
     plugin = TrackingPlugin()
 
-    serve_worker(
-        plugin,
-        reader,
-        io.BytesIO(),
-        permissions=frozenset({"read:/allowed"}),
+    asyncio.run(
+        serve_worker_requests(
+            plugin,
+            reader,
+            io.BytesIO(),
+            permissions=frozenset({"read:/allowed"}),
+        )
     )
 
     assert plugin.events[0][1].permissions == frozenset({"read:/allowed"})
@@ -2344,10 +2349,12 @@ def test_worker_default_protocol_and_eof_shutdown():
     plugin = TrackingPlugin()
     writer = io.BytesIO()
 
-    agreement = serve_worker(
-        plugin,
-        io.BytesIO(encode_frame(handshake_frame(service_offer))),
-        writer,
+    agreement = asyncio.run(
+        serve_worker_requests(
+            plugin,
+            io.BytesIO(encode_frame(handshake_frame(service_offer))),
+            writer,
+        )
     )
 
     assert agreement.protocol_version == 1
@@ -2887,10 +2894,12 @@ def test_worker_answers_the_handshake_before_its_plugin_starts():
             type(self).frames_at_start = _frames(writer.getvalue())
             await super().start(context)
 
-    serve_worker(
-        ObservantPlugin(),
-        io.BytesIO(encode_frame(handshake_frame(service_offer))),
-        writer,
+    asyncio.run(
+        serve_worker_requests(
+            ObservantPlugin(),
+            io.BytesIO(encode_frame(handshake_frame(service_offer))),
+            writer,
+        )
     )
 
     assert [frame.type for frame in ObservantPlugin.frames_at_start] == [WorkerMessageType.HELLO]

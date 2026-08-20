@@ -89,56 +89,6 @@ def load_external_plugin(
     return plugin
 
 
-def serve_worker(
-    plugin: WorkloadPlugin,
-    reader: BinaryIO,
-    writer: BinaryIO,
-    *,
-    minimum_protocol: int = 1,
-    maximum_protocol: int = 1,
-    permissions: frozenset[str] = frozenset(),
-) -> HandshakeAgreement:
-    """Acknowledge the handshake, start the plugin, then serve control frames.
-
-    The handshake is answered before ``start`` runs so the service can bound
-    protocol negotiation and plugin startup separately; a plugin that takes
-    seconds to load a model no longer looks like a failed handshake.
-    """
-    offer = HandshakeOffer(
-        plugin.plugin_id,
-        minimum_protocol,
-        maximum_protocol,
-        WORKER_CAPABILITIES,
-    )
-    service = parse_handshake(_read_frame(reader))
-    agreement = negotiate_handshake(service, offer)
-    _write_frame(writer, handshake_frame(offer))
-    asyncio.run(
-        plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
-    )
-    _write_frame(writer, ready_frame(plugin.plugin_id))
-    try:
-        while True:
-            try:
-                frame = _read_frame(reader)
-            except EOFError:
-                break
-            if frame.type is WorkerMessageType.CANCEL and frame.request_id is None:
-                break
-            _write_frame(
-                writer,
-                IPCFrame(
-                    agreement.protocol_version,
-                    WorkerMessageType.ERROR,
-                    frame.request_id,
-                    {"code": "unsupported-message", "detail": "message is not implemented"},
-                ),
-            )
-    finally:
-        asyncio.run(plugin.stop())
-    return agreement
-
-
 async def serve_worker_requests(
     plugin: WorkloadPlugin,
     reader: BinaryIO,
