@@ -22,6 +22,7 @@ off and a long document costs more spans rather than less text.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -72,6 +73,10 @@ from .translation import Span, TranslationError, translate_document
 PLUGIN_ID = "document-translation"
 READ_PERMISSION = "files:read-selected"
 MAX_LANGUAGE_CHARACTERS = 64
+# The same shape the manifest's input contract declares. It was only a length
+# here, so a target the manifest refuses reached the prompt as a target
+# language: the two statements of one rule have to agree.
+_LANGUAGE = re.compile(r"^[A-Za-z][A-Za-z -]*$")
 # Half the window for the source, half for the translation. A translation can
 # run longer than what it translates, and the alternative to reserving room is
 # a paragraph that stops mid-sentence.
@@ -96,6 +101,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
         router: GenerationRouter,
         fragment_store: MemoryFragmentStore,
         *,
+        translation_routes: Mapping[str, GenerationRouter] | None = None,
         adapters: Mapping[str, ExtractionAdapter] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
@@ -107,6 +113,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
         if clock_ms is not None and not callable(clock_ms):
             raise DocumentTranslationError("clock-invalid", "clock must be callable")
         self._router = router
+        self._translation_routes = _validated_translation_routes(translation_routes)
         self._store = fragment_store
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         defaults: dict[str, ExtractionAdapter] = {
@@ -124,6 +131,8 @@ class DocumentTranslationPlugin(ManagedPlugin):
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
         self._router.require_ready()
+        for route in self._translation_routes.values():
+            route.require_ready()
 
     async def on_health(self) -> PluginHealth:
         self._router.require_ready()
@@ -184,6 +193,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
             translated, provider_id, accelerator = await self._translate_source(
                 request,
                 task,
+                self._route(language),
                 control,
                 index,
                 text,
@@ -222,18 +232,9 @@ class DocumentTranslationPlugin(ManagedPlugin):
         if request.trigger != "manual":
             raise DocumentTranslationError("request-invalid", "document translation is manual only")
         self.permissions.require(READ_PERMISSION)
-        language = request.payload.get("targetLanguage")
-        if (
-            not isinstance(language, str)
-            or not language.strip()
-            or len(language) > MAX_LANGUAGE_CHARACTERS
-        ):
-            raise DocumentTranslationError(
-                "language-invalid",
-                f"target language must contain 1-{MAX_LANGUAGE_CHARACTERS} characters",
-            )
+        language = _validated_language(request.payload.get("targetLanguage"))
         selected = select_question_sources(request.job_id, request.payload.get("sources"))
-        return selected, language.strip()
+        return selected, language
 
     async def _source_text(self, source: SelectedSource) -> str:
         adapter = self._adapters.get(source.item.suffix)
@@ -255,10 +256,21 @@ class DocumentTranslationPlugin(ManagedPlugin):
             )
         return extraction.text
 
+    def _route(self, language: str) -> GenerationRouter:
+        """The route qualified for this target, or the general one.
+
+        A language whose own model was measured is answered by that model;
+        every other target goes to the general route. Nothing here decides
+        whether the pair was measured — the receipt says that, and the wiring
+        that installs the route is the provider's.
+        """
+        return self._translation_routes.get(language.casefold(), self._router)
+
     async def _translate_source(
         self,
         request: PluginRequest,
         task,
+        router: GenerationRouter,
         control: SourceFragment,
         index: int,
         text: str,
@@ -279,7 +291,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
                 request.job_id,
                 (SourceFragment(reference, digest, span.index + 1, span.text, digest),),
             )
-            generated = await self._router.run(
+            generated = await router.run(
                 task,
                 generation_request(request.job_id, PLUGIN_ID, (control.reference, reference)),
                 cancellation,
@@ -313,6 +325,47 @@ class DocumentTranslationPlugin(ManagedPlugin):
         fraction: float,
     ) -> None:
         await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
+
+
+def _validated_language(value: object) -> str:
+    """The target a person named, in the shape the manifest declares."""
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > MAX_LANGUAGE_CHARACTERS
+        or _LANGUAGE.fullmatch(value.strip()) is None
+    ):
+        raise DocumentTranslationError(
+            "language-invalid",
+            f"target language must be 1-{MAX_LANGUAGE_CHARACTERS} letters",
+        )
+    return value.strip()
+
+
+def _validated_translation_routes(
+    value: Mapping[str, GenerationRouter] | None,
+) -> dict[str, GenerationRouter]:
+    """Language-specific routes, keyed by the same normalisation the request is."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise DocumentTranslationError(
+            "provider-invalid", "translation routes must be a language mapping"
+        )
+    routes: dict[str, GenerationRouter] = {}
+    for language, router in value.items():
+        try:
+            normalized = _validated_language(language).casefold()
+        except DocumentTranslationError as error:
+            raise DocumentTranslationError(
+                "provider-invalid", "translation route language is invalid"
+            ) from error
+        if normalized in routes or not isinstance(router, GenerationRouter):
+            raise DocumentTranslationError(
+                "provider-invalid", "translation routes must be unique generation routers"
+            )
+        routes[normalized] = router
+    return routes
 
 
 def _translation_tokens(task) -> int:

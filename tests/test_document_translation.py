@@ -274,3 +274,104 @@ def test_the_manifest_declares_the_published_contracts():
         "targetLanguage",
     }
     assert "files:read-selected" in manifest["plugin"]["permissions"]
+
+
+@pytest.mark.asyncio
+async def test_a_language_with_its_own_qualified_model_is_answered_by_that_model(tmp_path):
+    """OMNI-0522: the Hebrew route the distribution wires, proved here.
+
+    The provider mounts a second, separately qualified model for one target.
+    A workload that took a single router would have sent Hebrew to the general
+    model anyway, and nothing would have said so.
+    """
+
+    store = MemoryFragmentStore()
+    general = TranslatingWorker(store)
+    hebrew = TranslatingWorker(store)
+    subject = DocumentTranslationPlugin(
+        GenerationRouter((general,)),
+        store,
+        translation_routes={"Hebrew": GenerationRouter((hebrew,))},
+    )
+    await subject.start(
+        PluginContext(PLUGIN_ID, 1, {}, frozenset({"files:read-selected", "accelerator:gpu"}))
+    )
+    source = document(tmp_path)
+
+    # The target is matched the way the request is normalised, not by spelling.
+    assert (
+        await subject.execute(
+            request(source, targetLanguage="hebrew"), CancellationController(), Progress()
+        )
+    ).status is PluginResultStatus.SUCCEEDED
+    assert general.spans == []
+    assert hebrew.spans != []
+
+    hebrew.spans.clear()
+    assert (
+        await subject.execute(
+            PluginRequest(
+                "job-2",
+                PLUGIN_ID,
+                "manual",
+                {"sources": [str(source)], "targetLanguage": "French"},
+                1,
+                None,
+            ),
+            CancellationController(),
+            Progress(),
+        )
+    ).status is PluginResultStatus.SUCCEEDED
+    assert hebrew.spans == []
+    assert general.spans != []
+
+
+def test_a_route_the_workload_cannot_address_is_refused_at_construction():
+    store = MemoryFragmentStore()
+    router = GenerationRouter((TranslatingWorker(store),))
+
+    for routes in (
+        {"": router},
+        {"Hebr3w": router},
+        {"x" * (MAX_LANGUAGE_CHARACTERS + 1): router},
+    ):
+        with pytest.raises(DocumentTranslationError) as invalid:
+            DocumentTranslationPlugin(router, store, translation_routes=routes)
+        assert invalid.value.code == "provider-invalid"
+
+    with pytest.raises(DocumentTranslationError) as duplicated:
+        DocumentTranslationPlugin(
+            router, store, translation_routes={"Hebrew": router, "hebrew": router}
+        )
+    assert duplicated.value.code == "provider-invalid"
+
+    with pytest.raises(DocumentTranslationError) as unrouted:
+        DocumentTranslationPlugin(router, store, translation_routes={"Hebrew": object()})
+    assert unrouted.value.code == "provider-invalid"
+
+    with pytest.raises(DocumentTranslationError) as unmapped:
+        DocumentTranslationPlugin(router, store, translation_routes=["Hebrew"])
+    assert unmapped.value.code == "provider-invalid"
+
+
+@pytest.mark.asyncio
+async def test_the_plugin_refuses_the_targets_its_own_manifest_refuses(tmp_path):
+    """The input contract and the plugin have to state one rule, not two.
+
+    The manifest declares `^[A-Za-z][A-Za-z -]*$`; the plugin checked only the
+    length, so a target the published contract refuses reached the prompt.
+    """
+
+    store = MemoryFragmentStore()
+    subject = await started(store)
+    source = document(tmp_path)
+    pattern = json.loads(
+        (ROOT / "plugin-manifests" / "document-translation.json").read_text(encoding="utf-8")
+    )["plugin"]["schemas"]["input"]["properties"]["targetLanguage"]["pattern"]
+    assert pattern == "^[A-Za-z][A-Za-z -]*$"
+
+    for target in ("He9rew", "עברית", "-Hebrew"):
+        refused = await subject.execute(
+            request(source, targetLanguage=target), CancellationController(), Progress()
+        )
+        assert refused.detail == "language-invalid", target
