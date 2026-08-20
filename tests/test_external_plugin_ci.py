@@ -201,11 +201,16 @@ def test_smoke_cli_prints_stable_json(monkeypatch, capsys):
 
 def test_external_plugin_workflow_builds_real_wheels_and_runs_outside_checkout():
     workflow = Path(".github/workflows/external-plugin.yml").read_text()
+    script = Path("scripts/run-external-plugin-smoke.sh").read_text()
 
-    assert "python -m build --wheel --no-isolation --outdir dist ." in workflow
-    assert "python -m build --wheel --no-isolation --outdir examples/" in workflow
-    assert "examples/omnitensor-plugin-template" in workflow
-    assert "python -m venv" in workflow
-    assert "working-directory: ${{ runner.temp }}" in workflow
-    assert "omnitensor-plugin-smoke" in workflow
-    assert "--plugin-id template-workload" in workflow
+    # The steps moved into the script so a developer can run the gate that
+    # fails on them; the workflow's job is to call it.
+    assert "./scripts/run-external-plugin-smoke.sh" in workflow
+    assert "-m build --wheel --no-isolation" in script
+    assert "examples/omnitensor-plugin-template" in script
+    assert "-m venv" in script
+    assert "omnitensor-plugin-smoke" in script
+    assert "--plugin-id template-workload" in script
+    # Still outside the checkout: an accidental relative import of the source
+    # tree has to fail rather than pass quietly.
+    assert 'cd "$work"' in script
