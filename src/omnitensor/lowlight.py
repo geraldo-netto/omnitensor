@@ -28,19 +28,15 @@ from .lowlight_settings import (
     _migrate_low_light_0_1_to_0_2 as _migrate_low_light_0_1_to_0_2,
 )
 from .plugins.settings import PluginSettingsError, PluginSettingsStore
+from .stable_error import StableError
 
 DEFAULT_LOW_LIGHT_SETTINGS_ROOT = "~/.config/omnitensor/workload-settings"
 DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_OUTPUT_NAME_CHARACTERS = 255
 
 
-class LowLightWorkspaceError(ValueError):
+class LowLightWorkspaceError(StableError, ValueError):
     """Stable refusal at the low-light filesystem boundary."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

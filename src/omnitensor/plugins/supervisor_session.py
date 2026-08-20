@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 
+from ..stable_error import StableError
 from .budgets import WorkerBudgetEnforcer
 from .ipc import (
     HandshakeAgreement,
@@ -31,13 +32,8 @@ from .supervisor_process import (
 )
 
 
-class PluginWorkerError(RuntimeError):
+class PluginWorkerError(StableError, RuntimeError):
     """Stable executable-worker refusal safe to surface as a job failure."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(slots=True)

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
 from ..registry import validate_document
+from ..stable_error import StableError
 from .acceptance_kit import (
     CaseScore,
     JsonDigestMismatchError,
@@ -45,13 +46,8 @@ PRIMARY_MODEL_SHA256 = "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882
 PRIMARY_MODEL_ID = "qwen3-8b-q4-k-m"
 
 
-class DocumentAcceptanceError(ValueError):
+class DocumentAcceptanceError(StableError, ValueError):
     """Stable acceptance refusal safe to show to an operator."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

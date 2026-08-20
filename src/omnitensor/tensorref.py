@@ -52,6 +52,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .stable_error import StableError
+
 DEFAULT_MAX_TENSOR_BYTES = 64 * 1024 * 1024
 MAX_RANK = 6
 MAX_DIMENSION = 65_536
@@ -61,13 +63,8 @@ _DTYPE_CODES = {"float32": "f", "float64": "d", "int32": "i", "int64": "q", "uin
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
-class TensorReferenceError(ValueError):
+class TensorReferenceError(StableError, ValueError):
     """Stable refusal for a referenced input, safe to return to the caller."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class InputRootPolicy(Protocol):

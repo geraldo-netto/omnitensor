@@ -11,6 +11,7 @@ from typing import Protocol, runtime_checkable
 
 from omnitensor.telemetry_types import SourceStatus
 
+from ..stable_error import StableError
 from .pipeline import CollectedOutput
 from .protocol import JsonObject, valid_plugin_id
 
@@ -38,11 +39,8 @@ class CollectionStatus(StrEnum):
     FAILED = "failed"
 
 
-class TriggerValidationError(ValueError):
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
+class TriggerValidationError(StableError, ValueError):
+    """Why a trigger was refused before any collection ran."""
 
 
 @dataclass(frozen=True, slots=True)

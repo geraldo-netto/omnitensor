@@ -24,6 +24,7 @@ from ..conversion import (
     convert_to_ncnn,
     convert_to_openvino,
 )
+from ..stable_error import StableError
 
 TARGET_ORDER = ("gpu", "npu", "tpu")
 _EDGE_TPU_COUNT = re.compile(
@@ -32,13 +33,8 @@ _EDGE_TPU_COUNT = re.compile(
 )
 
 
-class CompilerError(ValueError):
+class CompilerError(StableError, ValueError):
     """Stable producer-side compilation refusal."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

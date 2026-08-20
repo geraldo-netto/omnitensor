@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TypeAlias
 
+from ..stable_error import StableError
 from .artifacts import ArtifactReference
 from .protocol import JsonObject, PluginResult, PluginResultStatus
 
@@ -26,13 +27,8 @@ class PipelineStage(StrEnum):
     TERMINAL = "terminal"
 
 
-class PipelineTransitionError(RuntimeError):
+class PipelineTransitionError(StableError, RuntimeError):
     """Stable state-transition rejection for orchestration diagnostics."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

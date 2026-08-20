@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .stable_error import StableError
+
 RECORD_VERSION = 1
 DEFAULT_MAX_BUILD_RECORDS = 5_000
 MAX_BUILD_DURATION_MS = 30 * 24 * 60 * 60 * 1000
@@ -21,13 +23,8 @@ NETWORK_STABLE_ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,78}[a-z0-9])?")
 PERIPHERAL_STABLE_ID = NETWORK_STABLE_ID
 
 
-class RecorderError(ValueError):
+class RecorderError(StableError, ValueError):
     """Stable recording contract failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,13 +44,8 @@ class FeatureRow:
         }
 
 
-class ForecastError(ValueError):
+class ForecastError(StableError, ValueError):
     """Stable fitting or forecasting failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

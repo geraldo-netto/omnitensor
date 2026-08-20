@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..stable_error import StableError
+
 DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
 # Unbounded by default. These ceilings refused real work — a Qwen worker
 # legitimately holding 831 MB was killed against a 512 MiB limit once its model
@@ -43,13 +45,8 @@ class WorkerBudgetCode(StrEnum):
     CONCURRENCY = "concurrency-budget-exceeded"
 
 
-class WorkerBudgetExceededError(RuntimeError):
+class WorkerBudgetExceededError(StableError, RuntimeError):
     """Stable worker-call failure safe to cross the service boundary."""
-
-    def __init__(self, code: WorkerBudgetCode, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

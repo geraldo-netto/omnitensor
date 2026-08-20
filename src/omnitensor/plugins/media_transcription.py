@@ -25,6 +25,7 @@ from ..sdk import (
     failed_result,
     succeeded_result,
 )
+from ..stable_error import StableError
 from .protocol import CancellationToken, PluginRequest, PluginResult, ProgressReporter
 
 PLUGIN_ID = "media-transcription"
@@ -93,13 +94,8 @@ class MediaProviderIdentity:
     accelerator: str
 
 
-class MediaTranscriptionError(ValueError):
+class MediaTranscriptionError(StableError, ValueError):
     """Stable refusal that contains no selected content or absolute path."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @runtime_checkable

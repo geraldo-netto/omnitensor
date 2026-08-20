@@ -10,6 +10,7 @@ from typing import Protocol
 
 import jsonschema
 
+from ..stable_error import StableError
 from .protocol import JsonObject
 
 SECRET_SCHEMA_MARKER = "x-omnitensor-secret"
@@ -28,18 +29,12 @@ _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 SecretPath = tuple[str, ...]
 
 
-class SecretConfigurationError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(f"{code}: {detail}")
-        self.code = code
-        self.detail = detail
+class SecretConfigurationError(StableError, ValueError):
+    """Why a secret reference is not usable configuration."""
 
 
-class SecretResolutionError(RuntimeError):
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(f"{code}: {detail}")
-        self.code = code
-        self.detail = detail
+class SecretResolutionError(StableError, RuntimeError):
+    """Why a secret could not be resolved at the moment it was needed."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,6 +27,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from ..stable_error import StableError
 from .spans import OUTPUT_HEADROOM, Span, covers, reassemble, split
 
 # The room a span's translation is given inside the task's fixed output budget.
@@ -37,13 +38,8 @@ from .spans import OUTPUT_HEADROOM, Span, covers, reassemble, split
 SPAN_SAFETY = 1.25
 
 
-class TranslationError(ValueError):
+class TranslationError(StableError, ValueError):
     """A refusal that names what could not be translated, never its content."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 def span_budget_tokens(output_tokens: int) -> int:

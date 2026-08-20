@@ -17,6 +17,7 @@ from typing import Protocol, runtime_checkable
 
 import jsonschema
 
+from ..stable_error import StableError
 from .protocol import CancellationToken, ProgressReporter
 
 MAX_PROMPT_CHARACTERS = 32_768
@@ -35,13 +36,8 @@ _PRE_GENERATION_FAILURES = frozenset(
 _PREFERENCES = frozenset({("gpu",), ("npu", "gpu")})
 
 
-class GenerationError(RuntimeError):
+class GenerationError(StableError, RuntimeError):
     """Stable generation refusal safe to expose without private content."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class ProviderGenerationError(GenerationError):

@@ -32,6 +32,7 @@ from ..forecastresult import forecast_reading
 from ..job_ports import JobDispatcher, PreparedLaneDispatcher
 from ..outputcontract import declared_output, parse_labels, reduce_output
 from ..registry import Workload
+from ..stable_error import StableError
 from .cancellation import Cancellation, CancellationJournal, CancellationRegistry
 from .flow import PluginFlowController
 from .pipeline import (
@@ -67,13 +68,8 @@ def _current_job() -> tuple[str, object]:
         ) from error
 
 
-class OrchestrationError(ValueError):
+class OrchestrationError(StableError, ValueError):
     """Stable wiring failure, raised before any job is accepted."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

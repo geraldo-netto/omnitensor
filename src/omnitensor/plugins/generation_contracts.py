@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ..stable_error import StableError
 from .acceptance_kit import (
     NativeLoadReport,
     require_integer,
@@ -18,13 +19,8 @@ from .generation import GenerationRequest, GenerationTask
 from .protocol import CancellationToken, ProgressReporter
 
 
-class GenerationProviderError(ValueError):
+class GenerationProviderError(StableError, ValueError):
     """Stable provider configuration or qualification refusal."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

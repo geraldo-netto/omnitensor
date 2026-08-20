@@ -12,6 +12,7 @@ from pathlib import Path
 import jsonschema
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..stable_error import StableError
 from ..storelock import store_lock
 from .protocol import JsonObject, valid_plugin_id
 from .secrets import (
@@ -27,13 +28,8 @@ MAX_MIGRATIONS = 32
 _VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 
 
-class PluginSettingsError(ValueError):
+class PluginSettingsError(StableError, ValueError):
     """Stable configuration or persistence-contract rejection."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 
+from .stable_error import StableError
+
 FORECAST_KIND = "forecast"
 MAX_FORECAST_NESTING = 3
 MAX_TARGET_CHARS = 64
@@ -12,13 +14,8 @@ MAX_HORIZON = 128
 _READING_FIELDS = frozenset({"kind", "targetFeature", "horizon", "value"})
 
 
-class ForecastResultError(ValueError):
+class ForecastResultError(StableError, ValueError):
     """A forecast model produced an output that cannot mean one scalar."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 def forecast_reading(model: Mapping | None, tensors: object) -> dict | None:

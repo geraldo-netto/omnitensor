@@ -31,6 +31,7 @@ from ..sdk import (
     failed_result,
     succeeded_result,
 )
+from ..stable_error import StableError
 from .event_workload import (
     MemoryFragmentStore,
     PlainTextAdapter,
@@ -87,13 +88,8 @@ _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _PRIVATE_REFERENCE = re.compile(r"^private:[A-Za-z0-9._:-]{1,220}$")
 
 
-class DocumentQuestionError(ValueError):
+class DocumentQuestionError(StableError, ValueError):
     """Stable refusal that carries no selected content or path."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

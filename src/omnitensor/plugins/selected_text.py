@@ -21,6 +21,7 @@ from ..sdk import (
     failed_result,
     succeeded_result,
 )
+from ..stable_error import StableError
 from .event_workload import MemoryFragmentStore
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
@@ -45,13 +46,8 @@ MAX_LANGUAGE_CHARACTERS = 64
 _LANGUAGE = re.compile(r"^[A-Za-z][A-Za-z -]*$")
 
 
-class SelectedTextError(ValueError):
+class SelectedTextError(StableError, ValueError):
     """Stable refusal that never contains the private selection."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class SelectedTextPlugin(ManagedPlugin):

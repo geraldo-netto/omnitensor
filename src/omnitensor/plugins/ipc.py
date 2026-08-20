@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from ..stable_error import StableError
 from .protocol import (
     JsonObject,
     PluginProgress,
@@ -54,13 +55,8 @@ class WorkerMessageType(StrEnum):
     EXECUTE = "execute"
 
 
-class IPCProtocolError(ValueError):
+class IPCProtocolError(StableError, ValueError):
     """Stable boundary error safe to map to worker diagnostics."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

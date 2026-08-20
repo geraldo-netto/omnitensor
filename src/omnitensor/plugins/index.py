@@ -33,6 +33,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..stable_error import StableError
 from ..storelock import store_lock
 
 INDEX_DOCUMENT_VERSION = 1
@@ -56,13 +57,8 @@ class IndexHealth(StrEnum):
     INCOMPATIBLE = "incompatible"
 
 
-class IndexStoreError(ValueError):
+class IndexStoreError(StableError, ValueError):
     """Stable index contract failure, safe to report to a caller."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

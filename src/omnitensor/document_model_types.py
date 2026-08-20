@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
+from .stable_error import StableError
 
 PROFILE_ID = "document-intelligence"
 RECIPE_ID = "bge-small-en-v1-5"
@@ -31,13 +32,8 @@ _NATIVE_DTYPES = {
 }
 
 
-class DocumentModelError(ValueError):
+class DocumentModelError(StableError, ValueError):
     """Stable producer failure safe to show to a local operator."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

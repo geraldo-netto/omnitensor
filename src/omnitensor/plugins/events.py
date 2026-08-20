@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from omnitensor.registry import validate_document
 
+from ..stable_error import StableError
 from .extraction import ExtractionOutcome, ExtractionResult
 from .fragments import SourceFragment
 
@@ -27,13 +28,8 @@ _PRIVATE_REFERENCE = re.compile(r"^private:[A-Za-z0-9._:-]{1,200}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 
 
-class EventResultError(ValueError):
+class EventResultError(StableError, ValueError):
     """Stable event-contract or confirmation refusal."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

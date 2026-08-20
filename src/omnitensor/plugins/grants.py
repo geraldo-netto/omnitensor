@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
+from ..stable_error import StableError
 from ..storelock import store_lock
 from .protocol import valid_plugin_id
 
@@ -35,11 +36,8 @@ class GrantAction(StrEnum):
     REVOKED = "revoked"
 
 
-class GrantError(ValueError):
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
+class GrantError(StableError, ValueError):
+    """Why a grant operation was refused."""
 
 
 @dataclass(frozen=True, slots=True)

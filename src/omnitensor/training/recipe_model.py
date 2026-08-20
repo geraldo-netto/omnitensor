@@ -7,18 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ..stable_error import StableError
+
 MODEL_RECIPE_VERSION = 1
 RECEIPT_FILENAME = "source-receipt.json"
 _LEGACY_MODULE = "omnitensor.training.recipes"
 
 
-class ModelRecipeError(ValueError):
+class ModelRecipeError(StableError, ValueError):
     """Stable producer failure safe to show to a local operator."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

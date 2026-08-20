@@ -15,16 +15,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from ..stable_error import StableError
+
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 
 
-class FragmentStoreError(ValueError):
+class FragmentStoreError(StableError, ValueError):
     """Stable refusal with no private content in its detail."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

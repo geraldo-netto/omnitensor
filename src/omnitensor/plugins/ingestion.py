@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..stable_error import StableError
+
 DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024
 DEFAULT_MAX_FILES = 10_000
 DEFAULT_MAX_DEPTH = 8
@@ -37,13 +39,8 @@ class IngestionRejection(StrEnum):
     UNREADABLE = "unreadable"
 
 
-class IngestionError(ValueError):
+class IngestionError(StableError, ValueError):
     """Stable ingestion configuration or scan failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 def positive_integer_bound(

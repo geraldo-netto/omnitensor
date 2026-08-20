@@ -23,6 +23,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..stable_error import StableError
 from .protocol import PluginProgress, PluginResult
 
 DEFAULT_MAX_RETAINED_JOBS = 256
@@ -30,13 +31,8 @@ DEFAULT_RESULT_TTL_SECONDS = 900.0
 MAX_RETAINED_JOBS_LIMIT = 4096
 
 
-class JobResultError(RuntimeError):
+class JobResultError(StableError, RuntimeError):
     """Stable retrieval failure safe to return over the bus."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,6 +10,7 @@ from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
+from ..stable_error import StableError
 from .protocol import valid_plugin_id
 
 MAX_JOB_ID_CHARS = 120
@@ -30,11 +31,8 @@ class TextRedactor(Protocol):
     def redact_text(self, text: str) -> str: ...
 
 
-class SummaryError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(f"{code}: {detail}")
-        self.code = code
-        self.detail = detail
+class SummaryError(StableError, ValueError):
+    """Why a result summary was refused."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,7 @@ from ..plugins.protocol import (
     PluginResult,
     PluginResultStatus,
 )
+from ..stable_error import StableError
 from .contracts import ProgressSink
 
 MAX_PROGRESS_DETAIL_CHARS = 1024
@@ -29,13 +30,8 @@ _MAX_JOB_ID_CHARS = 128
 _MISSING = object()
 
 
-class SDKContractError(ValueError):
+class SDKContractError(StableError, ValueError):
     """Stable plugin-author error raised before a host boundary is crossed."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class PluginCancelledError(asyncio.CancelledError):

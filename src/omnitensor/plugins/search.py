@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..stable_error import StableError
 from .index import BoundedIndexStore, IndexEntry, IndexHealth, IndexState, IndexStoreError
 
 DEFAULT_PAGE_SIZE = 25
@@ -50,13 +51,8 @@ class ResultState(StrEnum):
     RECOVERING = "recovering"
 
 
-class SearchError(ValueError):
+class SearchError(StableError, ValueError):
     """Stable query rejection, safe to return to a caller."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

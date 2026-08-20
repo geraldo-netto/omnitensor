@@ -11,6 +11,7 @@ from omnitensor.preparation import ArtifactReference, artifact_reference_error, 
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..registry import validate_document
+from ..stable_error import StableError
 
 TRAINING_REPORT_VERSION = 1
 TRAINING_RECIPE = "forecast-v1"
@@ -24,13 +25,8 @@ MAX_INPUT_WIDTH = 512
 _PROFILE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-class TrainingError(ValueError):
+class TrainingError(StableError, ValueError):
     """Stable training failure safe to show to a local operator."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 def validate_training_report_document(document: object, *, numeric: bool = False) -> None:

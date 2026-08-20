@@ -34,6 +34,7 @@ from .plugins.artifact_trust import (
     artifact_signature_payload,
 )
 from .plugins.artifacts import ArtifactReference
+from .stable_error import StableError
 from .storelock import store_lock
 
 DEFAULT_PUBLISHER_LABEL = "xpuwlm"
@@ -43,13 +44,8 @@ MAX_TRUST_DOCUMENT_BYTES = 64 * 1024
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,46}[a-z0-9])?")
 
 
-class PublisherIdentityError(ValueError):
+class PublisherIdentityError(StableError, ValueError):
     """Stable failure at the local signing-identity boundary."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

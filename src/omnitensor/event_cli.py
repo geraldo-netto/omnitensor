@@ -16,15 +16,13 @@ from .plugins.event_workload import EventWorkloadError, confirmed_ics, select_so
 from .plugins.events import EventResultError, parse_grounded_event_result
 from .plugins.generation_catalog import load_generation_catalog
 from .plugins.generation_contracts import GenerationProviderError
+from .stable_error import StableError
 
 MAX_RESULT_BYTES = 1024 * 1024
 
 
-class EventClientError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
+class EventClientError(StableError, ValueError):
+    """Why an event import could not be completed."""
 
 
 def _place(event) -> str | None:

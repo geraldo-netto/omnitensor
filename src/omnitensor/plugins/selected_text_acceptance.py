@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_bytes_bounded, write_json_atomic
 from ..registry import validate_document
+from ..stable_error import StableError
 from .acceptance_kit import (
     BoundedJsonDocument,
     NativeLoadReport,
@@ -48,11 +49,8 @@ _HEBREW = re.compile(r"[\u0590-\u05ff]")
 _DISALLOWED_SCRIPT = re.compile(r"[\u0400-\u052f\u0600-\u06ff]")
 
 
-class SelectedTextAcceptanceError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
+class SelectedTextAcceptanceError(StableError, ValueError):
+    """Why a selected-text qualification was refused."""
 
 
 @dataclass(frozen=True, slots=True)

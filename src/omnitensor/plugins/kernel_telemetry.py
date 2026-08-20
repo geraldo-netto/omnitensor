@@ -33,6 +33,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ..stable_error import StableError
+
 DEFAULT_SOCKET_PATH = "/run/omnitensor/bpf-aggregate.sock"
 DEFAULT_MAX_AGGREGATE_BYTES = 256 * 1024
 DEFAULT_TIMEOUT_SECONDS = 2.0
@@ -81,13 +83,8 @@ class KernelTelemetryState(StrEnum):
     HELPER_INVALID = "helper-invalid"
 
 
-class KernelTelemetryError(ValueError):
+class KernelTelemetryError(StableError, ValueError):
     """Stable kernel-telemetry contract failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

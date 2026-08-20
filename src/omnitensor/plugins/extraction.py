@@ -30,6 +30,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from ..stable_error import StableError
 from .document_ingestion import DEFAULT_MAX_EXPANSION_RATIO, DocumentIngestor
 from .ingestion import IngestedFile
 
@@ -71,13 +72,8 @@ class BlockKind(StrEnum):
     OTHER = "other"
 
 
-class ExtractionError(ValueError):
+class ExtractionError(StableError, ValueError):
     """Stable extraction configuration failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

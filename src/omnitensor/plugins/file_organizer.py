@@ -28,6 +28,7 @@ from ..sdk import (
     failed_result,
     succeeded_result,
 )
+from ..stable_error import StableError
 from .document_qa import IndexedSpan, page_spans, select_question_sources
 from .event_workload import (
     EventWorkloadError,
@@ -64,13 +65,8 @@ READ_PERMISSION = "files:read-selected"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
-class FileOrganizerError(ValueError):
+class FileOrganizerError(StableError, ValueError):
     """Stable refusal that never contains private content or absolute paths."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class FileOrganizerPlugin(ManagedPlugin):

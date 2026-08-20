@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..atomicio import fsync_directory as _fsync_directory
 from ..atomicio import read_json_bounded
+from ..stable_error import StableError
 from .artifact_installation import (
     ARTIFACT_STORE_LOCK_FILE,
     ArtifactActivation,
@@ -25,13 +26,8 @@ _ARTIFACT_METADATA_VERSION = 1
 MAX_ARTIFACT_METADATA_BYTES = 64 * 1024
 
 
-class ArtifactCacheError(RuntimeError):
+class ArtifactCacheError(StableError, RuntimeError):
     """Stable cache failure safe to surface through orchestration."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

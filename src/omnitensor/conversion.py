@@ -31,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from .stable_error import StableError
+
 SUPPORTED_SOURCES = (".onnx", ".pt")
 OPENVINO_SOURCES = (".onnx",)
 DEFAULT_TIMEOUT_SECONDS = 900.0
@@ -39,13 +41,8 @@ MAX_RANK = 5
 _SHAPE = re.compile(r"^\[(\d+(?:,\d+)*)\]$")
 
 
-class ConversionError(ValueError):
+class ConversionError(StableError, ValueError):
     """Stable conversion failure, safe to show to whoever ran the command."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @dataclass(frozen=True, slots=True)

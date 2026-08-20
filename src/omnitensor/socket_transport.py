@@ -48,6 +48,7 @@ from .contract import RUNTIME_METHODS
 from .guard import GuardRefusedError
 from .ports import RuntimeHandler
 from .registry import validate_document
+from .stable_error import StableError
 
 CONTROL_PROTOCOL_VERSION = 1
 CONTROL_REQUEST_SCHEMA = "control-request.schema.json"
@@ -63,13 +64,8 @@ _LENGTH_PREFIX = struct.Struct(">I")
 _PEERCRED = struct.Struct("3i")
 
 
-class ControlSocketError(Exception):
+class ControlSocketError(StableError, Exception):
     """A control-socket failure with a stable code a client can branch on."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 def default_socket_path(environ: dict | None = None) -> Path:

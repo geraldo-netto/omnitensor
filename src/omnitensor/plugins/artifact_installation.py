@@ -19,6 +19,7 @@ from omnitensor.atomicio import JsonTooLargeError, read_json_bounded, write_json
 from omnitensor.atomicio import fsync_directory as _fsync_directory
 from omnitensor.storelock import store_lock
 
+from ..stable_error import StableError
 from .artifact_trust import (
     ArtifactProvenance,
     ArtifactTrustVerifier,
@@ -45,13 +46,8 @@ _DOCUMENT_VERSION = 1
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
-class ArtifactInstallationError(RuntimeError):
+class ArtifactInstallationError(StableError, RuntimeError):
     """Stable installation failure safe to surface through orchestration."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class PinnedArtifactInstallationError(RuntimeError):

@@ -43,6 +43,7 @@ from .plugins.artifacts import (
 from .plugins.artifacts import (
     artifact_reference_error as _artifact_reference_error,
 )
+from .stable_error import StableError
 
 ArtifactInstallationError = _ArtifactInstallationError
 artifact_reference_error = _artifact_reference_error
@@ -59,13 +60,8 @@ FORMAT_ACCELERATORS = {
 }
 
 
-class PreparationError(ValueError):
+class PreparationError(StableError, ValueError):
     """Stable preparation failure."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class FileDigestTooLargeError(OSError):

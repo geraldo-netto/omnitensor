@@ -4,16 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ..stable_error import StableError
+
 _LEGACY_MODULE = "omnitensor.training.runner"
 
 
-class ForecastRunError(ValueError):
+class ForecastRunError(StableError, ValueError):
     """Stable refusal from the trusted forecast path."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class ForecastClient(Protocol):

@@ -23,6 +23,7 @@ from typing import Generic, Protocol, TypeVar, runtime_checkable
 from omnitensor.telemetry_types import STABLE_ID
 
 from ..registry import validate_document
+from ..stable_error import StableError
 from .pipeline import CollectedOutput
 from .triggers import CollectorReadiness, SourceStatus, Trigger
 
@@ -32,13 +33,8 @@ COLLECTED_OUTPUT_SCHEMA = "collected-output.schema.json"
 Sample = TypeVar("Sample")
 
 
-class CollectionError(ValueError):
+class CollectionError(StableError, ValueError):
     """Stable collection rejection safe to surface through orchestration."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 @runtime_checkable

@@ -16,19 +16,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Collection
 
+from ..stable_error import StableError
 from .grants import GrantLedger
 
 DEFAULT_REVOCATION_POLL_SECONDS = 0.25
 MAX_REVOCATION_POLL_SECONDS = 60.0
 
 
-class RevocationError(RuntimeError):
+class RevocationError(StableError, RuntimeError):
     """Work stopped because consent for it was withdrawn or never granted."""
-
-    def __init__(self, code: str, detail: str):
-        self.code = code
-        self.detail = detail
-        super().__init__(f"{code}: {detail}")
 
 
 class LiveGrantView:
