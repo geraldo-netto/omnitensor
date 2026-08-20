@@ -108,3 +108,29 @@ def test_desktop_history_owner_lock_seam_stays_live_after_legacy_import(monkeypa
         is False
     )
     assert observed == [(tmp_path, ".desktop-training.lock")]
+
+
+def test_no_test_imports_its_helpers_through_a_tests_package():
+    """`tests/` is not a package, and importing it as one only works by luck.
+
+    `from tests.conftest import ...` resolves because pytest puts the rootdir
+    on `sys.path` for a rootdir-relative run. Any other entry — an in-process
+    `pytest.main`, a coverage or audit wrapper, a run started from another
+    directory — fails at collection with `No module named 'tests'`, which is
+    how this was found while measuring which source files a gate loads. Every
+    other file imports `from conftest import ...`; all of them should.
+    """
+    suite = Path(__file__).parent
+    offenders = []
+    for path in sorted(suite.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            named = []
+            if isinstance(node, ast.ImportFrom) and not node.level:
+                named = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                named = [alias.name for alias in node.names]
+            if any(name == "tests" or name.startswith("tests.") for name in named):
+                offenders.append(f"{path.relative_to(suite)}:{node.lineno}")
+
+    assert offenders == []

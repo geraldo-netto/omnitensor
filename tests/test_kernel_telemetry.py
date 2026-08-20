@@ -776,9 +776,10 @@ def test_a_worker_failure_reason_reaches_the_inventory_only_when_there_is_one():
     even as null — is a field an older applet rejects, taking the whole catalog
     down with it. It is present only when the runtime has something to say.
     """
+    from conftest import sample_plugin_manifest  # noqa: PLC0415
+
     from omnitensor.inspection import plugin_inventory_entry
     from omnitensor.registry import validate_document
-    from tests.conftest import sample_plugin_manifest  # noqa: PLC0415
 
     class Resolution:
         ready = True
