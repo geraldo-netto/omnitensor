@@ -45,6 +45,10 @@ CLIENT_PAYLOADS = {
             "/home/person/omnitensor-inputs/notes.md",
         ],
     },
+    "document-translation": {
+        "sources": ["/home/person/omnitensor-inputs/contract.txt"],
+        "targetLanguage": "Português",
+    },
     "event-extraction": {"sources": ["/home/person/omnitensor-inputs/meeting.md"]},
     "media-transcription": {"sources": ["/home/person/omnitensor-inputs/clip.wav"]},
 }
@@ -52,13 +56,9 @@ CLIENT_PAYLOADS = {
 # Workloads this repository ships that the client does not drive yet, with the
 # reason. Named rather than omitted: the check below is in both directions, so
 # a shipped workload is either transcribed above or listed here on purpose.
-NOT_CLIENT_DRIVEN = {
-    # `xpuwlm/workflows/specs/catalog.py` says in a comment that the workload
-    # "is not installed: no manifest declares it and the runtime has no such
-    # id". That stopped being true when OMNI-0521 published the manifest and
-    # OMNI-0522 shipped the distribution; the client spec is OMNI-0544.
-    "document-translation": "the client has no spec for it yet (OMNI-0544)",
-}
+# Empty is the state to be in, and `document-translation` was the last entry:
+# it left when the client shipped a spec, a window and a chooser for it.
+NOT_CLIENT_DRIVEN: dict[str, str] = {}
 
 # The bounds the client refuses on before it submits anything, so a person is
 # told at the chooser rather than a minute later by a failed job.
