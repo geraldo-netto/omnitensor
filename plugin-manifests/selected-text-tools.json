@@ -59,6 +59,7 @@
       },
       {
         "id": "dictalm2-hebrew-q4-k-m",
+        "selectable": false,
         "version": "1.0.0",
         "format": "gguf",
         "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",

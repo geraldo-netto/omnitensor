@@ -39,6 +39,7 @@
     "artifacts": [
       {
         "id": "qwen2-5-vl-7b-instruct",
+        "selectable": false,
         "version": "1.0.0",
         "format": "gguf",
         "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
@@ -50,6 +51,7 @@
       },
       {
         "id": "whisper-small-multilingual",
+        "selectable": false,
         "version": "1.0.0",
         "format": "ggml-whisper",
         "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",

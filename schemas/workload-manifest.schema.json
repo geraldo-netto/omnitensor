@@ -176,6 +176,10 @@
                 "type": "string",
                 "pattern": "^[a-f0-9]{64}$"
               },
+              "selectable": {
+                "description": "Whether a person may choose this artifact as the model this workload runs. A manifest pins every artifact the workload uses, and most workloads use one a person never picks: the embedder behind a document question, the named model behind one target language, the transcriber behind a recording. Offering those in a model dropdown ends at a worker that cannot do the work. Absent means selectable, so a manifest written before this field keeps its meaning.",
+                "type": "boolean"
+              },
               "sourceUri": {
                 "description": "Where this exact file came from. Stated per artifact because the worker reports provenance for whichever model a person chose, and a provider that hardcodes one URI cites the wrong model the moment somebody chooses another.",
                 "type": "string",

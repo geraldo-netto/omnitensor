@@ -220,10 +220,16 @@ class InstalledPluginRuntime:
         )
 
     def declared_artifacts(self, plugin_id: str) -> tuple[str, ...]:
-        """The artifact ids this plugin's manifest pins, in declared order.
+        """The artifact ids a person may choose for this plugin, in declared order.
 
-        The bound on which model a person may choose for it: every id here has
-        a pinned digest this service verifies, and anything else has none.
+        Every id here has a pinned digest this service verifies, and anything
+        else has none — but a manifest pins every artifact the workload
+        *uses*, and most workloads use one nobody picks: the embedder behind a
+        document question, the named model behind one target language, the
+        transcriber behind a recording. Those declare `selectable: false`, and
+        leaving them in meant a model dropdown offering an embedder and a
+        `set-profile-model` that accepted it, ending at a worker that cannot
+        do the work.
         """
         plugin = self._plugin(plugin_id)
         if plugin is None:
@@ -232,7 +238,9 @@ class InstalledPluginRuntime:
         return tuple(
             str(artifact["id"])
             for artifact in artifacts
-            if isinstance(artifact, dict) and isinstance(artifact.get("id"), str)
+            if isinstance(artifact, dict)
+            and isinstance(artifact.get("id"), str)
+            and artifact.get("selectable", True) is not False
         )
 
     def configuration_spec(self, plugin_id: str) -> PluginConfigurationSpec | None:

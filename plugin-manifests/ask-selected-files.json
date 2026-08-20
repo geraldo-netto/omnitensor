@@ -64,6 +64,7 @@
       },
       {
         "id": "bge-small-en-v1-5-ask-gpu",
+        "selectable": false,
         "version": "1.0.0",
         "format": "ncnn",
         "sha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",

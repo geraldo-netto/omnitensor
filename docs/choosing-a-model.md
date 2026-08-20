@@ -72,9 +72,17 @@ to, which is a different fact from having chosen that model.
 ls ~/.local/share/omnitensor/artifacts
 ```
 
-Anything in that store with a manifest declaration can be selected. Adding one
-means installing the weights with their pinned digest and declaring the artifact
-in the workload's manifest — see `docs/qwen-workload-installation.md`.
+Anything in that store the workload's manifest declares as selectable can be
+chosen. Adding one means installing the weights with their pinned digest and
+declaring the artifact in the workload's manifest — see
+`docs/qwen-workload-installation.md`.
+
+Not every pinned artifact is one of these. A manifest pins everything the
+workload *uses*, and most workloads use a model nobody picks: the BGE embedder
+behind a document question, DictaLM behind a Hebrew target, Whisper behind a
+recording. Those declare `"selectable": false`, `describe-plugins` publishes
+that beside each artifact, and `set-profile-model` refuses them — choosing one
+would have ended at a worker that cannot do the work.
 
 Candidates that were measured but not installed live in
 `~/.local/share/omnitensor/benchmark-candidates`, and

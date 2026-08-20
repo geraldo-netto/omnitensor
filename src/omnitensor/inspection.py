@@ -35,6 +35,10 @@ class ArtifactReadiness:
     format: str
     ready: bool
     reason: str
+    # Whether a person may choose this as the workload's model. A manifest
+    # pins every artifact the workload uses, and a client building a dropdown
+    # from the list without this offers the embedder behind a question.
+    selectable: bool = True
 
 
 def artifact_readiness(
@@ -49,6 +53,9 @@ def artifact_readiness(
     """
     readiness: list[ArtifactReadiness] = []
     for declared in plugin.manifest["plugin"]["artifacts"]:
+        # Absent means selectable, so a manifest written before the field
+        # keeps the meaning it had.
+        selectable = declared.get("selectable", True) is not False
         try:
             resolution = resolve(declared["id"])
         except Exception as error:  # noqa: BLE001 - store failures are arbitrary
@@ -59,6 +66,7 @@ def artifact_readiness(
                     declared["format"],
                     False,
                     f"artifact store is unreadable: {type(error).__name__}",
+                    selectable,
                 )
             )
             continue
@@ -69,6 +77,7 @@ def artifact_readiness(
                 declared["format"],
                 bool(resolution.ready),
                 "" if resolution.ready else resolution.reason,
+                selectable,
             )
         )
     return tuple(readiness)
@@ -126,6 +135,7 @@ def plugin_inventory_entry(
                 "format": item.format,
                 "ready": item.ready,
                 "reason": item.reason,
+                "selectable": item.selectable,
             }
             for item in artifact_readiness(plugin, resolve_artifact)
         ],

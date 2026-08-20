@@ -143,7 +143,8 @@
               "version",
               "format",
               "ready",
-              "reason"
+              "reason",
+              "selectable"
             ],
             "properties": {
               "id": {
@@ -168,6 +169,10 @@
               "reason": {
                 "type": "string",
                 "maxLength": 240
+              },
+              "selectable": {
+                "description": "Whether a person may choose this artifact as the model this workload runs. A manifest pins every artifact a workload uses, and most use one nobody picks — the embedder behind a document question, the named model behind one target language, the transcriber behind a recording — so a dropdown built from this list without reading this field offers a model that ends at a worker which cannot do the work.",
+                "type": "boolean"
               }
             }
           }
