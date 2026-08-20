@@ -14,10 +14,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The embedder is its own distribution: BGE on ncnn shares no code path with
-# llama.cpp, and every wheel that wanted generation used to carry its three
-# dependencies. Still an extra, so a wheel that only generates does not.
-documents = ["omnitensor-ncnn-embeddings==0.2.0"]
 media = ["pymupdf>=1.24"]
 
 [tool.hatch.build.targets.wheel]
@@ -35,5 +31,5 @@ fail_under = 95
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "../ncnn-embeddings/src", "../../src"]
+pythonpath = ["src", "../../src"]
 asyncio_mode = "auto"

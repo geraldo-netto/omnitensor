@@ -16,7 +16,6 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from omnitensor_ncnn_embeddings import bge
 from omnitensor_vulkan_runtime import (
     factories,
     grammar,
@@ -29,7 +28,6 @@ from omnitensor_vulkan_runtime import (
 
 from omnitensor.plugins.acceptance_kit import NativeLoadReport
 from omnitensor.plugins.document_qa import (
-    EmbeddingProvider,
     IndexedSpan,
     document_question_task,
     grounded_answer_document,
@@ -59,6 +57,11 @@ from omnitensor.plugins.selected_text_acceptance import (
 from omnitensor.plugins.tuning import WorkloadTuning
 from omnitensor.registry import validate_document
 from omnitensor.sdk import BootstrapArtifact, CancellationController, SDKContractError
+
+# The device the shipped receipts were measured on. Named here rather than
+# imported: the embedder that used to own the constant is another distribution
+# now, and this one must not depend on it.
+QUALIFIED_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 
 
 class Progress:
@@ -95,7 +98,7 @@ def _hebrew_runtime(tmp_path):
     return hebrew.HebrewTranslationRuntime(MemoryFragmentStore(), lease)
 
 
-def _qualification(*, device=bge.QUALIFIED_DEVICE, layers=4):
+def _qualification(*, device=QUALIFIED_DEVICE, layers=4):
     return qualification.Qualification(device, layers, "0.3.34", ())
 
 
@@ -715,7 +718,7 @@ def test_native_runtime_verification_binds_version_and_binary_bytes(tmp_path, mo
     first.write_bytes(b"vulkan")
     second.write_bytes(b"llama")
     expected = qualification.Qualification(
-        bge.QUALIFIED_DEVICE,
+        QUALIFIED_DEVICE,
         29,
         "0.3.34",
         (
@@ -2248,7 +2251,6 @@ def test_factory_refuses_absent_or_wrong_bootstrap(monkeypatch):
     ("factory", "plugin_id"),
     [
         (factories.create_event_extraction, "event-extraction"),
-        (factories.create_ask_selected_files, "ask-selected-files"),
         (factories.create_selected_text_tools, "selected-text-tools"),
         (factories.create_file_organizer, "file-organizer"),
     ],
@@ -2298,38 +2300,6 @@ def test_event_and_document_factories_fail_closed_on_missing_resources(tmp_path,
 
     with pytest.raises(RuntimeError, match="event recovery state is unavailable"):
         factories.create_event_extraction()
-
-    incomplete_bge = BootstrapArtifact(
-        factories.BGE_ARTIFACT_ID,
-        "1.0.0",
-        "ncnn",
-        "c" * 64,
-        tmp_path / "model.param",
-        (("model.bin", "d" * 64),),
-        "https://example.invalid/bge.param",
-        "MIT",
-    )
-
-    class DocumentBootstrap:
-        model_choice = ""
-
-        def chosen_or(self, default_artifact_id):
-            return self.require_artifact(self.model_choice or default_artifact_id)
-
-        accelerator_lease_path = lease
-        state_path = tmp_path
-
-        def require_artifact(self, artifact_id):
-            return model if artifact_id == model.id else incomplete_bge
-
-    monkeypatch.setattr(
-        factories,
-        "current_plugin_bootstrap",
-        lambda _plugin_id: DocumentBootstrap(),
-    )
-
-    with pytest.raises(RuntimeError, match="BGE companions are incomplete"):
-        factories.create_ask_selected_files()
 
 
 def test_selected_factory_requires_private_receipt_state(tmp_path, monkeypatch):
@@ -2408,7 +2378,9 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
         "selected-text-tools",
         "file-organizer",
     ):
-        _bootstrap, _store, _native, model, receipt, router = factories._generation(plugin_id)
+        _bootstrap, _store, _native, model, receipt, router = factories.generation_context(
+            plugin_id
+        )
         descriptor = router._workers["gpu"].descriptor
         assert descriptor.provenance.model_id == model.path.stem
         assert descriptor.accelerator == "gpu"
@@ -2483,17 +2455,6 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
         "https://example.invalid/dictalm.gguf",
         "Apache-2.0",
     )
-    bge_artifact = BootstrapArtifact(
-        factories.BGE_ARTIFACT_ID,
-        "1.0.0",
-        "ncnn",
-        "c" * 64,
-        tmp_path / "bge" / "model.param",
-        (("model.bin", "d" * 64), ("tokenizer.json", "e" * 64)),
-        "https://example.invalid/bge.param",
-        "MIT",
-    )
-
     class Bootstrap:
         model_choice = ""
 
@@ -2504,25 +2465,9 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
         state_path = state
 
         def require_artifact(self, artifact_id):
-            return {
-                qwen.id: qwen,
-                hebrew_model.id: hebrew_model,
-                bge_artifact.id: bge_artifact,
-            }[artifact_id]
-
-    class FakeEmbedder:
-        def __init__(self, *args):
-            self.args = args
-            self.descriptor = EmbeddingProvider("bge", "gpu", "c" * 64, True)
-
-        async def embed(self, *_args, **_kwargs):
-            return ()
-
-        async def preflight(self):
-            return None
+            return {qwen.id: qwen, hebrew_model.id: hebrew_model}[artifact_id]
 
     monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
-    monkeypatch.setattr(factories, "BgeVulkanEmbedder", FakeEmbedder)
     monkeypatch.setattr(factories, "load_qualification", lambda *_args: _qualification())
     monkeypatch.setattr(
         factories, "load_model_qualification", lambda *_args: _qualification(layers=33)
@@ -2530,7 +2475,6 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
 
     created = (
         factories.create_event_extraction(),
-        factories.create_ask_selected_files(),
         factories.create_selected_text_tools(),
         factories.create_file_organizer(),
         factories.create_document_translation(),
@@ -2538,7 +2482,6 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
 
     assert [item.plugin_id for item in created] == [
         "event-extraction",
-        "ask-selected-files",
         "selected-text-tools",
         "file-organizer",
         "document-translation",
@@ -2551,34 +2494,27 @@ def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypat
         if name.startswith("create_") and callable(getattr(factories, name))
     }
     assert {item.plugin_id.replace("-", "_") for item in created} == published
-    assert isinstance(created[1]._embedder, FakeEmbedder)
-    assert created[1]._embedder.args == (
-        bge_artifact.path,
-        bge_artifact.path.parent / "tokenizer.json",
-        bge_artifact.sha256,
-        lease,
-    )
     assert created[0]._plugin._journal._path == state / "event-recovery.json"
-    hebrew_router = created[2]._plugin._translation_routes["hebrew"]
+    hebrew_router = created[1]._plugin._translation_routes["hebrew"]
     hebrew_worker = hebrew_router._workers["gpu"]
     assert hebrew_worker.descriptor.provider_id == "dictalm2-hebrew-gpu"
     assert hebrew_worker.descriptor.provenance.model_id == factories.HEBREW_ARTIFACT_ID
-    assert created[2]._plugin._router._workers["gpu"].descriptor.provider_id == (
+    assert created[1]._plugin._router._workers["gpu"].descriptor.provider_id == (
         "qwen3-workloads-gpu"
     )
-    assert len(created[2]._runtimes) == 2
-    assert created[2]._load_receipt_path == state / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    assert len(created[1]._runtimes) == 2
+    assert created[1]._load_receipt_path == state / SELECTED_TEXT_WORKER_LOAD_RECEIPT
     # The fifth: the same DictaLM route, assembled by the same helper, and no
     # load receipt — that one belongs to selected-text.
-    translation = created[4]._plugin
+    translation = created[3]._plugin
     assert translation._translation_routes["hebrew"]._workers["gpu"].descriptor.provider_id == (
         "dictalm2-hebrew-gpu"
     )
-    assert len(created[4]._runtimes) == 2
-    assert created[4]._load_receipt_path is None
-    assert created[4]._load_receipt_models == ()
+    assert len(created[3]._runtimes) == 2
+    assert created[3]._load_receipt_path is None
+    assert created[3]._load_receipt_models == ()
 
-    assert created[2]._load_receipt_models == (
+    assert created[1]._load_receipt_models == (
         ("primary", qwen.sha256),
         ("hebrewTranslation", hebrew_model.sha256),
     )
@@ -2619,7 +2555,7 @@ def test_qualified_workload_lifecycle_proves_gpu_and_delegates(monkeypatch):
             return result
 
     class Native:
-        physical_device = bge.QUALIFIED_DEVICE
+        physical_device = QUALIFIED_DEVICE
 
         async def load(self, paths, accelerator):
             calls.append(("load", paths, accelerator))
@@ -2683,7 +2619,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
             calls.append(("stop",))
 
     class Native:
-        physical_device = bge.QUALIFIED_DEVICE
+        physical_device = QUALIFIED_DEVICE
 
         def __init__(self, layers):
             self.layers = layers
@@ -2738,7 +2674,7 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
     assert receipt.document() == document
     assert receipt.primary.load.total_model_layers == 37
     assert receipt.hebrew.load.total_model_layers == 33
-    assert receipt.primary.device_name == receipt.hebrew.device_name == bge.QUALIFIED_DEVICE
+    assert receipt.primary.device_name == receipt.hebrew.device_name == QUALIFIED_DEVICE
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     assert calls == [
         ("remove", True),
@@ -2793,7 +2729,7 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
             calls.append("stop")
 
     class Native:
-        physical_device = bge.QUALIFIED_DEVICE
+        physical_device = QUALIFIED_DEVICE
 
         def __init__(self, report):
             self.report = report
@@ -2852,7 +2788,7 @@ def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(tmp_pat
             calls.append("stop")
 
     class Native:
-        physical_device = bge.QUALIFIED_DEVICE
+        physical_device = QUALIFIED_DEVICE
 
         def __init__(self, layers):
             self.layers = layers
@@ -2909,7 +2845,7 @@ def test_selected_start_failure_preserves_original_and_attempts_every_cleanup(
             calls.append("stop")
 
     class FailingNative:
-        physical_device = bge.QUALIFIED_DEVICE
+        physical_device = QUALIFIED_DEVICE
 
         async def load(self, _paths, _accelerator):
             calls.append(("load", 37))
@@ -3045,7 +2981,7 @@ def test_qualified_workload_start_failure_terminates_and_stops(monkeypatch):
 
 @pytest.mark.parametrize(
     ("physical_device", "layers"),
-    [("AMD Radeon 610M (RADV GFX1103_R1)", 4), (bge.QUALIFIED_DEVICE, 3)],
+    [("AMD Radeon 610M (RADV GFX1103_R1)", 4), (QUALIFIED_DEVICE, 3)],
 )
 def test_a_workload_starts_on_a_device_the_receipt_never_measured(
     monkeypatch, physical_device, layers

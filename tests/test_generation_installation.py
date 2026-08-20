@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -404,18 +405,41 @@ def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
 
 
 def shim_distributions() -> dict[str, Path]:
-    """Every distribution whose entry point is a re-export of the shared runtime.
+    """Every distribution whose entry point is a re-export of a provider runtime.
 
-    Derived, so a sixth is covered by the rule the moment it exists.
-    `media-transcription` is deliberately not one: its shim re-exports from its
-    own package, and its identity is checked by its own provider suite.
+    Derived, so a new one is covered by the rule the moment it exists, and no
+    longer keyed to one runtime's package name: `ask-selected-files` stopped
+    being a shim when its factory moved out of the generation wheel, and a
+    rule that only recognised `omnitensor_vulkan_runtime` would have read that
+    move as a regression. `media-transcription` is deliberately not one
+    either: its shim re-exports from its own package, and its identity is
+    checked by its own provider suite.
     """
     found = {}
     for provider, project in distributions().values():
         [module] = project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
         package = module.removeprefix("src/")
         source = (provider / "src" / package / "__init__.py").read_text(encoding="utf-8")
-        if "from omnitensor_vulkan_runtime import" in source:
+        if re.search(r"^from omnitensor_\w+ import \w+ as create$", source, re.MULTILINE):
+            found[package] = provider
+    return found
+
+
+def composed_distributions() -> dict[str, Path]:
+    """Every workload distribution that assembles rather than re-exports.
+
+    Two are: `ask-selected-files`, which needs the llama.cpp runtime and the
+    ncnn embedder and so builds its workload out of both, and
+    `media-transcription`, whose provider is its own package. A distribution
+    that is not a re-export states its own check, and this is where that is
+    required rather than assumed.
+    """
+    shims = set(shim_distributions())
+    found = {}
+    for provider, project in distributions().values():
+        [module] = project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+        package = module.removeprefix("src/")
+        if package not in shims:
             found[package] = provider
     return found
 
@@ -429,7 +453,7 @@ def test_the_shim_identity_suites_state_their_one_check_once():
     single package name — so the next change to the shim contract is one edit
     rather than five that have to agree.
     """
-    assert len(shim_distributions()) == 5
+    assert len(shim_distributions()) == 4
 
     bodies = set()
     for package, provider in shim_distributions().items():
@@ -441,3 +465,18 @@ def test_the_shim_identity_suites_state_their_one_check_once():
 
     assert len(bodies) == 1, "the copies have drifted apart again"
     assert (PROVIDERS / "shim_identity.py").is_file()
+
+
+def test_a_distribution_that_composes_rather_than_re_exports_states_its_own_check():
+    """OMNI-0555: not every workload wheel is one import.
+
+    `ask-selected-files` builds its workload from two distributions, so the
+    shared shim check does not describe it and skipping it silently would
+    leave the only assembled workload unproven where it is built.
+    """
+    composed = composed_distributions()
+
+    assert set(composed) == {"omnitensor_ask_selected_files", "omnitensor_media_transcription"}
+    for package, provider in composed.items():
+        suites = sorted(path.name for path in (provider / "tests").glob("test_*.py"))
+        assert suites, f"{package} states no check of its own"

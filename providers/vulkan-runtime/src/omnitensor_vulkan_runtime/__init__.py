@@ -1,19 +1,21 @@
 """Shared native provider used by the isolated workload wheels."""
 
 from .factories import (
-    create_ask_selected_files,
+    QualifiedWorkload,
     create_document_translation,
     create_event_extraction,
     create_file_organizer,
     create_selected_text_tools,
+    generation_context,
     workload_tasks,
 )
 
 __all__ = [
-    "create_ask_selected_files",
+    "QualifiedWorkload",
     "create_document_translation",
     "create_event_extraction",
     "create_file_organizer",
     "create_selected_text_tools",
+    "generation_context",
     "workload_tasks",
 ]

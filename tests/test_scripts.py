@@ -225,5 +225,10 @@ def test_the_provider_requirements_script_drops_only_the_local_distributions():
     # Extras are third-party requirements too, and were exactly what went
     # missing when a provider suite failed 35 of 107.
     runtime = module.requirements(ROOT / "providers/vulkan-runtime/pyproject.toml")
-    assert "ncnn>=1.0.20260526" in runtime
     assert "pymupdf>=1.24" in runtime
+    assert "llama-cpp-python==0.3.34" in runtime
+    # ncnn left with the embedder: the generation wheel no longer installs an
+    # embedding engine to answer a question with.
+    assert not any(item.startswith("ncnn") for item in runtime)
+    embeddings = module.requirements(ROOT / "providers/ncnn-embeddings/pyproject.toml")
+    assert "ncnn>=1.0.20260526" in embeddings

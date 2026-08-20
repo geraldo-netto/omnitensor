@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-
-from omnitensor_ncnn_embeddings import BgeVulkanEmbedder
+from typing import Protocol, runtime_checkable
 
 from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_answer import document_question_task
-from omnitensor.plugins.document_qa import DocumentQuestionPlugin
 from omnitensor.plugins.document_translation import (
     DocumentTranslationPlugin,
     document_translation_task,
@@ -62,8 +60,21 @@ from .runtime import LlamaVulkanRuntime
 # `default_model()` reads that from the receipt — and remains only because
 # the installer pins this exact file.
 SHIPPED_ARTIFACT_ID = "qwen3-8b-q4-k-m"
-BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
 HEBREW_ARTIFACT_ID = "dictalm2-hebrew-q4-k-m"
+
+
+@runtime_checkable
+class EmbedderPort(Protocol):
+    """What this wrapper needs of an embedder, which is not where it comes from.
+
+    `ask-selected-files` builds one from the ncnn distribution and hands it in;
+    stating the port here rather than importing the class keeps ncnn out of a
+    wheel that only generates.
+    """
+
+    async def preflight(self) -> None: ...
+
+    async def aclose(self) -> None: ...
 
 
 class QualifiedWorkload:
@@ -75,7 +86,7 @@ class QualifiedWorkload:
         runtime: LlamaVulkanRuntime,
         model_path: Path,
         qualification: Qualification,
-        embedder: BgeVulkanEmbedder | None = None,
+        embedder: EmbedderPort | None = None,
         additional_runtimes: tuple[tuple[LlamaVulkanRuntime, Path, Qualification], ...] = (),
         load_receipt_path: Path | None = None,
         load_receipt_models: tuple[tuple[str, str], ...] = (),
@@ -231,7 +242,14 @@ def _provenance(artifact) -> ArtifactProvenance:
     )
 
 
-def _generation(plugin_id: str):
+def generation_context(plugin_id: str):
+    """Everything a Qwen workload needs before its own plugin is built.
+
+    Public because a workload distribution that is more than a re-export —
+    `ask-selected-files`, which also embeds — assembles its own plugin from
+    this and from another distribution's embedder, and doing that from here
+    would put ncnn back inside the llama.cpp wheel.
+    """
     bootstrap = current_plugin_bootstrap(plugin_id)
     if bootstrap.accelerator_lease_path is None:
         raise RuntimeError("GPU accelerator grant is unavailable")
@@ -289,7 +307,7 @@ def workload_tasks() -> dict[str, Callable[[], GenerationTask]]:
 
 
 def create_event_extraction() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = _generation("event-extraction")
+    bootstrap, store, runtime, model, qualification, router = generation_context("event-extraction")
     if bootstrap.state_path is None:
         raise RuntimeError("event recovery state is unavailable")
     plugin = EventExtractionPlugin(
@@ -298,27 +316,6 @@ def create_event_extraction() -> QualifiedWorkload:
         EventRecoveryJournal(bootstrap.state_path / "event-recovery.json"),
     )
     return QualifiedWorkload(plugin, runtime, model.path, qualification)
-
-
-def create_ask_selected_files() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = _generation("ask-selected-files")
-    bge = bootstrap.require_artifact(BGE_ARTIFACT_ID)
-    companions = dict(bge.companions)
-    if set(companions) != {"model.bin", "tokenizer.json"}:
-        raise RuntimeError("BGE companions are incomplete")
-    embedder = BgeVulkanEmbedder(
-        bge.path,
-        bge.path.parent / "tokenizer.json",
-        bge.sha256,
-        bootstrap.accelerator_lease_path,
-    )
-    return QualifiedWorkload(
-        DocumentQuestionPlugin(embedder, router, store),
-        runtime,
-        model.path,
-        qualification,
-        embedder,
-    )
 
 
 def _hebrew_route(bootstrap, store):
@@ -347,7 +344,9 @@ def _hebrew_route(bootstrap, store):
 
 
 def create_document_translation() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = _generation("document-translation")
+    bootstrap, store, runtime, model, qualification, router = generation_context(
+        "document-translation"
+    )
     hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = _hebrew_route(
         bootstrap, store
     )
@@ -366,7 +365,9 @@ def create_document_translation() -> QualifiedWorkload:
 
 
 def create_selected_text_tools() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = _generation("selected-text-tools")
+    bootstrap, store, runtime, model, qualification, router = generation_context(
+        "selected-text-tools"
+    )
     if bootstrap.state_path is None:
         raise RuntimeError("selected-text load receipt state is unavailable")
     hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = _hebrew_route(
@@ -392,5 +393,5 @@ def create_selected_text_tools() -> QualifiedWorkload:
 
 
 def create_file_organizer() -> QualifiedWorkload:
-    _bootstrap, store, runtime, model, qualification, router = _generation("file-organizer")
+    _bootstrap, store, runtime, model, qualification, router = generation_context("file-organizer")
     return QualifiedWorkload(FileOrganizerPlugin(router, store), runtime, model.path, qualification)
