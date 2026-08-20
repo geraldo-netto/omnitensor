@@ -23,6 +23,7 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0579 | open | high | m | **Every page of a document reopens and reparses the whole file.** `providers/media-transcription/.../documents.py` calls `_render_document_page` per page, and each call runs `_pdf_reader()` and then `pymupdf.open(source)` / `PdfReader(source)` / `Image.open(source)` from scratch — so a 300-page PDF is parsed 301 times and the work is quadratic in the page count. `_pdf_page_count` opens it once more. On a long document this is most of the wall clock, and it is the same documents that then run into the call deadline. Open the source once for the whole transcription and read each page from that handle, keeping the per-page interleaving with the vision model so a long document still reports progress while it works. |
 
 ## Blocked
 
