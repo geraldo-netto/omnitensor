@@ -55,16 +55,19 @@ result contained no raw fragment field or absolute source path.
 
 ## Package and model layout
 
-The provider is six wheels rather than one wheel with five entry points. An
+The provider is seven wheels rather than one wheel with five entry points. An
 OmniTensor plugin distribution may own exactly one identity and exactly one
-`omnitensor-plugin.json`, so each workload needs an identity-isolated thin
-wheel. All five depend on one implementation wheel:
+`omnitensor-plugin.json`, so each workload needs an identity-isolated wheel.
+Five of them depend on the generation wheel; `ask-selected-files` also needs
+the embedder wheel, which is separate because BGE on ncnn is a different
+engine and no workload that only generates should install it:
 
 | Wheel | Responsibility | Pinned models |
 | --- | --- | --- |
-| `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, BGE/ncnn retrieval, and the five factories | runtime only |
+| `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, and four workload factories | runtime only |
+| `omnitensor-ncnn-embeddings` | BGE/ncnn retrieval on the same GPU lease | runtime only |
 | `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
-| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus BGE-small-en-v1.5 |
+| `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point, manifest, and the workload it assembles from the two runtime wheels | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus BGE-small-en-v1.5 |
 | `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus operation-specific DictaLM2 Hebrew |
 | `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
 | `omnitensor-qwen-document-translation` | `document-translation` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus DictaLM2 for a Hebrew target |
@@ -226,7 +229,7 @@ mkdir -p "$OMNI_WHEELS"
 
 "$OMNI_BUILDER/pip" install --upgrade pip build hatchling wheel
 
-for provider in vulkan-runtime event-extraction ask-selected-files \
+for provider in vulkan-runtime ncnn-embeddings event-extraction ask-selected-files \
   selected-text-tools file-organizer document-translation; do
   "$OMNI_BUILDER/pip" wheel --no-deps \
     "$OMNI_SOURCE/providers/$provider" --wheel-dir "$OMNI_WHEELS"
@@ -248,6 +251,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
   "$OMNI_LLAMA_WHEEL"
 "$OMNI_SERVICE/pip" install --no-deps \
   "$OMNI_WHEELS"/omnitensor_vulkan_runtime-0.2.0-*.whl \
+  "$OMNI_WHEELS"/omnitensor_ncnn_embeddings-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.2.0-*.whl \
@@ -577,6 +581,7 @@ systemctl --user stop omnitensor.service
 "$OMNI_SERVICE/pip" install --force-reinstall --no-deps \
   /absolute/path/to/previous/llama_cpp_python-0.3.34-*.whl \
   /absolute/path/to/previous/omnitensor_vulkan_runtime-*.whl \
+  /absolute/path/to/previous/omnitensor_ncnn_embeddings-*.whl \
   /absolute/path/to/previous/omnitensor_qwen_event_extraction-*.whl \
   /absolute/path/to/previous/omnitensor_qwen_ask_selected_files-*.whl \
   /absolute/path/to/previous/omnitensor_qwen_selected_text_tools-*.whl \
@@ -629,7 +634,7 @@ systemctl --user stop omnitensor.service
 
 # Optional, only when nothing else depends on the shared provider runtime:
 "$OMNI_SERVICE/pip" uninstall -y \
-  omnitensor-vulkan-runtime llama-cpp-python
+  omnitensor-vulkan-runtime omnitensor-ncnn-embeddings llama-cpp-python
 systemctl --user start omnitensor.service
 ```
 

@@ -542,3 +542,27 @@ def test_every_command_a_person_must_run_is_written_down():
 
     undocumented = sorted(name for name in scripts if name not in written)
     assert undocumented == []
+
+
+def test_the_installation_guide_names_every_provider_wheel_a_person_must_build():
+    """OMNI-0556: the runtime wheels are not derivable from the workload ids.
+
+    `qwen_distributions()` finds a distribution by its workload entry point,
+    and the two runtime wheels publish none — so nothing in the guide's own
+    gates would have noticed that a person following it never built the
+    embedder, and `ask-selected-files` would fail to import at worker start.
+    """
+    guide = (ROOT / "docs/qwen-workload-installation.md").read_text(encoding="utf-8")
+    runtime_wheels = {
+        path.parent.name: tomllib.loads(path.read_text(encoding="utf-8"))["project"]["name"]
+        for path in sorted((ROOT / "providers").glob("*/pyproject.toml"))
+        if "entry-points" not in tomllib.loads(path.read_text(encoding="utf-8"))["project"]
+    }
+
+    assert set(runtime_wheels) == {"vulkan-runtime", "ncnn-embeddings"}
+    loop = guide.split("for provider in", 1)[1].split("; do", 1)[0]
+    for directory, name in runtime_wheels.items():
+        wheel = name.replace("-", "_")
+        assert f"`{name}`" in guide, f"{name} is not in the wheel table"
+        assert f"{wheel}-0.2.0-*.whl" in guide, f"{name} is never installed"
+        assert directory in loop, f"{directory} is never built"
