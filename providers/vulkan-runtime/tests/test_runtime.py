@@ -2450,7 +2450,13 @@ def test_generation_factory_shares_one_model_across_all_workloads(tmp_path, monk
     ]
 
 
-def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monkeypatch):
+def test_every_factory_builds_the_expected_isolated_workload(tmp_path, monkeypatch):
+    """One case per entry point, and the set is derived from the exports.
+
+    This built four factories from a literal tuple, so `create_document_
+    translation` — the fifth entry point, which a shipped wheel calls — was
+    executed by no test at all.
+    """
     lease = tmp_path / "generation.lock"
     lease.touch()
     state = tmp_path / "state"
@@ -2525,6 +2531,7 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         factories.create_ask_selected_files(),
         factories.create_selected_text_tools(),
         factories.create_file_organizer(),
+        factories.create_document_translation(),
     )
 
     assert [item.plugin_id for item in created] == [
@@ -2532,7 +2539,16 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
         "ask-selected-files",
         "selected-text-tools",
         "file-organizer",
+        "document-translation",
     ]
+    # Every entry point the package publishes was built above, so a sixth is a
+    # failing test rather than an untested factory.
+    published = {
+        name.removeprefix("create_")
+        for name in dir(factories)
+        if name.startswith("create_") and callable(getattr(factories, name))
+    }
+    assert {item.plugin_id.replace("-", "_") for item in created} == published
     assert isinstance(created[1]._embedder, FakeEmbedder)
     assert created[1]._embedder.args == (
         bge_artifact.path,
@@ -2550,6 +2566,16 @@ def test_all_four_factories_build_the_expected_isolated_workload(tmp_path, monke
     )
     assert len(created[2]._runtimes) == 2
     assert created[2]._load_receipt_path == state / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    # The fifth: the same DictaLM route, assembled by the same helper, and no
+    # load receipt — that one belongs to selected-text.
+    translation = created[4]._plugin
+    assert translation._translation_routes["hebrew"]._workers["gpu"].descriptor.provider_id == (
+        "dictalm2-hebrew-gpu"
+    )
+    assert len(created[4]._runtimes) == 2
+    assert created[4]._load_receipt_path is None
+    assert created[4]._load_receipt_models == ()
+
     assert created[2]._load_receipt_models == (
         ("primary", qwen.sha256),
         ("hebrewTranslation", hebrew_model.sha256),
