@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/document-translation-result.schema.json",
+  "title": "Selected documents, translated",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "requestId",
+    "targetLanguage",
+    "providerId",
+    "accelerator",
+    "documents"
+  ],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "targetLanguage": {"type": "string", "minLength": 1, "maxLength": 64},
+    "providerId": {"type": "string", "minLength": 1, "maxLength": 120},
+    "accelerator": {"enum": ["gpu", "npu", "tpu"]},
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/document"}
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentId",
+        "fileName",
+        "sourceSha256",
+        "spanCount",
+        "text",
+        "translationSha256"
+      ],
+      "properties": {
+        "documentId": {"type": "string", "pattern": "^selected-document-[0-9]{1,6}$"},
+        "fileName": {"type": "string", "minLength": 1, "maxLength": 255},
+        "sourceSha256": {"$ref": "#/$defs/digest"},
+        "spanCount": {"type": "integer", "minimum": 1},
+        "text": {"type": "string", "minLength": 1},
+        "translationSha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

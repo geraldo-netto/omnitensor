@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/document-translation-answer.schema.json",
+  "title": "One translated span, as the isolated worker returns it",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "requestId", "translation", "evidence"],
+  "properties": {
+    "version": {"const": 1},
+    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
+    "translation": {"type": "string", "minLength": 1},
+    "evidence": {"$ref": "#/$defs/evidence"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceRef", "textSha256"],
+      "properties": {
+        "sourceRef": {"type": "string", "pattern": "^private:[A-Za-z0-9._:-]{1,220}$"},
+        "textSha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

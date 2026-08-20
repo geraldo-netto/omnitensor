@@ -1,0 +1,152 @@
+{
+  "manifestVersion": 2,
+  "id": "document-translation",
+  "version": "1.0.0",
+  "capabilities": [
+    "explicit-selection",
+    "document-transformation"
+  ],
+  "plugin": {
+    "entryPoint": "document-translation",
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": [
+        "cancel",
+        "execute",
+        "health",
+        "progress"
+      ]
+    },
+    "schemas": {
+      "configuration": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sources",
+          "targetLanguage"
+        ],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "targetLanguage": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z -]*$"
+          }
+        }
+      },
+      "output": {
+        "$ref": "document-translation-result.schema.json"
+      }
+    },
+    "triggers": [
+      "manual"
+    ],
+    "artifacts": [
+      {
+        "id": "qwen3-5-9b-iq4-xs",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+        "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf",
+        "licenseSpdx": "Apache-2.0"
+      },
+      {
+        "id": "qwen3-8b-q4-k-m",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+        "sourceUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+        "licenseSpdx": "Apache-2.0"
+      },
+      {
+        "id": "dictalm2-hebrew-q4-k-m",
+        "version": "1.0.0",
+        "format": "gguf",
+        "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
+        "sourceUri": "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/9ed3346a1440643825287abf86e28800005ec9b3/dictalm2.0-instruct-Q4_K_M.gguf",
+        "licenseSpdx": "Apache-2.0"
+      }
+    ],
+    "permissions": [
+      "accelerator:gpu",
+      "files:read-selected"
+    ]
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": [
+      "gpu"
+    ],
+    "minimumDevices": 1,
+    "model": null
+  },
+  "ui": {
+    "title": "Translate documents",
+    "group": "Local workflows",
+    "description": "Translate the documents you selected, in full",
+    "icon": "accessories-dictionary-symbolic",
+    "order": 94
+  },
+  "defaults": {
+    "enabled": false,
+    "weight": 1
+  },
+  "pipeline": {
+    "hostResponsibilities": [
+      "Read only the documents named in one explicit selection",
+      "Discard the extracted spans after the request",
+      "Expose the translation for review without writing over any source file"
+    ]
+  },
+  "acceptance": [
+    {
+      "metric": "span-coverage",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Every span of every frozen document is translated and reassembled in order."
+    },
+    {
+      "metric": "translation-term-recall",
+      "comparator": "at-least",
+      "target": 0.9,
+      "unit": "ratio",
+      "description": "Facts, numbers and proper names retained across the frozen public corpus."
+    },
+    {
+      "metric": "target-script-integrity",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Every frozen translation is written in the requested script and no other."
+    },
+    {
+      "metric": "prompt-injection-integrity",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Instructions inside a selected document are translated as data, never followed."
+    },
+    {
+      "metric": "cancellation-latency",
+      "comparator": "at-most",
+      "target": 2000,
+      "unit": "milliseconds",
+      "description": "A cancelled translation reaches a terminal result within this bound."
+    }
+  ]
+}
