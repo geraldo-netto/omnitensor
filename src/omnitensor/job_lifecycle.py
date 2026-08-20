@@ -157,7 +157,7 @@ class JobSubmissionService:
                     job_id,
                     stage,
                     _clamped(fraction),
-                    str(detail)[:200],
+                    str(detail),
                     self._clock_ms(),
                 ),
             )
@@ -361,7 +361,7 @@ class JobSubmissionService:
         status, detail = _terminal_status(task)
         # Before the early return below: a profile's counters must not depend
         # on whether a result store happens to be wired.
-        self._observer.job_finished(workload_id, str(status), detail[:200])
+        self._observer.job_finished(workload_id, str(status), detail)
         if self._results is None:
             # Still consulted the task above: an exception nobody retrieves is
             # reported by asyncio as an unhandled error at collection time.
@@ -374,7 +374,7 @@ class JobSubmissionService:
                 job_id,
                 status,
                 output if isinstance(output, dict) else {"value": output},
-                detail[:200],
+                detail,
                 self._clock_ms(),
             ),
         )

@@ -108,7 +108,7 @@ def profile_status(
         return {
             "status": "unavailable",
             "queued": queued,
-            "detail": choice.reason[:240],
+            "detail": choice.reason,
             "reason": choice.code,
         }
     if not workload.models:
@@ -123,7 +123,7 @@ def profile_status(
         return {
             "status": "unavailable",
             "queued": queued,
-            "detail": f"needs consent for {', '.join(ungranted)}"[:240],
+            "detail": f"needs consent for {', '.join(ungranted)}",
             "reason": reasons.consent_missing,
         }
     if artifact_ready is not None:
@@ -132,7 +132,7 @@ def profile_status(
             return {
                 "status": "unavailable",
                 "queued": queued,
-                "detail": f"{choice.backend}: {reason}"[:240],
+                "detail": f"{choice.backend}: {reason}",
                 "reason": reasons.artifact_unavailable,
             }
     return {
@@ -217,7 +217,7 @@ def plugin_profile_status(
     return {
         "status": "running" if running else "idle",
         "queued": queued,
-        "detail": detail[:240],
+        "detail": detail,
         "reason": reasons.serving,
     }
 

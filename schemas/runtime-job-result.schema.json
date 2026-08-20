@@ -12,7 +12,7 @@
     "jobId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
     "state": {"enum": ["unknown", "running", "succeeded", "failed", "cancelled"]},
     "code": {"type": "string", "pattern": "^[a-z0-9-]{1,64}$"},
-    "message": {"type": "string", "maxLength": 500},
+    "message": {"type": "string"},
     "timestamp": {"type": "integer", "minimum": 1},
     "progress": {
       "type": ["object", "null"],
@@ -20,7 +20,7 @@
       "required": ["fraction", "detail"],
       "properties": {
         "fraction": {"type": "number", "minimum": 0, "maximum": 1},
-        "detail": {"type": "string", "maxLength": 200}
+        "detail": {"type": "string"}
       }
     },
     "output": {"type": ["object", "null"]}

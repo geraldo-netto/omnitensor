@@ -32,7 +32,7 @@
       "minLength": 1,
       "maxLength": 80
     },
-    "message": {"type": "string", "minLength": 1, "maxLength": 240},
+    "message": {"type": "string", "minLength": 1},
     "timestamp": {"type": "integer", "minimum": 1}
   }
 }

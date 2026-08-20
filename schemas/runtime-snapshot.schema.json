@@ -75,8 +75,7 @@
             "maximum": 100
           },
           "reason": {
-            "type": "string",
-            "maxLength": 240
+            "type": "string"
           }
         }
       }
@@ -123,8 +122,7 @@
             "maximum": 1000000
           },
           "detail": {
-            "type": "string",
-            "maxLength": 240
+            "type": "string"
           },
           "reason": {
             "description": "Machine-readable counterpart to detail: what kind of problem this is, so a consumer chooses a remedy without matching English prose.",
@@ -268,8 +266,7 @@
           ]
         },
         "detail": {
-          "type": "string",
-          "maxLength": 240
+          "type": "string"
         },
         "collectedAtMs": {
           "type": "integer",

@@ -988,13 +988,15 @@ def test_profile_statuses_expose_machine_readable_states():
         def run(self, model_path, inputs):
             raise AssertionError("not executed")
 
-    truncated = profile_statuses(
+    long_reason = profile_statuses(
         workloads,
         {"tpu": LongReasonExecutor()},
         StatsScheduler(),
         policy,
     )
-    assert len(truncated["sample-workload"]["detail"]) == 240
+    # The refusal reason is delivered whole: a person reads why every candidate
+    # backend was rejected, and a cut string hides the last one.
+    assert long_reason["sample-workload"]["detail"] == "tpu: " + "x" * 400
 
     class ReadyExecutor(LongReasonExecutor):
         def availability(self):

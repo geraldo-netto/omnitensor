@@ -32,7 +32,6 @@ from .job_lifecycle import _DenyAllAuthorizer as _DenyAllAuthorizer
 from .job_lifecycle import _settled_outcome as _settled_outcome
 from .job_lifecycle import _terminal_status as _terminal_status
 from .job_lifecycle import _validate_integer_bound as _validate_integer_bound
-from .job_ports import MAX_JOB_MESSAGE_CHARS as MAX_JOB_MESSAGE_CHARS
 from .job_ports import JobAdmission as JobAdmission
 from .job_ports import JobAuthorizer as JobAuthorizer
 from .job_ports import JobDispatcher as JobDispatcher

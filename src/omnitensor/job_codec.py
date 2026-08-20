@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .job_ports import MAX_JOB_MESSAGE_CHARS
 from .plugins.job_results import JobRecord
 from .registry import validate_document
 
@@ -110,7 +109,7 @@ def _acknowledgement_reply(
         "jobId": job_id,
         "status": status,
         "code": code,
-        "message": message[:MAX_JOB_MESSAGE_CHARS],
+        "message": message,
         "timestamp": timestamp,
     }
     violations = validate_document("runtime-job-acknowledgement.schema.json", document)
@@ -141,7 +140,7 @@ def _result_reply(
             "jobId": job_id if isinstance(job_id, str) and job_id else "unknown",
             "state": state,
             "code": code,
-            "message": message[:500],
+            "message": message,
             "timestamp": timestamp,
             "progress": None,
             "output": None,
@@ -163,12 +162,12 @@ def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
                 "jobId": record.job_id,
                 "state": "running",
                 "code": "job-running",
-                "message": progress.detail[:500] if progress else "Job is still running",
+                "message": progress.detail if progress else "Job is still running",
                 "timestamp": timestamp,
                 "progress": (
                     None
                     if progress is None
-                    else {"fraction": progress.fraction, "detail": progress.detail[:200]}
+                    else {"fraction": progress.fraction, "detail": progress.detail}
                 ),
                 "output": None,
             },
@@ -182,7 +181,7 @@ def _record_reply(request_id: str, record: JobRecord, timestamp: int) -> str:
             "jobId": record.job_id,
             "state": str(result.status),
             "code": f"job-{result.status}",
-            "message": result.detail[:500] or "Job finished",
+            "message": result.detail or "Job finished",
             "timestamp": timestamp,
             "progress": None,
             "output": result.output if isinstance(result.output, dict) else None,

@@ -128,7 +128,7 @@ async def read_frame(reader: asyncio.StreamReader) -> dict | None:
 
 
 def _error_reply(request_id: int, code: str, detail: str) -> dict:
-    message = detail.strip()[:500] or code
+    message = detail.strip() or code
     return {
         "version": CONTROL_PROTOCOL_VERSION,
         "id": request_id,

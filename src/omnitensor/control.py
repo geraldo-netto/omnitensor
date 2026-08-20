@@ -37,7 +37,6 @@ REVISION_MISMATCH_MESSAGE = "Runtime policy revision changed; refresh and retry"
 PERSIST_FAILURE_MESSAGE = "Could not persist the policy; nothing was applied"
 INTERNAL_ERROR_MESSAGE = "Internal error while applying the command"
 COMMAND_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
-MAX_MESSAGE_LENGTH = 240
 
 
 def _now_ms() -> int:
@@ -369,7 +368,7 @@ class ControlService:
             "status": status,
             "revision": self._state.revision,
             "appliedAt": _now_ms(),
-            "message": message[:MAX_MESSAGE_LENGTH],
+            "message": message,
             "portfolio": self._state.portfolio(),
         }
 

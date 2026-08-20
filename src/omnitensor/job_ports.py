@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Protocol, runtime_checkable
 
-MAX_JOB_MESSAGE_CHARS = 240
-
 
 class JobAuthorizer(Protocol):
     def allows(self, action: str, workload_id: str) -> bool: ...
@@ -42,7 +40,7 @@ class JobDispatchError(RuntimeError):
             raise ValueError("job dispatch message must be non-empty")
         super().__init__(message)
         self.code = code
-        self.message = message[:MAX_JOB_MESSAGE_CHARS]
+        self.message = message
 
 
 class JobLifecycleObserver(Protocol):

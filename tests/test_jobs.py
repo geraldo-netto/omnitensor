@@ -1044,7 +1044,7 @@ def test_an_impossible_fraction_is_clamped_rather_than_losing_the_update(fractio
 
 @pytest.mark.parametrize("fraction", [0.0, 1.0])
 @pytest.mark.parametrize("detail_length", [200, 201])
-def test_running_result_progress_and_truncation_boundaries(fraction, detail_length):
+def test_running_result_progress_is_reported_whole(fraction, detail_length):
     store = JobResultStore()
     detail = "p" * detail_length
     store.record_progress(
@@ -1060,10 +1060,7 @@ def test_running_result_progress_and_truncation_boundaries(fraction, detail_leng
 
     document = decode_result(reply)
     assert document["state"] == "running"
-    assert document["progress"] == {
-        "fraction": fraction,
-        "detail": "p" * min(detail_length, 200),
-    }
+    assert document["progress"] == {"fraction": fraction, "detail": detail}
 
 
 @pytest.mark.parametrize(
@@ -1095,7 +1092,7 @@ def test_every_terminal_result_state_is_schema_valid(status):
 
 
 @pytest.mark.parametrize("detail_length", [500, 501])
-def test_terminal_result_message_truncation_boundary(detail_length):
+def test_terminal_result_message_is_reported_whole(detail_length):
     store = JobResultStore()
     store.record_result(
         "job-detail",
@@ -1116,7 +1113,7 @@ def test_terminal_result_message_truncation_boundary(detail_length):
         )
     )
 
-    assert document["message"] == "d" * min(detail_length, 500)
+    assert document["message"] == "d" * detail_length
 
 
 def test_invalid_stored_state_returns_a_contract_valid_rejection():
@@ -1383,3 +1380,29 @@ def _failing_once(reply):
         return reply(*args, **kwargs)
 
     return guarded
+
+
+def test_a_long_refusal_reason_survives_the_whole_job_wire_path():
+    """OMNI-0398: a joined multi-backend refusal is the string most worth reading.
+
+    It used to be cut at 240 characters by the dispatch error, again by the
+    acknowledgement codec, and again at 200 by the lifecycle observer, so the
+    last backend's reason — the one a person needs — vanished mid-word.
+    """
+    reason = "; ".join(
+        f"{backend}: refused because " + "d" * 200 for backend in ("gpu", "npu", "tpu")
+    )
+    assert len(reason) > 500
+
+    assert JobDispatchError("no-backend", reason).message == reason
+
+    text = job_codec._acknowledgement_reply("req-1", None, "rejected", "no-backend", reason, 1)
+    document = json.loads(text)
+    assert document["message"] == reason
+    assert not validate_document("runtime-job-acknowledgement.schema.json", document)
+
+    result = json.loads(
+        job_codec._result_reply("req-1", "job-1", "failed", "job-failed", reason, 1)
+    )
+    assert result["message"] == reason
+    assert not validate_document("runtime-job-result.schema.json", result)
