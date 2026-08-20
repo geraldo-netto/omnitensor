@@ -1049,3 +1049,37 @@ async def test_a_selection_needing_several_passes_is_answered_not_refused(tmp_pa
     for _task, generation in worker.requests:
         assert generation.content_references[0] == "private:job-1:question"
     assert validate_document("document-question-result.schema.json", result.output) == []
+
+
+class OverlongAdapter:
+    """A parser whose document does not fit inside the extraction ceilings."""
+
+    kind = AdapterKind.PARSER
+
+    async def pages(self, _item):
+        for number in range(2_001):
+            yield PageContent(number + 1, "text")
+
+
+@pytest.mark.asyncio
+async def test_a_selection_that_does_not_fit_is_refused_naming_what_went_unread(tmp_path):
+    """OMNI-0395: it used to be answered from its opening pages, silently."""
+    source = tmp_path / "long.txt"
+    source.write_text("text", encoding="utf-8")
+    store = MemoryFragmentStore()
+    plugin = DocumentQuestionPlugin(
+        Embedder(),
+        GenerationRouter((AnswerWorker(store),)),
+        store,
+        adapters={".txt": OverlongAdapter()},
+    )
+    await plugin.start(
+        PluginContext("ask-selected-files", 1, {}, frozenset({"files:read-selected"}))
+    )
+
+    result = await plugin.execute(request(source), CancellationController(), Progress())
+
+    assert result.status is PluginResultStatus.FAILED
+    assert result.detail.startswith("source-truncated: ")
+    assert "page(s) went unread" in result.detail
+    assert str(source) not in result.detail

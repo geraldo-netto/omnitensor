@@ -371,6 +371,45 @@ class _Collector:
         )
 
 
+TRUNCATED_SOURCE_CODE = "source-truncated"
+
+
+def measured_failure_detail(code: object, detail: object) -> str:
+    """A refusal whose explanation was measured, not looked up from a table.
+
+    Every other workload failure is a code with a fixed sentence beside it.
+    A truncated source is different: what went unread is counted at the moment
+    of refusal, so the counts have to travel with the code or they are lost.
+
+    Returns ``""`` when the code's explanation is a fixed sentence elsewhere.
+    """
+    if str(code) != TRUNCATED_SOURCE_CODE or not detail:
+        return ""
+    return f"{code}: {detail}"
+
+
+def truncation_summary(result: ExtractionResult) -> str:
+    """Name what a truncated extraction left out, in counts a person can act on.
+
+    Returns ``""`` when nothing was dropped. Deliberately free of file names
+    and content: a workload refusal carries neither.
+    """
+    if result.outcome is not ExtractionOutcome.TRUNCATED:
+        return ""
+    parts = [
+        f"{count} {noun}"
+        for count, noun in (
+            (result.dropped_pages, "page(s)"),
+            (result.dropped_characters, "character(s)"),
+            (result.dropped_regions, "layout region(s)"),
+        )
+        if count
+    ]
+    dropped = ", ".join(parts) if parts else "part of the document"
+    detail = f" ({result.detail})" if result.detail else ""
+    return f"read only {len(result.pages)} page(s); {dropped} went unread{detail}"
+
+
 def _page_number(value: object, fallback: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_COORDINATE:
         return fallback + 1

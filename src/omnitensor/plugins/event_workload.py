@@ -40,11 +40,14 @@ from .events import (
     source_fragments,
 )
 from .extraction import (
+    TRUNCATED_SOURCE_CODE,
     AdapterKind,
     DocumentExtractor,
     ExtractionAdapter,
     ExtractionOutcome,
     PageContent,
+    measured_failure_detail,
+    truncation_summary,
 )
 from .fragments import (
     FragmentStoreError,
@@ -313,35 +316,10 @@ class EventExtractionPlugin(ManagedPlugin):
             await self._report(request, progress, "select", 0.0)
             self._journal.stage(request.job_id, "select")
             selected = select_sources(request.job_id, request.payload.get("sources"))
-            references: list[str] = []
-            private_fragments: dict[str, SourceFragment] = {}
             self._journal.stage(request.job_id, "extract")
-            for index, source in enumerate(selected):
-                cancellation.raise_if_cancelled()
-                fraction = 0.1 + (0.45 * index / len(selected))
-                await self._report(request, progress, "extract", fraction)
-                adapter = self._adapters.get(source.item.suffix)
-                if adapter is None:
-                    raise EventWorkloadError(
-                        "source-unsupported", "selected source type is unsupported"
-                    )
-                extraction = await DocumentExtractor(adapter).extract(source.item)
-                if extraction.outcome not in {
-                    ExtractionOutcome.SUCCEEDED,
-                    ExtractionOutcome.TRUNCATED,
-                }:
-                    raise EventWorkloadError(
-                        "extraction-failed", "selected source could not be extracted"
-                    )
-                fragments = source_fragments(extraction, source.reference, source.item.digest)
-                await self._store.publish(request.job_id, fragments)
-                for fragment in fragments:
-                    if fragment.reference in private_fragments:
-                        raise EventWorkloadError(
-                            "source-invalid", "private fragment reference repeats"
-                        )
-                    private_fragments[fragment.reference] = fragment
-                    references.append(fragment.reference)
+            references, private_fragments = await self._extract_sources(
+                request, selected, cancellation, progress
+            )
             cancellation.raise_if_cancelled()
             self._journal.stage(request.job_id, "generate")
             await self._report(request, progress, "generate", 0.6)
@@ -371,10 +349,53 @@ class EventExtractionPlugin(ManagedPlugin):
             )
         except (EventWorkloadError, EventResultError, GenerationError, SDKContractError) as error:
             code = getattr(error, "code", "event-extraction-failed")
-            return failed_result(request, str(code), completed_at_ms=self._clock_ms())
+            return failed_result(
+                request,
+                measured_failure_detail(code, getattr(error, "detail", "")) or str(code),
+                completed_at_ms=self._clock_ms(),
+            )
         finally:
             await self._store.discard(request.job_id)
             self._journal.finish(request.job_id)
+
+    async def _extract_sources(
+        self,
+        request: PluginRequest,
+        selected: Sequence[SelectedSource],
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> tuple[list[str], dict[str, SourceFragment]]:
+        """Extract every selected source into private fragments, whole or not at all."""
+        references: list[str] = []
+        private_fragments: dict[str, SourceFragment] = {}
+        for index, source in enumerate(selected):
+            cancellation.raise_if_cancelled()
+            fraction = 0.1 + (0.45 * index / len(selected))
+            await self._report(request, progress, "extract", fraction)
+            adapter = self._adapters.get(source.item.suffix)
+            if adapter is None:
+                raise EventWorkloadError(
+                    "source-unsupported", "selected source type is unsupported"
+                )
+            extraction = await DocumentExtractor(adapter).extract(source.item)
+            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
+                # A truncated extraction used to be read as if whole, so a long
+                # selection was answered from its opening pages and nobody was
+                # told. Say what went unread instead of answering from part.
+                summary = truncation_summary(extraction)
+                if summary:
+                    raise EventWorkloadError(TRUNCATED_SOURCE_CODE, summary)
+                raise EventWorkloadError(
+                    "extraction-failed", "selected source could not be extracted"
+                )
+            fragments = source_fragments(extraction, source.reference, source.item.digest)
+            await self._store.publish(request.job_id, fragments)
+            for fragment in fragments:
+                if fragment.reference in private_fragments:
+                    raise EventWorkloadError("source-invalid", "private fragment reference repeats")
+                private_fragments[fragment.reference] = fragment
+                references.append(fragment.reference)
+        return references, private_fragments
 
     def _validate_request(self, request: PluginRequest) -> None:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:

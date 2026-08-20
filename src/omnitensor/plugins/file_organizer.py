@@ -36,7 +36,14 @@ from .event_workload import (
     PyMuPdfAdapter,
     SelectedSource,
 )
-from .extraction import DocumentExtractor, ExtractionAdapter, ExtractionOutcome
+from .extraction import (
+    TRUNCATED_SOURCE_CODE,
+    DocumentExtractor,
+    ExtractionAdapter,
+    ExtractionOutcome,
+    measured_failure_detail,
+    truncation_summary,
+)
 from .fragments import SourceFragment
 from .generation import (
     GenerationError,
@@ -177,9 +184,10 @@ class FileOrganizerPlugin(ManagedPlugin):
             GenerationError,
             SDKContractError,
         ) as error:
+            code = getattr(error, "code", "file-organizer-failed")
             return failed_result(
                 request,
-                str(getattr(error, "code", "file-organizer-failed")),
+                measured_failure_detail(code, getattr(error, "detail", "")) or str(code),
                 completed_at_ms=self._clock_ms(),
             )
         finally:
@@ -209,10 +217,14 @@ class FileOrganizerPlugin(ManagedPlugin):
                     "source-unsupported", "selected source type is unsupported"
                 )
             extraction = await DocumentExtractor(adapter).extract(source.item)
-            if extraction.outcome not in {
-                ExtractionOutcome.SUCCEEDED,
-                ExtractionOutcome.TRUNCATED,
-            }:
+            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
+                # A truncated extraction used to be answered as if whole, so a
+                # long selection was answered from its opening pages and nobody
+                # was told. Say what went unread instead of inventing an answer
+                # from part of it.
+                summary = truncation_summary(extraction)
+                if summary:
+                    raise FileOrganizerError(TRUNCATED_SOURCE_CODE, summary)
                 raise FileOrganizerError(
                     "extraction-failed", "selected source could not be extracted"
                 )

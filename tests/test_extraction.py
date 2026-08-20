@@ -326,3 +326,29 @@ def test_the_result_summarises_itself_without_the_text():
 
 def test_the_limits_are_reported():
     assert DocumentExtractor(Adapter()).limits.max_pages == 2_000
+
+
+def test_a_truncated_extraction_can_say_exactly_what_went_unread():
+    """OMNI-0395: what was dropped was counted and then thrown away."""
+    from omnitensor.plugins.extraction import (
+        TRUNCATED_SOURCE_CODE,
+        measured_failure_detail,
+        truncation_summary,
+    )
+
+    result = extract(Adapter([page(1, "a" * 10), page(2, "b" * 10)]), max_characters=12)
+
+    assert result.outcome is ExtractionOutcome.TRUNCATED
+    summary = truncation_summary(result)
+    assert "went unread" in summary
+    assert "character(s)" in summary
+    # A refusal names counts, never the file it read or anything it contained.
+    assert "report.pdf" not in summary
+    assert "a" * 10 not in summary
+
+    assert truncation_summary(extract(Adapter([page(1, "short")]))) == ""
+    assert measured_failure_detail(TRUNCATED_SOURCE_CODE, summary) == (
+        f"{TRUNCATED_SOURCE_CODE}: {summary}"
+    )
+    assert measured_failure_detail(TRUNCATED_SOURCE_CODE, "") == ""
+    assert measured_failure_detail("extraction-failed", summary) == ""

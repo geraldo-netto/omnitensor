@@ -38,7 +38,14 @@ from .event_workload import (
     SelectedSource,
     select_sources,
 )
-from .extraction import DocumentExtractor, ExtractionAdapter, ExtractionOutcome
+from .extraction import (
+    TRUNCATED_SOURCE_CODE,
+    DocumentExtractor,
+    ExtractionAdapter,
+    ExtractionOutcome,
+    measured_failure_detail,
+    truncation_summary,
+)
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
@@ -304,9 +311,10 @@ class DocumentQuestionPlugin(ManagedPlugin):
             GenerationError,
             SDKContractError,
         ) as error:
+            code = getattr(error, "code", "document-question-failed")
             return failed_result(
                 request,
-                failure_detail(getattr(error, "code", "document-question-failed")),
+                measured_failure_detail(code, getattr(error, "detail", "")) or failure_detail(code),
                 completed_at_ms=self._clock_ms(),
             )
         finally:
@@ -348,10 +356,14 @@ class DocumentQuestionPlugin(ManagedPlugin):
                     "source-unsupported", "selected source type is unsupported"
                 )
             extraction = await DocumentExtractor(adapter).extract(source.item)
-            if extraction.outcome not in {
-                ExtractionOutcome.SUCCEEDED,
-                ExtractionOutcome.TRUNCATED,
-            }:
+            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
+                # A truncated extraction used to be answered as if whole, so a
+                # long selection was answered from its opening pages and nobody
+                # was told. Say what went unread instead of inventing an answer
+                # from part of it.
+                summary = truncation_summary(extraction)
+                if summary:
+                    raise DocumentQuestionError(TRUNCATED_SOURCE_CODE, summary)
                 raise DocumentQuestionError(
                     "extraction-failed", "selected source could not be extracted"
                 )
