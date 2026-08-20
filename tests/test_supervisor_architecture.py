@@ -22,6 +22,7 @@ from omnitensor.plugins import supervisor_session as session
 
 PUBLIC_FACADE_NAMES = (
     "AsyncioSubprocessLauncher",
+    "CallHeartbeat",
     "DEFAULT_CANCEL_TIMEOUT_SECONDS",
     "DEFAULT_HANDSHAKE_TIMEOUT_SECONDS",
     "DEFAULT_STARTUP_TIMEOUT_SECONDS",
@@ -56,6 +57,7 @@ PUBLIC_FACADE_NAMES = (
     "parse_result",
     "perform_service_handshake",
     "read_frame",
+    "report",
     "write_frame",
 )
 

@@ -144,7 +144,7 @@ def test_deadline_cancels_inflight_call_with_stable_failure():
             await enforcer.run(operation)
 
         assert error.value.code is WorkerBudgetCode.DEADLINE
-        assert error.value.detail == "call exceeded 0.005 seconds"
+        assert error.value.detail == "call reported nothing for 0.005 seconds"
         assert cancelled.is_set()
         assert enforcer.snapshot() == WorkerBudgetSnapshot(0, 1, 0, 1)
 

@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0578 | open | high | m | **A job is killed at its call deadline however much of it is done and however loudly it is reporting.** `plugins/budgets.py` wraps the whole worker call in one `asyncio.wait(timeout=call_timeout_seconds)` and `plugins/flow.py` wraps it again in `asyncio.wait_for(deadline_seconds)`, so a generative call is cut off after 600s (605s at the flow) and the answer is thrown away as `deadline-exceeded`. Both clocks measure total work rather than silence, while the worker is already streaming `PROGRESS` frames through `supervisor_session.read_result` for exactly this reason — a three-hour recording or a long document is work somebody asked for, and the ceiling is a wrong answer waiting for a big enough input. Restart both clocks on every progress frame: the call is cut off only when the worker has reported nothing new for that long, which is the hang the deadline exists to catch. |
 
 ## Blocked
 

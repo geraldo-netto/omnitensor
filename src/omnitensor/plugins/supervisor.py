@@ -21,6 +21,7 @@ from .ipc import (
     read_frame,
     write_frame,
 )
+from .liveness import CallHeartbeat, report
 from .protocol import PluginRequest, PluginResult, ProgressReporter
 from .supervisor_diagnostics import (
     IDLE_WORKER_DETAIL,
@@ -84,6 +85,28 @@ def _validate_specs(specs: Sequence[WorkerSpec]) -> tuple[WorkerSpec, ...]:
         max_argument_chars=MAX_WORKER_ARGUMENT_CHARS,
         validate_offer=handshake_frame,
     )
+
+
+class _BeatingReporter:
+    """The caller's progress reporter, plus the two clocks' sign of life.
+
+    A wrapper rather than a change to `read_result`: the transport's job is to
+    read frames and hand them on, and whether anything is timing the call is
+    not its business. Beating the job-wide heartbeat as well is what keeps the
+    flow controller outside this call from giving up on a job that is working.
+    """
+
+    __slots__ = ("_heartbeat", "_reporter")
+
+    def __init__(self, reporter: ProgressReporter | None, heartbeat: CallHeartbeat) -> None:
+        self._reporter = reporter
+        self._heartbeat = heartbeat
+
+    async def report(self, progress) -> None:
+        self._heartbeat.beat()
+        report()
+        if self._reporter is not None:
+            await self._reporter.report(progress)
 
 
 class PluginWorkerSupervisor:
@@ -177,17 +200,25 @@ class PluginWorkerSupervisor:
         request: PluginRequest,
         progress: ProgressReporter | None,
     ) -> PluginResult:
+        # Every progress frame this call reads is a sign of life, for the
+        # worker's own budget and for the flow controller waiting outside it.
+        # Without it a call was cut off at its deadline however steadily the
+        # worker was reporting, which is how a long transcription lost its
+        # answer at the ten-minute mark.
+        heartbeat = CallHeartbeat()
+        beating_progress = _BeatingReporter(progress, heartbeat)
+
         async def operation():
             async with slot.request_lock:
                 await write_frame(
                     slot.process.writer,
                     _with_protocol(execute_frame(request), slot.agreement.protocol_version),
                 )
-                return await self._read_result(slot, request.job_id, progress)
+                return await self._read_result(slot, request.job_id, beating_progress)
 
         if slot.budget is None:
             return await operation()
-        return await slot.budget.run(operation)
+        return await slot.budget.run(operation, heartbeat)
 
     async def _read_result(
         self,

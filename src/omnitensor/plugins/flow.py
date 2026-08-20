@@ -27,6 +27,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .liveness import CallHeartbeat
+
 DEFAULT_MAX_IN_FLIGHT = 4
 DEFAULT_DEADLINE_SECONDS = 30.0
 DEFAULT_MAX_RETRIES = 1
@@ -119,8 +121,14 @@ class PluginFlowController:
         self,
         idempotency_key: str,
         operation: Callable[[], Awaitable],
+        heartbeat: CallHeartbeat | None = None,
     ) -> object:
-        """Run ``operation`` once for ``idempotency_key`` and return its result."""
+        """Run ``operation`` once for ``idempotency_key`` and return its result.
+
+        ``heartbeat`` is the call's sign of life. Without one the deadline is
+        what it always was — a bound on the whole operation — which is right
+        for an operation that cannot report anything.
+        """
         self._validate_key(idempotency_key)
         if not callable(operation):
             raise TypeError("operation must be callable")
@@ -133,7 +141,7 @@ class PluginFlowController:
         self._in_flight[idempotency_key] = future
         self._accepted += 1
         try:
-            result = await self._run_with_retries(operation)
+            result = await self._run_with_retries(operation, heartbeat)
         except BaseException as error:
             if not future.done():
                 # Never the CancelledError itself: a coalesced caller awaiting
@@ -181,21 +189,51 @@ class PluginFlowController:
             )
         return None
 
-    async def _run_with_retries(self, operation: Callable[[], Awaitable]) -> object:
+    async def _run_with_retries(
+        self,
+        operation: Callable[[], Awaitable],
+        heartbeat: CallHeartbeat | None = None,
+    ) -> object:
         attempts = self._max_retries + 1
         for attempt in range(1, attempts + 1):
             try:
-                return await asyncio.wait_for(operation(), timeout=self._deadline_seconds)
+                return await self._attempt(operation, heartbeat)
             except TimeoutError:
                 if attempt >= attempts:
                     self._failed += 1
                     raise FlowRefusedError(
                         FlowRefusal.RETRIES_EXHAUSTED,
-                        f"{self._plugin_id} exceeded {self._deadline_seconds:g}s "
+                        f"{self._plugin_id} reported nothing for {self._deadline_seconds:g}s "
                         f"on {attempts} attempts",
                     ) from None
                 self._retried += 1
         raise AssertionError("unreachable")  # pragma: no cover - loop always returns
+
+    async def _attempt(
+        self,
+        operation: Callable[[], Awaitable],
+        heartbeat: CallHeartbeat | None,
+    ) -> object:
+        """One attempt, ended by silence rather than by how long it took.
+
+        The deadline used to bound the whole operation, so a job that was
+        still reporting — a long transcription, a large document — was given
+        up on with its answer half made. A worker that keeps sending progress
+        is working; a worker that has sent nothing for the whole deadline is
+        the hang this is here to catch.
+        """
+        task = asyncio.ensure_future(operation())
+        try:
+            while True:
+                done, _pending = await asyncio.wait((task,), timeout=self._deadline_seconds)
+                if done:
+                    return await task
+                if heartbeat is None or not heartbeat.consume():
+                    raise TimeoutError
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     def _retained(self, key: str) -> object:
         entry = self._completed.get(key)

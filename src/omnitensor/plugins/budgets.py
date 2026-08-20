@@ -12,6 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from ..stable_error import StableError
+from .liveness import CallHeartbeat
 
 DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
 # Unbounded by default. These ceilings refused real work — a Qwen worker
@@ -117,14 +118,18 @@ class WorkerBudgetEnforcer:
             self._rejected,
         )
 
-    async def run(self, operation: Callable[[], Awaitable]) -> object:
+    async def run(
+        self,
+        operation: Callable[[], Awaitable],
+        heartbeat: CallHeartbeat | None = None,
+    ) -> object:
         if not callable(operation):
             raise TypeError("operation must be callable")
         await self._enter()
         task = None
         try:
             task = asyncio.create_task(operation())
-            result = await self._wait(task)
+            result = await self._wait(task, heartbeat)
             # Nothing here inspects the size of the answer. A result too large
             # for one IPC frame is split across frames by the transport; it was
             # refused here once, which discarded a whole document-QA answer and
@@ -154,21 +159,29 @@ class WorkerBudgetEnforcer:
             self._active += 1
             self._peak = max(self._peak, self._active)
 
-    async def _wait(self, task: asyncio.Task) -> object:
-        """The call's answer, or its deadline — one sleep, no polling.
+    async def _wait(self, task: asyncio.Task, heartbeat: CallHeartbeat | None) -> object:
+        """The call's answer, or its deadline — one sleep per silent stretch.
 
-        The event loop wakes this exactly twice: once when the call answers and
-        once if it does not answer in time. An idle worker costs no wakeups at
-        all, which is what an idle runtime is required to cost.
+        The deadline measures silence rather than total work. It used to end
+        the call a fixed number of seconds after it started, so a job that was
+        reporting steadily — a long recording, a document of a few hundred
+        pages — was killed with its answer half made. A worker that is sending
+        progress is a worker that is working; one that has sent nothing for
+        the whole budget is the hang this exists to catch.
+
+        The event loop still wakes once per budget's worth of silence and once
+        when the call answers, so an idle worker costs no wakeups at all.
         """
-        done, _pending = await asyncio.wait((task,), timeout=self._limits.call_timeout_seconds)
-        if not done:
-            self._rejected += 1
-            raise WorkerBudgetExceededError(
-                WorkerBudgetCode.DEADLINE,
-                f"call exceeded {self._limits.call_timeout_seconds:g} seconds",
-            )
-        return await task
+        while True:
+            done, _pending = await asyncio.wait((task,), timeout=self._limits.call_timeout_seconds)
+            if done:
+                return await task
+            if heartbeat is None or not heartbeat.consume():
+                self._rejected += 1
+                raise WorkerBudgetExceededError(
+                    WorkerBudgetCode.DEADLINE,
+                    f"call reported nothing for {self._limits.call_timeout_seconds:g} seconds",
+                )
 
 
 class ProcfsWorkerUsageProbe:

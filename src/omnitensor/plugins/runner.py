@@ -23,9 +23,11 @@ from collections.abc import Awaitable, Callable
 from .cancellation import (
     CancellationReason,
     CancellationRegistry,
+    JobCancellationToken,
     JobCancelledError,
 )
 from .flow import FlowRefusedError, PluginFlowController
+from .liveness import CallHeartbeat, beating
 from .pipeline import (
     PipelineStage,
     PipelineStateMachine,
@@ -82,16 +84,33 @@ class PipelineRunner:
             self._policy.require()
         except PolicyRefusedError as error:
             return self._refused(job_id, error.detail)
+        # One sign of life per job, held here because this is the layer that
+        # owns the job and the clock that gives up on it. Whatever runs the
+        # work beats it through `liveness.report`; the stages in between never
+        # see it.
+        heartbeat = CallHeartbeat()
+        # Tracked here rather than inside the stages: a job is cancellable
+        # from the moment it is accepted, and registering the token one
+        # scheduling hop later left a window where a cancel arriving
+        # immediately after submission was answered "no such job" and the work
+        # carried on to the end.
+        token = self._cancellations.track(job_id, self._plugin_id)
         try:
-            return await self._flow.submit(key, lambda: self._run_stages(job_id, request))
+            with beating(heartbeat):
+                return await self._flow.submit(
+                    key, lambda: self._run_stages(job_id, request, token), heartbeat
+                )
         except FlowRefusedError as error:
             # Flow refusals happen before any stage runs, so there is no
             # machine to finish; the result is synthesised at the same shape.
             return self._failed(job_id, error.code, error.detail)
+        finally:
+            self._cancellations.release(job_id)
 
-    async def _run_stages(self, job_id: str, request: object) -> PluginResult:
+    async def _run_stages(
+        self, job_id: str, request: object, token: JobCancellationToken
+    ) -> PluginResult:
         machine = PipelineStateMachine(job_id)
-        token = self._cancellations.track(job_id, self._plugin_id)
         try:
             machine.start()
             carried: object = request
@@ -117,8 +136,6 @@ class PipelineRunner:
                 completed_at_ms=self._clock_ms(),
             )
             return machine.terminal_result
-        finally:
-            self._cancellations.release(job_id)
 
     def cancel(self, job_id: str, detail: str = "") -> bool:
         """Withdraw a running job on behalf of its caller."""
