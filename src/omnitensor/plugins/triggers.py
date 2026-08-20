@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
@@ -13,12 +12,11 @@ from typing import Protocol, runtime_checkable
 from omnitensor.telemetry_types import SourceStatus
 
 from .pipeline import CollectedOutput
-from .protocol import JsonObject
+from .protocol import JsonObject, valid_plugin_id
 
 DEFAULT_MAX_TRIGGER_BYTES = 256 * 1024
 DEFAULT_MAX_PENDING_TRIGGERS = 256
 DEFAULT_COLLECTION_TIMEOUT_SECONDS = 30.0
-_IDENTIFIER = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _MAX_CORRELATION_CHARS = 128
 
 
@@ -314,7 +312,7 @@ class TriggerCoordinator:
 
 
 def _validate_plugin_id(plugin_id: str) -> None:
-    if not isinstance(plugin_id, str) or not _IDENTIFIER.fullmatch(plugin_id):
+    if not valid_plugin_id(plugin_id):
         raise TriggerValidationError("invalid-plugin-id", f"invalid plugin id: {plugin_id!r}")
 
 

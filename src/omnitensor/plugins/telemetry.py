@@ -8,6 +8,7 @@ from enum import StrEnum
 from threading import Lock
 
 from .pipeline import PipelineStage
+from .protocol import valid_plugin_id
 
 MAX_TELEMETRY_PLUGINS = 128
 MAX_PLUGIN_QUEUE_DEPTH = 1_000_000
@@ -16,7 +17,6 @@ MAX_TELEMETRY_COUNTER = 1_000_000_000
 MAX_TELEMETRY_DETAIL_CHARS = 240
 MAX_TELEMETRY_TIMESTAMP_MS = 9_007_199_254_740_991
 PLUGIN_TELEMETRY_CONTRACT_VERSION = 1
-_PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ERROR_CODE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -319,11 +319,7 @@ def _telemetry_document(snapshot: PluginTelemetry) -> dict[str, object]:
 
 
 def _validate_plugin_id(plugin_id: object) -> None:
-    if (
-        not isinstance(plugin_id, str)
-        or not 1 <= len(plugin_id) <= 80
-        or _PLUGIN_ID.fullmatch(plugin_id) is None
-    ):
+    if not valid_plugin_id(plugin_id):
         raise ValueError("plugin_id is invalid")
 
 

@@ -511,3 +511,36 @@ def _race_update(root: str, ready, results, threshold: int) -> None:
         results.put(error.code)
     else:
         results.put("ok")
+
+
+def test_every_store_agrees_on_what_a_plugin_id_is():
+    """OMNI-0525: three stores accepted an id the fourth then refused."""
+    import pytest as _pytest
+
+    from omnitensor.plugins.grants import GrantError
+    from omnitensor.plugins.grants import _validate_plugin_id as grants_check
+    from omnitensor.plugins.protocol import MAX_PLUGIN_ID_CHARS, valid_plugin_id
+    from omnitensor.plugins.settings import _validate_plugin_id as settings_check
+    from omnitensor.plugins.summaries import SummaryError
+    from omnitensor.plugins.summaries import _validate_plugin_id as summaries_check
+    from omnitensor.plugins.telemetry import _validate_plugin_id as telemetry_check
+    from omnitensor.plugins.triggers import TriggerValidationError
+    from omnitensor.plugins.triggers import _validate_plugin_id as triggers_check
+
+    overlong = "a" * (MAX_PLUGIN_ID_CHARS + 1)
+    assert valid_plugin_id("file-organizer") is True
+    assert valid_plugin_id(overlong) is False
+
+    checks = (
+        (grants_check, GrantError),
+        (settings_check, PluginSettingsError),
+        (summaries_check, SummaryError),
+        (telemetry_check, ValueError),
+        (triggers_check, TriggerValidationError),
+    )
+    for check, error in checks:
+        check("file-organizer")
+        with _pytest.raises(error):
+            check(overlong)
+        with _pytest.raises(error):
+            check("File-Organizer")

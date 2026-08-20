@@ -12,13 +12,13 @@ from pathlib import Path
 
 from ..atomicio import JsonTooLargeError, read_json_bounded, write_json_atomic
 from ..storelock import store_lock
+from .protocol import valid_plugin_id
 
 GRANTS_DOCUMENT_VERSION = 1
 DEFAULT_MAX_GRANTS_BYTES = 512 * 1024
 DEFAULT_AUDIT_EVENTS = 1024
 DEFAULT_RELOAD_LOCK_TIMEOUT_SECONDS = 0.1
 MAX_DECLARED_PERMISSIONS = 32
-_PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PERMISSION = re.compile(r"^[a-z][a-z0-9-]*:[a-zA-Z0-9*._/-]+$")
 _ACTOR = re.compile(r"^[A-Za-z0-9._:@-]{1,120}$")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
@@ -465,7 +465,7 @@ def _validate_provenance(provenance: GrantProvenance) -> None:
 
 
 def _validate_plugin_id(plugin_id: str) -> None:
-    if not isinstance(plugin_id, str) or not _PLUGIN_ID.fullmatch(plugin_id):
+    if not valid_plugin_id(plugin_id):
         raise GrantError("invalid-plugin-id", f"invalid plugin id: {plugin_id!r}")
 
 

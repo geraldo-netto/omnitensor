@@ -10,11 +10,12 @@ from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
+from .protocol import valid_plugin_id
+
 MAX_JOB_ID_CHARS = 120
 MAX_ALERT_ID_CHARS = 120
 ADVISORY_RISK_MAX = 0.5
 WARNING_RISK_MAX = 0.8
-_PLUGIN_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _PUBLIC_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 _JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 
@@ -178,11 +179,7 @@ def _optional_probability(name: str, value: object) -> float | None:
 
 
 def _validate_plugin_id(value: object) -> None:
-    if (
-        not isinstance(value, str)
-        or not 1 <= len(value) <= 80
-        or _PLUGIN_ID.fullmatch(value) is None
-    ):
+    if not valid_plugin_id(value):
         raise SummaryError("invalid-plugin-id", "plugin ID is invalid")
 
 

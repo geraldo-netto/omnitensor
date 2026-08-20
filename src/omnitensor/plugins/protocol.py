@@ -8,6 +8,7 @@ plugin implementation into the OmniTensor service process.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -34,6 +35,24 @@ class PluginHealthStatus(StrEnum):
     DEGRADED = "degraded"
     UNAVAILABLE = "unavailable"
     STOPPED = "stopped"
+
+
+# One rule for what a plugin id is, in the leaf every plugin module already
+# imports. It was written five times - in `grants`, `settings`, `summaries`,
+# `telemetry` and `triggers` - and two of those copies bounded the length while
+# three did not, so a 300-character id was accepted into the grant ledger and
+# the settings store and then refused by telemetry.
+PLUGIN_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_PLUGIN_ID_CHARS = 80
+
+
+def valid_plugin_id(value: object) -> bool:
+    """Whether ``value`` is a plugin id anything in this service will accept."""
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= MAX_PLUGIN_ID_CHARS
+        and PLUGIN_ID_PATTERN.fullmatch(value) is not None
+    )
 
 
 @dataclass(frozen=True, slots=True)
