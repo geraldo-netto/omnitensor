@@ -118,8 +118,14 @@ class RunnerSet:
         # tensor is the dispatcher's business, and narrowing it here silently
         # dropped inputRefs so a referenced input reached the executor as
         # nothing at all.
-        _RUNNING_JOB.set((job_id, dict(payload)))
-        return await runner.run(job_id, JobSubmission(job_id, dict(payload)))
+        token = _RUNNING_JOB.set((job_id, dict(payload)))
+        try:
+            return await runner.run(job_id, JobSubmission(job_id, dict(payload)))
+        finally:
+            # The token was discarded, so the binding outlived the job: anything
+            # else running in this same context afterwards - another job's
+            # retry, a stray task - read a finished job's identity as its own.
+            _RUNNING_JOB.reset(token)
 
     def cancel(self, profile_id: str, job_id: str, detail: str = "") -> bool:
         runner = self.runners.get(profile_id)

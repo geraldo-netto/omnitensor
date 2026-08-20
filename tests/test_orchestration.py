@@ -847,3 +847,17 @@ def test_an_artifact_that_disappears_is_refused_before_a_flow_slot(tmp_path):
     # Refused at admission: no stage ran, and no flow slot was taken or retried.
     assert dispatcher.calls == []
     assert runner._flow.snapshot().accepted == 0
+
+
+def test_a_finished_job_leaves_no_identity_bound_behind(tmp_path):
+    """OMNI-0419: the binding outlived the job that set it."""
+    built, _registry = runners(tmp_path)
+
+    async def scenario():
+        with pytest.raises(LookupError):
+            _RUNNING_JOB.get()
+        await built.submit("visual-library", "job-1", {"inputs": [[1, 2]]})
+        with pytest.raises(LookupError):
+            _RUNNING_JOB.get()
+
+    asyncio.run(scenario())
