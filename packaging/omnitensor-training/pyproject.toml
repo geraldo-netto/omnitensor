@@ -25,7 +25,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 license = "MIT"
-license-files = ["../../LICENSE"]
+license-files = ["LICENSE"]
 authors = [{name = "Geraldo Netto", email = "geraldonetto@gmail.com"}]
 dependencies = [
     "omnitensor==0.1.0",
@@ -94,9 +94,21 @@ omnitensor = { workspace = true }
 # separate. Nothing here may name a file outside `training/` or the recipes.
 packages = []
 
+# `src` and `model-recipes` here are symlinks to the repository's own, so these
+# two paths mean the same files in a checkout and inside an unpacked sdist -
+# where they are real directories put there by the sdist target below. Without
+# that, the wheel target reached outside the sdist root with `../../` and a
+# build from the sdist produced a wheel with no modules at all and thirteen
+# console scripts that every one of them raised ImportError.
 [tool.hatch.build.targets.wheel.force-include]
-"../../src/omnitensor/training" = "omnitensor/training"
-"../../model-recipes" = "omnitensor/model-recipes"
+"src/omnitensor/training" = "omnitensor/training"
+"model-recipes" = "omnitensor/model-recipes"
 
 [tool.hatch.build.targets.sdist]
 only-include = ["pyproject.toml", "README.md"]
+
+# The sources travel as real files, at exactly the paths the wheel target
+# expects, so `pip install` from the sdist yields the same wheel as a checkout.
+[tool.hatch.build.targets.sdist.force-include]
+"../../src/omnitensor/training" = "src/omnitensor/training"
+"../../model-recipes" = "model-recipes"

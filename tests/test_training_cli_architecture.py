@@ -183,3 +183,45 @@ def test_console_targets_stay_on_facade_and_numeric_promotion_stays_separate():
     assert not hasattr(training_install_cli, "promote_main")
     install_source = Path(training_install_cli.__file__).read_text(encoding="utf-8")
     assert "numeric_promotion" not in install_source
+
+
+def test_the_training_sdist_carries_the_sources_the_wheel_target_expects():
+    """OMNI-0447: an sdist of two files built a wheel with zero modules.
+
+    Both build targets must name paths that exist in a checkout *and* inside
+    an unpacked sdist, and neither may escape the distribution root.
+    """
+    import tomllib
+
+    packaging_root = ROOT / "packaging" / "omnitensor-training"
+    project = tomllib.loads((packaging_root / "pyproject.toml").read_text(encoding="utf-8"))
+    build = project["tool"]["hatch"]["build"]["targets"]
+
+    wheel_sources = build["wheel"]["force-include"]
+    assert wheel_sources == {
+        "src/omnitensor/training": "omnitensor/training",
+        "model-recipes": "omnitensor/model-recipes",
+    }
+    for source in wheel_sources:
+        # In the checkout these are symlinks onto the repository's own copies;
+        # in an sdist they are the real directories the sdist target put there.
+        resolved = (packaging_root / source).resolve()
+        assert resolved.is_dir()
+        assert resolved == (ROOT / source).resolve()
+
+    sdist = build["sdist"]["force-include"]
+    assert sdist == {
+        "../../src/omnitensor/training": "src/omnitensor/training",
+        "../../model-recipes": "model-recipes",
+    }
+    for destination in (*wheel_sources.values(), *sdist.values()):
+        assert not destination.startswith("..")
+
+    # The distribution ships its own licence rather than reaching out of its
+    # root for one, which put a `../../LICENSE` member inside the sdist.
+    assert project["project"]["license-files"] == ["LICENSE"]
+    assert (packaging_root / "LICENSE").is_file()
+    assert not (packaging_root / "LICENSE").is_symlink()
+    assert (packaging_root / "LICENSE").read_text(encoding="utf-8") == (
+        (ROOT / "LICENSE").read_text(encoding="utf-8")
+    )
