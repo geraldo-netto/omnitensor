@@ -1,7 +1,8 @@
-"""Shared native provider used by the four isolated workload wheels."""
+"""Shared native provider used by the isolated workload wheels."""
 
 from .factories import (
     create_ask_selected_files,
+    create_document_translation,
     create_event_extraction,
     create_file_organizer,
     create_selected_text_tools,
@@ -10,6 +11,7 @@ from .factories import (
 
 __all__ = [
     "create_ask_selected_files",
+    "create_document_translation",
     "create_event_extraction",
     "create_file_organizer",
     "create_selected_text_tools",

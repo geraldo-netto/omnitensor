@@ -51,7 +51,21 @@ def pairs() -> list[tuple[str, str]]:
     )
 
 
-@pytest.mark.parametrize(("plugin_id", "model_id"), pairs())
+def measured_pairs() -> list[tuple[str, str]]:
+    """The pairs somebody actually ran, which are the ones with a digest.
+
+    A pair recorded `unmeasured` has no task digest to have drifted: it is a
+    workload that ships before its GPU run, and the answer it produces says
+    "was not measured" rather than claiming a receipt it does not have.
+    """
+    return [
+        (plugin_id, model_id)
+        for plugin_id, model_id in pairs()
+        if shipped()["workloads"][plugin_id]["models"][model_id]["result"] != "unmeasured"
+    ]
+
+
+@pytest.mark.parametrize(("plugin_id", "model_id"), measured_pairs())
 def test_the_shipped_receipt_describes_the_task_that_will_run(plugin_id, model_id):
     """A digest that has moved means the task changed without re-qualification.
 
@@ -81,19 +95,37 @@ def test_a_pair_that_failed_says_why(plugin_id, model_id):
     the next person re-runs the same hours to learn the same thing."""
     recorded = shipped()["workloads"][plugin_id]["models"][model_id]
 
-    assert recorded["result"] in ("passed", "failed")
+    assert recorded["result"] in ("passed", "failed", "unmeasured")
     if recorded["result"] == "failed":
         assert recorded.get("reason", "").strip()
+    if recorded["result"] == "unmeasured":
+        # Nothing ran, so there is no digest to record; one here would be a
+        # measurement nobody took.
+        assert "taskSha256" not in recorded
 
 
 @pytest.mark.parametrize("plugin_id", sorted(factories._TASKS))
-def test_each_workload_defaults_to_a_model_that_passed(plugin_id):
-    """A default nobody qualified hands every job that did not choose a model
-    to a worker that cannot start."""
+def test_no_workload_defaults_to_a_model_that_failed(plugin_id):
+    """A default that failed hands every job that did not choose a model to a
+    model somebody measured and rejected."""
     entry = shipped()["workloads"][plugin_id]
 
     assert entry["default"] in entry["models"]
-    assert entry["models"][entry["default"]]["result"] == "passed"
+    assert entry["models"][entry["default"]]["result"] != "failed"
+
+
+def test_every_workload_this_provider_creates_is_measured_or_says_it_is_not():
+    """Which workloads still owe a GPU run, named rather than assumed."""
+    unmeasured = sorted(
+        plugin_id
+        for plugin_id, entry in shipped()["workloads"].items()
+        if all(record["result"] == "unmeasured" for record in entry["models"].values())
+    )
+
+    # OMNI-0523: `document-translation` ships before its receipt because the
+    # acceptance run needs the installed distribution to run against. Remove it
+    # from here in the commit that records the measurement.
+    assert unmeasured == ["document-translation"]
 
 
 def test_the_receipt_covers_exactly_the_workloads_this_provider_creates():

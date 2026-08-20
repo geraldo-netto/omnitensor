@@ -269,68 +269,90 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
         installation.main(argv)
 
 
-@pytest.mark.parametrize(
-    ("directory", "plugin_id", "module", "artifact_ids"),
-    [
-        (
-            "event-extraction",
-            "event-extraction",
-            "omnitensor_event_extraction",
-            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
-        ),
-        (
-            "ask-selected-files",
-            "ask-selected-files",
-            "omnitensor_ask_selected_files",
-            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
-        ),
-        (
-            "selected-text-tools",
-            "selected-text-tools",
-            "omnitensor_selected_text_tools",
-            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
-        ),
-        (
-            "file-organizer",
-            "file-organizer",
-            "omnitensor_file_organizer",
-            ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
-        ),
+# What each workload's manifest mounts, keyed by workload. The keys are checked
+# against the distributions actually in the tree below, in both directions: the
+# list used to be four hand-typed tuples, which meant a fifth distribution — or
+# a manifest with no distribution at all — was not a failing test but an absent
+# one. `media-transcription` was absent exactly that way.
+DECLARED_ARTIFACTS = {
+    "ask-selected-files": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
+    "document-translation": [
+        "qwen3-5-9b-iq4-xs",
+        "qwen3-8b-q4-k-m",
+        "dictalm2-hebrew-q4-k-m",
     ],
-)
-def test_provider_distribution_manifest_and_entry_point_identity_agree(
-    directory, plugin_id, module, artifact_ids
-):
-    provider = PROVIDERS / directory
-    project = tomllib.loads((provider / "pyproject.toml").read_text(encoding="utf-8"))
+    "event-extraction": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
+    "file-organizer": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
+    "media-transcription": ["qwen2-5-vl-7b-instruct", "whisper-small-multilingual"],
+    "selected-text-tools": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
+}
+
+
+def distributions() -> dict[str, tuple[Path, dict]]:
+    """Every provider distribution that declares a workload entry point."""
+    found: dict[str, tuple[Path, dict]] = {}
+    for path in sorted(PROVIDERS.glob("*/pyproject.toml")):
+        if "mutants" in path.parts:
+            continue
+        project = tomllib.loads(path.read_text(encoding="utf-8"))
+        entry_points = project["project"].get("entry-points", {}).get("omnitensor.workloads", {})
+        for workload_id in entry_points:
+            assert workload_id not in found, f"{workload_id} is declared by two distributions"
+            found[workload_id] = (path.parent, project)
+    return found
+
+
+def test_every_manifest_has_a_distribution_and_every_distribution_a_manifest():
+    """Both directions of one correspondence.
+
+    Only the first was ever checked, and only for a hand-typed four: a manifest
+    the service publishes with nothing that installs it is a workload a person
+    can see and never run, and a distribution with no manifest is discovered
+    and then refuses to start.
+    """
+    shipped = {path.stem for path in MANIFESTS.glob("*.json")}
+
+    assert set(distributions()) == shipped
+    assert set(DECLARED_ARTIFACTS) == shipped
+
+
+@pytest.mark.parametrize("plugin_id", sorted(distributions()))
+def test_provider_distribution_manifest_and_entry_point_identity_agree(plugin_id):
+    provider, project = distributions()[plugin_id]
     manifest_path = MANIFESTS / f"{plugin_id}.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     entry_points = project["project"]["entry-points"]["omnitensor.workloads"]
     force_include = project["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    [module] = project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+    module = module.removeprefix("src/")
 
     assert entry_points == {plugin_id: f"{module}:create"}
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == plugin_id
-    assert [item["id"] for item in manifest["plugin"]["artifacts"]] == artifact_ids
+    assert [item["id"] for item in manifest["plugin"]["artifacts"]] == DECLARED_ARTIFACTS[plugin_id]
     qwen_artifacts = [
         artifact
         for artifact in manifest["plugin"]["artifacts"]
         if artifact["id"] == GENERATION_MODEL_REFERENCE.id
     ]
-    assert qwen_artifacts == [
-        {
-            "id": GENERATION_MODEL_REFERENCE.id,
-            "version": GENERATION_MODEL_REFERENCE.version,
-            "format": GENERATION_MODEL_REFERENCE.format,
-            "sha256": GENERATION_MODEL_REFERENCE.sha256,
-            "sourceUri": GENERATION_MODEL_REFERENCE.source_uri,
-            "licenseSpdx": GENERATION_MODEL_REFERENCE.license_spdx,
-        }
-    ]
+    assert qwen_artifacts in (
+        [],
+        [
+            {
+                "id": GENERATION_MODEL_REFERENCE.id,
+                "version": GENERATION_MODEL_REFERENCE.version,
+                "format": GENERATION_MODEL_REFERENCE.format,
+                "sha256": GENERATION_MODEL_REFERENCE.sha256,
+                "sourceUri": GENERATION_MODEL_REFERENCE.source_uri,
+                "licenseSpdx": GENERATION_MODEL_REFERENCE.license_spdx,
+            }
+        ],
+    )
     assert "accelerator:gpu" in manifest["plugin"]["permissions"]
     assert validate_document("workload-manifest.schema.json", manifest) == []
-    assert force_include == {
-        f"../../plugin-manifests/{plugin_id}.json": f"{module}/omnitensor-plugin.json"
-    }
+    assert (
+        force_include[f"../../plugin-manifests/{plugin_id}.json"]
+        == f"{module}/omnitensor-plugin.json"
+    )
     assert (provider / "src" / module / "__init__.py").is_file()
 
     catalog = resolve_plugin_identities(

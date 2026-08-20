@@ -22,6 +22,13 @@ _RECORDED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _RECEIPT_VERSION = 2
 PASSED = "passed"
 FAILED = "failed"
+# A pair the receipt declares and nobody has measured yet. It exists because
+# the alternative is a deadlock: a workload cannot be qualified until its
+# distribution is installed and runnable, and it could not be declared here
+# until it was qualified. What it must never be is a claim — `_covers` reports
+# it as unmeasured, `qualified_models` does not offer it, and an answer says so.
+UNMEASURED = "unmeasured"
+_RESULTS = (PASSED, FAILED, UNMEASURED)
 _MAX_RECEIPT_BYTES = 64 * 1024
 
 
@@ -79,7 +86,7 @@ def _covers(value: object, plugin_id: str, model_id: str, task_digest: str) -> s
         return f"{plugin_id} has no measured models"
     workload = _workload_entry(value, plugin_id)
     record = workload["models"].get(model_id)
-    if record is None:
+    if record is None or record["result"] == UNMEASURED:
         return f"{model_id} was not measured for {plugin_id}"
     if record["result"] != PASSED:
         return f"{model_id} did not pass {plugin_id}: {record.get('reason', '')}".strip()
@@ -228,21 +235,30 @@ def _workload_entry(value: object, plugin_id: str) -> dict:
     for record in models.values():
         _workload_model(record)
     chosen = workload["default"]
-    if chosen not in models or models[chosen]["result"] != PASSED:
-        # A default nobody qualified would hand every job that did not choose
-        # a model to a worker that cannot start.
-        raise RuntimeError("workload default is not a passing model")
+    if chosen not in models or models[chosen]["result"] == FAILED:
+        # A default that *failed* hands every job that did not choose a model
+        # to a model somebody measured and rejected. A default nobody has
+        # measured yet is a different thing: `load_qualification` stopped
+        # gating on the receipt deliberately, so such a pair runs and the
+        # answer carries "was not measured" rather than refusing to start.
+        raise RuntimeError("workload default is a model that failed")
     return workload
 
 
 def _workload_model(record: object) -> None:
-    if not isinstance(record, dict) or not {"result", "taskSha256"} <= set(record):
+    if not isinstance(record, dict) or "result" not in record:
         raise RuntimeError("workload qualification is invalid")
     if set(record) - {"result", "taskSha256", "reason"}:
         raise RuntimeError("workload qualification is invalid")
-    if record["result"] not in (PASSED, FAILED):
+    if record["result"] not in _RESULTS:
         raise RuntimeError("workload result is invalid")
-    if not _is_digest(record["taskSha256"]):
+    if record["result"] == UNMEASURED:
+        # Nothing ran, so there is no task to have a digest of. A digest here
+        # would be a measurement nobody took.
+        if "taskSha256" in record:
+            raise RuntimeError("an unmeasured pair records no task digest")
+        return
+    if not _is_digest(record.get("taskSha256")):
         raise RuntimeError("workload task digest is invalid")
     # A failure is recorded rather than dropped, so nobody re-derives it in six
     # months — and a recorded failure without its reason is a note that says

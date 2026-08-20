@@ -553,9 +553,9 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
             lambda value: value["workloads"]["event-extraction"]["models"][
                 "qwen3-5-9b-iq4-xs"
             ].update(result="failed", reason="refused its own contract"),
-            # The workload's default is that model, and a default that did not
-            # pass is caught before anything asks to run it.
-            "workload default is not a passing model",
+            # The workload's default is that model, and a default somebody
+            # measured and rejected is caught before anything asks to run it.
+            "workload default is a model that failed",
         ),
         (
             # A failure recorded without its reason is a note saying only "no".
@@ -566,11 +566,25 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(default="qwen3-4b-q4-k-m"),
-            "workload default is not a passing model",
+            "workload default is a model that failed",
         ),
         (
             lambda value: value["workloads"]["event-extraction"].update(models={}),
             "workload qualification lists no model",
+        ),
+        (
+            # `unmeasured` says nothing ran; a digest beside it is a
+            # measurement nobody took.
+            lambda value: value["workloads"]["event-extraction"]["models"][
+                "qwen3-8b-q4-k-m"
+            ].update(result="unmeasured"),
+            "an unmeasured pair records no task digest",
+        ),
+        (
+            lambda value: value["workloads"]["event-extraction"]["models"][
+                "qwen3-8b-q4-k-m"
+            ].update(result="unknown"),
+            "workload result is invalid",
         ),
     ],
 )
@@ -3467,3 +3481,34 @@ def test_the_load_log_sink_is_handed_back_after_the_load(tmp_path, monkeypatch):
     for _ in range(1000):
         discarding(0, b"noise after the load", None)
     adapter._release()
+
+
+def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path, monkeypatch):
+    """OMNI-0522: a workload may ship before the GPU run that qualifies it.
+
+    Otherwise the two are a deadlock — the acceptance run needs the installed
+    distribution, and the distribution could not be declared until the run had
+    happened. What must not follow is a silent claim: the receipt records
+    `unmeasured`, `qualified_models` does not offer the pair, and the
+    qualification the provider hands the descriptor says so in words.
+    """
+
+    document = _receipt()
+    document["workloads"]["event-extraction"]["models"]["qwen3-8b-q4-k-m"] = {
+        "result": "unmeasured"
+    }
+    _load_receipt(monkeypatch, tmp_path, document)
+
+    loaded = qualification.load_qualification(
+        "event-extraction",
+        "qwen3-8b-q4-k-m",
+        "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+        event_generation_task(),
+    )
+
+    assert loaded.covers == "qwen3-8b-q4-k-m was not measured for event-extraction"
+    assert "qwen3-8b-q4-k-m" not in qualification.qualified_models("event-extraction")
+    # And it may still be the workload's default: unmeasured is not rejected.
+    document["workloads"]["event-extraction"]["default"] = "qwen3-8b-q4-k-m"
+    _load_receipt(monkeypatch, tmp_path, document)
+    assert qualification.default_model("event-extraction") == "qwen3-8b-q4-k-m"

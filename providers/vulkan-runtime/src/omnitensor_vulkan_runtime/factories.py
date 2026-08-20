@@ -9,6 +9,10 @@ from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_answer import document_question_task
 from omnitensor.plugins.document_qa import DocumentQuestionPlugin
+from omnitensor.plugins.document_translation import (
+    DocumentTranslationPlugin,
+    document_translation_task,
+)
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
     EventRecoveryJournal,
@@ -255,6 +259,7 @@ def _generation(plugin_id: str):
 
 _TASKS = {
     "ask-selected-files": document_question_task,
+    "document-translation": document_translation_task,
     "event-extraction": event_generation_task,
     "file-organizer": file_organizer_task,
     "selected-text-tools": selected_text_task,
@@ -308,15 +313,20 @@ def create_ask_selected_files() -> QualifiedWorkload:
     )
 
 
-def create_selected_text_tools() -> QualifiedWorkload:
-    bootstrap, store, runtime, model, qualification, router = _generation("selected-text-tools")
-    if bootstrap.state_path is None:
-        raise RuntimeError("selected-text load receipt state is unavailable")
+def _hebrew_route(bootstrap, store):
+    """DictaLM as one translation route, for every workload that offers Hebrew.
+
+    Two workloads translate into Hebrew and there is one measured model for
+    it, so the route is assembled once. What each workload does with the route
+    — a target it may pick, a target a document is translated into — is the
+    workload's, not this function's.
+    """
     hebrew_model = bootstrap.require_artifact(HEBREW_ARTIFACT_ID)
     hebrew_qualification = load_model_qualification(hebrew_model.id, hebrew_model.sha256)
-    assert bootstrap.accelerator_lease_path is not None
+    if bootstrap.accelerator_lease_path is None:
+        raise RuntimeError("GPU accelerator grant is unavailable")
     hebrew_runtime = HebrewTranslationRuntime(store, bootstrap.accelerator_lease_path)
-    hebrew_descriptor = GenerationProviderDescriptor(
+    descriptor = GenerationProviderDescriptor(
         provider_id="dictalm2-hebrew-gpu",
         accelerator="gpu",
         runtime="llama.cpp-vulkan",
@@ -324,11 +334,40 @@ def create_selected_text_tools() -> QualifiedWorkload:
         provenance=_provenance(hebrew_model),
         evidence=_evidence(hebrew_qualification),
     )
-    hebrew_worker = LlamaCppVulkanWorker(hebrew_descriptor, hebrew_runtime, (hebrew_model.path,))
+    worker = LlamaCppVulkanWorker(descriptor, hebrew_runtime, (hebrew_model.path,))
+    return GenerationRouter((worker,)), hebrew_runtime, hebrew_model, hebrew_qualification
+
+
+def create_document_translation() -> QualifiedWorkload:
+    bootstrap, store, runtime, model, qualification, router = _generation("document-translation")
+    hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = _hebrew_route(
+        bootstrap, store
+    )
+    plugin = DocumentTranslationPlugin(
+        router,
+        store,
+        translation_routes={"Hebrew": hebrew_router},
+    )
+    return QualifiedWorkload(
+        plugin,
+        runtime,
+        model.path,
+        qualification,
+        additional_runtimes=((hebrew_runtime, hebrew_model.path, hebrew_qualification),),
+    )
+
+
+def create_selected_text_tools() -> QualifiedWorkload:
+    bootstrap, store, runtime, model, qualification, router = _generation("selected-text-tools")
+    if bootstrap.state_path is None:
+        raise RuntimeError("selected-text load receipt state is unavailable")
+    hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = _hebrew_route(
+        bootstrap, store
+    )
     plugin = SelectedTextPlugin(
         router,
         store,
-        translation_routes={"Hebrew": GenerationRouter((hebrew_worker,))},
+        translation_routes={"Hebrew": hebrew_router},
     )
     return QualifiedWorkload(
         plugin,
