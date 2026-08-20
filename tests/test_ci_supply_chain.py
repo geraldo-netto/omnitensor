@@ -70,7 +70,7 @@ def test_provider_suite_script_owns_the_install_loop() -> None:
     assert "install --no-deps -e" in script
 
     workflow = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
-    assert "./scripts/run-provider-suites.sh --install" in workflow
+    assert "./scripts/run-provider-suites.sh --install --cov" in workflow
     # The loop lives in one place now, so CI cannot drift away from what a
     # developer reproduces locally.
     assert "provider-requirements.py" not in workflow
@@ -126,3 +126,34 @@ def test_every_workflow_step_runs_something_a_developer_can_run() -> None:
     assert referenced == set(local)
     for name, path in local.items():
         assert path.exists(), name
+
+
+def test_every_provider_distribution_declares_a_coverage_floor_ci_enforces() -> None:
+    """`providers/` is a sixth of the runtime source and had no floor at all.
+
+    `[tool.coverage.run] source = ["src/omnitensor"]`, so the root
+    `--cov-fail-under=80` says nothing about a provider: a module no test loads
+    was indistinguishable from one at 100%. The suites cannot be merged into
+    the root run — each distribution has its own dependencies — so each one
+    declares its own floor and the script reads it. Checked in both
+    directions: a distribution with no floor fails here, and a floor CI never
+    runs is caught by the workflow assertions below.
+    """
+    providers = sorted((ROOT / "providers").glob("*/pyproject.toml"))
+    assert len(providers) >= 6
+
+    floors = {}
+    for path in providers:
+        project = tomllib.loads(path.read_text(encoding="utf-8"))
+        floor = project.get("tool", {}).get("coverage", {}).get("report", {}).get("fail_under")
+        assert isinstance(floor, int), f"{path.parent.name} declares no coverage floor"
+        assert 0 < floor <= 100
+        floors[path.parent.name] = floor
+
+    script = (ROOT / "scripts" / "run-provider-suites.sh").read_text(encoding="utf-8")
+    assert "--cov)" in script
+    assert "fail_under" in script
+    assert "--cov-fail-under=" in script
+
+    workflow = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+    assert "./scripts/run-provider-suites.sh --install --cov" in workflow

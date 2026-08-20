@@ -35,5 +35,10 @@ jobs:
       # each provider distribution's suite ran only if something ran it
       # deliberately. Nothing did: media-transcription sat at 35 failures of
       # 107 that no gate reported.
-      - name: Install provider distributions and test their suites
-        run: OMNI_PYTHON="$(uv run --no-sync python -c 'import sys; print(sys.executable)')" ./scripts/run-provider-suites.sh --install
+      # `--cov` measures each distribution against the floor it declares in its
+      # own pyproject. The root `--cov-fail-under=80` above covers
+      # `src/omnitensor` only, so `providers/` — a sixth of the runtime source
+      # — was measured by nothing at all, and a provider module no test loads
+      # read exactly like one at 100%.
+      - name: Install provider distributions and test their suites with coverage
+        run: OMNI_PYTHON="$(uv run --no-sync python -c 'import sys; print(sys.executable)')" ./scripts/run-provider-suites.sh --install --cov

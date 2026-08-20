@@ -19,5 +19,16 @@ packages = ["src/omnitensor_file_organizer"]
 [tool.hatch.build.targets.wheel.force-include]
 "../../plugin-manifests/file-organizer.json" = "omnitensor_file_organizer/omnitensor-plugin.json"
 
+# The floor this distribution's own suite must hold. A shim is one import and one
+# `__all__`; anything less than every line means the installed binding is unproven.
+[tool.coverage.report]
+fail_under = 100
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# So the identity suite's one real check — that the installed shim object *is*
+# the runtime factory — runs instead of skipping. It used to skip on every
+# machine that had not installed both wheels, which is every machine that had
+# not read the skip reason, and a coverage floor over a shim that never loads
+# is a floor over nothing.
+pythonpath = ["src", "../vulkan-runtime/src", "../../src"]

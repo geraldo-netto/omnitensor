@@ -24,6 +24,12 @@ packages = ["src/omnitensor_vulkan_runtime"]
 source_paths = ["src/omnitensor_vulkan_runtime/"]
 pytest_add_cli_args_test_selection = ["tests/"]
 
+# The floor this distribution's own suite must hold. The root `--cov-fail-under`
+# measures `src/omnitensor` only, so without this a provider module no test loads
+# is indistinguishable from one at 100%. Measured 97% when the floor was set.
+[tool.coverage.report]
+fail_under = 95
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "../../src"]
