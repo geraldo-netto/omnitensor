@@ -49,6 +49,17 @@ CLIENT_PAYLOADS = {
     "media-transcription": {"sources": ["/home/person/omnitensor-inputs/clip.wav"]},
 }
 
+# Workloads this repository ships that the client does not drive yet, with the
+# reason. Named rather than omitted: the check below is in both directions, so
+# a shipped workload is either transcribed above or listed here on purpose.
+NOT_CLIENT_DRIVEN = {
+    # `xpuwlm/workflows/specs/catalog.py` says in a comment that the workload
+    # "is not installed: no manifest declares it and the runtime has no such
+    # id". That stopped being true when OMNI-0521 published the manifest and
+    # OMNI-0522 shipped the distribution; the client spec is OMNI-0544.
+    "document-translation": "the client has no spec for it yet (OMNI-0544)",
+}
+
 # The bounds the client refuses on before it submits anything, so a person is
 # told at the chooser rather than a minute later by a failed job.
 CLIENT_SOURCE_BOUNDS = {
@@ -115,9 +126,19 @@ def test_the_operations_the_client_offers_are_the_ones_the_manifest_allows():
     assert declared == offered
 
 
-def test_every_workload_the_client_drives_still_has_a_manifest_here():
-    """A window for a workload this repository no longer ships is a button that
-    fails on click."""
+def test_the_client_workloads_and_the_shipped_manifests_agree_in_both_directions():
+    """Only one direction was checked, and the other is where the gap was.
+
+    A window for a workload this repository no longer ships is a button that
+    fails on click — that is the direction this had. A workload this
+    repository ships that the client never drives is the opposite: a manifest
+    published to a client that cannot reach it, and nothing said so when
+    `document-translation` landed.
+    """
     shipped = {path.stem for path in MANIFESTS.glob("*.json")}
 
     assert set(CLIENT_PAYLOADS) <= shipped
+    assert set(NOT_CLIENT_DRIVEN) <= shipped
+    assert set(CLIENT_PAYLOADS) | set(NOT_CLIENT_DRIVEN) == shipped
+    assert set(CLIENT_PAYLOADS).isdisjoint(NOT_CLIENT_DRIVEN)
+    assert all(reason.strip() for reason in NOT_CLIENT_DRIVEN.values())

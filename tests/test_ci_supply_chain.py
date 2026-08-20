@@ -157,3 +157,56 @@ def test_every_provider_distribution_declares_a_coverage_floor_ci_enforces() -> 
 
     workflow = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
     assert "./scripts/run-provider-suites.sh --install --cov" in workflow
+
+
+def _console_scripts() -> dict[str, tuple[str, str]]:
+    """Every command the two distributions install, by name."""
+    found: dict[str, tuple[str, str]] = {}
+    for path in (ROOT / "pyproject.toml", ROOT / "packaging/omnitensor-training/pyproject.toml"):
+        project = tomllib.loads(path.read_text(encoding="utf-8"))["project"]
+        for name, target in project.get("scripts", {}).items():
+            module, _colon, attribute = target.partition(":")
+            assert name not in found, f"{name} is installed by two distributions"
+            found[name] = (module, attribute)
+    return found
+
+
+def test_every_installed_command_names_a_callable_that_exists() -> None:
+    """An entry point that resolves to nothing fails on the machine, at run time.
+
+    Nothing checked this: two console scripts were asserted individually in
+    `test_documentation.py` and the other twenty-eight by no test at all, so a
+    renamed `main` would have been found by the person who typed the command.
+    Import-free on purpose — the training commands live in a distribution this
+    environment need not have installed — so the module's source is read
+    instead.
+    """
+    import ast
+
+    source_root = ROOT / "src"
+    missing = []
+    for name, (module, attribute) in sorted(_console_scripts().items()):
+        path = source_root / (module.replace(".", "/") + ".py")
+        if not path.is_file():
+            path = source_root / module.replace(".", "/") / "__init__.py"
+        if not path.is_file():
+            missing.append(f"{name}: no module {module}")
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        defined = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                defined.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.Assign):
+                defined.update(target.id for target in node.targets if isinstance(target, ast.Name))
+        if attribute not in defined:
+            missing.append(f"{name}: {module} defines no {attribute}")
+
+    assert missing == []
+    # Both distributions are read, not only the service one.
+    assert "omnitensor" in _console_scripts()
+    assert "omnitensor-train-model" in _console_scripts()
