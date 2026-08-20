@@ -16,6 +16,7 @@ from omnitensor.preparation import ArtifactInstallationError, PreparationError
 from omnitensor.telemetry_recorder import TelemetryRecorder
 from omnitensor.telemetry_types import RecorderError
 
+from .. import paths
 from ..conversion import ConversionError
 from ..forecastresult import parse_forecast_reading
 from .build import (
@@ -62,14 +63,14 @@ from .training_train_cli import network_train_main as _network_train_main
 from .training_train_cli import storage_train_main as _storage_train_main
 from .training_train_cli import train_main as _train_main
 
-DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
-DEFAULT_SNAPSHOT_PATH = "~/.local/state/xpu-workload-manager/state.json"
-DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
-DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
-DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
-DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
-DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
-DEFAULT_BUILD_OUTPUT = "~/.local/share/omnitensor/training/build-advisor/local"
+DEFAULT_RECORDS_ROOT = paths.TELEMETRY_RECORDS_ROOT
+DEFAULT_SNAPSHOT_PATH = paths.SNAPSHOT_PATH
+DEFAULT_OUTPUT_ROOT = paths.TRAINING_OUTPUT_ROOT
+DEFAULT_ARTIFACT_ROOT = paths.ARTIFACT_ROOT
+DEFAULT_BINDINGS_ROOT = paths.MODEL_BINDINGS_ROOT
+DEFAULT_STORAGE_OUTPUT = f"{paths.TRAINING_OUTPUT_ROOT}/storage-intelligence/local"
+DEFAULT_NETWORK_OUTPUT = f"{paths.TRAINING_OUTPUT_ROOT}/network-peripherals/local"
+DEFAULT_BUILD_OUTPUT = f"{paths.TRAINING_OUTPUT_ROOT}/build-advisor/local"
 DEFAULT_HARDWARE_OUTPUT = "~/.local/share/omnitensor/training/hardware-health/local"
 DEFAULT_DESKTOP_OUTPUT = "~/.local/share/omnitensor/training/desktop-context/local"
 

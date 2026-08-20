@@ -11,13 +11,14 @@ from pathlib import Path
 
 from omnitensor.telemetry_recorder import TelemetryRecorder
 
+from .. import paths
 from ..forecastresult import parse_forecast_reading
 from .forecast_client import SocketForecastClient
 from .forecast_contracts import ForecastRunError
 from .runner import TrustedForecastRunner, load_forecast_binding
 
-DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
-DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
+DEFAULT_RECORDS_ROOT = paths.TELEMETRY_RECORDS_ROOT
+DEFAULT_BINDINGS_ROOT = paths.MODEL_BINDINGS_ROOT
 
 
 @dataclass(frozen=True, slots=True)

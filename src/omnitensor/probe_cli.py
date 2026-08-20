@@ -20,6 +20,7 @@ import argparse
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from . import paths
 from .fit import (
     CACHE_BYTES,
     DEFAULT_OVERHEAD_BYTES,
@@ -32,7 +33,7 @@ from .fit import (
 )
 from .gguf import GgufError, ModelShape, read_shape
 
-DEFAULT_ARTIFACT_ROOT = Path.home() / ".local/share/omnitensor/artifacts"
+DEFAULT_ARTIFACT_ROOT = Path(paths.ARTIFACT_ROOT).expanduser()
 # The context the four text workloads declare in their task limits. Their own
 # number, not a preference: it is what lets sixteen documents be read at once.
 DEFAULT_CONTEXT = 32_768

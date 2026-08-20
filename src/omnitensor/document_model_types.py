@@ -6,6 +6,8 @@ import copy
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import paths
+
 PROFILE_ID = "document-intelligence"
 RECIPE_ID = "bge-small-en-v1-5"
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
@@ -15,10 +17,10 @@ MAX_CORPUS_BYTES = 256 * 1024
 MIN_NATIVE_COSINE = 0.999
 MIN_RETRIEVAL_OVERLAP = 0.9
 MAX_NATIVE_ABSOLUTE_ERROR = 0.001
-DEFAULT_SOURCE_ROOT = "~/.local/share/omnitensor/model-sources"
-DEFAULT_BUILD_ROOT = "~/.local/share/omnitensor/document-model-build"
-DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
-DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
+DEFAULT_SOURCE_ROOT = paths.MODEL_SOURCES_ROOT
+DEFAULT_BUILD_ROOT = paths.DOCUMENT_MODEL_BUILD_ROOT
+DEFAULT_ARTIFACT_ROOT = paths.ARTIFACT_ROOT
+DEFAULT_BINDINGS_ROOT = paths.MODEL_BINDINGS_ROOT
 DOCUMENT_MODEL_REPORT_SCHEMA = "document-model-report.schema.json"
 
 _PORTABLE_INPUT_NAMES = ("input_ids", "attention_mask", "token_type_ids")

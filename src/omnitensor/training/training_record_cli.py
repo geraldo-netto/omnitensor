@@ -12,12 +12,13 @@ from pathlib import Path
 from omnitensor.telemetry_recorder import TelemetryRecorder
 from omnitensor.telemetry_types import RecorderError
 
+from .. import paths
 from .contracts import TrainingError
 from .desktop_history import DESKTOP_REVOCATION_CONFIRMATION, revoke_desktop_history
 from .snapshot_recording import load_runtime_snapshot, record_runtime_snapshot
 
-DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
-DEFAULT_SNAPSHOT_PATH = "~/.local/state/xpu-workload-manager/state.json"
+DEFAULT_RECORDS_ROOT = paths.TELEMETRY_RECORDS_ROOT
+DEFAULT_SNAPSHOT_PATH = paths.SNAPSHOT_PATH
 
 
 @dataclass(frozen=True, slots=True)

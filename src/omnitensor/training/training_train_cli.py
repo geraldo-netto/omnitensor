@@ -12,6 +12,7 @@ from types import MappingProxyType
 
 from omnitensor.forecasting import ForecastError
 
+from .. import paths
 from .build import (
     BUILD_PROVENANCE_CONFIRMATION,
     BuildAdvisorTrainer,
@@ -29,8 +30,8 @@ from .hardware import (
 from .network import NORMAL_ONLY_CONFIRMATION, NetworkAnomalyTrainer, load_network_replay
 from .storage import BACKBLAZE_TERMS, BackblazeDatasetBuilder, StorageTrainer
 
-DEFAULT_RECORDS_ROOT = "~/.local/state/omnitensor/telemetry"
-DEFAULT_OUTPUT_ROOT = "~/.local/share/omnitensor/training"
+DEFAULT_RECORDS_ROOT = paths.TELEMETRY_RECORDS_ROOT
+DEFAULT_OUTPUT_ROOT = paths.TRAINING_OUTPUT_ROOT
 DEFAULT_STORAGE_OUTPUT = "~/.local/share/omnitensor/training/storage-intelligence/local"
 DEFAULT_NETWORK_OUTPUT = "~/.local/share/omnitensor/training/network-peripherals/local"
 DEFAULT_BUILD_OUTPUT = "~/.local/share/omnitensor/training/build-advisor/local"

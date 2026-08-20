@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from . import paths
 from .acceptance_checks import (
     check_applet,
     check_applet_contract,
@@ -123,7 +124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(
             os.environ.get(
                 "OMNITENSOR_STATE_PATH",
-                "~/.local/state/xpu-workload-manager/state.json",
+                paths.SNAPSHOT_PATH,
             )
         ).expanduser(),
     )

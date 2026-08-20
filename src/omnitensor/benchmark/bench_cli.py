@@ -21,6 +21,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from .. import paths
 from ..fit import device_memory, estimate, gibibytes, verdict
 from ..gguf import GgufError, read_shape
 from . import cases as case_files
@@ -38,7 +39,7 @@ from .vulkan_devices import DeviceError, VulkanDevice
 from .vulkan_devices import devices as vulkan_devices
 from .vulkan_devices import select as select_device
 
-DEFAULT_ARTIFACT_ROOT = Path.home() / ".local/share/omnitensor/artifacts"
+DEFAULT_ARTIFACT_ROOT = Path(paths.ARTIFACT_ROOT).expanduser()
 
 DEFAULT_MODELS = ("qwen3-8b-q4-k-m", "qwen3-4b-q4-k-m")
 

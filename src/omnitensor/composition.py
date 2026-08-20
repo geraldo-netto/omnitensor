@@ -9,15 +9,16 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from . import paths
 from .plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
 from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
 
-DEFAULT_STATE_PATH = "~/.local/state/xpu-workload-manager/state.json"
-DEFAULT_POLICY_PATH = "~/.local/state/omnitensor/policy.json"
-DEFAULT_WORKLOADS_PATH = "~/.local/share/omnitensor/workloads"
-DEFAULT_MODEL_BINDINGS_PATH = "~/.local/share/omnitensor/model-bindings"
-DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
-DEFAULT_GRANTS_PATH = "~/.local/state/omnitensor/grants.json"
+DEFAULT_STATE_PATH = paths.SNAPSHOT_PATH
+DEFAULT_POLICY_PATH = paths.POLICY_PATH
+DEFAULT_WORKLOADS_PATH = paths.WORKLOADS_ROOT
+DEFAULT_MODEL_BINDINGS_PATH = paths.MODEL_BINDINGS_ROOT
+DEFAULT_ARTIFACT_ROOT = paths.ARTIFACT_ROOT
+DEFAULT_GRANTS_PATH = paths.GRANTS_PATH
 
 
 def _env_path(

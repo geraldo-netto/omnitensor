@@ -11,12 +11,13 @@ from pathlib import Path
 from omnitensor.forecasting import ForecastError
 from omnitensor.preparation import ArtifactInstallationError, PreparationError
 
+from .. import paths
 from ..conversion import ConversionError
 from .contracts import TrainingError
 from .installation import available_targets, install_training
 
-DEFAULT_ARTIFACT_ROOT = "~/.local/share/omnitensor/artifacts"
-DEFAULT_BINDINGS_ROOT = "~/.local/share/omnitensor/model-bindings"
+DEFAULT_ARTIFACT_ROOT = paths.ARTIFACT_ROOT
+DEFAULT_BINDINGS_ROOT = paths.MODEL_BINDINGS_ROOT
 
 
 @dataclass(frozen=True, slots=True)
