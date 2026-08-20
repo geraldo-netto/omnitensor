@@ -633,3 +633,19 @@ def test_unpersistable_adoption_is_logged_rather_than_silent(control, monkeypatc
 
     assert "file-organizer" not in control.state.profiles
     assert any("file-organizer" in record.getMessage() for record in caplog.records)
+
+
+def test_the_convenience_builder_forwards_every_dependency(tmp_path):
+    """OMNI-0463: it dropped two, so set-profile-model always refused."""
+    applied = []
+    service = build_control_service(
+        tmp_path / "policy.json",
+        {"visual-library": ProfilePolicy(enabled=True, weight=1)},
+        profile_models=lambda _profile_id: ("model-a",),
+        on_applied=lambda: applied.append("notified"),
+    )
+
+    acknowledgement = apply(service, command("set-profile-model", "visual-library", "model-a"))
+
+    assert acknowledgement["status"] == "applied"
+    assert applied == ["notified"]

@@ -43,16 +43,6 @@ def _now_ms() -> int:
     return max(1, int(time.time() * 1000))
 
 
-_CHOOSERS = {
-    "set-profile-device": lambda control, state, profile_id, value: control._set_profile_device(
-        state, profile_id, value
-    ),
-    "set-profile-model": lambda control, state, profile_id, value: control._set_profile_model(
-        state, profile_id, value
-    ),
-}
-
-
 def _integral_weight(value: object) -> int | None:
     """Coerce a schema-valid weight to the ``int`` the policy stores.
 
@@ -217,15 +207,8 @@ class ControlService:
             state.paused = command["value"] is True
             return None
         profile_id = command["profileId"]
-        # Device and model are choices *about* a profile rather than settings
-        # inside its policy, so they are answerable for a profile that has no
-        # stored policy yet — hence one gate for both, before the policy lookup
-        # the rest need.
-        chooser = _CHOOSERS.get(operation)
-        if chooser is not None:
-            if not self._known_profile(state, profile_id):
-                return f"Unknown workload profile: {profile_id}"
-            return chooser(self, state, profile_id, command["value"])
+        if operation in ("set-profile-device", "set-profile-model"):
+            return self._choose(state, operation, profile_id, command["value"])
         policy = state.profiles.get(profile_id)
         if policy is None:
             return f"Unknown workload profile: {profile_id}"
@@ -237,6 +220,18 @@ class ControlService:
             return f"Weight must be between {MIN_WEIGHT} and {MAX_WEIGHT}"
         policy.weight = weight
         return None
+
+    def _choose(self, state: PolicyState, operation: str, profile_id: str, value) -> str | None:
+        """Apply a choice *about* a profile rather than a setting inside it.
+
+        Device and model are answerable for a profile that has no stored policy
+        yet, so they share one gate, before the policy lookup the rest need.
+        """
+        if not self._known_profile(state, profile_id):
+            return f"Unknown workload profile: {profile_id}"
+        if operation == "set-profile-device":
+            return self._set_profile_device(state, profile_id, value)
+        return self._set_profile_model(state, profile_id, value)
 
     def _apply_batch(self, state: PolicyState, changes: list) -> str | None:
         """Apply every change or none of them.
@@ -379,9 +374,21 @@ def build_control_service(
     *,
     profile_exists=None,
     gpu_device_ids=None,
+    profile_models=None,
+    on_applied=None,
 ) -> ControlService:
+    """Wire a control service over a policy file.
+
+    Every argument the service takes is forwarded. It used to drop
+    ``profile_models`` and ``on_applied``, so a service built this way notified
+    nothing of a policy change and refused every ``set-profile-model`` with
+    "Model is not declared by this workload" - the fallback for a profile whose
+    declared models nobody could name.
+    """
     return ControlService(
         PolicyStore(state_path, defaults),
         profile_exists=profile_exists,
         gpu_device_ids=gpu_device_ids,
+        **({} if profile_models is None else {"profile_models": profile_models}),
+        **({} if on_applied is None else {"on_applied": on_applied}),
     )
