@@ -259,6 +259,11 @@ def install_prepared(prepared: PreparedArtifact, root: Path | str) -> Path:
     return Path(getattr(installation, "path", root))
 
 
+def uninstall_prepared(reference, root: Path | str) -> bool:
+    """Undo one landed installation; the compensating half of install_prepared."""
+    return ArtifactInstaller(Path(root)).uninstall(reference)
+
+
 def trusted_prepared_installer(
     root: Path | str,
     *,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sys
@@ -9,7 +10,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from omnitensor.preparation import PreparedArtifact, install_prepared, prepare_artifact
+from omnitensor.preparation import (
+    PreparedArtifact,
+    install_prepared,
+    prepare_artifact,
+    uninstall_prepared,
+)
 
 from ..atomicio import write_json_atomic
 from ..registry import (
@@ -30,6 +36,8 @@ from .compilers import (
     resolve_compiler_tool,
 )
 from .contracts import TrainingError, TrainingReport
+
+LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_TARGETS = TARGET_ORDER
 
@@ -108,32 +116,50 @@ def install_training(
         if compiler is None:
             raise TrainingError("compiler-missing", f"no compiler provider for {target}")
         prepared.append(_compile_and_prepare(report, request, compiler, output))
-    installed = []
-    for compiled, artifact in prepared:
-        landed = install_prepared(artifact, artifact_root)
-        fragment = _model_fragment(report, artifact, compiled.fully_quantized)
-        installed.append(
-            InstalledVariant(
-                compiled.accelerator,
-                artifact.reference.id,
-                artifact.reference.format,
-                landed,
-                fragment,
+    installed: list[InstalledVariant] = []
+    landed_references = []
+    try:
+        for compiled, artifact in prepared:
+            landed = install_prepared(artifact, artifact_root)
+            landed_references.append(artifact.reference)
+            fragment = _model_fragment(report, artifact, compiled.fully_quantized)
+            installed.append(
+                InstalledVariant(
+                    compiled.accelerator,
+                    artifact.reference.id,
+                    artifact.reference.format,
+                    landed,
+                    fragment,
+                )
             )
+        binding = _binding_manifest(
+            report,
+            {variant.accelerator: variant.manifest_fragment for variant in installed},
+            bundled_root=bundled_root,
         )
-    binding = _binding_manifest(
-        report,
-        {variant.accelerator: variant.manifest_fragment for variant in installed},
-        bundled_root=bundled_root,
-    )
-    binding_path = Path(bindings_root) / report.spec.profile_id / "manifest.json"
-    publish_binding(
-        binding_path,
-        binding,
-        prefix=".model-binding-",
-        writer=write_json_atomic,
-    )
+        binding_path = Path(bindings_root) / report.spec.profile_id / "manifest.json"
+        publish_binding(
+            binding_path,
+            binding,
+            prefix=".model-binding-",
+            writer=write_json_atomic,
+        )
+    except BaseException:
+        # All the variants or none: failing on the second of three left the
+        # first in the store with no binding naming it, an orphan nothing
+        # cleaned and a retry installed beside.
+        remove_landed_artifacts(landed_references, artifact_root)
+        raise
     return InstalledTraining(report.spec.profile_id, binding_path, tuple(installed))
+
+
+def remove_landed_artifacts(references, artifact_root) -> None:
+    """Undo a part-finished publication, reporting nothing it cannot undo."""
+    for reference in reversed(list(references)):
+        try:
+            uninstall_prepared(reference, artifact_root)
+        except Exception:  # noqa: BLE001 - cleanup must not mask the real failure
+            LOGGER.exception("could not remove partially installed %s", reference.id)
 
 
 def validated_targets(targets: Sequence[str]) -> tuple[str, ...]:

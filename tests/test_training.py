@@ -13,9 +13,11 @@ from conftest import sample_manifest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
+from omnitensor.plugins.artifacts import ArtifactResolver
 from omnitensor.plugins.recorder import FeatureRow, TelemetryRecorder
 from omnitensor.preparation import file_digest
 from omnitensor.registry import Workload
+from omnitensor.training import installation
 from omnitensor.training.cli import _feature_values, install_main, record_main, train_main
 from omnitensor.training.compilers import (
     CompilationRequest,
@@ -754,3 +756,32 @@ def test_install_cli_reports_stable_failure_without_traceback(tmp_path, capsys):
 
     assert code == 1
     assert "installation failed" in capsys.readouterr().err
+
+
+def test_a_publication_that_fails_part_way_leaves_no_orphan_artifact(tmp_path, monkeypatch):
+    """OMNI-0416: the first variant landed with no binding naming it."""
+    fake_prepared_training(tmp_path, monkeypatch)
+    artifact_root = tmp_path / "artifacts"
+    landed = []
+    install = installation.install_prepared
+
+    def failing_install(artifact, root):
+        if landed:
+            raise RuntimeError("the store went read-only")
+        landed.append(artifact.reference)
+        return install(artifact, root)
+
+    monkeypatch.setattr(installation, "install_prepared", failing_install)
+
+    with pytest.raises(RuntimeError, match="read-only"):
+        install_training(
+            tmp_path / "fit/training-report.json",
+            targets=("gpu", "npu"),
+            artifact_root=artifact_root,
+            bindings_root=tmp_path / "bindings",
+        )
+
+    assert landed, "the first variant must have been installed for this to prove anything"
+    resolver = ArtifactResolver([artifact_root])
+    assert resolver.resolve(landed[0]).ready is False
+    assert not (tmp_path / "bindings").exists()

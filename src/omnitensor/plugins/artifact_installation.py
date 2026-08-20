@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import os
+import shutil
 import stat
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -403,6 +404,30 @@ class ArtifactInstaller:
             [self._root],
             max_artifact_bytes=self._max_artifact_bytes,
         ).resolve(reference)
+
+    @_store_locked
+    def uninstall(self, reference: ArtifactReference) -> bool:
+        """Remove one installed version and undo the activation that named it.
+
+        The compensating action for a producer that installs several variants
+        and fails part-way: without it the artifacts that already landed stay
+        in the store with no binding referencing them, nothing ever cleans them
+        and a retry reinstalls beside them. Returns ``False`` when there was
+        nothing of that version to remove.
+        """
+        artifact_root = self._artifact_root(reference.id)
+        destination = artifact_root / reference.version
+        current = self.activation(reference.id)
+        if current.active == reference:
+            # Point at whatever it displaced, which may be nothing at all.
+            self._write_activation(reference.id, ArtifactActivation(current.rollback, None))
+        elif current.rollback == reference:
+            self._write_activation(reference.id, ArtifactActivation(current.active, None))
+        if not destination.exists():
+            return False
+        shutil.rmtree(destination, ignore_errors=True)
+        _fsync_directory(artifact_root)
+        return True
 
     @_store_locked
     def rollback(self, artifact_id: str) -> ArtifactInstallation:

@@ -38,7 +38,12 @@ from .compilers import (
     compiler_catalog,
 )
 from .contracts import TrainingError, validate_training_report_document
-from .installation import InstalledTraining, InstalledVariant, validated_targets
+from .installation import (
+    InstalledTraining,
+    InstalledVariant,
+    remove_landed_artifacts,
+    validated_targets,
+)
 
 MAX_NUMERIC_REPORT_BYTES = 1024 * 1024
 MAX_PARITY_ERROR = 1e-4
@@ -188,6 +193,36 @@ class NativeParityVerifier(Protocol):
 ArtifactSigner = Callable[[ArtifactReference, str], ArtifactProvenance]
 
 
+def _compile_prepare_and_gate(
+    report: NumericTrainingReport,
+    request: CompilationRequest,
+    catalog: Mapping[str, TargetCompiler],
+    target: str,
+    *,
+    output: Path,
+    artifact_id: str,
+    version: str,
+    parity_verifier: NativeParityVerifier,
+) -> tuple[CompiledTarget, PreparedArtifact, NativeParityEvidence]:
+    """Compile one target, prepare its artifact, and hold it to the parity gate."""
+    compiler = catalog.get(target)
+    if compiler is None:
+        raise TrainingError("compiler-missing", f"no compiler provider for {target}")
+    try:
+        compiled = compiler.compile(request, output / target)
+    except CompilerError as error:
+        raise TrainingError(error.code, error.detail) from error
+    artifact = prepare_artifact(
+        compiled.primary,
+        artifact_id=artifact_id,
+        version=version,
+        model_format=compiled.model_format,
+    )
+    evidence = parity_verifier.verify(report, compiled)
+    _validate_parity(report, artifact, evidence)
+    return compiled, artifact, evidence
+
+
 def promote_numeric_training(
     report_path: Path | str,
     *,
@@ -219,54 +254,56 @@ def promote_numeric_training(
         raise TrainingError(error.code, error.detail) from error
     output = Path(build_root) if build_root is not None else report.report_path.parent / "compiled"
     request = CompilationRequest(report.model_path, "onnx", report.input_shape, False)
-    prepared: list[tuple[CompiledTarget, PreparedArtifact, NativeParityEvidence]] = []
-    for target in selected:
-        compiler = catalog.get(target)
-        if compiler is None:
-            raise TrainingError("compiler-missing", f"no compiler provider for {target}")
-        try:
-            compiled = compiler.compile(request, output / target)
-        except CompilerError as error:
-            raise TrainingError(error.code, error.detail) from error
-        artifact = prepare_artifact(
-            compiled.primary,
+    prepared = [
+        _compile_prepare_and_gate(
+            report,
+            request,
+            catalog,
+            target,
+            output=output,
             artifact_id=f"{artifact_id}-{target}",
             version=variant_versions[target],
-            model_format=compiled.model_format,
+            parity_verifier=parity_verifier,
         )
-        evidence = parity_verifier.verify(report, compiled)
-        _validate_parity(report, artifact, evidence)
-        prepared.append((compiled, artifact, evidence))
+        for target in selected
+    ]
     install_trusted = trusted_prepared_installer(
         artifact_root,
         trust_verifier=trust_verifier,
     )
-    installed = []
-    for compiled, artifact, evidence in prepared:
-        provenance = signer(artifact.reference, report.report_sha256)
-        landed = install_trusted(artifact, provenance)
-        fragment = _numeric_model_fragment(report, artifact, compiled, evidence)
-        installed.append(
-            InstalledVariant(
-                compiled.accelerator,
-                artifact.reference.id,
-                artifact.reference.format,
-                landed,
-                fragment,
+    installed: list[InstalledVariant] = []
+    landed_references = []
+    try:
+        for compiled, artifact, evidence in prepared:
+            provenance = signer(artifact.reference, report.report_sha256)
+            landed = install_trusted(artifact, provenance)
+            landed_references.append(artifact.reference)
+            fragment = _numeric_model_fragment(report, artifact, compiled, evidence)
+            installed.append(
+                InstalledVariant(
+                    compiled.accelerator,
+                    artifact.reference.id,
+                    artifact.reference.format,
+                    landed,
+                    fragment,
+                )
             )
+        binding = _numeric_binding_manifest(
+            report,
+            {variant.accelerator: variant.manifest_fragment for variant in installed},
+            bundled_root=bundled_root,
         )
-    binding = _numeric_binding_manifest(
-        report,
-        {variant.accelerator: variant.manifest_fragment for variant in installed},
-        bundled_root=bundled_root,
-    )
-    binding_path = Path(bindings_root) / report.profile_id / "manifest.json"
-    publish_binding(
-        binding_path,
-        binding,
-        prefix=".numeric-model-binding-",
-        writer=write_json_atomic,
-    )
+        binding_path = Path(bindings_root) / report.profile_id / "manifest.json"
+        publish_binding(
+            binding_path,
+            binding,
+            prefix=".numeric-model-binding-",
+            writer=write_json_atomic,
+        )
+    except BaseException:
+        # The same all-or-none rule the untrusted publication follows.
+        remove_landed_artifacts(landed_references, artifact_root)
+        raise
     return InstalledTraining(report.profile_id, binding_path, tuple(installed))
 
 
