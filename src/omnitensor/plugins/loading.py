@@ -22,12 +22,14 @@ from . import loading_staging as _staging
 from . import worker_specs as _specs
 from .artifacts import ArtifactReference as _ArtifactReference
 from .artifacts import ArtifactResolution as _ArtifactResolution
+from .configuration_spec import manifest_configuration_spec
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
 from .offloop import run_off_loop as _run_off_loop
 from .protocol import PluginProgress, PluginRequest, PluginResultStatus
 from .sandbox import SELECTED_FILES_PERMISSION
+from .settings import PluginConfigurationSpec, PluginSettingsError
 from .supervisor import PluginWorkerSupervisor
 from .supervisor_diagnostics import WorkerState, WorkerStatus
 from .supervisor_process import AsyncioSubprocessLauncher
@@ -222,6 +224,24 @@ class InstalledPluginRuntime:
             for artifact in artifacts
             if isinstance(artifact, dict) and isinstance(artifact.get("id"), str)
         )
+
+    def configuration_spec(self, plugin_id: str) -> PluginConfigurationSpec | None:
+        """The configuration contract this plugin's manifest declares.
+
+        `None` when the plugin is unknown or declares no contract at all. A
+        manifest that declares one this runtime cannot hold raises instead:
+        that is a defect in the distribution, and refusing by name is the only
+        way anybody learns which manifest is wrong.
+        """
+        plugin = self._plugin(plugin_id)
+        if plugin is None:
+            return None
+        try:
+            return manifest_configuration_spec(plugin.plugin_id, plugin.manifest)
+        except PluginSettingsError as error:
+            if error.code == "configuration-undeclared":
+                return None
+            raise
 
     def granted_permissions(self, plugin_id: str) -> frozenset[str]:
         """What this plugin was actually granted when its worker started."""

@@ -91,6 +91,7 @@ from .plugins.orchestration import (
     RunnerSet,
     with_recovery,
 )
+from .plugins.settings import PluginSettingsStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
@@ -253,12 +254,18 @@ class OmniTensorService:
             for workload_id, workload in self._workloads.items()
         }
         storage = policy_storage or PolicyStore(policy_path, defaults)
+        # Beside the policy store rather than in it: a workload's tuning is
+        # validated against that workload's own schema, and a policy document
+        # holding documents no schema here describes could not be validated.
+        self._plugin_settings = PluginSettingsStore(snapshot_path.parent / "plugin-settings")
         self.control = ControlService(
             storage,
             on_applied=self._policy_changed,
             profile_exists=self._profile_exists,
             gpu_device_ids=self._gpu_device_ids,
             profile_models=self._profile_models,
+            profile_configuration=self._profile_configuration,
+            settings_store=self._plugin_settings,
         )
         self._devices = self._discovery.detect()
         self._executors = build_executors(self._devices)
@@ -463,6 +470,17 @@ class OmniTensorService:
         """
         declared = getattr(self._plugin_runtime, "declared_artifacts", None)
         return tuple(declared(profile_id)) if callable(declared) else ()
+
+    def _profile_configuration(self, profile_id: str):
+        """The configuration contract this workload declares, or nothing.
+
+        Asked of the plugin runtime each time rather than cached: a workload
+        installed, upgraded or removed while the service runs changes the
+        answer, and a stale spec would hold settings against a contract that
+        is no longer the plugin's.
+        """
+        spec_of = getattr(self._plugin_runtime, "configuration_spec", None)
+        return spec_of(profile_id) if callable(spec_of) else None
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
         return tuple(device.id for device in self._devices if device.backend == "gpu")

@@ -80,7 +80,7 @@ small:
 | Prefer a card, set a weight | `apply-command` `set-profile-device`, `set-profile-weight` |
 | Choose the model a workload runs | `apply-command` `set-profile-model` |
 | Run something | `submit-job`, `get-job-result`, `cancel-job` |
-| Configure a workload | `set-plugin-configuration` (planned, OMNI-0355) |
+| Configure a workload | `apply-command` `set-profile-configuration` |
 
 Two things were considered and rejected, recorded here so they are not
 re-derived:

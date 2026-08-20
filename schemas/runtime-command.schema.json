@@ -37,6 +37,7 @@
         "set-profile-weight",
         "set-profile-device",
         "set-profile-model",
+        "set-profile-configuration",
         "set-paused",
         "apply-profiles"
       ]
@@ -66,12 +67,15 @@
           "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
         },
         {
+          "type": "object"
+        },
+        {
           "type": "null"
         }
       ]
     },
     "changes": {
-      "description": "Several profile settings applied as one command, one revision, and one acknowledgement. Sending them separately spends a call and a revision each, and a failure part-way leaves policy half-applied with no way to retry the rest as a unit \u2014 the batch either applies whole or changes nothing.",
+      "description": "Several profile settings applied as one command, one revision, and one acknowledgement. Sending them separately spends a call and a revision each, and a failure part-way leaves policy half-applied with no way to retry the rest as a unit — the batch either applies whole or changes nothing.",
       "type": "array",
       "minItems": 1,
       "maxItems": 128,
@@ -173,6 +177,27 @@
                 "type": "null"
               }
             ]
+          },
+          "changes": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "set-profile-configuration"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The configuration a person chose, validated against the schema that workload's own manifest declares rather than against this one. Unbounded here on purpose: the settings store holds the document-size limit, and a ceiling stated twice is a ceiling that drifts.",
+            "type": "object"
           },
           "changes": false
         }

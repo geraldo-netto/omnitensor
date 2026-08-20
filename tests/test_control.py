@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from omnitensor.control import (
+    CONFIGURATION_UNAVAILABLE_MESSAGE,
     CONTROL_VERSION,
     INTERNAL_ERROR_MESSAGE,
     PERSIST_FAILURE_MESSAGE,
@@ -209,6 +210,8 @@ def test_control_service_holds_no_dead_defaults_state():
         "profile_exists",
         "gpu_device_ids",
         "profile_models",
+        "profile_configuration",
+        "settings_store",
     ]
 
 
@@ -649,3 +652,225 @@ def test_the_convenience_builder_forwards_every_dependency(tmp_path):
 
     assert acknowledgement["status"] == "applied"
     assert applied == ["notified"]
+
+
+# --- set-profile-configuration (OMNI-0541) ------------------------------------
+
+
+CONFIGURATION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "guidance": {"type": "string", "default": ""},
+        "length": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
+    },
+}
+
+
+def configuration_control(tmp_path, *, schema=None, spec_of=None, store=None):
+    from omnitensor.plugins import PluginSettingsStore, manifest_configuration_spec
+
+    manifest = {
+        "plugin": {
+            "schemas": {
+                "configuration": CONFIGURATION_SCHEMA if schema is None else schema,
+                "input": {"type": "object"},
+                "output": {"type": "object"},
+            }
+        }
+    }
+    settings = PluginSettingsStore(tmp_path / "plugin-settings") if store is None else store
+    return build_control_service(
+        tmp_path / "policy.json",
+        {"hardware-health": ProfilePolicy(enabled=True, weight=2)},
+        profile_configuration=(
+            spec_of
+            if spec_of is not None
+            else (lambda profile_id: manifest_configuration_spec(profile_id, manifest))
+        ),
+        settings_store=settings,
+    ), settings
+
+
+def test_a_configuration_is_validated_against_the_workloads_own_schema(tmp_path):
+    service, settings = configuration_control(tmp_path)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"guidance": "cite sources"}),
+    )
+    assert acknowledgement["status"] == "applied"
+    assert acknowledgement["revision"] == 1
+
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).configuration == {"guidance": "cite sources"}
+
+
+def test_a_configuration_the_workload_refuses_spends_no_revision(tmp_path):
+    service, settings = configuration_control(tmp_path)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"length": 9}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["revision"] == 0
+    assert "Configuration was refused" in acknowledgement["message"]
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).revision == 0
+
+
+def test_an_unknown_property_is_refused_by_the_manifests_schema(tmp_path):
+    service, _settings = configuration_control(tmp_path)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"unknown": True}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["revision"] == 0
+
+
+def test_a_workload_that_declares_no_configuration_is_named(tmp_path):
+    service, _settings = configuration_control(tmp_path, spec_of=lambda _profile_id: None)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert "declares no configuration" in acknowledgement["message"]
+
+
+def test_a_manifest_declaring_a_contract_nothing_can_hold_is_named(tmp_path):
+    from omnitensor.plugins import manifest_configuration_spec
+
+    def spec_of(profile_id):
+        return manifest_configuration_spec(
+            profile_id,
+            {
+                "plugin": {
+                    "schemas": {
+                        "configuration": {
+                            "type": "object",
+                            "properties": {"mode": {"type": "string"}},
+                            "required": ["mode"],
+                        },
+                        "input": {},
+                        "output": {},
+                    }
+                }
+            },
+        )
+
+    service, _settings = configuration_control(tmp_path, spec_of=spec_of)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"mode": "safe"}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert "configuration contract is unusable" in acknowledgement["message"]
+
+
+def test_an_unknown_profile_is_refused_before_anything_is_stored(tmp_path):
+    service, _settings = configuration_control(tmp_path)
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "not-installed", {"guidance": "x"}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == "Unknown workload profile: not-installed"
+
+
+def test_a_runtime_wired_without_a_settings_store_refuses_rather_than_pretending(tmp_path):
+    service = build_control_service(
+        tmp_path / "policy.json",
+        {"hardware-health": ProfilePolicy(enabled=True, weight=2)},
+    )
+    acknowledgement = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"guidance": "x"}),
+    )
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == CONFIGURATION_UNAVAILABLE_MESSAGE
+
+
+def test_a_stale_revision_is_refused_before_the_configuration_is_read(tmp_path):
+    service, settings = configuration_control(tmp_path)
+    apply(service, command("set-profile-configuration", "hardware-health", {"guidance": "one"}))
+    stale = apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"guidance": "two"}, revision=0),
+    )
+    assert stale["status"] == "rejected"
+    assert stale["message"] == REVISION_MISMATCH_MESSAGE
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).configuration == {"guidance": "one"}
+
+
+def test_each_stored_configuration_advances_the_settings_revision(tmp_path):
+    service, settings = configuration_control(tmp_path)
+    apply(service, command("set-profile-configuration", "hardware-health", {"guidance": "one"}))
+    apply(
+        service,
+        command("set-profile-configuration", "hardware-health", {"guidance": "two"}, revision=1),
+    )
+    spec = service._profile_configuration("hardware-health")
+    stored = settings.load(spec)
+    assert stored.revision == 2
+    assert stored.configuration == {"guidance": "two"}
+
+
+def test_a_stored_configuration_is_not_called_unapplied_when_the_policy_save_fails(
+    tmp_path, caplog
+):
+    """The two writes cannot be one, so the acknowledgement tells the truth.
+
+    "Nothing was applied" would be false: the configuration is on disk. What
+    the failed save costs is the revision bump that tells clients to re-read,
+    and that is what the log says.
+    """
+    service, settings = configuration_control(tmp_path)
+
+    def refuse(_state):
+        raise OSError("read-only file system")
+
+    service._store.save = refuse
+    with caplog.at_level(logging.WARNING, logger="omnitensor.control"):
+        acknowledgement = apply(
+            service,
+            command("set-profile-configuration", "hardware-health", {"guidance": "kept"}),
+        )
+    assert acknowledgement["status"] == "applied"
+    assert acknowledgement["revision"] == 0
+    assert "could not be persisted" in caplog.text
+    spec = service._profile_configuration("hardware-health")
+    assert settings.load(spec).configuration == {"guidance": "kept"}
+
+
+def test_a_policy_save_failure_still_rejects_every_other_operation(tmp_path):
+    service, _settings = configuration_control(tmp_path)
+
+    def refuse(_state):
+        raise OSError("read-only file system")
+
+    service._store.save = refuse
+    acknowledgement = apply(service, command("set-profile-enabled", "hardware-health", False))
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == PERSIST_FAILURE_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, 3, "gpu-renderD128", None, [], "text"],
+)
+def test_a_configuration_that_is_not_an_object_fails_the_command_contract(tmp_path, value):
+    service, _settings = configuration_control(tmp_path)
+    acknowledgement = apply(service, command("set-profile-configuration", "hardware-health", value))
+    assert acknowledgement["status"] == "rejected"
+    assert acknowledgement["message"] == "Command does not match the version 2 contract"
+
+
+def test_the_operation_may_not_carry_a_batch_or_a_null_profile(tmp_path):
+    service, _settings = configuration_control(tmp_path)
+    document = json.loads(command("set-profile-configuration", None, {}))
+    assert validate_document("runtime-command.schema.json", document) != []
+    document = json.loads(command("set-profile-configuration", "hardware-health", {}))
+    document["changes"] = [{"profileId": "hardware-health", "enabled": True}]
+    assert validate_document("runtime-command.schema.json", document) != []

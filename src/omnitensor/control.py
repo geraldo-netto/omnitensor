@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import functools
 import json
 import logging
 import re
@@ -18,6 +19,7 @@ import time
 from pathlib import Path
 
 from .plugins.offloop import run_off_loop
+from .plugins.settings import PluginSettingsError
 from .ports import PolicyStorage
 from .registry import validate_document
 from .state import (
@@ -33,6 +35,8 @@ from .state import (
 LOGGER = logging.getLogger("omnitensor.control")
 
 CONTROL_VERSION = 2
+SET_PROFILE_CONFIGURATION = "set-profile-configuration"
+CONFIGURATION_UNAVAILABLE_MESSAGE = "Workload configuration is not available on this runtime"
 REVISION_MISMATCH_MESSAGE = "Runtime policy revision changed; refresh and retry"
 PERSIST_FAILURE_MESSAGE = "Could not persist the policy; nothing was applied"
 INTERNAL_ERROR_MESSAGE = "Internal error while applying the command"
@@ -78,6 +82,8 @@ class ControlService:
         profile_exists=None,
         gpu_device_ids=None,
         profile_models=None,
+        profile_configuration=None,
+        settings_store=None,
     ):
         self._store = store
         self._on_applied = on_applied
@@ -87,6 +93,13 @@ class ControlService:
         # pins. A model no manifest declares has no verified digest here, so
         # choosing it could only ever end at a worker that refuses to start.
         self._profile_models = profile_models or (lambda _profile_id: ())
+        # A workload's tuning is not policy: it is validated against the schema
+        # that workload's own manifest declares, and held in the settings store
+        # rather than in the policy document. Both are injected because a
+        # runtime wired without them must refuse the operation rather than
+        # pretend to have stored something.
+        self._profile_configuration = profile_configuration
+        self._settings_store = settings_store
         self._state: PolicyState = store.load()
         self._lock = asyncio.Lock()
 
@@ -174,23 +187,9 @@ class ControlService:
         # would both commit N+1 — the compare-and-swap the contract promises
         # would silently stop holding.
         async with self._lock:
-            if command["expectedRevision"] != self._state.revision:
-                return self._rejection(command_id, REVISION_MISMATCH_MESSAGE)
-            # Commit protocol: mutate a copy, persist it, only then publish it
-            # in memory — a failed save leaves the served state untouched.
-            candidate = copy.deepcopy(self._state)
-            message = self._execute(candidate, command)
-            if message is not None:
-                return self._rejection(command_id, message)
-            candidate.revision += 1
-            try:
-                # A policy save is a write plus a file and a directory fsync.
-                # On the event loop that stalls snapshot publishing and job
-                # dispatch for as long as the disk takes.
-                await run_off_loop(self._store.save, candidate)
-            except OSError:
-                return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
-            self._state = candidate
+            rejection = await self._apply_locked(command, command_id)
+        if rejection is not None:
+            return rejection
         if self._on_applied is not None:
             # The listener is a runtime nudge (e.g. wake scheduler workers);
             # it must never break the acknowledgement contract for an already
@@ -199,12 +198,103 @@ class ControlService:
                 self._on_applied()
         return self._acknowledgement(command_id, "applied", "Policy applied")
 
+    async def _apply_locked(self, command: dict, command_id: str) -> dict | None:
+        """Check the revision, apply the command, and commit — or say no.
+
+        Returns the rejection to send, or nothing when the command was applied.
+        The caller holds the lock for all of it.
+        """
+        if command["expectedRevision"] != self._state.revision:
+            return self._rejection(command_id, REVISION_MISMATCH_MESSAGE)
+        if command["operation"] == SET_PROFILE_CONFIGURATION:
+            # Stored before any revision is spent, so a configuration the
+            # workload's own schema refuses leaves the runtime as it was.
+            message = await self._store_configuration(command)
+            if message is not None:
+                return self._rejection(command_id, message)
+        # Commit protocol: mutate a copy, persist it, only then publish it in
+        # memory — a failed save leaves the served state untouched.
+        candidate = copy.deepcopy(self._state)
+        message = self._execute(candidate, command)
+        if message is not None:
+            return self._rejection(command_id, message)
+        candidate.revision += 1
+        if not await self._commit(candidate, command):
+            return self._rejection(command_id, PERSIST_FAILURE_MESSAGE)
+        return None
+
+    async def _commit(self, candidate: PolicyState, command: dict) -> bool:
+        """Persist the new policy and publish it in memory, or report failure.
+
+        A policy save is a write plus a file and a directory fsync. On the
+        event loop that stalls snapshot publishing and job dispatch for as long
+        as the disk takes, so it runs off it.
+        """
+        try:
+            await run_off_loop(self._store.save, candidate)
+        except OSError:
+            if command["operation"] != SET_PROFILE_CONFIGURATION:
+                return False
+            # The configuration is already stored, so "nothing was applied"
+            # would be false. What was lost is the revision bump that tells
+            # clients to re-read, and the next committed change carries it.
+            LOGGER.warning(
+                "Configuration for %s was stored but the policy revision could not be"
+                " persisted; clients are not told to refresh until the next change",
+                command["profileId"],
+                exc_info=True,
+            )
+            return True
+        self._state = candidate
+        return True
+
+    async def _store_configuration(self, command: dict) -> str | None:
+        """Validate and persist one workload's configuration, or say why not.
+
+        The compare-and-swap is the settings store's own, taken under the lock
+        this command already holds, so the revision this reads is the revision
+        it writes against.
+        """
+        profile_id = command["profileId"]
+        if self._settings_store is None or self._profile_configuration is None:
+            return CONFIGURATION_UNAVAILABLE_MESSAGE
+        if not self._known_profile(self._state, profile_id):
+            return f"Unknown workload profile: {profile_id}"
+        try:
+            spec = self._profile_configuration(profile_id)
+        except PluginSettingsError as error:
+            # A manifest declaring a contract nothing can hold: a required
+            # property with no default, a version that is not semver. Here is
+            # the only place a person ever sees that.
+            return f"This workload's configuration contract is unusable: {error.detail}"
+        if spec is None:
+            return f"This workload declares no configuration: {profile_id}"
+        try:
+            current = await run_off_loop(self._settings_store.load, spec)
+            await run_off_loop(
+                functools.partial(
+                    self._settings_store.update,
+                    spec,
+                    expected_revision=current.revision,
+                    configuration=command["value"],
+                )
+            )
+        except PluginSettingsError as error:
+            return f"Configuration was refused: {error.detail}"
+        except OSError:
+            return PERSIST_FAILURE_MESSAGE
+        return None
+
     def _execute(self, state: PolicyState, command: dict) -> str | None:
         operation = command["operation"]
         if operation == "apply-profiles":
             return self._apply_batch(state, command["changes"])
         if operation == "set-paused":
             state.paused = command["value"] is True
+            return None
+        if operation == SET_PROFILE_CONFIGURATION:
+            # Already stored, against the workload's schema rather than this
+            # one's. The policy change is the revision and nothing else.
             return None
         profile_id = command["profileId"]
         if operation in ("set-profile-device", "set-profile-model"):
@@ -375,6 +465,8 @@ def build_control_service(
     profile_exists=None,
     gpu_device_ids=None,
     profile_models=None,
+    profile_configuration=None,
+    settings_store=None,
     on_applied=None,
 ) -> ControlService:
     """Wire a control service over a policy file.
@@ -389,6 +481,8 @@ def build_control_service(
         PolicyStore(state_path, defaults),
         profile_exists=profile_exists,
         gpu_device_ids=gpu_device_ids,
+        profile_configuration=profile_configuration,
+        settings_store=settings_store,
         **({} if profile_models is None else {"profile_models": profile_models}),
         **({} if on_applied is None else {"on_applied": on_applied}),
     )
