@@ -37,7 +37,11 @@ _IMAGE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".svg", ".webp"})
 _AUDIO_SUFFIXES = frozenset({".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"})
 _VIDEO_SUFFIXES = frozenset({".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"})
 _PRESENTATION_SUFFIXES = frozenset({".odp", ".pptx"})
-_DOCUMENT_SUFFIXES = frozenset({".pdf", ".tif", ".tiff"})
+# `.docx` and `.txt` are documents that have text and no pages: they are read
+# here and answered without rendering, because a Word file has no page until
+# something lays it out and this runtime invokes no layout engine.
+_DOCUMENT_SUFFIXES = frozenset({".docx", ".pdf", ".tif", ".tiff", ".txt"})
+_UNPAGED_SUFFIXES = frozenset({".docx", ".txt"})
 MAX_SVG_BYTES = 8 * 1024 * 1024
 MAX_RENDER_DIMENSION = 1600
 MAX_INFERENCE_DIMENSION = 768
@@ -144,7 +148,7 @@ class AvMediaAdapter(MediaProbe, FrameSampler):
                 None,
                 False,
                 None,
-                _document_page_count(source),
+                None if suffix in _UNPAGED_SUFFIXES else _document_page_count(source),
             )
         return None
 

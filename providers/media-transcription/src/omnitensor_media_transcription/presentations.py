@@ -20,12 +20,20 @@ from omnitensor.plugins.media_transcription import (
 )
 from omnitensor.plugins.protocol import CancellationToken
 
+from .archives import (
+    MAX_PART_XML_BYTES,
+    archive_entries,
+    read_archive_entry,
+    xml_root,
+)
 from .text import joined_visible_text as _joined_slide_text
 
+# What this module calls itself in a refusal, which is the only thing that
+# differs between reading a slide deck and reading any other OOXML container.
+_KIND = "presentation"
+
 _PRESENTATION_IMAGE_SUFFIXES = frozenset({".jpeg", ".jpg", ".png", ".webp"})
-MAX_ARCHIVE_ENTRIES = 4096
-MAX_ARCHIVE_EXPANDED_BYTES = 256 * 1024 * 1024
-MAX_SLIDE_XML_BYTES = 4 * 1024 * 1024
+MAX_SLIDE_XML_BYTES = MAX_PART_XML_BYTES
 MAX_PRESENTATION_IMAGE_BYTES = 16 * 1024 * 1024
 
 
@@ -88,7 +96,7 @@ def _presentation_slide_count(source: Path) -> int:
 def _presentation_blueprints(source: Path) -> tuple[_SlideBlueprint, ...]:
     try:
         with zipfile.ZipFile(source) as archive:
-            entries = _archive_entries(archive)
+            entries = archive_entries(archive, _KIND)
             suffix = source.suffix.lower()
             if suffix == ".pptx":
                 slides = _pptx_blueprints(archive, entries)
@@ -109,56 +117,6 @@ def _presentation_blueprints(source: Path) -> tuple[_SlideBlueprint, ...]:
     return slides
 
 
-def _archive_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
-    infos = archive.infolist()
-    if len(infos) > MAX_ARCHIVE_ENTRIES:
-        raise MediaTranscriptionError(
-            "presentation-invalid", "presentation archive has too many entries"
-        )
-    entries = {}
-    expanded = 0
-    for info in infos:
-        path = PurePosixPath(info.filename)
-        mode = info.external_attr >> 16
-        if (
-            path.is_absolute()
-            or ".." in path.parts
-            or "\\" in info.filename
-            or info.flag_bits & 1
-            or mode & 0o170000 == 0o120000
-            or info.filename in entries
-        ):
-            raise MediaTranscriptionError(
-                "presentation-invalid", "presentation archive entry is unsafe"
-            )
-        expanded += info.file_size
-        if expanded > MAX_ARCHIVE_EXPANDED_BYTES:
-            raise MediaTranscriptionError(
-                "presentation-invalid", "presentation archive expands beyond its limit"
-            )
-        entries[info.filename] = info
-    return entries
-
-
-def _read_archive_entry(
-    archive: zipfile.ZipFile,
-    entries: Mapping[str, zipfile.ZipInfo],
-    name: str,
-    maximum: int,
-) -> bytes:
-    info = entries.get(name)
-    if info is None or info.is_dir() or not 0 <= info.file_size <= maximum:
-        raise MediaTranscriptionError(
-            "presentation-invalid", "presentation archive entry is unavailable"
-        )
-    content = archive.read(info)
-    if len(content) != info.file_size:
-        raise MediaTranscriptionError(
-            "presentation-invalid", "presentation archive entry was truncated"
-        )
-    return content
-
-
 def _require_image():
     """Pillow, or a refusal that names the install rather than the slide."""
     from importlib import import_module  # noqa: PLC0415 - deferred: an optional or heavy dependency
@@ -168,30 +126,6 @@ def _require_image():
     except ImportError as error:
         raise MediaTranscriptionError(
             "presentation-runtime-unavailable", "install the Pillow image decoder"
-        ) from error
-
-
-def _xml_root(content: bytes):
-    """Parse presentation XML with the hardened parser, or say which failed.
-
-    The import used to sit inside the same `except Exception` as the parse, so
-    an installation missing `defusedxml` told the person their presentation was
-    invalid. It is a declared dependency of this distribution, so its absence
-    is a broken install rather than a fact about their file — and reporting it
-    as one sends them off to re-export a document that was fine.
-    """
-    try:
-        from defusedxml import ElementTree  # noqa: PLC0415
-    except ImportError as error:
-        raise MediaTranscriptionError(
-            "presentation-runtime-unavailable",
-            "install the defusedxml presentation parser",
-        ) from error
-    try:
-        return ElementTree.fromstring(content)
-    except Exception as error:
-        raise MediaTranscriptionError(
-            "presentation-invalid", "presentation XML is invalid"
         ) from error
 
 
@@ -216,11 +150,13 @@ def _pptx_blueprints(
 ) -> tuple[_SlideBlueprint, ...]:
     presentation_name = "ppt/presentation.xml"
     rels_name = "ppt/_rels/presentation.xml.rels"
-    presentation = _xml_root(
-        _read_archive_entry(archive, entries, presentation_name, MAX_SLIDE_XML_BYTES)
+    presentation = xml_root(
+        read_archive_entry(archive, entries, presentation_name, MAX_SLIDE_XML_BYTES, _KIND), _KIND
     )
     relationships = _relationship_map(
-        _xml_root(_read_archive_entry(archive, entries, rels_name, MAX_SLIDE_XML_BYTES)),
+        xml_root(
+            read_archive_entry(archive, entries, rels_name, MAX_SLIDE_XML_BYTES, _KIND), _KIND
+        ),
         presentation_name,
     )
     relation_attribute = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
@@ -245,7 +181,9 @@ def _pptx_slide_blueprint(
     slide_name: str,
     number: int,
 ) -> _SlideBlueprint:
-    slide = _xml_root(_read_archive_entry(archive, entries, slide_name, MAX_SLIDE_XML_BYTES))
+    slide = xml_root(
+        read_archive_entry(archive, entries, slide_name, MAX_SLIDE_XML_BYTES, _KIND), _KIND
+    )
     text_tag = "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
     text = _joined_slide_text(item.text or "" for item in slide.iter(text_tag))
     relation_name = posixpath.join(
@@ -256,7 +194,10 @@ def _pptx_slide_blueprint(
     relationships = {}
     if relation_name in entries:
         relationships = _relationship_map(
-            _xml_root(_read_archive_entry(archive, entries, relation_name, MAX_SLIDE_XML_BYTES)),
+            xml_root(
+                read_archive_entry(archive, entries, relation_name, MAX_SLIDE_XML_BYTES, _KIND),
+                _KIND,
+            ),
             slide_name,
         )
     embed_attribute = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
@@ -271,7 +212,9 @@ def _pptx_slide_blueprint(
 def _odp_blueprints(
     archive: zipfile.ZipFile, entries: Mapping[str, zipfile.ZipInfo]
 ) -> tuple[_SlideBlueprint, ...]:
-    content = _xml_root(_read_archive_entry(archive, entries, "content.xml", MAX_SLIDE_XML_BYTES))
+    content = xml_root(
+        read_archive_entry(archive, entries, "content.xml", MAX_SLIDE_XML_BYTES, _KIND), _KIND
+    )
     page_tag = "{urn:oasis:names:tc:opendocument:xmlns:drawing:1.0}page"
     paragraph_tag = "{urn:oasis:names:tc:opendocument:xmlns:text:1.0}p"
     image_tag = "{urn:oasis:names:tc:opendocument:xmlns:drawing:1.0}image"
@@ -303,7 +246,7 @@ def _extract_presentation(source: Path, root: Path) -> tuple[PresentationSlide, 
     blueprints = _presentation_blueprints(source)
     slides = []
     with zipfile.ZipFile(source) as archive:
-        entries = _archive_entries(archive)
+        entries = archive_entries(archive, _KIND)
         for blueprint in blueprints:
             paths = tuple(
                 _write_presentation_image(archive, entries, entry, root, blueprint.number, index)
@@ -321,7 +264,7 @@ def _write_presentation_image(
     slide_number: int,
     image_number: int,
 ) -> Path:
-    content = _read_archive_entry(archive, entries, entry, MAX_PRESENTATION_IMAGE_BYTES)
+    content = read_archive_entry(archive, entries, entry, MAX_PRESENTATION_IMAGE_BYTES, _KIND)
     suffix = PurePosixPath(entry).suffix.lower()
     path = root / f"slide-{slide_number:02d}-image-{image_number:02d}{suffix}"
     path.write_bytes(content)

@@ -16,6 +16,11 @@ dependencies = [
   "omnitensor-vulkan-runtime==0.2.0",
   "Pillow>=11,<13",
   "PyMuPDF>=1.24,<2",
+  # The fallback reader, and pure Python: PyMuPDF ships a compiled wheel that
+  # does not load on every machine, and a person whose PDF is refused for that
+  # cannot tell it from a broken file. pypdf extracts text without rendering,
+  # which is a smaller answer rather than no answer.
+  "pypdf>=4.3,<7",
   "pywhispercpp==1.5.0",
 ]
 

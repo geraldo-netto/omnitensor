@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import omnitensor_media_transcription.archives as archives
 import omnitensor_media_transcription.models as models
 import omnitensor_media_transcription.presentations as presentations
 import omnitensor_media_transcription.provider as provider
@@ -29,6 +30,10 @@ from omnitensor.plugins.media_transcription import (
     VisualTranscript,
 )
 from omnitensor.sdk import BootstrapArtifact, CancellationController, PluginBootstrap
+
+# What these guards call themselves in a refusal when a slide deck is what
+# is being read; `archives` takes it from the caller.
+KIND = "presentation"
 
 
 def _assert_media_error(error: pytest.ExceptionInfo, code: str, detail: str) -> None:
@@ -636,21 +641,21 @@ class _Archive:
 
 
 def test_archive_entries_accept_exact_limits_and_reject_every_unsafe_shape(monkeypatch):
-    monkeypatch.setattr(presentations, "MAX_ARCHIVE_ENTRIES", 2)
-    monkeypatch.setattr(presentations, "MAX_ARCHIVE_EXPANDED_BYTES", 3)
+    monkeypatch.setattr(archives, "MAX_ARCHIVE_ENTRIES", 2)
+    monkeypatch.setattr(archives, "MAX_ARCHIVE_EXPANDED_BYTES", 3)
     first = _ArchiveInfo("one.xml", 1)
     second = _ArchiveInfo("two.xml", 2)
-    assert presentations._archive_entries(_Archive([first, second])) == {
+    assert archives.archive_entries(_Archive([first, second]), KIND) == {
         "one.xml": first,
         "two.xml": second,
     }
 
     too_many = [first, second, _ArchiveInfo("three.xml", 0)]
     with pytest.raises(MediaTranscriptionError) as error:
-        presentations._archive_entries(_Archive(too_many))
+        archives.archive_entries(_Archive(too_many), KIND)
     _assert_media_error(error, "presentation-invalid", "presentation archive has too many entries")
 
-    monkeypatch.setattr(presentations, "MAX_ARCHIVE_ENTRIES", 10)
+    monkeypatch.setattr(archives, "MAX_ARCHIVE_ENTRIES", 10)
     for infos in (
         [_ArchiveInfo("/absolute.xml")],
         [_ArchiveInfo("../escape.xml")],
@@ -660,11 +665,13 @@ def test_archive_entries_accept_exact_limits_and_reject_every_unsafe_shape(monke
         [_ArchiveInfo("same.xml"), _ArchiveInfo("same.xml")],
     ):
         with pytest.raises(MediaTranscriptionError) as error:
-            presentations._archive_entries(_Archive(infos))
+            archives.archive_entries(_Archive(infos), KIND)
         _assert_media_error(error, "presentation-invalid", "presentation archive entry is unsafe")
 
     with pytest.raises(MediaTranscriptionError) as error:
-        presentations._archive_entries(_Archive([_ArchiveInfo("one", 2), _ArchiveInfo("two", 2)]))
+        archives.archive_entries(
+            _Archive([_ArchiveInfo("one", 2), _ArchiveInfo("two", 2)]), KIND
+        )
     _assert_media_error(
         error, "presentation-invalid", "presentation archive expands beyond its limit"
     )
@@ -674,11 +681,11 @@ def test_archive_reads_allow_zero_and_maximum_bytes_but_reject_invalid_entries()
     zero = _ArchiveInfo("zero", 0)
     maximum = _ArchiveInfo("maximum", 3)
     assert (
-        presentations._read_archive_entry(_Archive([zero], b""), {"zero": zero}, "zero", 3) == b""
+        archives.read_archive_entry(_Archive([zero], b""), {"zero": zero}, "zero", 3, KIND) == b""
     )
     assert (
-        presentations._read_archive_entry(
-            _Archive([maximum], b"abc"), {"maximum": maximum}, "maximum", 3
+        archives.read_archive_entry(
+            _Archive([maximum], b"abc"), {"maximum": maximum}, "maximum", 3, KIND
         )
         == b"abc"
     )
@@ -690,41 +697,41 @@ def test_archive_reads_allow_zero_and_maximum_bytes_but_reject_invalid_entries()
     )
     for entries, name in invalid:
         with pytest.raises(MediaTranscriptionError) as error:
-            presentations._read_archive_entry(_Archive([]), entries, name, 3)
+            archives.read_archive_entry(_Archive([]), entries, name, 3, KIND)
         _assert_media_error(
             error, "presentation-invalid", "presentation archive entry is unavailable"
         )
 
     truncated = _ArchiveInfo("truncated", 3)
     with pytest.raises(MediaTranscriptionError) as error:
-        presentations._read_archive_entry(
-            _Archive([truncated], b"ab"), {"truncated": truncated}, "truncated", 3
+        archives.read_archive_entry(
+            _Archive([truncated], b"ab"), {"truncated": truncated}, "truncated", 3, KIND
         )
     _assert_media_error(error, "presentation-invalid", "presentation archive entry was truncated")
 
 
 def test_xml_and_relationship_parsing_preserve_exact_safety_contract():
     with pytest.raises(MediaTranscriptionError) as error:
-        presentations._xml_root(b"<broken")
+        archives.xml_root(b"<broken", KIND)
     _assert_media_error(error, "presentation-invalid", "presentation XML is invalid")
 
-    root = presentations._xml_root(
+    root = archives.xml_root(
         b"""<Relationships>
         <Relationship/>
         <Relationship Id="missing-target"/>
         <Relationship Target="missing-id"/>
         <Relationship Id="external" Target="https://example.test/a" TargetMode="External"/>
         <Relationship Id="valid" Target="../media/image.png"/>
-        </Relationships>"""
+        </Relationships>""",
+        KIND,
     )
     assert presentations._relationship_map(root, "ppt/slides/slide1.xml") == {
         "valid": "ppt/media/image.png"
     }
 
     for target in ("/absolute.png", "../../../escape.png"):
-        unsafe = presentations._xml_root(
-            f'<Relationships><Relationship Id="unsafe" Target="{target}"/></Relationships>'.encode()
-        )
+        document = f'<Relationships><Relationship Id="unsafe" Target="{target}"/></Relationships>'
+        unsafe = archives.xml_root(document.encode(), KIND)
         with pytest.raises(MediaTranscriptionError) as error:
             presentations._relationship_map(unsafe, "ppt/slides/slide1.xml")
         _assert_media_error(error, "presentation-invalid", "presentation relationship is unsafe")

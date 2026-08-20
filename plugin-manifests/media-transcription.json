@@ -7,6 +7,7 @@
     "media-transcription",
     "multilingual-speech-transcription",
     "paged-document-transcription",
+    "text-document-transcription",
     "presentation-transcription",
     "visual-content-transcription"
   ],

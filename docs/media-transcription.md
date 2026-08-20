@@ -11,6 +11,7 @@ Supported inputs:
 - images: PNG, JPEG, WebP, and safely rasterized SVG;
 - video: MP4, WebM, MKV, MOV, AVI, and M4V;
 - paged documents: PDF and multipage TIFF;
+- text documents: Word `.docx` and plain `.txt`;
 - presentations: PowerPoint `.pptx` and LibreOffice Impress `.odp`.
 
 The language of the speech is detected from the first window that carries
@@ -22,13 +23,23 @@ and transcribes everything after it as whatever it decided.
 
 Audio returns timestamped speech. Images return exact visible text plus a
 scene description. Videos combine timestamped speech with at most twelve
-sampled-frame transcriptions. PDF/TIFF results retain page order. PPTX/ODP
+sampled-frame transcriptions. PDF/TIFF results retain page order. A `.docx` or a `.txt` is answered as one
+entry with no page number and no description of a picture: a Word file is
+paginated by whatever opens it, and this runtime lays out nothing, so claiming
+a page would be claiming where the breaks fall. The description says what the
+thing is instead — the same answer a presentation slide carrying no images has
+always given. PPTX/ODP
 results retain slide order and combine structured slide text with descriptions
 of embedded raster images. Legacy binary `.ppt` is not parsed; convert it to
 PPTX or ODP with LibreOffice before selecting it.
 
 PyAV supplies the pinned FFmpeg decoding boundary. Pillow handles bounded
-raster images, PyMuPDF renders bounded PDF pages, and CairoSVG rejects XML
+raster images, PyMuPDF renders bounded PDF pages — and pypdf reads them when
+PyMuPDF cannot load, which happens on machines its compiled wheel does not
+support. A PDF read that way is text with no rendered page, so the answer
+carries no description of one, and that is visible in the answer rather than
+being a quietly smaller result. Word documents are read as OOXML through the
+same guarded archive reader the presentations use, and CairoSVG rejects XML
 entities and external resources before producing a bounded PNG. The runtime
 does not invoke `ffmpeg`, ImageMagick, LibreOffice, or a shell subprocess.
 Those independent host tools may be used to author acceptance fixtures.

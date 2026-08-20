@@ -391,8 +391,10 @@ async def test_complex_pdf_and_multipage_tiff_render_every_page_for_visual_trans
 @pytest.mark.asyncio
 async def test_av_adapter_refuses_unsupported_corrupt_missing_and_cancelled_media(tmp_path):
     adapter = provider.AvMediaAdapter()
-    unsupported = tmp_path / "item.txt"
-    unsupported.write_text("x")
+    # `.txt` used to be the example of a type this workload does not read.
+    # It reads one now, so the example is a suffix that really is unsupported.
+    unsupported = tmp_path / "item.bin"
+    unsupported.write_bytes(b"x")
     with pytest.raises(MediaTranscriptionError, match="media-unsupported"):
         await adapter.inspect(unsupported)
     broken = tmp_path / "broken.png"
