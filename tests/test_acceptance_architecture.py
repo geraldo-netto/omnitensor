@@ -96,15 +96,22 @@ def test_acceptance_values_pickle_through_the_module_that_defines_them():
 
 
 def test_owner_dag_has_no_facade_backedge():
+    """Every owner beside the facade, discovered rather than listed.
+
+    Gate audit, 2026-08-20: the four file names were typed here, so a fifth
+    `acceptance_*` owner would have been an unchecked module rather than a
+    failing test — the same shape as the layering gates OMNI-0533 rewrote.
+    """
     root = Path(checks.__file__).parent
-    for name in (
-        "acceptance_contracts.py",
-        "acceptance_probes.py",
+    owners = sorted(path for path in root.glob("acceptance_*.py"))
+    assert [path.name for path in owners] == [
         "acceptance_checks.py",
         "acceptance_cli.py",
-    ):
-        source = (root / name).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        "acceptance_contracts.py",
+        "acceptance_probes.py",
+    ]
+    for path in owners:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 assert node.module not in {"acceptance", "omnitensor.acceptance"}

@@ -232,31 +232,61 @@ assert generation_catalog is direct
     assert (completed.returncode, completed.stderr) == (0, "")
 
 
-def test_export_owners_do_not_import_public_names_back_from_the_barrel():
-    owner_paths = {
-        ROOT / "src/omnitensor/plugins" / f"{module_name.removeprefix('.')}.py"
+def test_no_module_in_the_package_imports_public_names_back_from_the_barrel():
+    """Every module in the package, not only the 42 that own an export.
+
+    Gate audit, 2026-08-20: this read `_EXPORTS` for its file list, so it
+    checked 42 of the 85 modules in `omnitensor/plugins` and `import
+    omnitensor.plugins` inside any of the other 43 was green. It also had no
+    case for `from ..plugins import X`, which is how a module one package down
+    would reach the barrel. Both were found by feeding it the mistake it
+    exists to catch, which nothing had done.
+    """
+    package = ROOT / "src/omnitensor/plugins"
+    modules = [
+        path
+        for path in sorted(package.rglob("*.py"))
+        if "__pycache__" not in path.parts and path.name != "__init__.py"
+    ]
+    assert len(modules) >= 80
+    # The owners are a subset, and were the whole of what this used to read.
+    owners = {
+        package / f"{module_name.removeprefix('.')}.py"
         for module_name, _attribute_name in plugins._EXPORTS.values()
     }
-    for path in owner_paths:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        barrel_imports = {
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        }
-        assert "omnitensor.plugins" not in barrel_imports, path
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom):
-                continue
-            if node.module == "omnitensor.plugins":
-                assert all(alias.name not in plugins._EXPORTS for alias in node.names), path
-            if node.module == "omnitensor":
-                assert all(alias.name != "plugins" for alias in node.names), path
-            if node.level == 1 and node.module is None:
-                assert all(alias.name not in plugins._EXPORTS for alias in node.names), path
-            if node.level >= 2 and node.module is None:
-                assert all(alias.name != "plugins" for alias in node.names), path
+    assert owners < set(modules)
+
+    reaching = {
+        str(path.relative_to(ROOT)): sorted(_barrel_reads(path))
+        for path in modules
+        if _barrel_reads(path)
+    }
+
+    assert reaching == {}
+
+
+def _barrel_reads(path: Path) -> set[str]:
+    """Every way this module reaches its own package barrel, in any spelling."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names if alias.name == "omnitensor.plugins")
+        elif isinstance(node, ast.ImportFrom):
+            found.update(_barrel_names(node))
+    return found
+
+
+def _barrel_names(node: ast.ImportFrom) -> set[str]:
+    names = {alias.name for alias in node.names}
+    if node.module == "omnitensor.plugins" or (node.level == 1 and node.module is None):
+        return names & set(plugins._EXPORTS)
+    if node.module == "omnitensor" or (node.level >= 2 and node.module is None):
+        return names & {"plugins"}
+    # `from ..plugins import X` reaches the barrel from a subpackage, and this
+    # rule had no case for it at all.
+    if node.level >= 1 and node.module == "plugins":
+        return names
+    return set()
 
 
 def test_kernel_exports_keep_canonical_identity_defaults_and_consumer_features():
