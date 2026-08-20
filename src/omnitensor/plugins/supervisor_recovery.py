@@ -289,7 +289,7 @@ async def cancel_orphaned_jobs(host, plugin_id: str, detail: str) -> None:
         )
     except asyncio.CancelledError:
         raise
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
         host._record_diagnostic(
             WorkerDiagnostic(
                 plugin_id,

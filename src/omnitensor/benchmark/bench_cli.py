@@ -170,7 +170,7 @@ def measure(
                     say=say,
                 )
             )
-        except Exception as failure:  # one model failing is a result, not the end
+        except Exception as failure:  # one model failing is a result, not the end  # noqa: BLE001
             say(f"{model_id} could not be measured: {type(failure).__name__}: {failure}")
         written = write_results(every_run, result_root)
         say(f"results written to {written}")

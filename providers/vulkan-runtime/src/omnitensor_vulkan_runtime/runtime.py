@@ -205,7 +205,10 @@ class LlamaVulkanRuntime:
             raise
         self._lease = lease
         try:
-            from llama_cpp import Llama, llama_cpp  # type: ignore[import-not-found]
+            from llama_cpp import (  # type: ignore[import-not-found]  # noqa: PLC0415 - deferred: an optional or heavy dependency
+                Llama,
+                llama_cpp,
+            )
         except ImportError as error:
             raise ProviderGenerationError(
                 "model-load-failed",
@@ -440,6 +443,6 @@ def _output_token_limit(requested: int | None) -> int | None:
 
 
 def _generation_progress(request_id: str, fraction: float):
-    from omnitensor.plugins.protocol import PluginProgress
+    from omnitensor.plugins.protocol import PluginProgress  # noqa: PLC0415
 
     return PluginProgress(request_id, "native-generation", fraction, "", 1)

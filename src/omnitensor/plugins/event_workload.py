@@ -127,7 +127,7 @@ class PyMuPdfAdapter:
 
     async def pages(self, item: IngestedFile) -> AsyncIterator[PageContent]:
         try:
-            import pymupdf  # type: ignore[import-not-found]
+            import pymupdf  # type: ignore[import-not-found]  # noqa: PLC0415 - deferred: an optional or heavy dependency
         except ImportError as error:
             raise EventWorkloadError(
                 "adapter-unavailable", "install the events extra for PDF/image extraction"

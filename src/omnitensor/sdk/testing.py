@@ -328,7 +328,7 @@ class LocalPipelineRunner:
                 str(error) or "cancelled",
                 completed_at_ms=self._clock.now_ms,
             )
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
             result = failed_result(
                 request,
                 f"local pipeline failed: {type(error).__name__}",

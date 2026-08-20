@@ -235,7 +235,7 @@ def ingested_entry(
     family: str,
 ) -> IndexEntry:
     """Build a family-prefixed entry from one accepted file."""
-    from .ingestion import IngestedFile
+    from .ingestion import IngestedFile  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     if not isinstance(item, IngestedFile):
         raise IndexStoreError("entry-invalid", "item must be an IngestedFile")

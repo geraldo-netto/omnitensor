@@ -122,7 +122,7 @@ def _require_ncnn_vulkan(executor: LowLightNcnnExecutor, model_path: Path) -> No
 
 def _validated_output_tensor(outputs: list):
     try:
-        import numpy
+        import numpy  # noqa: PLC0415 - deferred: an optional or heavy dependency
     except ImportError as error:  # pragma: no cover - gpu extra owns dependency
         raise LowLightWorkspaceError(
             "runtime-unavailable", "install OmniTensor with the gpu extra for NumPy"
@@ -151,8 +151,8 @@ def _validated_output_tensor(outputs: list):
 
 def _reconstruct_rgb(tensor, width: int, height: int) -> bytes:
     try:
-        import numpy
-        from PIL import Image
+        import numpy  # noqa: PLC0415 - deferred: an optional or heavy dependency
+        from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
     except ImportError as error:  # pragma: no cover - gpu extra owns dependencies
         raise LowLightWorkspaceError(
             "runtime-unavailable", "install OmniTensor with the gpu extra for Pillow and NumPy"

@@ -103,7 +103,9 @@ def verify_pinned_source(
     if digest_file is None:
         # Local import avoids preparation -> ArtifactInstaller -> preparation
         # at module import time while retaining a convenient canonical default.
-        from omnitensor.preparation import file_digest
+        # Deferred: `preparation` imports this module, so a top-level import
+        # here would be a cycle at load time.
+        from omnitensor.preparation import file_digest  # noqa: PLC0415
 
         digest_file = file_digest
 
@@ -298,7 +300,9 @@ class ArtifactInstaller:
         is reported as an integrity check, not as provenance.
         """
         # Local import avoids preparation -> ArtifactInstaller at module load.
-        from omnitensor.preparation import file_digest
+        # Deferred: `preparation` imports this module, so a top-level import
+        # here would be a cycle at load time.
+        from omnitensor.preparation import file_digest  # noqa: PLC0415
 
         metadata_path = Path(version_root) / _ARTIFACT_METADATA_FILE
         try:
@@ -331,7 +335,9 @@ class ArtifactInstaller:
         before installation — the store would have recorded the substitute and
         happily re-verified it ever after.
         """
-        from omnitensor.preparation import file_digest
+        # Deferred: `preparation` imports this module, so a top-level import
+        # here would be a cycle at load time.
+        from omnitensor.preparation import file_digest  # noqa: PLC0415
 
         for name, expected in sorted(reference.declared_companions.items()):
             path = Path(version_root) / name
@@ -564,7 +570,9 @@ class ArtifactInstaller:
 
     def _file_digests(self, root: Path) -> dict[str, str]:
         """Every artifact file in one directory, by name and content."""
-        from omnitensor.preparation import file_digest
+        # Deferred: `preparation` imports this module, so a top-level import
+        # here would be a cycle at load time.
+        from omnitensor.preparation import file_digest  # noqa: PLC0415
 
         return {
             path.name: file_digest(path, max_bytes=self._max_artifact_bytes)

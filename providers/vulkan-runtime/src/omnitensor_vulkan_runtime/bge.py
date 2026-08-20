@@ -145,7 +145,7 @@ def vulkan_device_index(preferred: str) -> int:
     software device was the only one — from no Vulkan device at all.
     """
     try:
-        import ncnn
+        import ncnn  # noqa: PLC0415 - deferred: an optional or heavy dependency
     except ImportError as error:  # pragma: no cover - dependency boundary
         raise ValueError("ncnn is unavailable") from error
     try:

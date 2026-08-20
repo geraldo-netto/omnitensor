@@ -178,8 +178,12 @@ class SentenceEmbeddingOnnxExporter:
 
     def export(self, source: FetchedModelSource, destination: Path) -> None:
         try:
-            import onnx
-            from onnx import TensorProto, checker, helper
+            import onnx  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            from onnx import (  # noqa: PLC0415 - deferred: an optional or heavy dependency
+                TensorProto,
+                checker,
+                helper,
+            )
         except ImportError as error:  # pragma: no cover - environment-dependent
             raise ModelRecipeError(
                 "producer-dependency-missing", "install OmniTensor with the train extra"

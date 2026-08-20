@@ -117,7 +117,11 @@ def _read_bounded(path: Path, maximum: int) -> bytes:
 
 def _decode_normalized(payload: bytes, max_pixels: int):
     try:
-        from PIL import Image, ImageCms, ImageOps
+        from PIL import (  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            Image,
+            ImageCms,
+            ImageOps,
+        )
     except ImportError as error:  # pragma: no cover - installation-dependent
         raise LowLightWorkspaceError(
             "decoder-unavailable", "install OmniTensor with the gpu extra for Pillow"
@@ -194,8 +198,8 @@ def _to_srgb(image, image_module, cms_module):
 
 def _rgb_nchw(image) -> list:
     try:
-        import numpy
-        from PIL import Image
+        import numpy  # noqa: PLC0415 - deferred: an optional or heavy dependency
+        from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
     except ImportError as error:  # pragma: no cover - installation-dependent
         raise LowLightWorkspaceError(
             "decoder-unavailable", "install OmniTensor with the gpu extra for Pillow and NumPy"

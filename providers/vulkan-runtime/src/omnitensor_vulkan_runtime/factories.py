@@ -175,7 +175,7 @@ def _capture_sync_failure(
 ) -> BaseException | None:
     try:
         operation()
-    except BaseException as error:
+    except BaseException as error:  # noqa: BLE001 - containment: this must not escape into the caller
         return failure if failure is not None else error
     return failure
 
@@ -185,7 +185,7 @@ async def _capture_async_failure(
 ) -> BaseException | None:
     try:
         await operation
-    except BaseException as error:
+    except BaseException as error:  # noqa: BLE001 - containment: this must not escape into the caller
         return failure if failure is not None else error
     return failure
 

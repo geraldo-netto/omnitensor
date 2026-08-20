@@ -131,8 +131,8 @@ class WhisperVulkanTranscriber(SpeechTranscriber):
 
     def _load(self):
         try:
-            import _pywhispercpp as native
-            from pywhispercpp.model import Model
+            import _pywhispercpp as native  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            from pywhispercpp.model import Model  # noqa: PLC0415
         except ImportError as error:
             raise QualifiedMediaError(
                 "install pywhispercpp 1.5.0 from source with GGML_VULKAN=1"
@@ -318,8 +318,11 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
     @staticmethod
     def _runtime():
         try:
-            from llama_cpp import Llama, llama_cpp
-            from llama_cpp.llama_chat_format import Qwen25VLChatHandler
+            from llama_cpp import (  # noqa: PLC0415 - deferred: an optional or heavy dependency
+                Llama,
+                llama_cpp,
+            )
+            from llama_cpp.llama_chat_format import Qwen25VLChatHandler  # noqa: PLC0415
         except ImportError as error:
             raise QualifiedMediaError("Vulkan llama-cpp-python runtime is unavailable") from error
         return Llama, llama_cpp, Qwen25VLChatHandler
@@ -352,7 +355,7 @@ def _close_whisper(model) -> None:
     if context is None:
         return
     model._ctx = None
-    import _pywhispercpp as native
+    import _pywhispercpp as native  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     native.whisper_free(context)
 

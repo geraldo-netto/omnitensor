@@ -101,7 +101,7 @@ def _external_metadata(entry_point: _EntryPoint) -> PluginMetadata:
             distribution_name = distribution.name
             distribution_version = distribution.version
             manifest_paths = _distribution_manifests(distribution)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
         problem = f"distribution metadata unavailable: {type(error).__name__}"
     return PluginMetadata(
         PluginSource.EXTERNAL,

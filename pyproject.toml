@@ -156,7 +156,33 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C90"]
+# BLE001, PLC0415 and PLW0603 are selected because the source already answers
+# them 89 times in `# noqa` comments: those comments were written to say that a
+# broad except, a deferred import or a module-level memo is deliberate here,
+# and until the rules were selected they said it to nobody. RUF100 keeps them
+# honest by failing on a suppression that no longer suppresses anything.
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "SIM",
+    "C90",
+    "BLE001",
+    "PLC0415",
+    "PLW0603",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# A test that imports inside the case it is about keeps the case readable and
+# can monkeypatch before the import happens; PLC0415 is about the production
+# import graph, which is where it is enforced.
+"tests/**" = ["PLC0415"]
+"providers/*/tests/**" = ["PLC0415"]
+"scripts/**" = ["PLC0415"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8

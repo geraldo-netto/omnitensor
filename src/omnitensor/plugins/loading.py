@@ -84,7 +84,7 @@ IDLE_EXIT_DETAIL = "worker stopped after being idle; starts on demand"
 async def _cleanup_abandoned_staging(staging: asyncio.Task) -> None:
     try:
         _worker_payload, abandoned = await asyncio.shield(staging)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - containment: this must not escape into the caller
         return
     await _run_off_loop(shutil.rmtree, abandoned, True)
 

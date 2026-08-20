@@ -209,7 +209,7 @@ class TriggerCoordinator:
             )
         except TimeoutError:
             return CollectorReadiness(SourceStatus.UNAVAILABLE, "readiness timed out", 0)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
             return CollectorReadiness(
                 SourceStatus.UNAVAILABLE,
                 f"readiness failed: {type(error).__name__}",
@@ -238,7 +238,7 @@ class TriggerCoordinator:
                 None,
                 "collection timed out",
             )
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
             return CollectionOutcome(
                 trigger,
                 CollectionStatus.FAILED,

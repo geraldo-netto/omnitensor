@@ -260,7 +260,7 @@ async def _execute_request(
             completed_at_ms=max(1, time.time_ns() // 1_000_000),
         )
         frames = result_frames(result)
-    except Exception:
+    except Exception:  # noqa: BLE001 - containment: this must not escape into the caller
         _write_error(writer, protocol_version, request.job_id, "plugin-execution-failed")
         return
     for frame in frames:

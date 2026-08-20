@@ -232,7 +232,7 @@ async def cancel_request(
             read_result_of(slot, request_id, None),
             timeout=cancel_timeout,
         )
-    except (Exception, asyncio.CancelledError):
+    except (Exception, asyncio.CancelledError):  # noqa: BLE001 - containment: this must not escape into the caller
         await asyncio.shield(force_stop(slot.process, stop_timeout))
 
 

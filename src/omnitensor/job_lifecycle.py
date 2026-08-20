@@ -224,7 +224,7 @@ class JobSubmissionService:
                 error.code,
                 error.message,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - containment: this must not escape into the caller
             # The caller is being told the job was rejected, so nothing may
             # keep running on its behalf or keep holding a capacity slot.
             self._abandon_job(started_job_id)
@@ -329,7 +329,7 @@ class JobSubmissionService:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - containment: this must not escape into the caller
             return self._reply(
                 _request_id_from_text(text, self._max_request_bytes),
                 None,

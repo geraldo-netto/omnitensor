@@ -96,7 +96,7 @@ class Run:
 
 def fragments(case: Case, request_id: str) -> tuple[SourceFragment, ...]:
     """A case's sources as the fragments a workload would have published."""
-    import hashlib
+    import hashlib  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     built = []
     for index, text in enumerate(case.sources):
@@ -140,7 +140,7 @@ async def run_case(
         document = json.loads(raw)
     except json.JSONDecodeError:
         error = "output was not JSON"
-    except Exception as failure:  # a failed case is data, not a stopped run
+    except Exception as failure:  # a failed case is data, not a stopped run  # noqa: BLE001
         error = f"{type(failure).__name__}: {failure}"
     finally:
         elapsed = time.monotonic() - started

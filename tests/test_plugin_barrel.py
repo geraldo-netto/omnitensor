@@ -195,7 +195,7 @@ def test_concurrent_resolution_returns_one_canonical_identity(monkeypatch):
     def resolve():
         try:
             resolved.append(getattr(plugins, name))
-        except BaseException as error:
+        except BaseException as error:  # noqa: BLE001 - containment: this must not escape into the caller
             failures.append(error)
 
     monkeypatch.setattr(plugins, "_import_module", concurrent_import)

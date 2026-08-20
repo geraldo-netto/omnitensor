@@ -70,7 +70,7 @@ def current_plugin_bootstrap(plugin_id: str) -> PluginBootstrap:
 
 def configure_plugin_bootstrap(bootstrap: PluginBootstrap) -> None:
     """Install bootstrap data once; called only by the trusted worker launcher."""
-    global _CURRENT
+    global _CURRENT  # noqa: PLW0603 - a one-entry memo of a pure check
     if _CURRENT is not None:
         if bootstrap == _CURRENT:
             return

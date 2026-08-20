@@ -58,14 +58,14 @@ def _document_page_count(source: Path) -> int:
     try:
         suffix = source.suffix.lower()
         if suffix == ".pdf":
-            import pymupdf
+            import pymupdf  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
             with pymupdf.open(source) as document:
                 count = document.page_count
                 if document.needs_pass:
                     raise ValueError("encrypted PDF")
         elif suffix in {".tif", ".tiff"}:
-            from PIL import Image
+            from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
             with Image.open(source) as image:
                 count = image.n_frames
@@ -97,7 +97,7 @@ def _render_document_page(source: Path, root: Path, page_number: int) -> tuple[s
 
 
 def _render_pdf_page(source: Path, path: Path, page_number: int) -> str:
-    import pymupdf
+    import pymupdf  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     with pymupdf.open(source) as document:
         page = document.load_page(page_number - 1)
@@ -114,7 +114,7 @@ def _render_pdf_page(source: Path, path: Path, page_number: int) -> str:
 
 
 def _render_tiff_page(source: Path, path: Path, page_number: int) -> str:
-    from PIL import Image
+    from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     with Image.open(source) as image:
         image.seek(page_number - 1)

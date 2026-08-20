@@ -143,7 +143,7 @@ class SocketApplyCommandProbe:
                 remaining = deadline - loop.time()
                 try:
                     return await asyncio.wait_for(call_once(), timeout=max(remaining, 0.001))
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - containment: this must not escape into the caller
                     first_error = first_error or error
                     remaining = deadline - loop.time()
                     if remaining <= 0:

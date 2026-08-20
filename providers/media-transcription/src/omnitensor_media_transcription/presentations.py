@@ -161,7 +161,7 @@ def _read_archive_entry(
 
 def _require_image():
     """Pillow, or a refusal that names the install rather than the slide."""
-    from importlib import import_module
+    from importlib import import_module  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     try:
         return import_module("PIL.Image")
@@ -181,7 +181,7 @@ def _xml_root(content: bytes):
     as one sends them off to re-export a document that was fine.
     """
     try:
-        from defusedxml import ElementTree
+        from defusedxml import ElementTree  # noqa: PLC0415
     except ImportError as error:
         raise MediaTranscriptionError(
             "presentation-runtime-unavailable",

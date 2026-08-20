@@ -165,7 +165,10 @@ class OptedInRootScanner:
     def _accept(self, path: Path) -> tuple[IngestedFile | None, RejectedFile | None]:
         # Local import avoids loading the artifact installer through
         # preparation while the plugin package is still initializing.
-        from omnitensor.preparation import FileDigestTooLargeError, file_digest
+        from omnitensor.preparation import (  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            FileDigestTooLargeError,
+            file_digest,
+        )
 
         try:
             if not self._within_roots(path):

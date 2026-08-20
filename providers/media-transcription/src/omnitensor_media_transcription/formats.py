@@ -276,7 +276,7 @@ def _require(module: str, detail: str):
     could not be decoded. That is a statement about their file, and it sent
     them to re-encode something that was never the problem.
     """
-    from importlib import import_module
+    from importlib import import_module  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     try:
         return import_module(module)
@@ -307,7 +307,7 @@ def _svg_output_size(content: bytes) -> tuple[int, int]:
 
 
 def _svg_text(source: Path) -> str:
-    from defusedxml import ElementTree
+    from defusedxml import ElementTree  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     root = ElementTree.fromstring(source.read_bytes())
     parts = (
@@ -319,7 +319,7 @@ def _svg_text(source: Path) -> str:
 def _svg_url_fetcher(url: str, resource_type: str):
     if not isinstance(url, str) or not url.startswith("data:image/"):
         raise ValueError("external SVG resources are forbidden")
-    from cairosvg.url import fetch
+    from cairosvg.url import fetch  # noqa: PLC0415 - deferred: an optional or heavy dependency
 
     return fetch(url, resource_type)
 

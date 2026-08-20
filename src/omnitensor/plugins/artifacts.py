@@ -173,7 +173,10 @@ class ArtifactResolver:
     ) -> ArtifactResolution:
         # Local import avoids preparation -> artifact installer -> resolver at
         # module import time while keeping hashing canonical.
-        from omnitensor.preparation import FileDigestTooLargeError, file_digest
+        from omnitensor.preparation import (  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            FileDigestTooLargeError,
+            file_digest,
+        )
 
         if not path.is_file():
             return ArtifactResolution(False, None, f"artifact is not a regular file: {path}", 0)

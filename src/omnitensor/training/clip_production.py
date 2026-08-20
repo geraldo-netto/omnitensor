@@ -152,8 +152,8 @@ class TorchScriptClipOnnxExporter:
 
     def export(self, source: FetchedModelSource, destination: Path) -> None:
         try:
-            import onnx
-            import torch
+            import onnx  # noqa: PLC0415 - deferred: an optional or heavy dependency
+            import torch  # noqa: PLC0415 - deferred: an optional or heavy dependency
         except ImportError as error:  # pragma: no cover - environment-dependent
             raise ModelRecipeError(
                 "producer-dependency-missing",
