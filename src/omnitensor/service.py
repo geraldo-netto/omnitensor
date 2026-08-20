@@ -280,8 +280,11 @@ class OmniTensorService:
             on_applied=self._policy_changed,
             profile_exists=self._profile_exists,
             gpu_device_ids=self._gpu_device_ids,
-            profile_models=self._profile_models,
-            profile_configuration=self._profile_configuration,
+            # The plugin runtime's own bound methods, not delegates through
+            # this class: both answer from the manifests it owns, and a
+            # runtime that has neither is one the control service tolerates.
+            profile_models=getattr(self._plugin_runtime, "declared_artifacts", None),
+            profile_configuration=getattr(self._plugin_runtime, "configuration_spec", None),
             settings_store=self._plugin_settings,
             on_configuration_applied=self._configuration_changed,
         )
@@ -488,28 +491,6 @@ class OmniTensorService:
         after a change must get the change.
         """
         return self.control.state.model_choices.get(profile_id)
-
-    def _profile_models(self, profile_id: str) -> tuple[str, ...]:
-        """The artifacts this workload's manifest pins, by id.
-
-        The bound on what a person may choose. A model outside it has no
-        verified digest for this workload, so choosing it could only ever end
-        at a worker that refuses to start — better refused here, where the
-        refusal has somewhere to be read.
-        """
-        declared = getattr(self._plugin_runtime, "declared_artifacts", None)
-        return tuple(declared(profile_id)) if callable(declared) else ()
-
-    def _profile_configuration(self, profile_id: str):
-        """The configuration contract this workload declares, or nothing.
-
-        Asked of the plugin runtime each time rather than cached: a workload
-        installed, upgraded or removed while the service runs changes the
-        answer, and a stale spec would hold settings against a contract that
-        is no longer the plugin's.
-        """
-        spec_of = getattr(self._plugin_runtime, "configuration_spec", None)
-        return spec_of(profile_id) if callable(spec_of) else None
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
         return tuple(device.id for device in self._devices if device.backend == "gpu")

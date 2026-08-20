@@ -1040,3 +1040,37 @@ def test_a_bundled_workload_has_no_worker_to_replace(fake_nodes, tmp_path):
     service._configuration_changed("hardware-health")
 
     assert scheduled == []
+
+
+def test_the_control_service_is_handed_the_plugin_runtimes_own_answers(fake_nodes, tmp_path):
+    """OMNI-0552: both used to be one-line delegates through the service.
+
+    Each answers from the manifests the plugin runtime owns, so the runtime's
+    bound method is what the control service takes — one collaborator fewer
+    that only the service could supply.
+    """
+    service = build_service(fake_nodes, tmp_path)
+
+    assert service.control._profile_models == service._plugin_runtime.declared_artifacts
+    assert service.control._profile_configuration == service._plugin_runtime.configuration_spec
+
+
+def test_a_runtime_that_answers_neither_is_still_accepted(fake_nodes, tmp_path):
+    """A substituted runtime need not have either; the refusal is the same."""
+
+    class Bare:
+        def plugin_ids(self):
+            return frozenset()
+
+    service = build_service(fake_nodes, tmp_path)
+    replaced = service_module.OmniTensorService(
+        snapshot_path=tmp_path / "other/snapshot.json",
+        policy_path=tmp_path / "other/policy.json",
+        workloads_path=tmp_path / "workloads",
+        discovery_paths=fake_nodes,
+        plugin_runtime=Bare(),
+    )
+
+    assert replaced.control._profile_models("anything") == ()
+    assert replaced.control._profile_configuration is None
+    assert service is not replaced
