@@ -360,7 +360,11 @@ class SelectedTextPrompting:
 
 def _operation_instruction(operation: object, language: object) -> str:
     translate = (
-        f"Translate the selection into {json.dumps(language)} in result; preserve the exact "
+        # `ensure_ascii=False`: a person asking for "Português" was quoting a
+        # name the model then read as `"Portugu\u00eas"`, which is not the
+        # language they asked for and not a word in any of them.
+        f"Translate the selection into {json.dumps(language, ensure_ascii=False)} in result; "
+        "preserve the exact "
         "meaning of every noun, verb, number, and name; use only the target language and its "
         "script; transliterate proper names; do not add a label; tasks must be empty."
         if isinstance(language, str) and language

@@ -420,6 +420,14 @@ def test_grammar_projection_refuses_unbounded_or_invalid_references(schema):
 def test_receipt_binds_each_exact_task_and_model(
     monkeypatch, tmp_path, plugin_id, model_id, task_factory, layers
 ):
+    """One model's load record, read by whichever workload asks for it.
+
+    It used to assert the receipt's task digest against the running task as
+    well. That binding is gone (OMNI-0565): it was wrong within days of any
+    work on a prompt, and what pins a workload now is
+    `tests/test_workload_prompt_contract.py` in `omnitensor` together with the
+    message-assembly tests here.
+    """
     document = _receipt()
     _load_receipt(monkeypatch, tmp_path, document)
 
@@ -435,10 +443,6 @@ def test_receipt_binds_each_exact_task_and_model(
         layers,
         document["runtime"]["version"],
         tuple(sorted(document["runtime"]["binaries"].items())),
-    )
-    assert (
-        qualification.task_sha256(task_factory())
-        == document["workloads"][plugin_id]["models"][model_id]["taskSha256"]
     )
 
 
@@ -489,12 +493,13 @@ def test_a_tampered_model_identity_still_refuses(monkeypatch, tmp_path):
 
 
 def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp_path):
-    """The three cases that used to refuse startup now say so and carry on.
+    """Whatever the workload or the task, the load record is the receipt's.
 
-    A task digest that moved without the receipt being reissued is the failure
-    that briefly left event extraction unable to start at all; a workload
-    nobody measured, and a model measured for something else, did the same to
-    anyone who chose one.
+    The receipt stopped claiming to cover a task on 2026-08-20 (OMNI-0565): it
+    bound a digest over the whole `GenerationTask`, so the claim was wrong
+    within days of any work on a prompt, and nothing re-measured. What it is
+    still right about is what a load reported — the device, the layers, the
+    runtime — and that is true for every workload asking about this model.
     """
     document = _receipt()
     _load_receipt(monkeypatch, tmp_path, document)
@@ -505,14 +510,11 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
     moved = qualification.load_qualification(
         "event-extraction", model, digest, replace(task, task_version=2)
     )
-    assert moved.covers == "event-extraction has changed since qwen3-8b-q4-k-m was measured"
-
     unmeasured = qualification.load_qualification("unknown-workload", model, digest, task)
-    assert unmeasured.covers == "unknown-workload has no measured models"
 
-    # And the record itself is still the receipt's, so what is reported about
-    # the run stays true even when nobody measured this combination.
+    assert moved.covers == unmeasured.covers == ""
     assert moved.device == unmeasured.device == document["device"]
+    assert moved.model_layers == unmeasured.model_layers
 
 
 @pytest.mark.parametrize(
@@ -607,17 +609,30 @@ def test_a_workload_the_receipt_does_not_cover_reports_and_runs(monkeypatch, tmp
     ],
 )
 def test_receipt_refuses_identity_and_shape_tampering(tmp_path, monkeypatch, mutate, detail):
+    """A broken receipt is a broken install, whichever half is read.
+
+    Since OMNI-0565 the two halves are read by different functions: the model
+    block by `load_qualification`, which says what a load reported, and the
+    workload block by `default_model`, which says which model a workload runs
+    when nobody chose one. Both refuse a receipt that has been tampered with,
+    and this asserts through whichever one owns the field the case mutates.
+    """
     document = _receipt()
     mutate(document)
     _load_receipt(monkeypatch, tmp_path, document)
 
-    with pytest.raises(RuntimeError) as excinfo:
+    def read_both():
         qualification.load_qualification(
             "event-extraction",
             "qwen3-8b-q4-k-m",
             "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
             event_generation_task(),
         )
+        qualification.default_model("event-extraction")
+        qualification.measured_models("event-extraction")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        read_both()
     assert str(excinfo.value) == detail
 
 
@@ -675,14 +690,18 @@ def test_a_pair_that_failed_is_not_offered_but_may_still_be_chosen(tmp_path, mon
         "event-extraction", "qwen3-4b-q4-k-m", "a" * 64, event_generation_task()
     )
 
-    assert chosen.covers == "qwen3-4b-q4-k-m did not pass event-extraction: drops half the events"
+    # Choosing it anyway still runs: `qualified_models` is a list to offer,
+    # never a gate, and that outlives the coverage report OMNI-0565 dropped.
+    assert chosen.device == document["device"]
 
 
 def test_a_model_measured_for_another_workload_reports_rather_than_refuses(tmp_path, monkeypatch):
-    """Qualified *as a model* is not qualified *for this task*.
+    """A model the receipt knows may be loaded by any workload that wants it.
 
-    DictaLM has been the first for months and never the second. That is worth
-    saying on the answer; it is not grounds for refusing to run.
+    DictaLM was measured for translation and never for extraction, and that
+    was once reported on the answer. The report is gone with the claim it
+    belonged to (OMNI-0565); what remains is that neither the model nor the
+    workload is refused.
     """
     _load_receipt(monkeypatch, tmp_path, _receipt())
 
@@ -693,9 +712,10 @@ def test_a_model_measured_for_another_workload_reports_rather_than_refuses(tmp_p
         event_generation_task(),
     )
 
-    assert elsewhere.covers == (
-        f"{factories.HEBREW_ARTIFACT_ID} was not measured for event-extraction"
-    )
+    # Since OMNI-0565 the receipt says nothing about a task, so the answer is
+    # the load record itself — true for whichever workload asks.
+    assert elsewhere.covers == ""
+    assert elsewhere.device == _receipt()["device"]
 
 
 def test_the_default_model_is_the_one_a_job_that_chose_nothing_runs(tmp_path, monkeypatch):
@@ -2711,19 +2731,19 @@ def test_selected_workload_publishes_measured_receipt_only_after_both_loads(tmp_
 @pytest.mark.parametrize(
     ("hebrew_report", "hebrew_digest"),
     [
+        # Partial offload: some layers stayed off the GPU.
         (
-            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 32, 32, False),
+            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 32, 33, False),
             HEBREW_MODEL_SHA256,
         ),
+        # llama.cpp fell back to the CPU, which is the one rule a live load
+        # must satisfy — there is deliberately no CPU backend anywhere.
         (
             NativeLoadReport("llama.cpp-vulkan", "Vulkan", 33, 33, True),
             HEBREW_MODEL_SHA256,
         ),
+        # A backend that is not the one this provider loads through.
         (NativeLoadReport("wrong", "Vulkan", 33, 33, False), HEBREW_MODEL_SHA256),
-        (
-            NativeLoadReport("llama.cpp-vulkan", "Vulkan", 33, 33, False),
-            "0" * 64,
-        ),
     ],
 )
 def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
@@ -2785,6 +2805,68 @@ def test_selected_receipt_failure_removes_stale_bytes_and_never_publishes(
     assert not receipt_path.exists()
     assert calls[0] == "start"
     assert calls[-1] == "stop"
+
+
+def test_a_receipt_records_the_load_that_happened_rather_than_a_frozen_identity(
+    tmp_path, monkeypatch
+):
+    """Another card, another model, fewer layers than the frozen run had.
+
+    The receipt records what loaded; it does not re-run the acceptance
+    identity check. It used to, and a worker on any other GPU — or on any
+    model a person chose — died at start with a truncated handshake and
+    nothing to read. These two cases were left asserting the old rule after
+    the rule was dropped, which is why they were red rather than the code.
+    """
+    published = []
+    calls = []
+
+    class Plugin:
+        plugin_id = "selected-text-tools"
+
+        async def start(self, _context):
+            calls.append("start")
+
+        async def stop(self):  # pragma: no cover - a successful start never stops here
+            calls.append("stop")
+
+    class Native:
+        physical_device = "AMD Radeon 610M (RADV GFX1103_R1)"
+
+        def __init__(self, layers):
+            self.layers = layers
+
+        async def load(self, _paths, _accelerator):
+            return NativeLoadReport("llama.cpp-vulkan", "Vulkan", self.layers, self.layers, False)
+
+        async def terminate(self, request_id):
+            calls.append(request_id)
+
+    receipt_path = tmp_path / SELECTED_TEXT_WORKER_LOAD_RECEIPT
+    monkeypatch.setattr(
+        factories, "verify_native_runtime", lambda _value: "llama-cpp-python-0.3.34"
+    )
+    monkeypatch.setattr(
+        factories,
+        "write_json_atomic",
+        lambda _path, document, **_kwargs: published.append(document),
+    )
+    wrapper = factories.QualifiedWorkload(
+        Plugin(),
+        Native(28),
+        Path("qwen.gguf"),
+        _qualification(layers=37),
+        additional_runtimes=((Native(24), Path("hebrew.gguf"), _qualification(layers=33)),),
+        load_receipt_path=receipt_path,
+        load_receipt_models=(("primary", "0" * 64), ("hebrewTranslation", "1" * 64)),
+    )
+
+    asyncio.run(wrapper.start(PluginContext("selected-text-tools", 1, {}, frozenset())))
+
+    [document] = published
+    assert document["pluginId"] == "selected-text-tools"
+    assert set(document["models"]) == {"primary", "hebrewTranslation"}
+    assert calls[0] == "start"
 
 
 def test_selected_receipt_write_failure_cleans_worker_and_leaves_no_file(tmp_path, monkeypatch):
@@ -3222,9 +3304,9 @@ def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path
 
     Otherwise the two are a deadlock — the acceptance run needs the installed
     distribution, and the distribution could not be declared until the run had
-    happened. What must not follow is a silent claim: the receipt records
-    `unmeasured`, `qualified_models` does not offer the pair, and the
-    qualification the provider hands the descriptor says so in words.
+    happened. `unmeasured` therefore stays a value the receipt may record and
+    `qualified_models` still declines to offer that pair — what went with
+    OMNI-0565 is only the sentence the provider used to hand the descriptor.
     """
 
     document = _receipt()
@@ -3240,7 +3322,7 @@ def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path
         event_generation_task(),
     )
 
-    assert loaded.covers == "qwen3-8b-q4-k-m was not measured for event-extraction"
+    assert loaded.covers == ""
     assert "qwen3-8b-q4-k-m" not in qualification.qualified_models("event-extraction")
     # And it may still be the workload's default: unmeasured is not rejected.
     document["workloads"]["event-extraction"]["default"] = "qwen3-8b-q4-k-m"
@@ -3495,3 +3577,98 @@ def test_a_tuned_hebrew_translation_carries_the_guidance_too(tmp_path):
     assert [message["role"] for message in messages] == ["user", "user"]
     assert "keep the formal register" in messages[-1]["content"]
     assert messages[0]["content"].startswith(hebrew._TRANSLATION_PROMPT)
+
+
+# --- what this adapter actually sends (OMNI-0570) -----------------------------
+
+
+def _stub_llama(observed, reply):
+    class Llama:
+        def create_chat_completion(self, **kwargs):
+            observed.append(kwargs)
+            return iter(({"choices": [{"delta": {"content": reply}}]},))
+
+    return Llama()
+
+
+def test_the_adapter_sends_the_system_rules_the_workload_hint_and_the_request(tmp_path):
+    """The whole message list, in order, for a workload that adds a hint.
+
+    Each half is owned by a different distribution — the task and the hint by
+    `omnitensor`, the layout by this one — so nothing but a test that sees both
+    can say the hint reached the model at all. It stopped reaching it twice
+    while the hints were being moved, and the only sign was an answer that
+    echoed the selection back.
+    """
+    adapter = _runtime(tmp_path, SelectedTextPrompting())
+    control = SourceFragment(
+        "private:job-1:control",
+        "a" * 64,
+        1,
+        json.dumps({"operation": "summarize", "language": None}),
+        "b" * 64,
+    )
+    selection = SourceFragment(
+        "private:job-1:selection", "c" * 64, 1, "The migration moved 1.4 million rows.", "d" * 64
+    )
+    asyncio.run(adapter._store.publish("job-1", (control, selection)))
+    task = selected_text_task()
+    request = GenerationRequest(
+        "job-1", "selected-text-tools", (control.reference, selection.reference)
+    )
+    observed = []
+    adapter._llama = _stub_llama(
+        observed,
+        json.dumps(
+            {
+                "version": 1,
+                "requestId": "job-1",
+                "operation": "summarize",
+                "result": "A migration moved rows.",
+                "tasks": [],
+                "evidence": {
+                    "sourceRef": selection.reference,
+                    "sourceSha256": selection.source_sha256,
+                    "span": {"start": 0, "end": len(selection.text)},
+                    "textSha256": selection.text_sha256,
+                },
+            }
+        ),
+    )
+
+    adapter._generate_sync(task, request, CancellationController())
+
+    [call] = observed
+    system, user = call["messages"]
+    assert system["role"] == "system"
+    assert system["content"].startswith(task.system_prompt)
+    assert 'operation is "summarize"' in system["content"]
+    assert "Summarize the selection concisely" in system["content"]
+    assert '"job-1"' in system["content"]
+    assert user["role"] == "user"
+    assert selection.text in user["content"], "the selection is the untrusted content"
+    assert selection.text not in system["content"], "and it never joins the rules"
+    assert call["temperature"] == 0.0
+    assert call["seed"] == 0
+    assert call["max_tokens"] == task.limits.output_tokens
+
+
+def test_a_workload_that_adds_nothing_sends_the_task_and_the_request_alone(tmp_path):
+    """`NO_PROMPTING` is a workload whose own prompt says everything."""
+    adapter = _runtime(tmp_path)
+    source = SourceFragment(
+        "private:job-1:source:1", "a" * 64, 1, "invoice-2026-08.pdf", "b" * 64
+    )
+    asyncio.run(adapter._store.publish("job-1", (source,)))
+    observed = []
+    adapter._llama = _stub_llama(observed, json.dumps({"version": 1, "requestId": "job-1"}))
+
+    with contextlib.suppress(Exception):
+        adapter._generate_sync(
+            file_organizer_task(),
+            GenerationRequest("job-1", "file-organizer", (source.reference,)),
+            CancellationController(),
+        )
+
+    [call] = observed
+    assert [message["role"] for message in call["messages"]] == ["system", "user"]

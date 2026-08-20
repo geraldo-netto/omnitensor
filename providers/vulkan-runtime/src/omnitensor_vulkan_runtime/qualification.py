@@ -7,7 +7,7 @@ import importlib.metadata
 import importlib.resources
 import json
 import re
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from omnitensor.plugins.generation import GenerationTask
@@ -38,9 +38,9 @@ class Qualification:
     model_layers: int
     runtime_version: str
     runtime_binaries: tuple[tuple[str, str], ...]
-    # Empty when a frozen acceptance run covers this exact workload, model and
-    # task; otherwise the reason it does not. Carried so the answer can say so,
-    # never consulted to decide whether the work may run.
+    # Kept as a field so nothing downstream changes shape, and always empty
+    # since 2026-08-20: the receipt stopped being a claim about the task. See
+    # `load_qualification`.
     covers: str = ""
 
 
@@ -55,44 +55,23 @@ def load_qualification(
     model_sha256: str,
     task: GenerationTask,
 ) -> Qualification:
-    """The receipt's record for this pair, and whether it covers this workload.
+    """What a load of this model reported: its device, layers and runtime.
 
-    Not a gate. It used to raise when the receipt did not list the pair, so a
-    person who chose an unmeasured model got a worker that refused to start —
-    and a task digest that moved without the receipt being reissued did the
-    same to a model that had been measured, which is how event extraction was
-    briefly unable to start at all. Choosing a model is the person's to make
-    and theirs to own; what the receipt knows is reported, never enforced.
+    It no longer says whether an acceptance run covers this workload's task.
+    The receipt bound a digest over the whole `GenerationTask`, so every edit
+    to a prompt or a schema — including a refactor that changed nothing the
+    model sees — moved it, while re-measuring needs the GPU and does not
+    happen in the same commit. What that produced was a claim that was wrong
+    within days and six tests that were simply red (OMNI-0501, OMNI-0565).
+    The maintainer's decision on 2026-08-20 was to stop maintaining the claim
+    rather than to keep a stale one: what pins a workload now is that it asks
+    the model what it was reviewed asking (`tests/test_workload_prompt_contract.py`
+    in `omnitensor`, and the message-assembly tests here).
+
+    `task` stays in the signature: every caller has one, and the day a model
+    changes is the day this may need it again.
     """
-    document = _qualification_document()
-    qualification = _model_qualification(document, model_id, model_sha256)
-    return replace(
-        qualification,
-        covers=_covers(document["workloads"], plugin_id, model_id, task_sha256(task)),
-    )
-
-
-def _covers(value: object, plugin_id: str, model_id: str, task_digest: str) -> str:
-    """Empty when the receipt covers this exactly; otherwise why it does not.
-
-    A malformed receipt still raises. That is not an unmeasured pair, it is a
-    broken install — the same class as a missing dependency — and reporting it
-    as "nobody measured this" would send a person off to run an acceptance
-    pass against a file the reader cannot even parse.
-    """
-    if not isinstance(value, dict):
-        raise RuntimeError("workload qualification is invalid")
-    if plugin_id not in value:
-        return f"{plugin_id} has no measured models"
-    workload = _workload_entry(value, plugin_id)
-    record = workload["models"].get(model_id)
-    if record is None or record["result"] == UNMEASURED:
-        return f"{model_id} was not measured for {plugin_id}"
-    if record["result"] != PASSED:
-        return f"{model_id} did not pass {plugin_id}: {record.get('reason', '')}".strip()
-    if record["taskSha256"] != task_digest:
-        return f"{plugin_id} has changed since {model_id} was measured"
-    return ""
+    return _model_qualification(_qualification_document(), model_id, model_sha256)
 
 
 def load_model_qualification(model_id: str, model_sha256: str) -> Qualification:

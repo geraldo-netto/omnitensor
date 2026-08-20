@@ -120,3 +120,16 @@ def write_workload(root: Path, manifest: dict) -> None:
     directory = root / manifest["id"]
     directory.mkdir(parents=True)
     (directory / "manifest.json").write_text(json.dumps(manifest))
+
+def pytest_addoption(parser):
+    """Rewrite the reviewed workload prompts instead of asserting against them.
+
+    A golden file is only worth having if updating it is deliberate, so this
+    is a flag somebody types and a diff they then read — never something a
+    failing run does for itself.
+    """
+    parser.addoption(
+        "--update-workload-prompts",
+        action="store_true",
+        help="rewrite tests/golden/workload-prompts from the current tasks",
+    )
