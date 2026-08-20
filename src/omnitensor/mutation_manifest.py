@@ -63,6 +63,23 @@ def _source_files(root: Path) -> tuple[Path, ...]:
     return files
 
 
+def selector_module(selector: str) -> str:
+    """The module a mutation selector names.
+
+    Split on the separators `_module_selectors` actually emits — `.x_` for a
+    function and `.xǁ` for a method — and on the last of them, since neither a
+    function nor a class name can contain one. Splitting on a bare `.x` made
+    any module whose path had a segment beginning with `x`
+    (`omnitensor.executors.xpu`) report the wrong module, and a correct
+    manifest was then rejected for not matching its own scope.
+    """
+    for separator in (".xǁ", ".x_"):
+        head, found, _tail = selector.rpartition(separator)
+        if found:
+            return head
+    return selector
+
+
 def _instrumentable_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     if not node.decorator_list:
         return True
@@ -272,7 +289,7 @@ def load_mutation_manifest(
     selectors = tuple(selector for shard in shards for selector in shard.selectors)
     if len(set(selectors)) != len(selectors):
         raise ValueError("mutation selector appears in multiple shards")
-    modules = frozenset(selector.split(".x", 1)[0] for selector in selectors)
+    modules = frozenset(selector_module(selector) for selector in selectors)
     scope = _validated_scope(document["scope"], source_root, modules)
     mutable = mutable_selector_inventory(source_root, modules)
     unexecutable = sorted(set(selectors) - mutable)

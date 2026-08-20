@@ -672,3 +672,17 @@ def test_ci_matrix_is_derived_from_manifest_and_runs_the_same_campaign():
     assert "--selector-file mutation-selectors.json --shard scheduler" in readme
     for shard in ("acceptance", "document-binding", "event-workload", "grounded-answer"):
         assert f"--shard {shard} --report /tmp/omnitensor-mutmut-{shard}.txt" in readme
+
+
+def test_a_selector_module_is_split_on_the_separator_not_on_a_bare_x():
+    """OMNI-0440: `omnitensor.executors.xpu` reported module `omnitensor.executors`."""
+    from omnitensor.mutation_manifest import selector_module
+
+    assert selector_module("omnitensor.discovery.x_detect_gpu") == "omnitensor.discovery"
+    assert selector_module("omnitensor.executors.gpu.xǁGpuExecutorǁavailability") == (
+        "omnitensor.executors.gpu"
+    )
+    # The segment that used to break it: a module whose name starts with `x`.
+    assert selector_module("omnitensor.executors.xpu.x_run") == "omnitensor.executors.xpu"
+    assert selector_module("omnitensor.x_ray.xǁScannerǁscan") == "omnitensor.x_ray"
+    assert selector_module("omnitensor.discovery") == "omnitensor.discovery"
