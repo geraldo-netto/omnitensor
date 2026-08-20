@@ -147,9 +147,11 @@ def test_cpu_reference_owner_is_absent_from_runtime_and_native_modules():
     }
     assert owners <= allowed
 
-    provider = (ROOT / "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/bge.py").read_text(
-        encoding="utf-8"
-    )
+    # The embedder is its own distribution since OMNI-0517: BGE on ncnn shares
+    # no code path with llama.cpp, so it left the generation wheel.
+    provider = (
+        ROOT / "providers/ncnn-embeddings/src/omnitensor_ncnn_embeddings/bge.py"
+    ).read_text(encoding="utf-8")
     # The provider reaches the runner and its prefix in the service package, not
     # through the trainers: it is part of the serving path and must import on a
     # machine that never installed `omnitensor-training`.
