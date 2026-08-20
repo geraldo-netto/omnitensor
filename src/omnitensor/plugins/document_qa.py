@@ -47,11 +47,8 @@ from .event_workload import (
     SelectedSource,
 )
 from .extraction import (
-    TRUNCATED_SOURCE_CODE,
-    DocumentExtractor,
     ExtractionAdapter,
-    ExtractionOutcome,
-    truncation_summary,
+    SelectedDocumentReader,
 )
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
@@ -110,6 +107,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
                 raise DocumentQuestionError("adapter-invalid", "source adapter mapping is invalid")
             defaults[suffix] = adapter
         self._adapters = defaults
+        self._reader = SelectedDocumentReader(defaults, DocumentQuestionError)
 
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
@@ -279,23 +277,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
         spans: list[IndexedSpan] = []
         for index, source in enumerate(selected):
             cancellation.raise_if_cancelled()
-            adapter = self._adapters.get(source.item.suffix)
-            if adapter is None:
-                raise DocumentQuestionError(
-                    "source-unsupported", "selected source type is unsupported"
-                )
-            extraction = await DocumentExtractor(adapter).extract_all(source.item)
-            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
-                # A truncated extraction used to be answered as if whole, so a
-                # long selection was answered from its opening pages and nobody
-                # was told. Say what went unread instead of inventing an answer
-                # from part of it.
-                summary = truncation_summary(extraction)
-                if summary:
-                    raise DocumentQuestionError(TRUNCATED_SOURCE_CODE, summary)
-                raise DocumentQuestionError(
-                    "extraction-failed", "selected source could not be extracted"
-                )
+            extraction = await self._reader.read(source.item)
             spans.extend(
                 page_spans(
                     request.job_id,

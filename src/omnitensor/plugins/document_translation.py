@@ -47,12 +47,9 @@ from .event_workload import (
     SelectedSource,
 )
 from .extraction import (
-    TRUNCATED_SOURCE_CODE,
-    DocumentExtractor,
     ExtractionAdapter,
-    ExtractionOutcome,
+    SelectedDocumentReader,
     measured_failure_detail,
-    truncation_summary,
 )
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
@@ -128,6 +125,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
                 )
             defaults[suffix] = adapter
         self._adapters = defaults
+        self._reader = SelectedDocumentReader(defaults, DocumentTranslationError)
 
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
@@ -238,19 +236,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
         return selected, language
 
     async def _source_text(self, source: SelectedSource) -> str:
-        adapter = self._adapters.get(source.item.suffix)
-        if adapter is None:
-            raise DocumentTranslationError(
-                "source-unsupported", "selected source type is unsupported"
-            )
-        extraction = await DocumentExtractor(adapter).extract_all(source.item)
-        if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
-            summary = truncation_summary(extraction)
-            if summary:
-                raise DocumentTranslationError(TRUNCATED_SOURCE_CODE, summary)
-            raise DocumentTranslationError(
-                "extraction-failed", "selected source could not be extracted"
-            )
+        extraction = await self._reader.read(source.item)
         if not extraction.text.strip():
             raise DocumentTranslationError(
                 "source-empty", "each selected document must contain extractable text"

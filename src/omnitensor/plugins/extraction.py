@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
@@ -581,6 +581,52 @@ def truncation_summary(result: ExtractionResult) -> str:
     dropped = ", ".join(parts) if parts else "part of the document"
     detail = f" ({result.detail})" if result.detail else ""
     return f"read only {len(result.pages)} page(s); {dropped} went unread{detail}"
+
+
+class SelectedDocumentReader:
+    """Read one selected document in full, or raise the workload's refusal.
+
+    Four workloads held this block verbatim — resolve an adapter by suffix,
+    refuse `source-unsupported` when there is none, extract in accumulating
+    passes, and turn a non-`SUCCEEDED` outcome into `source-truncated` with
+    its measured counts or `extraction-failed`. They differed only in which
+    exception type they raised. It was edited identically in all four twice in
+    one day, which is what a seam looks like before it is named.
+
+    The adapter mapping is held by reference rather than copied: a workload
+    exposes the same dictionary, and a caller that adds or removes an adapter
+    on the plugin must change what the reader resolves.
+    """
+
+    def __init__(
+        self,
+        adapters: dict[str, ExtractionAdapter],
+        error_type: Callable[[str, str], Exception],
+        *,
+        limits: ExtractionLimits | None = None,
+    ) -> None:
+        self._adapters = adapters
+        self._error_type = error_type
+        self._limits = limits
+
+    @property
+    def adapters(self) -> dict[str, ExtractionAdapter]:
+        return self._adapters
+
+    async def read(self, item) -> ExtractionResult:
+        adapter = self._adapters.get(item.suffix)
+        if adapter is None:
+            raise self._error_type("source-unsupported", "selected source type is unsupported")
+        extraction = await DocumentExtractor(adapter, limits=self._limits).extract_all(item)
+        if extraction.outcome is ExtractionOutcome.SUCCEEDED:
+            return extraction
+        # A truncated extraction used to be answered as if whole, so a long
+        # selection was answered from its opening pages and nobody was told.
+        # Say what went unread instead of inventing an answer from part of it.
+        summary = truncation_summary(extraction)
+        if summary:
+            raise self._error_type(TRUNCATED_SOURCE_CODE, summary)
+        raise self._error_type("extraction-failed", "selected source could not be extracted")
 
 
 def _page_number(value: object, fallback: int) -> int:

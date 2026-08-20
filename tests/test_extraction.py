@@ -7,16 +7,20 @@ import pytest
 
 from omnitensor.plugins.document_ingestion import DocumentIngestor
 from omnitensor.plugins.extraction import (
+    TRUNCATED_SOURCE_CODE,
     AdapterKind,
     BlockKind,
     DocumentExtractor,
     ExtractionError,
     ExtractionLimits,
     ExtractionOutcome,
+    ExtractionResult,
     ImageRegion,
     LayoutBlock,
+    NormalisedPage,
     PageContent,
     ResumePoint,
+    SelectedDocumentReader,
     normalise_text,
 )
 from omnitensor.plugins.ingestion import IngestedFile
@@ -482,3 +486,77 @@ def test_a_six_megabyte_selection_is_extracted_whole():
     assert result.outcome is ExtractionOutcome.SUCCEEDED
     assert len(result.pages) == 6_000
     assert result.dropped_characters == 0
+
+
+class RefusalError(Exception):
+    """Stands in for one workload's stable refusal type."""
+
+    def __init__(self, code, detail):
+        super().__init__(code, detail)
+        self.code = code
+        self.detail = detail
+
+
+def test_the_reader_raises_the_workloads_own_refusal_for_each_way_reading_fails(monkeypatch):
+    """OMNI-0537: the block four workloads held, and the one thing they varied.
+
+    Each of them resolved an adapter by suffix, refused `source-unsupported`,
+    extracted, and mapped a non-`SUCCEEDED` outcome to `source-truncated` with
+    its measured counts or to `extraction-failed`. Only the exception type
+    differed, so that is the only thing the reader takes.
+    """
+
+    adapters = {".pdf": Adapter([page(1, "readable")])}
+    reader = SelectedDocumentReader(adapters, RefusalError)
+
+    assert asyncio.run(reader.read(ITEM)).outcome is ExtractionOutcome.SUCCEEDED
+
+    unsupported = IngestedFile("/home/u/notes.odt", 10, 1_000, ".odt", "e" * 64)
+    with pytest.raises(RefusalError) as refused:
+        asyncio.run(reader.read(unsupported))
+    assert refused.value.code == "source-unsupported"
+
+    # A truncated read is what `extract_all` reports when no further pass can
+    # make progress — a page larger than one pass. Reached here by making the
+    # extractor say so, since the mapping is what this reader owns.
+    async def truncated_pass(_self, _item, **_kwargs):
+        return ExtractionResult(
+            ExtractionOutcome.TRUNCATED,
+            (NormalisedPage(1, "readable", (), ()),),
+            detail="a page is larger than one extraction pass",
+            dropped_pages=3,
+            dropped_characters=90,
+        )
+
+    monkeypatch.setattr(DocumentExtractor, "extract_all", truncated_pass)
+    with pytest.raises(RefusalError) as truncated:
+        asyncio.run(reader.read(ITEM))
+    assert truncated.value.code == TRUNCATED_SOURCE_CODE
+    # The counts travel with the refusal; they are measured, not looked up.
+    assert "3 page(s), 90 character(s) went unread" in truncated.value.detail
+
+    async def crashed_pass(_self, _item, **_kwargs):
+        return ExtractionResult(ExtractionOutcome.CRASHED, (), detail="segfault")
+
+    monkeypatch.setattr(DocumentExtractor, "extract_all", crashed_pass)
+    with pytest.raises(RefusalError) as failed:
+        asyncio.run(reader.read(ITEM))
+    assert failed.value.code == "extraction-failed"
+    assert failed.value.detail == "selected source could not be extracted"
+
+
+def test_the_reader_resolves_the_adapters_the_workload_currently_holds():
+    """Held by reference: a workload that drops an adapter drops the route.
+
+    The plugins expose the same mapping the reader resolves against, and a
+    test that pops `.txt` off a plugin is asserting exactly that.
+    """
+
+    adapters = {".pdf": Adapter([page(1, "readable")])}
+    reader = SelectedDocumentReader(adapters, RefusalError)
+    assert reader.adapters is adapters
+
+    adapters.pop(".pdf")
+    with pytest.raises(RefusalError) as refused:
+        asyncio.run(reader.read(ITEM))
+    assert refused.value.code == "source-unsupported"

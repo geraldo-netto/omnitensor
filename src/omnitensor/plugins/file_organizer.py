@@ -35,12 +35,9 @@ from .event_workload import (
     SelectedSource,
 )
 from .extraction import (
-    TRUNCATED_SOURCE_CODE,
-    DocumentExtractor,
     ExtractionAdapter,
-    ExtractionOutcome,
+    SelectedDocumentReader,
     measured_failure_detail,
-    truncation_summary,
 )
 from .fragments import SourceFragment
 from .generation import (
@@ -100,6 +97,7 @@ class FileOrganizerPlugin(ManagedPlugin):
                 raise FileOrganizerError("adapter-invalid", "source adapter mapping is invalid")
             defaults[suffix] = adapter
         self._adapters = defaults
+        self._reader = SelectedDocumentReader(defaults, FileOrganizerError)
 
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
@@ -206,23 +204,7 @@ class FileOrganizerPlugin(ManagedPlugin):
         spans: list[IndexedSpan] = []
         for index, source in enumerate(selected):
             cancellation.raise_if_cancelled()
-            adapter = self._adapters.get(source.item.suffix)
-            if adapter is None:
-                raise FileOrganizerError(
-                    "source-unsupported", "selected source type is unsupported"
-                )
-            extraction = await DocumentExtractor(adapter).extract_all(source.item)
-            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
-                # A truncated extraction used to be answered as if whole, so a
-                # long selection was answered from its opening pages and nobody
-                # was told. Say what went unread instead of inventing an answer
-                # from part of it.
-                summary = truncation_summary(extraction)
-                if summary:
-                    raise FileOrganizerError(TRUNCATED_SOURCE_CODE, summary)
-                raise FileOrganizerError(
-                    "extraction-failed", "selected source could not be extracted"
-                )
+            extraction = await self._reader.read(source.item)
             # Every span, no ``remaining``. Two spans is the first ~4 KB, and a
             # report whose subject only appears on page three was filed from
             # its cover sheet with nothing saying the rest went unread.

@@ -38,14 +38,11 @@ from .events import (
     source_fragments,
 )
 from .extraction import (
-    TRUNCATED_SOURCE_CODE,
     AdapterKind,
-    DocumentExtractor,
     ExtractionAdapter,
-    ExtractionOutcome,
     PageContent,
+    SelectedDocumentReader,
     measured_failure_detail,
-    truncation_summary,
 )
 from .fragments import (
     FragmentStoreError,
@@ -252,6 +249,7 @@ class EventExtractionPlugin(ManagedPlugin):
                 raise EventWorkloadError("adapter-invalid", "source adapter mapping is invalid")
             defaults[suffix] = adapter
         self._adapters = defaults
+        self._reader = SelectedDocumentReader(defaults, EventWorkloadError)
         self._interrupted: tuple[str, ...] = ()
 
     async def on_start(self) -> None:
@@ -375,22 +373,7 @@ class EventExtractionPlugin(ManagedPlugin):
             cancellation.raise_if_cancelled()
             fraction = 0.1 + (0.45 * index / len(selected))
             await self._report(request, progress, "extract", fraction)
-            adapter = self._adapters.get(source.item.suffix)
-            if adapter is None:
-                raise EventWorkloadError(
-                    "source-unsupported", "selected source type is unsupported"
-                )
-            extraction = await DocumentExtractor(adapter).extract_all(source.item)
-            if extraction.outcome is not ExtractionOutcome.SUCCEEDED:
-                # A truncated extraction used to be read as if whole, so a long
-                # selection was answered from its opening pages and nobody was
-                # told. Say what went unread instead of answering from part.
-                summary = truncation_summary(extraction)
-                if summary:
-                    raise EventWorkloadError(TRUNCATED_SOURCE_CODE, summary)
-                raise EventWorkloadError(
-                    "extraction-failed", "selected source could not be extracted"
-                )
+            extraction = await self._reader.read(source.item)
             fragments = source_fragments(extraction, source.reference, source.item.digest)
             await self._store.publish(request.job_id, fragments)
             for fragment in fragments:
