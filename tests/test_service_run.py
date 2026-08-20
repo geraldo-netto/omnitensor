@@ -2400,3 +2400,34 @@ def test_the_publisher_can_be_woken_while_the_transport_is_still_starting(tmp_pa
     asyncio.run(service.run())
 
     assert transport.woke
+
+
+def test_run_says_it_is_ready_only_once_the_socket_accepts(tmp_path, monkeypatch):
+    """XTPU-0191: verification polled blind because nothing announced readiness."""
+    from omnitensor import service as service_module
+
+    events: list[str] = []
+    transport = FakeTransport()
+
+    original_start = transport.start
+
+    async def watched_start(api):
+        events.append("transport-started")
+        return await original_start(api)
+
+    transport.start = watched_start
+    monkeypatch.setattr(service_module, "notify_ready", lambda: events.append("ready") or True)
+    monkeypatch.setattr(
+        service_module, "notify_stopping", lambda: events.append("stopping") or True
+    )
+
+    service = build_service(
+        tmp_path,
+        discovery=FakeDiscovery([tpu_device()]),
+        publisher=FakePublisher(),
+        transport=transport,
+    )
+    service._stopping.set()
+    asyncio.run(service.run())
+
+    assert events == ["transport-started", "ready", "stopping"]

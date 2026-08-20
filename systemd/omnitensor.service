@@ -3,7 +3,12 @@ Description=OmniTensor unified local inference service
 After=graphical-session.target
 
 [Service]
-Type=exec
+# notify, not exec: `systemctl --user restart` then returns when the control
+# socket is accepting rather than when the process was spawned, so anything
+# run straight afterwards - `omnitensor-verify-install` above all - talks to a
+# service that is ready instead of polling a socket that does not exist yet.
+Type=notify
+NotifyAccess=main
 ExecStart=%h/.local/bin/omnitensor
 Restart=on-failure
 RestartSec=5

@@ -130,6 +130,7 @@ from .profile_selection import (
 from .profile_selection import (
     profile_statuses as profile_statuses,
 )
+from .readiness import notify_ready, notify_stopping
 from .registry import Workload, bundled_workloads_path, load_workload_catalog
 from .runtime_api import RuntimeAPI as RuntimeAPI
 from .scheduler import Scheduler
@@ -912,6 +913,9 @@ class OmniTensorService:
             await self._transport.start(self.runtime_api)
             self.reconcile_interrupted_jobs()
             self._scheduler.start()
+            # Only now: the control socket accepts and the scheduler will take
+            # work, so a caller told "ready" can immediately be answered.
+            notify_ready()
             loop_tasks = [
                 loop.create_task(self._publisher()),
                 loop.create_task(self._rediscover()),
@@ -940,6 +944,7 @@ class OmniTensorService:
             # Out here rather than in the inner `finally`: anything raising
             # between `start()` and that block left the per-backend worker
             # tasks spawned and every queued job's future unresolved.
+            notify_stopping()
             self._stopping.set()
             await self._scheduler.stop()
             await self.jobs.stop()
