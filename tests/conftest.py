@@ -121,6 +121,7 @@ def write_workload(root: Path, manifest: dict) -> None:
     directory.mkdir(parents=True)
     (directory / "manifest.json").write_text(json.dumps(manifest))
 
+
 def pytest_addoption(parser):
     """Rewrite the reviewed workload prompts instead of asserting against them.
 

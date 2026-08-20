@@ -216,10 +216,7 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
     control = ControlService(
         PolicyStore(
             options["policy_path"],
-            {
-                workload_id: workload.default_policy()
-                for workload_id, workload in workloads.items()
-            },
+            {workload_id: workload.default_policy() for workload_id, workload in workloads.items()},
         ),
         profile_exists=lambda profile_id: (
             profile_id in workloads or profile_id in plugin_runtime.plugin_ids()

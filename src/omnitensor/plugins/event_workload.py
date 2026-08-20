@@ -766,7 +766,6 @@ def _read_exact_file(path: Path, expected_size: int) -> bytes:
     return raw
 
 
-
 EVENT_GROUNDING_HINT = (
     "Trusted eligibility preflight found a fragment containing an explicit calendar date, "
     "clock time, and named timezone. Evaluate its factual event statement; do not refuse "

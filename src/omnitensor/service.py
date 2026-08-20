@@ -271,9 +271,7 @@ class OmniTensorService:
         )
         # Whoever owns the plugin runtime names it to the resolver: a resolver
         # built before it would report every plugin artifact as undeclared.
-        self._artifacts.reads_plugins_from(
-            lambda: self._plugin_runtime.snapshot.catalog.plugins
-        )
+        self._artifacts.reads_plugins_from(lambda: self._plugin_runtime.snapshot.catalog.plugins)
         self._publish_interval_s = publish_interval_s
         self._discovery_interval_s = discovery_interval_s
         storage = policy_storage or PolicyStore(

@@ -46,7 +46,6 @@ RESTATEMENT_IS_A_NON_ANSWER = frozenset({"explain", "summarize", "rewrite"})
 MAX_SELECTION_CHARACTERS = 32_768
 
 
-
 class SelectedTextError(StableError, ValueError):
     """Stable refusal that never contains the private selection."""
 
@@ -357,9 +356,7 @@ class SelectedTextPrompting:
             f"{instruction} Return operation exactly as named.\n"
         )
 
-    def reconsideration(
-        self, task, hint: str, raw: str, request=None, store=None
-    ) -> str | None:
+    def reconsideration(self, task, hint: str, raw: str, request=None, store=None) -> str | None:
         """One re-ask when the answer is the selection handed straight back.
 
         Measured on the live desk: `explain` on "The mitochondrion is the

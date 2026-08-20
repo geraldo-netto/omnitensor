@@ -596,9 +596,8 @@ def _valid_document_visuals(items: tuple[VisualTranscript, ...], page_count: int
         return False
     if page_count is None:
         return len(items) == 1 and items[0].page_number is None
-    return (
-        len(items) == page_count
-        and [item.page_number for item in items] == list(range(1, len(items) + 1))
+    return len(items) == page_count and [item.page_number for item in items] == list(
+        range(1, len(items) + 1)
     )
 
 
