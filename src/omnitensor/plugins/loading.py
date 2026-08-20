@@ -165,6 +165,7 @@ class InstalledPluginRuntime:
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
         profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
         profile_model_choice: Callable[[str], str | None] | None = None,
+        profile_configuration: Callable[[str], Mapping[str, object] | None] | None = None,
         worker_idle_timeout_s: float | None = WORKER_IDLE_TIMEOUT_S,
         sleep: Callable[[float], object] | None = None,
     ) -> None:
@@ -185,6 +186,9 @@ class InstalledPluginRuntime:
         # Which model each workload was told to run, asked of the host rather
         # than stored, so a worker started after a change gets the change.
         self._profile_model_choice = profile_model_choice
+        # What each workload was tuned to, asked of the host for the same
+        # reason: a worker started after a change must start with the change.
+        self._profile_configuration = profile_configuration
         self._granted: dict[str, frozenset[str]] = {}
         self._revoked_workers: set[str] = set()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
@@ -573,6 +577,12 @@ class InstalledPluginRuntime:
         if self._profile_model_choice is not None:
             spec_options["model_choices"] = {
                 plugin.plugin_id: self._profile_model_choice(plugin.plugin_id) or ""
+                for plugin in catalog.plugins
+                if plugin.source is PluginSource.EXTERNAL
+            }
+        if self._profile_configuration is not None:
+            spec_options["configurations"] = {
+                plugin.plugin_id: self._profile_configuration(plugin.plugin_id) or {}
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }

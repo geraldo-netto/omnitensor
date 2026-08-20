@@ -39,8 +39,9 @@ from .ipc import (
     result_frames,
 )
 from .offloop import run_off_loop
-from .protocol import PluginContext, PluginProgress, PluginRequest, WorkloadPlugin
+from .protocol import JsonObject, PluginContext, PluginProgress, PluginRequest, WorkloadPlugin
 from .seccomp import confinement_error, install_filter
+from .worker_configuration import read_worker_configuration
 
 WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
 WORKER_CANCEL_GRACE_SECONDS = 0.05
@@ -97,6 +98,7 @@ async def serve_worker_requests(
     minimum_protocol: int = 1,
     maximum_protocol: int = 1,
     permissions: frozenset[str] = frozenset(),
+    configuration: JsonObject | None = None,
 ) -> HandshakeAgreement:
     """Serve executable requests while continuing to receive cancellation."""
     offer = HandshakeOffer(
@@ -108,7 +110,14 @@ async def serve_worker_requests(
     service = parse_handshake(await run_off_loop(_read_frame, reader))
     agreement = negotiate_handshake(service, offer)
     _write_frame(writer, handshake_frame(offer))
-    await plugin.start(PluginContext(plugin.plugin_id, agreement.protocol_version, {}, permissions))
+    await plugin.start(
+        PluginContext(
+            plugin.plugin_id,
+            agreement.protocol_version,
+            dict(configuration or {}),
+            permissions,
+        )
+    )
     _write_frame(writer, ready_frame(plugin.plugin_id))
     active: dict[str, tuple[asyncio.Task, CancellationController]] = {}
     # The loop holds only weak references to tasks, so a grace timer nobody
@@ -375,7 +384,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"{blocked}. Pass --no-seccomp to accept that deliberately."
             )
         install_filter()
-    configure_plugin_bootstrap(_bootstrap(arguments))
+    bootstrap = _bootstrap(arguments)
+    configure_plugin_bootstrap(bootstrap)
     plugin = load_external_plugin(
         arguments.plugin_id,
         arguments.entry_point,
@@ -388,6 +398,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             sys.stdin.buffer,
             channel,
             permissions=frozenset(arguments.permission),
+            configuration=read_worker_configuration(bootstrap.state_path),
         )
     )
 

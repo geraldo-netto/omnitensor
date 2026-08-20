@@ -91,7 +91,7 @@ from .plugins.orchestration import (
     RunnerSet,
     with_recovery,
 )
-from .plugins.settings import PluginSettingsStore
+from .plugins.settings import PluginSettingsError, PluginSettingsStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
@@ -236,6 +236,7 @@ class OmniTensorService:
             accelerator_devices=self._plugin_accelerator_devices,
             profile_accelerator_devices=self._plugin_accelerator_devices,
             profile_model_choice=self._plugin_model_choice,
+            profile_configuration=self._plugin_configuration_values,
             progress_sink=lambda progress: self._note_job_progress(
                 progress.job_id,
                 progress.stage,
@@ -481,6 +482,28 @@ class OmniTensorService:
         """
         spec_of = getattr(self._plugin_runtime, "configuration_spec", None)
         return spec_of(profile_id) if callable(spec_of) else None
+
+    def _plugin_configuration_values(self, profile_id: str) -> dict | None:
+        """The configuration this workload was tuned to, or nothing.
+
+        A store that refuses — a plugin upgraded across a configuration
+        contract with no migration, an unreadable document — starts the worker
+        on its defaults rather than not at all: a workload lost to a tunable
+        it does not need would be the worse answer, and the log names it.
+        """
+        spec = self._profile_configuration(profile_id)
+        if spec is None:
+            return None
+        try:
+            return self._plugin_settings.load(spec).configuration
+        except (PluginSettingsError, OSError):
+            LOGGER.warning(
+                "Could not read the stored configuration for %s; its worker starts on the"
+                " defaults its manifest declares",
+                profile_id,
+                exc_info=True,
+            )
+            return None
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
         return tuple(device.id for device in self._devices if device.backend == "gpu")

@@ -23,6 +23,7 @@ from .loading_staging import _STAGING_COMPONENT
 from .sandbox import FilesystemSandbox
 from .supervisor_process import WorkerSpec
 from .worker_budgets import limits_for
+from .worker_configuration import publish_worker_configuration
 
 MAX_WORKER_IMPORT_PATHS = 16
 WORKER_CAPABILITIES = frozenset({"cancel", "execute", "health", "progress"})
@@ -49,6 +50,7 @@ def external_worker_specs(
     accelerator_devices: Mapping[str, Path] | None = None,
     accelerator_devices_by_plugin: Mapping[str, Mapping[str, Path]] | None = None,
     model_choices: Mapping[str, str] | None = None,
+    configurations: Mapping[str, Mapping[str, object]] | None = None,
 ) -> tuple[WorkerSpec, ...]:
     """Build deterministic argv without importing plugin code in the service."""
     executable = executable_path(python_executable)
@@ -57,6 +59,7 @@ def external_worker_specs(
     device_map = dict(accelerator_devices or {})
     per_plugin = accelerator_devices_by_plugin or {}
     chosen_models = model_choices or {}
+    chosen_configurations = configurations or {}
     specs = []
     for plugin in plugins:
         if plugin.source is not PluginSource.EXTERNAL:
@@ -72,6 +75,7 @@ def external_worker_specs(
                 resolve_artifact=resolve_artifact,
                 accelerator_devices=dict(per_plugin.get(plugin.plugin_id, device_map)),
                 model_choice=str(chosen_models.get(plugin.plugin_id, "")),
+                configuration=chosen_configurations.get(plugin.plugin_id),
             )
         except ValueError as error:
             if plugin.plugin_id in per_plugin and str(error).startswith(
@@ -96,6 +100,7 @@ def external_worker_spec(
     resolve_artifact: ArtifactProvider | None,
     accelerator_devices: Mapping[str, Path],
     model_choice: str = "",
+    configuration: Mapping[str, object] | None = None,
 ) -> WorkerSpec:
     protocol = plugin.manifest["plugin"]["protocol"]
     declared = frozenset(plugin.manifest["plugin"]["permissions"])
@@ -106,6 +111,9 @@ def external_worker_spec(
     state_path = plugin_state_path(worker_state_root, plugin.plugin_id)
     if state_path is not None:
         argv.extend(("--state-path", str(state_path)))
+        # Written rather than passed: an argument is world-readable through
+        # /proc, and a tunable is what somebody typed into a local assistant.
+        publish_worker_configuration(state_path, configuration)
     device_paths = accelerator_paths(declared, granted, accelerator_devices)
     lease_path = accelerator_lease_path(worker_state_root, declared, granted)
     if lease_path is not None:

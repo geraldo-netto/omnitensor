@@ -2602,7 +2602,9 @@ def test_worker_main_parses_identity_and_import_roots(monkeypatch, tmp_path):
             "external-dist",
         )
     ]
-    assert served == [(plugin, stdin.buffer, channel, {"permissions": frozenset()})]
+    assert served == [
+        (plugin, stdin.buffer, channel, {"permissions": frozenset(), "configuration": {}})
+    ]
     assert claims == [0], "the frame channel must be claimed before the plugin is loaded"
     assert worker_module.sys.path[0] == str(site)
 
