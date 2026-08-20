@@ -6,7 +6,7 @@ imports, the manifest packaged beside it, and the plugin id inside that
 manifest. When they disagree the worker is discovered and then refuses to
 start, which a person sees only as "worker-unavailable".
 
-`tests/test_qwen_installation.py` in the service repository checks the same
+`tests/test_generation_installation.py` in the service repository checks the same
 agreement from the other side. That is a different boundary: it reads the
 manifests in the checkout, not the wheel this distribution builds.
 """

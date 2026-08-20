@@ -321,13 +321,13 @@ before importing immutable versions into the artifact store:
 ```sh
 OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
 
-"$OMNI_SERVICE/omnitensor-install-qwen-artifacts" \
+"$OMNI_SERVICE/omnitensor-install-generation-artifacts" \
   --artifact-root "$OMNI_ARTIFACTS" \
   --qwen-model "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" \
   --bge-param "$BGE_PARAM" \
   --bge-bin "$BGE_BIN" \
   --bge-tokenizer "$BGE_TOKENIZER" \
-  --accept-qwen-license Apache-2.0 \
+  --accept-model-license Apache-2.0 \
   --accept-bge-license MIT
 
 "$OMNI_SERVICE/omnitensor-install-hebrew-translation-model" \

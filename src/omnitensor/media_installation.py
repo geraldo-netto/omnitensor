@@ -60,11 +60,11 @@ def install_media_artifacts(
     artifact_root: Path,
     sources: MediaArtifactSources,
     *,
-    accepted_qwen_license: str,
+    accepted_model_license: str,
     accepted_whisper_license: str,
 ) -> dict[str, object]:
     """Verify every source first, then atomically install both model families."""
-    if accepted_qwen_license != "Apache-2.0" or accepted_whisper_license != "MIT":
+    if accepted_model_license != "Apache-2.0" or accepted_whisper_license != "MIT":
         raise MediaInstallationError("license acceptance must explicitly name Apache-2.0 and MIT")
     expected = (
         (sources.vision_model, VISION_REFERENCE.sha256, VISION_MODEL_SIZE_BYTES),
@@ -117,7 +117,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--vision-model", type=Path, required=True)
     parser.add_argument("--vision-projector", type=Path, required=True)
     parser.add_argument("--speech-model", type=Path, required=True)
-    parser.add_argument("--accept-qwen-license", required=True)
+    parser.add_argument("--accept-model-license", required=True)
     parser.add_argument("--accept-whisper-license", required=True)
     return parser
 
@@ -131,7 +131,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 arguments.vision_projector,
                 arguments.speech_model,
             ),
-            accepted_qwen_license=arguments.accept_qwen_license,
+            accepted_model_license=arguments.accept_model_license,
             accepted_whisper_license=arguments.accept_whisper_license,
         )
 

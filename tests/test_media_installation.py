@@ -61,7 +61,7 @@ def test_installer_verifies_and_installs_pinned_vision_and_speech(tmp_path, monk
     receipt = install_media_artifacts(
         tmp_path / "artifacts",
         sources,
-        accepted_qwen_license="Apache-2.0",
+        accepted_model_license="Apache-2.0",
         accepted_whisper_license="MIT",
     )
 
@@ -82,7 +82,7 @@ def test_installer_requires_exact_license_acceptance(tmp_path, qwen, whisper):
         install_media_artifacts(
             tmp_path / "artifacts",
             sources,
-            accepted_qwen_license=qwen,
+            accepted_model_license=qwen,
             accepted_whisper_license=whisper,
         )
 
@@ -100,7 +100,7 @@ def test_all_sources_verify_before_store_creation(tmp_path, monkeypatch):
         install_media_artifacts(
             tmp_path / "artifacts",
             sources,
-            accepted_qwen_license="Apache-2.0",
+            accepted_model_license="Apache-2.0",
             accepted_whisper_license="MIT",
         )
 
@@ -230,7 +230,7 @@ def test_parser_exposes_exact_paths_and_licenses():
         "vision_model": (("--vision-model",), Path, True),
         "vision_projector": (("--vision-projector",), Path, True),
         "speech_model": (("--speech-model",), Path, True),
-        "accept_qwen_license": (("--accept-qwen-license",), None, True),
+        "accept_model_license": (("--accept-model-license",), None, True),
         "accept_whisper_license": (("--accept-whisper-license",), None, True),
     }
 
@@ -254,7 +254,7 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
             str(values[1]),
             "--speech-model",
             str(values[2]),
-            "--accept-qwen-license",
+            "--accept-model-license",
             "Apache-2.0",
             "--accept-whisper-license",
             "MIT",
@@ -262,7 +262,7 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
     )
     assert observed["sources"] == MediaArtifactSources(*values)
     assert observed["licenses"] == {
-        "accepted_qwen_license": "Apache-2.0",
+        "accepted_model_license": "Apache-2.0",
         "accepted_whisper_license": "MIT",
     }
     assert json.loads(capsys.readouterr().out) == {"version": 1, "artifacts": []}
@@ -276,7 +276,7 @@ def test_cli_surfaces_stable_refusal(tmp_path, monkeypatch):
     argv = ["--artifact-root", str(tmp_path)]
     for option in ("--vision-model", "--vision-projector", "--speech-model"):
         argv.extend((option, str(tmp_path / option[2:])))
-    argv.extend(("--accept-qwen-license", "Apache-2.0"))
+    argv.extend(("--accept-model-license", "Apache-2.0"))
     argv.extend(("--accept-whisper-license", "MIT"))
     with pytest.raises(SystemExit, match="refused"):
         installation.main(argv)
