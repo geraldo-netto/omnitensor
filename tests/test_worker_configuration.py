@@ -151,3 +151,67 @@ def test_the_configuration_never_reaches_the_command_line(tmp_path):
     state_path = state_root / "external-example"
     assert read_worker_configuration(state_path) == {"guidance": "personal"}
     assert stat.S_IMODE(os.stat(state_path).st_mode) == 0o700
+
+
+def test_the_runtime_reads_the_store_it_was_given_rather_than_asking_its_host(tmp_path):
+    """OMNI-0552: the host callback could only ask this object for the contract.
+
+    A workload's spec comes from a manifest this runtime owns, so a host asked
+    for the values had to call back into it for the contract first — a cycle
+    that had to be broken before either object could move to the composition
+    root.
+    """
+    from omnitensor.plugins import PluginSettingsStore, manifest_configuration_spec
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    manifest = {
+        "plugin": {
+            "schemas": {
+                "configuration": {
+                    "type": "object",
+                    "properties": {"guidance": {"type": "string", "default": ""}},
+                },
+                "input": {},
+                "output": {},
+            }
+        }
+    }
+    store = PluginSettingsStore(tmp_path / "settings")
+    store.update(
+        manifest_configuration_spec("external-example", manifest),
+        expected_revision=0,
+        configuration={"guidance": "cite sources"},
+    )
+    runtime = InstalledPluginRuntime(tmp_path / "bundled", settings_store=store)
+    runtime.configuration_spec = lambda plugin_id: manifest_configuration_spec(plugin_id, manifest)
+
+    assert runtime.stored_configuration("external-example") == {"guidance": "cite sources"}
+
+
+def test_a_runtime_with_no_store_starts_its_workers_untuned(tmp_path):
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    runtime = InstalledPluginRuntime(tmp_path / "bundled")
+
+    assert runtime.stored_configuration("external-example") is None
+
+
+def test_a_store_that_refuses_starts_the_worker_on_the_manifests_defaults(tmp_path, caplog):
+    """A workload lost to an unreadable tunable would be the worse answer."""
+    import logging
+
+    from omnitensor.plugins import manifest_configuration_spec
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    manifest = {"plugin": {"schemas": {"configuration": {}, "input": {}, "output": {}}}}
+
+    class Refusing:
+        def load(self, _spec):
+            raise OSError("unreadable")
+
+    runtime = InstalledPluginRuntime(tmp_path / "bundled", settings_store=Refusing())
+    runtime.configuration_spec = lambda plugin_id: manifest_configuration_spec(plugin_id, manifest)
+
+    with caplog.at_level(logging.WARNING, logger="omnitensor.plugins.loading"):
+        assert runtime.stored_configuration("external-example") is None
+    assert "starts on the" in caplog.text

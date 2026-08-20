@@ -91,7 +91,7 @@ from .plugins.orchestration import (
     RunnerSet,
     with_recovery,
 )
-from .plugins.settings import PluginSettingsError, PluginSettingsStore
+from .plugins.settings import PluginSettingsStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
 from .ports import (
@@ -237,6 +237,13 @@ class OmniTensorService:
             ArtifactInstaller(artifact_root) if artifact_root else None,
             workloads_of=lambda: self._workloads,
         )
+        # Beside the policy store rather than in it: a workload's tuning is
+        # validated against that workload's own schema, and a policy document
+        # holding documents no schema here describes could not be validated.
+        # Built before the plugin runtime, which reads it.
+        self._plugin_settings = plugin_settings or PluginSettingsStore(
+            snapshot_path.parent / "plugin-settings"
+        )
         self._plugin_runtime = plugin_runtime or InstalledPluginRuntime(
             bundled_workloads_path(),
             grant_source=self._grants,
@@ -246,7 +253,7 @@ class OmniTensorService:
             accelerator_devices=self._plugin_accelerator_devices,
             profile_accelerator_devices=self._plugin_accelerator_devices,
             profile_model_choice=self._plugin_model_choice,
-            profile_configuration=self._plugin_configuration_values,
+            settings_store=self._plugin_settings,
             progress_sink=lambda progress: self._note_job_progress(
                 progress.job_id,
                 progress.stage,
@@ -267,9 +274,6 @@ class OmniTensorService:
                 workload_id: workload.default_policy()
                 for workload_id, workload in self._workloads.items()
             },
-        )
-        self._plugin_settings = plugin_settings or PluginSettingsStore(
-            snapshot_path.parent / "plugin-settings"
         )
         self.control = ControlService(
             storage,
@@ -506,28 +510,6 @@ class OmniTensorService:
         """
         spec_of = getattr(self._plugin_runtime, "configuration_spec", None)
         return spec_of(profile_id) if callable(spec_of) else None
-
-    def _plugin_configuration_values(self, profile_id: str) -> dict | None:
-        """The configuration this workload was tuned to, or nothing.
-
-        A store that refuses — a plugin upgraded across a configuration
-        contract with no migration, an unreadable document — starts the worker
-        on its defaults rather than not at all: a workload lost to a tunable
-        it does not need would be the worse answer, and the log names it.
-        """
-        spec = self._profile_configuration(profile_id)
-        if spec is None:
-            return None
-        try:
-            return self._plugin_settings.load(spec).configuration
-        except (PluginSettingsError, OSError):
-            LOGGER.warning(
-                "Could not read the stored configuration for %s; its worker starts on the"
-                " defaults its manifest declares",
-                profile_id,
-                exc_info=True,
-            )
-            return None
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
         return tuple(device.id for device in self._devices if device.backend == "gpu")

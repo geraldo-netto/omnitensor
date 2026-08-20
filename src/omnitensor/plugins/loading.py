@@ -27,9 +27,13 @@ from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
 from .manifest_compatibility import resolve_plugin_compatibility
 from .offloop import run_off_loop as _run_off_loop
-from .protocol import PluginProgress, PluginRequest, PluginResultStatus
+from .protocol import JsonObject, PluginProgress, PluginRequest, PluginResultStatus
 from .sandbox import SELECTED_FILES_PERMISSION
-from .settings import PluginConfigurationSpec, PluginSettingsError
+from .settings import (
+    PluginConfigurationSpec,
+    PluginSettingsError,
+    PluginSettingsStore,
+)
 from .supervisor import PluginWorkerSupervisor
 from .supervisor_diagnostics import WorkerState, WorkerStatus
 from .supervisor_process import AsyncioSubprocessLauncher
@@ -165,7 +169,7 @@ class InstalledPluginRuntime:
         accelerator_devices: Callable[[], Mapping[str, Path]] | None = None,
         profile_accelerator_devices: Callable[[str], Mapping[str, Path]] | None = None,
         profile_model_choice: Callable[[str], str | None] | None = None,
-        profile_configuration: Callable[[str], Mapping[str, object] | None] | None = None,
+        settings_store: PluginSettingsStore | None = None,
         worker_idle_timeout_s: float | None = WORKER_IDLE_TIMEOUT_S,
         sleep: Callable[[float], object] | None = None,
     ) -> None:
@@ -186,9 +190,11 @@ class InstalledPluginRuntime:
         # Which model each workload was told to run, asked of the host rather
         # than stored, so a worker started after a change gets the change.
         self._profile_model_choice = profile_model_choice
-        # What each workload was tuned to, asked of the host for the same
-        # reason: a worker started after a change must start with the change.
-        self._profile_configuration = profile_configuration
+        # Where a workload's tuning is held. Read here rather than handed in
+        # by the host: the spec it is read against comes from this runtime's
+        # own manifests, so a host callback for the values could only ask this
+        # object for the contract and then answer it back.
+        self._settings_store = settings_store
         self._granted: dict[str, frozenset[str]] = {}
         self._revoked_workers: set[str] = set()
         self._snapshot = InstalledPluginSnapshot(PluginCatalog((), ()), ())
@@ -246,6 +252,31 @@ class InstalledPluginRuntime:
             if error.code == "configuration-undeclared":
                 return None
             raise
+
+    def stored_configuration(self, plugin_id: str) -> JsonObject | None:
+        """What this workload was tuned to, or nothing.
+
+        A store that refuses — a plugin upgraded across a configuration
+        contract with no migration, an unreadable document — starts the worker
+        on the defaults its manifest declares rather than not at all: a
+        workload lost to a tunable it does not need would be the worse answer,
+        and the log names it.
+        """
+        if self._settings_store is None:
+            return None
+        spec = self.configuration_spec(plugin_id)
+        if spec is None:
+            return None
+        try:
+            return self._settings_store.load(spec).configuration
+        except (PluginSettingsError, OSError):
+            LOGGER.warning(
+                "Could not read the stored configuration for %s; its worker starts on the"
+                " defaults its manifest declares",
+                plugin_id,
+                exc_info=True,
+            )
+            return None
 
     def granted_permissions(self, plugin_id: str) -> frozenset[str]:
         """What this plugin was actually granted when its worker started."""
@@ -580,9 +611,9 @@ class InstalledPluginRuntime:
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }
-        if self._profile_configuration is not None:
+        if self._settings_store is not None:
             spec_options["configurations"] = {
-                plugin.plugin_id: self._profile_configuration(plugin.plugin_id) or {}
+                plugin.plugin_id: self.stored_configuration(plugin.plugin_id) or {}
                 for plugin in catalog.plugins
                 if plugin.source is PluginSource.EXTERNAL
             }
