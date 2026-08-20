@@ -24,6 +24,11 @@ jobs:
           uv sync --locked --extra dev
       - name: Lint
         run: uv run --no-sync ruff check
+      # Formatting was enforced by nothing: `ruff format --check` appeared in
+      # no workflow, no script and no document, so a reformatted file reached
+      # `develop` unremarked and the next diff carried the noise.
+      - name: Format
+        run: uv run --no-sync ruff format --check
       - name: Test with coverage
         run: uv run --no-sync pytest --cov=omnitensor --cov-report=term --cov-fail-under=80
       # The root run collects `tests/` and never descends into `providers/`, so

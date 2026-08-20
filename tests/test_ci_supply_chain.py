@@ -75,3 +75,54 @@ def test_provider_suite_script_owns_the_install_loop() -> None:
     # developer reproduces locally.
     assert "provider-requirements.py" not in workflow
     assert "uv pip install --no-deps -e" not in workflow
+
+
+def test_formatting_is_gated_somewhere():
+    """`ruff check` and `ruff format` refuse different mistakes.
+
+    Gate audit, 2026-08-20: `ruff format --check` appeared in no workflow, no
+    script and no document, so formatting was enforced by nothing and a
+    reformatted file reached `develop` unremarked.
+    """
+
+    quality = (ROOT / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+    assert "ruff format --check" in quality
+    assert "ruff check" in quality
+
+
+def test_external_plugin_smoke_is_a_script_ci_calls_rather_than_steps_only_ci_has() -> None:
+    """The gate that proves an installed plugin needs no checkout must be runnable."""
+
+    script_path = ROOT / "scripts" / "run-external-plugin-smoke.sh"
+    assert script_path.stat().st_mode & 0o111, "the script must be executable"
+    script = script_path.read_text(encoding="utf-8")
+    assert "-m build --wheel" in script
+    assert "omnitensor-plugin-smoke" in script
+    assert "-m venv" in script
+
+    workflow = (ROOT / ".github" / "workflows" / "external-plugin.yml").read_text(encoding="utf-8")
+    assert "./scripts/run-external-plugin-smoke.sh" in workflow
+    # One place, so CI cannot drift away from what a developer reproduces.
+    assert "python -m build" not in workflow
+    assert "omnitensor-plugin-smoke" not in workflow
+
+
+def test_every_workflow_step_runs_something_a_developer_can_run() -> None:
+    """Each CI stage names a command that exists in this checkout.
+
+    The audit's third question: a stage whose name claims more than it runs,
+    or whose steps exist nowhere else, is a gate nobody can reproduce.
+    """
+
+    local = {
+        "./scripts/run-provider-suites.sh": ROOT / "scripts" / "run-provider-suites.sh",
+        "./scripts/run-external-plugin-smoke.sh": ROOT / "scripts" / "run-external-plugin-smoke.sh",
+        "omnitensor.mutation_campaign": ROOT / "src" / "omnitensor" / "mutation_campaign.py",
+    }
+    referenced = set()
+    for workflow in WORKFLOWS:
+        source = workflow.read_text(encoding="utf-8")
+        referenced.update(name for name in local if name in source)
+    assert referenced == set(local)
+    for name, path in local.items():
+        assert path.exists(), name
