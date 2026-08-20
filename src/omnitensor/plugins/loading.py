@@ -111,6 +111,17 @@ class ReloadablePermissionGrantSource(Protocol):
     def reload(self) -> object: ...
 
 
+# How long a job waits for a worker that is starting or restarting before it
+# is told the worker is not there. Long enough for the largest installed model
+# to load onto the GPU, which is what the wait is actually for; a worker that
+# has failed is refused at once rather than at the end of this.
+WORKER_READY_WAIT_SECONDS = 120.0
+# States — and the absence of a state — that a moment's patience resolves.
+# Anything else is a verdict, and waiting on one only delays the news.
+_COMING_UP = frozenset({WorkerState.STARTING, WorkerState.RESTARTING})
+_READY_POLL_SECONDS = 0.05
+
+
 @runtime_checkable
 class OnDemandWorkerSupervisor(Protocol):
     """Optional supervisor capability: launch and stop one worker at a time.
@@ -299,7 +310,12 @@ class InstalledPluginRuntime:
         status = next(
             (item for item in self._supervisor.statuses() if item.plugin_id == plugin_id), None
         )
-        if status is None or not self._servable(status):
+        # A status the supervisor has not written yet is a moment rather than
+        # a fault — seconds after a restart the catalog already lists a plugin
+        # whose worker has not been registered — so it is admitted here,
+        # waited for in `_acquire_worker`, and failed there if it never
+        # arrives.
+        if status is not None and not self._servable(status):
             raise JobDispatchError("worker-unavailable", "Plugin worker is not ready")
         capabilities = set(plugin.manifest["plugin"]["protocol"].get("capabilities", ()))
         if "execute" not in capabilities:
@@ -324,8 +340,18 @@ class InstalledPluginRuntime:
         A worker that is deliberately not running is not an unavailable one.
         Refusing here would turn the first request after an idle exit into a
         failure, when what it should do is pay the start-up cost.
+
+        The same is true of one that is on its way up. This gate is
+        synchronous — it answers the submitting call — so it cannot wait, but
+        it can accept: `_acquire_worker` does the waiting a moment later, and
+        a worker that never arrives fails the job there with what the
+        supervisor says about it. Refusing here instead meant that for the
+        first half-minute after a restart every submission came back
+        `worker-unavailable`, which reads like a fault and is a queue.
         """
         if status.state is WorkerState.READY:
+            return True
+        if status.state in {WorkerState.STARTING, WorkerState.RESTARTING}:
             return True
         return status.state is WorkerState.IDLE and self._on_demand
 
@@ -373,11 +399,19 @@ class InstalledPluginRuntime:
     async def _acquire_worker(self, plugin_id: str) -> None:
         """Make sure a worker is serving this plugin, starting one if needed."""
         if not self._on_demand:
+            # Eagerly started workers still take time to come up — a
+            # multi-gigabyte model has to reach the GPU first — and for that
+            # window every job was refused `worker-unavailable`, which reads
+            # like a fault and is a queue. Waited for here rather than in the
+            # supervisor: how long a caller will wait for a worker is this
+            # layer's decision, and the supervisor's job is to say what the
+            # worker is doing.
+            await self._await_worker(plugin_id)
             return
         self._cancel_idle_exit(plugin_id)
         self._inflight[plugin_id] = self._inflight.get(plugin_id, 0) + 1
         try:
-            status = await self._supervisor.ensure_ready(plugin_id)
+            status = await self._ready_or_waited(plugin_id)
         except BaseException:
             self._release_worker(plugin_id)
             raise
@@ -385,6 +419,57 @@ class InstalledPluginRuntime:
             detail = getattr(status, "detail", "") or "plugin worker could not be started"
             self._release_worker(plugin_id)
             raise PluginWorkerError("worker-unavailable", detail)
+
+    async def _ready_or_waited(self, plugin_id: str):
+        """Ask for the worker, and keep asking while the answer is "not yet".
+
+        `ensure_ready` answers with what the supervisor knows *now*, and right
+        after a restart that is `None` — the supervisor has not adopted the
+        specs yet, so there is nothing to be ready. That is a moment rather
+        than a refusal, and it used to end the job with "plugin worker could
+        not be started" three seconds after a restart.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WORKER_READY_WAIT_SECONDS
+        while True:
+            status = await self._supervisor.ensure_ready(plugin_id)
+            state = getattr(status, "state", None)
+            if state is WorkerState.READY:
+                return status
+            if state is not None and state not in _COMING_UP:
+                return status
+            if loop.time() >= deadline:
+                return status
+            await asyncio.sleep(_READY_POLL_SECONDS)
+
+    def _status_of(self, plugin_id: str):
+        """What the supervisor says about this worker now, if it will say."""
+        statuses = getattr(self._supervisor, "statuses", None)
+        if statuses is None:
+            return None
+        return next((status for status in statuses() if status.plugin_id == plugin_id), None)
+
+    async def _await_worker(self, plugin_id: str) -> None:
+        """Give a worker that is on its way up the time to arrive.
+
+        Waited for here rather than in the supervisor because this is the
+        layer that knows the plugin exists: seconds after a restart the
+        catalog already lists it and the supervisor has no status for it at
+        all, which is the same "not yet" as `starting` and was reported as
+        the same fault. A worker that reaches a state waiting cannot mend —
+        failed, exhausted, exited — ends the wait at once.
+        """
+        if getattr(self._supervisor, "statuses", None) is None:
+            return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WORKER_READY_WAIT_SECONDS
+        while True:
+            status = self._status_of(plugin_id)
+            if status is not None and status.state not in _COMING_UP:
+                return
+            if loop.time() >= deadline:
+                return
+            await asyncio.sleep(_READY_POLL_SECONDS)
 
     def _release_worker(self, plugin_id: str) -> None:
         """Give the worker back, and arm its idle exit once nothing is left."""

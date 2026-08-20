@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0585 | open | medium | s | **A job submitted while a worker is still starting is refused instead of waited for.** Observed live on 2026-08-20, four seconds after `systemctl --user restart`: `xpuwlm transcribe` came straight back with `worker-unavailable: Plugin worker is not ready`. `PluginWorkerSupervisor.execute` requires the slot to be `READY` and refuses otherwise, while `ensure_ready` exists precisely so that the first request after an idle exit pays the start-up cost rather than being refused — and a worker that is `starting` or `restarting` is the same case. Since OMNI-0580 the service answers within three seconds of a restart, so this window is now the *only* thing between a restart and usable work, and it reports as a fault rather than as something to wait through. Wait for the worker the request is for, bounded by the call's own deadline, and keep the refusal for a worker that failed. |
 
 ## Blocked
 

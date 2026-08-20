@@ -1695,6 +1695,12 @@ def test_installed_runtime_admission_errors_are_stable_contracts(tmp_path):
 
     plugin = _resolved(tmp_path=tmp_path)
     runtime._snapshot = InstalledPluginSnapshot(PluginCatalog((plugin,), ()), ())
+    # A worker the supervisor has failed on is refused here; one it has not
+    # written a status for yet is not — that is the window right after a
+    # restart, and it is waited through rather than turned away (OMNI-0585).
+    supervisor.statuses_value = (
+        WorkerStatus("external-example", WorkerState.FAILED, None, None, "worker exited"),
+    )
     refused("external-example", {}, "worker-unavailable", "Plugin worker is not ready")
 
     supervisor.statuses_value = (
@@ -3361,3 +3367,74 @@ class TestStartingWorkersDoesNotStopTheServiceAnswering:
 
         # The loop went on running while the blocking build was in flight.
         assert observed == [5], "the loop was blocked while the worker specs were built"
+
+
+class TestAJobWaitsForTheWorkerItNeeds:
+    """OMNI-0585, from the layer that decides how long a caller waits."""
+
+    class Supervisor:
+        """Reports what a worker is doing; it is asked, never told to wait."""
+
+        def __init__(self, states):
+            self.states = list(states)
+            self.asked = 0
+
+        def statuses(self):
+            self.asked += 1
+            state = self.states[0]
+            if len(self.states) > 1:
+                # The next look sees it arrive, which is what waiting is for.
+                self.states.pop(0)
+            if state is None:
+                return ()
+            return (SimpleNamespace(plugin_id="media-transcription", state=state, detail=""),)
+
+    @pytest.mark.parametrize(
+        "state",
+        [WorkerState.STARTING, WorkerState.RESTARTING, WorkerState.READY],
+    )
+    def test_a_submission_is_admitted_while_its_worker_comes_up(self, tmp_path, state):
+        """Admission is synchronous, so it accepts rather than waits.
+
+        Refusing here is what actually produced `worker-unavailable` seconds
+        after a restart: the wait added to `_acquire_worker` never ran,
+        because the job had already been turned away at submission.
+        """
+        from omnitensor.plugins import loading  # noqa: PLC0415
+
+        runtime = loading.InstalledPluginRuntime(
+            bundled_root=tmp_path,
+            entry_points_provider=lambda **_selection: (),
+            supervisor=self.Supervisor([state]),
+        )
+
+        assert runtime._servable(SimpleNamespace(state=state)) is True
+
+    @pytest.mark.parametrize("state", [WorkerState.FAILED, WorkerState.EXHAUSTED])
+    def test_a_submission_for_a_worker_that_failed_is_still_refused(self, tmp_path, state):
+        """Waiting cannot mend those, so the caller is told now."""
+        from omnitensor.plugins import loading  # noqa: PLC0415
+
+        runtime = loading.InstalledPluginRuntime(
+            bundled_root=tmp_path,
+            entry_points_provider=lambda **_selection: (),
+            supervisor=self.Supervisor([state]),
+        )
+
+        assert runtime._servable(SimpleNamespace(state=state)) is False
+
+    @pytest.mark.asyncio
+    async def test_a_supervisor_that_cannot_say_is_not_waited_on(self, tmp_path):
+        """An older or simpler supervisor keeps the behaviour it had."""
+        from omnitensor.plugins import loading  # noqa: PLC0415
+
+        class Silent:
+            pass
+
+        runtime = loading.InstalledPluginRuntime(
+            bundled_root=tmp_path,
+            entry_points_provider=lambda **_selection: (),
+            supervisor=Silent(),
+        )
+
+        await runtime._acquire_worker("media-transcription")
