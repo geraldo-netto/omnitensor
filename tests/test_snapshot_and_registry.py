@@ -649,3 +649,41 @@ def test_a_manifest_without_a_model_digest_still_loads(tmp_path):
     """The field is optional so manifests written before it keep working."""
     write_workload(tmp_path, sample_manifest())
     assert load_workloads(tmp_path)["sample-workload"].model is None
+
+
+def test_an_unchanged_snapshot_is_not_revalidated_against_the_schema(monkeypatch, fake_nodes):
+    """OMNI-0386: an idle runtime revalidated the same 7.5 KB document forever."""
+    from omnitensor import snapshot as snapshot_module
+
+    calls = []
+    real = snapshot_module.validate_document
+
+    def counting(name, document):
+        calls.append(name)
+        return real(name, document)
+
+    monkeypatch.setattr(snapshot_module, "validate_document", counting)
+    monkeypatch.setattr(snapshot_module, "_LAST_VALIDATED", None)
+
+    add_pcie_tpu(fake_nodes)
+    devices = detect_devices(fake_nodes)
+
+    first = snapshot_module.build_snapshot(
+        devices=devices, profiles={}, metrics={}, generated_at_ms=1
+    )
+    assert len(calls) == 1
+
+    later = snapshot_module.build_snapshot(
+        devices=devices, profiles={}, metrics={}, generated_at_ms=2
+    )
+    assert len(calls) == 1, "only generatedAt moved"
+    assert later["generatedAt"] != first["generatedAt"]
+
+    # Anything else in the document and it is checked again.
+    snapshot_module.build_snapshot(
+        devices=devices,
+        profiles={},
+        metrics={"queueDepth": 1, "runningProfiles": 0},
+        generated_at_ms=3,
+    )
+    assert len(calls) == 2

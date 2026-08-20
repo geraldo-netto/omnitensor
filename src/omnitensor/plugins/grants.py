@@ -101,6 +101,15 @@ class GrantLedger:
         with self._state_lock:
             return self._revision
 
+    def changed_on_disk(self) -> bool:
+        """Whether the file differs from what is held in memory.
+
+        One ``stat``, on the caller's own thread: the publisher used to hand
+        every tick to a worker thread to discover that nothing had changed.
+        """
+        with self._state_lock:
+            return self._path_stamp() != self._source_stamp
+
     def reload(
         self,
         *,

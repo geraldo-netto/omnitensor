@@ -809,8 +809,13 @@ class OmniTensorService:
         now = asyncio.get_running_loop().time()
         if now < self._next_grant_refresh:
             return
-        await run_off_loop(self._grants.reload)
         self._next_grant_refresh = now + GRANT_REFRESH_INTERVAL_S
+        # A stat here, a thread hop only when the ledger actually moved. The
+        # refresh interval is shorter than any publish tick, so this ran on
+        # every one of them to re-read a file nobody had written.
+        if not self._grants.changed_on_disk():
+            return
+        await run_off_loop(self._grants.reload)
 
     async def _rediscover(self) -> None:
         """Rediscover when the kernel says so, and only poll when it cannot.

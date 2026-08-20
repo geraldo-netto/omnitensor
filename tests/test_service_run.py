@@ -577,6 +577,9 @@ def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
             self.started.set()
             assert self.release.wait(timeout=0.5)
 
+        def changed_on_disk(self):
+            return True
+
         def is_granted(self, _profile_id, _permission, _declared):
             return False
 
@@ -607,8 +610,12 @@ def test_publisher_refreshes_grants_once_off_the_event_loop(tmp_path):
 
 def test_grant_refresh_interval_includes_the_exact_boundary(tmp_path, monkeypatch):
     class Grants:
-        def __init__(self):
+        def __init__(self, changed=True):
             self.reloads = 0
+            self.changed = changed
+
+        def changed_on_disk(self):
+            return self.changed
 
         def reload(self):
             self.reloads += 1
@@ -643,6 +650,15 @@ def test_grant_refresh_interval_includes_the_exact_boundary(tmp_path, monkeypatc
     loop.current = service._next_grant_refresh
     asyncio.run(service._refresh_grants())
     assert grants.reloads == 2
+
+    # OMNI-0386: an unchanged ledger costs one stat, not a thread hop.
+    unchanged = Grants(changed=False)
+    service._grants = unchanged
+    service._next_grant_refresh = loop.current
+    observed.clear()
+    asyncio.run(service._refresh_grants())
+    assert unchanged.reloads == 0
+    assert observed == []
     assert service._next_grant_refresh == 10.0 + 2 * GRANT_REFRESH_INTERVAL_S
 
 

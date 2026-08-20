@@ -110,10 +110,26 @@ def build_snapshot(
         # What a client changes, published from the store that enforces it, so
         # a client renders policy rather than remembering its own copy of it.
         snapshot["policy"] = policy
+    _validate_snapshot(snapshot)
+    return snapshot
+
+
+# The last document that passed, apart from when it was built. An idle runtime
+# rebuilds a byte-identical snapshot every tick and revalidating it cost 1.9 ms
+# of one core per tick to reach the answer it reached the tick before. Content,
+# never identity: the memo is a pure function of the document.
+_LAST_VALIDATED: dict | None = None
+
+
+def _validate_snapshot(snapshot: dict) -> None:
+    global _LAST_VALIDATED  # noqa: PLW0603 - a one-entry memo of a pure check
+    content = {key: value for key, value in snapshot.items() if key != "generatedAt"}
+    if content == _LAST_VALIDATED:
+        return
     violations = validate_document("runtime-snapshot.schema.json", snapshot)
     if violations:
         raise ValueError(f"snapshot violates contract: {'; '.join(violations)}")
-    return snapshot
+    _LAST_VALIDATED = content
 
 
 def write_snapshot(path: Path, snapshot: dict) -> None:
