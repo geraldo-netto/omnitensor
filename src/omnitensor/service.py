@@ -75,6 +75,9 @@ from .jobs import (
     PredicateJobAuthorizer,
 )
 from .plugin_admission import DEFAULT_MAX_CONCURRENT, PluginAdmissionQueue
+from .plugin_lifecycle import DEVICE_RELOAD_RETRY_ATTEMPTS as _DEVICE_RELOAD_RETRY_ATTEMPTS
+from .plugin_lifecycle import DEVICE_RELOAD_RETRY_DELAY_S as _DEVICE_RELOAD_RETRY_DELAY_S
+from .plugin_lifecycle import PluginLifecycle
 from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.artifacts import ArtifactReference, ArtifactResolution
 from .plugins.cancellation import JobCancellationRegistry
@@ -166,12 +169,8 @@ GRANT_REFRESH_INTERVAL_S = 0.25
 # enough that installing an artifact shows up while someone is still looking
 # for it.
 PLUGIN_READINESS_INTERVAL_S = 30.0
-# A device reload that fails is usually transient (a worker still shutting
-# down, a lease not yet released), so it is retried a few times with growing
-# delay.  The attempts are bounded: an idle runtime must not keep waking to
-# retry forever, and the next policy change schedules a reload anyway.
-DEVICE_RELOAD_RETRY_ATTEMPTS = 3
-DEVICE_RELOAD_RETRY_DELAY_S = 0.5
+DEVICE_RELOAD_RETRY_ATTEMPTS = _DEVICE_RELOAD_RETRY_ATTEMPTS
+DEVICE_RELOAD_RETRY_DELAY_S = _DEVICE_RELOAD_RETRY_DELAY_S
 
 
 class OmniTensorService:
@@ -271,15 +270,19 @@ class OmniTensorService:
         )
         self._last_device_choices = dict(self.control.state.device_choices)
         self._last_model_choices = dict(self.control.state.model_choices)
-        self._pending_device_profiles: set[str] = set()
-        # Profiles whose accelerator reload failed outright.  They stay refused
-        # -- their worker may still hold the previous device -- but unlike the
-        # pending set they are published as unavailable, so a person sees why
-        # nothing is being accepted instead of a profile that reports 'Ready'.
-        self._unavailable_device_profiles: set[str] = set()
-        self._plugin_reload_requested = False
-        self._plugin_reload_task: asyncio.Task | None = None
-        self._plugin_lifecycle_lock = asyncio.Lock()
+        # One owner for the rule that a worker's device mount is immutable:
+        # the lock, the reloads in flight, and the profiles a failed reload
+        # left unusable were three fields read from six methods spread across
+        # this class.
+        self._plugins = PluginLifecycle(
+            lambda: self._plugin_runtime,
+            plugin_ids=self._plugin_ids,
+            reloadable=lambda runtime: isinstance(runtime, AcceleratorReloadableRuntime),
+            on_reloaded=self._plugin_runtime_reloaded,
+            logger=LOGGER,
+            retry_attempts=DEVICE_RELOAD_RETRY_ATTEMPTS,
+            retry_delay_s=DEVICE_RELOAD_RETRY_DELAY_S,
+        )
         # Plugin jobs run in worker processes rather than scheduler lanes, so
         # this pool is where a plugin profile's weight decides anything at all.
         # Its width answers to the host: the per-worker ceilings that used to
@@ -369,9 +372,9 @@ class OmniTensorService:
         return routing.policy_weight(self.control.state, workload_id)
 
     def _admits(self, workload_id: str) -> bool:
-        if workload_id in self._pending_device_profiles:
+        if workload_id in self._plugins.pending:
             return False
-        if workload_id in self._unavailable_device_profiles:
+        if workload_id in self._plugins.unavailable:
             return False
         return routing.policy_admits(self.control.state, workload_id)
 
@@ -436,25 +439,7 @@ class OmniTensorService:
         )
 
     def _schedule_plugin_reload(self, profile_ids: set[str] | frozenset[str] | None = None) -> None:
-        if not isinstance(self._plugin_runtime, AcceleratorReloadableRuntime):
-            return
-        affected = self._plugin_ids() if profile_ids is None else frozenset(profile_ids)
-        if not affected:
-            return
-        # A worker's device mount is immutable.  Once policy points elsewhere,
-        # new jobs must wait until the replacement worker owns that exact lease;
-        # a failed replacement remains unavailable rather than using the old GPU.
-        self._pending_device_profiles.update(affected)
-        self._plugin_reload_requested = True
-        if self._plugin_reload_task is None or self._plugin_reload_task.done():
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                return
-            self._plugin_reload_task = loop.create_task(
-                self._reload_plugin_accelerators(),
-                name="omnitensor-plugin-accelerator-reload",
-            )
+        self._plugins.schedule_reload(profile_ids)
 
     def _profile_exists(self, profile_id: str) -> bool:
         return profile_id in self._workloads or profile_id in self._plugin_ids()
@@ -690,7 +675,7 @@ class OmniTensorService:
                 self._plugin_queue.profile_stats(),
                 policy,
                 reasons=reasons,
-                unavailable=frozenset(self._unavailable_device_profiles),
+                unavailable=frozenset(self._plugins.unavailable),
             )
         )
         return statuses
@@ -867,9 +852,8 @@ class OmniTensorService:
             self._stopping.set()
             await self._scheduler.stop()
             await self.jobs.stop()
-            reload_task = self._plugin_reload_task
+            reload_task = self._plugins.cancel_reload()
             if reload_task is not None:
-                reload_task.cancel()
                 await asyncio.gather(reload_task, return_exceptions=True)
             await self._stop_plugin_runtime()
             await self._transport.stop()
@@ -885,8 +869,7 @@ class OmniTensorService:
             self._stopping.clear()
 
     async def _start_plugin_runtime(self) -> None:
-        async with self._plugin_lifecycle_lock:
-            plugin_snapshot = await self._plugin_runtime.start()
+        plugin_snapshot = await self._plugins.start()
         observation.register_plugin_telemetry(
             plugin_snapshot,
             self.plugin_telemetry,
@@ -962,47 +945,12 @@ class OmniTensorService:
         return self._resolve_artifact(artifact_id)
 
     async def _stop_plugin_runtime(self) -> None:
-        async with self._plugin_lifecycle_lock:
-            await self._plugin_runtime.stop()
+        await self._plugins.stop()
 
-    async def _reload_plugin_accelerators(self) -> None:
-        try:
-            while self._plugin_reload_requested:
-                affected = frozenset(self._pending_device_profiles)
-                self._plugin_reload_requested = False
-                plugin_snapshot = await self._reload_accelerator_devices(affected)
-                if plugin_snapshot is None:
-                    continue
-                self._unavailable_device_profiles.difference_update(affected)
-                observation.register_plugin_telemetry(
-                    plugin_snapshot,
-                    self.plugin_telemetry,
-                )
-                await self._record_plugin_readiness()
-        finally:
-            # Whatever happened, admission must not stay wedged on a set that
-            # only this loop can clear: a profile that is genuinely unusable is
-            # held in _unavailable_device_profiles, where it is published.
-            self._pending_device_profiles.clear()
-
-    async def _reload_accelerator_devices(self, affected: frozenset[str]):
-        """Reload plugin device leases, retrying a transient failure a few times."""
-        delay = DEVICE_RELOAD_RETRY_DELAY_S
-        for attempt in range(DEVICE_RELOAD_RETRY_ATTEMPTS):
-            try:
-                async with self._plugin_lifecycle_lock:
-                    return await self._plugin_runtime.reload_accelerator_devices()
-            except Exception:  # noqa: BLE001 - plugin adapters are external
-                LOGGER.exception(
-                    "Could not reload plugin accelerator leases (attempt %d of %d)",
-                    attempt + 1,
-                    DEVICE_RELOAD_RETRY_ATTEMPTS,
-                )
-                if attempt + 1 < DEVICE_RELOAD_RETRY_ATTEMPTS:
-                    await asyncio.sleep(delay)
-                    delay *= 2
-        self._unavailable_device_profiles.update(affected)
-        return None
+    async def _plugin_runtime_reloaded(self, plugin_snapshot) -> None:
+        """What the service does once a reload has replaced the workers."""
+        observation.register_plugin_telemetry(plugin_snapshot, self.plugin_telemetry)
+        await self._record_plugin_readiness()
 
 
 def main() -> None:  # pragma: no cover - process entry point

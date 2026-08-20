@@ -185,7 +185,7 @@ def test_profile_gpu_choice_routes_executor_worker_lease_and_published_identitie
     assert service._plugin_accelerator_devices("sample-workload")["gpu"] == Path(
         "/dev/dri/renderD129"
     )
-    assert service._pending_device_profiles == set()
+    assert service._plugins.pending == set()
 
 
 def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(fake_nodes, tmp_path):
@@ -226,13 +226,13 @@ def test_external_plugin_choice_blocks_new_jobs_until_exact_lease_is_reloaded(fa
         assert service._admits("external-plugin") is False
         assert service._job_authorized("submit", "external-plugin") is False
         release.set()
-        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+        await asyncio.wait_for(service._plugins.reload_task, timeout=1)
         return reply
 
     acknowledgement = asyncio.run(scenario())
 
     assert acknowledgement["status"] == "applied"
-    assert service._pending_device_profiles == set()
+    assert service._plugins.pending == set()
     assert service._admits("external-plugin") is True
 
 
@@ -274,13 +274,13 @@ def test_failed_accelerator_reload_never_wedges_admission_silently(
                 }
             )
         )
-        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+        await asyncio.wait_for(service._plugins.reload_task, timeout=1)
 
     asyncio.run(scenario())
 
     assert len(attempts) == service_module.DEVICE_RELOAD_RETRY_ATTEMPTS
-    assert service._pending_device_profiles == set()
-    assert service._unavailable_device_profiles == {"external-plugin"}
+    assert service._plugins.pending == set()
+    assert service._plugins.unavailable == {"external-plugin"}
     assert service._admits("external-plugin") is False
     status = service.publish_once()["profiles"]["external-plugin"]
     assert status["status"] == "unavailable"
@@ -300,7 +300,7 @@ def test_recovered_accelerator_reload_clears_the_unavailable_profile(fake_nodes,
             return object()
 
     service._plugin_runtime = Plugins()
-    service._unavailable_device_profiles.add("external-plugin")
+    service._plugins.unavailable.add("external-plugin")
 
     async def scenario():
         await service.control.apply_command_text(
@@ -316,11 +316,11 @@ def test_recovered_accelerator_reload_clears_the_unavailable_profile(fake_nodes,
                 }
             )
         )
-        await asyncio.wait_for(service._plugin_reload_task, timeout=1)
+        await asyncio.wait_for(service._plugins.reload_task, timeout=1)
 
     asyncio.run(scenario())
 
-    assert service._unavailable_device_profiles == set()
+    assert service._plugins.unavailable == set()
     assert service._admits("external-plugin") is True
 
 
