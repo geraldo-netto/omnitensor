@@ -48,20 +48,29 @@ async def test_document_transcriber_preserves_every_field_and_cleans_root(monkey
     root.mkdir()
     calls = []
 
-    monkeypatch.setattr(documents, "_document_page_count", lambda _source: 2)
+    opened = []
+    closed = []
+
+    class Opened(documents._OpenDocument):
+        def __init__(self):
+            super().__init__(2)
+            opened.append("opened")
+
+        def page(self, render_root, page_number):
+            assert render_root == root
+            path = render_root / f"page-{page_number:02d}.png"
+            path.write_bytes(b"frame")
+            return f"printed {page_number}", path
+
+        def close(self):
+            closed.append("closed")
+
+    monkeypatch.setattr(documents, "_open_document", lambda _source: Opened())
     monkeypatch.setattr(
         documents.tempfile,
         "mkdtemp",
         lambda *, prefix: calls.append(("prefix", prefix)) or str(root),
     )
-
-    def render(_source, render_root, page_number):
-        assert render_root == root
-        path = render_root / f"page-{page_number:02d}.png"
-        path.write_bytes(b"frame")
-        return f"printed {page_number}", path
-
-    monkeypatch.setattr(documents, "_render_document_page", render)
 
     class Vision:
         async def transcribe(self, frame, cancellation):
@@ -99,62 +108,73 @@ async def test_document_transcriber_preserves_every_field_and_cleans_root(monkey
         ("page-02.png", None),
     ]
     assert not root.exists()
+    # Opened once for the whole document and closed when it was done, rather
+    # than reparsed per page.
+    assert opened == ["opened"]
+    assert closed == ["closed"]
 
 
 @pytest.mark.parametrize("count", [1, 64, 2_500])
-def test_document_page_count_accepts_any_positive_count(monkeypatch, tmp_path, count):
+def test_a_document_is_opened_once_and_reports_however_many_pages_it_has(
+    monkeypatch, tmp_path, count
+):
     source = tmp_path / "document.PDF"
     source.write_bytes(b"stub")
-    document = SimpleNamespace(page_count=count, needs_pass=False)
-    monkeypatch.setitem(
-        sys.modules,
-        "pymupdf",
-        SimpleNamespace(open=lambda selected: _Context(document) if selected == source else None),
+    opened = []
+    document = SimpleNamespace(
+        page_count=count, needs_pass=False, close=lambda: opened.append("closed")
     )
 
+    def opener(selected):
+        opened.append(("open", selected))
+        return document
+
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=opener))
+
     assert documents._document_page_count(source) == count
+    # One open for the whole file, and it is closed again: the probe reads the
+    # number and holds nothing.
+    assert opened == [("open", source), "closed"]
 
 
 @pytest.mark.parametrize("count", [0, -1])
-def test_document_page_count_rejects_a_document_with_no_pages(monkeypatch, tmp_path, count):
+def test_a_document_with_no_pages_is_refused_and_closed(monkeypatch, tmp_path, count):
     source = tmp_path / "document.pdf"
     source.write_bytes(b"stub")
-    document = SimpleNamespace(page_count=count, needs_pass=False)
-    monkeypatch.setitem(
-        sys.modules,
-        "pymupdf",
-        SimpleNamespace(open=lambda _path: _Context(document)),
+    closed = []
+    document = SimpleNamespace(
+        page_count=count, needs_pass=False, close=lambda: closed.append("closed")
     )
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda _path: document))
 
     with pytest.raises(MediaTranscriptionError) as error:
-        documents._document_page_count(source)
+        documents._open_document(source)
 
     _assert_media_error(error, "document-invalid", "document page count is invalid")
+    assert closed == ["closed"], "a document that is refused must not be left open"
 
 
-def test_document_page_count_accepts_tif_and_rejects_encrypted_pdf(monkeypatch, tmp_path):
+def test_a_tiff_is_counted_and_an_encrypted_pdf_is_refused(monkeypatch, tmp_path):
     tif = tmp_path / "scan.TIF"
     Image.new("RGB", (2, 3), "blue").save(tif, format="TIFF")
     assert documents._document_page_count(tif) == 1
 
     encrypted = tmp_path / "private.pdf"
     encrypted.write_bytes(b"stub")
-    document = SimpleNamespace(page_count=1, needs_pass=True)
-    monkeypatch.setitem(
-        sys.modules,
-        "pymupdf",
-        SimpleNamespace(open=lambda _path: _Context(document)),
-    )
+    closed = []
+    document = SimpleNamespace(page_count=1, needs_pass=True, close=lambda: closed.append("closed"))
+    monkeypatch.setitem(sys.modules, "pymupdf", SimpleNamespace(open=lambda _path: document))
     with pytest.raises(MediaTranscriptionError) as error:
         documents._document_page_count(encrypted)
     _assert_media_error(error, "document-invalid", "selected document could not be decoded")
     assert isinstance(error.value.__cause__, ValueError)
     assert str(error.value.__cause__) == "encrypted PDF"
+    assert closed == ["closed"]
 
 
-def test_render_pdf_page_uses_exact_page_scale_and_opaque_png(monkeypatch, tmp_path):
+def test_a_rendered_pdf_page_keeps_its_exact_scale_and_opaque_png(monkeypatch, tmp_path):
     source = tmp_path / "source.pdf"
-    target = tmp_path / "page.png"
+    root = tmp_path
     calls = []
 
     class Pixmap:
@@ -177,9 +197,15 @@ def test_render_pdf_page_uses_exact_page_scale_and_opaque_png(monkeypatch, tmp_p
             return Pixmap()
 
     class Document:
+        page_count = 4
+        needs_pass = False
+
         def load_page(self, index):
             calls.append(("page", index))
             return Page()
+
+        def close(self):
+            calls.append(("close",))
 
     class Matrix:
         def __init__(self, x_scale, y_scale):
@@ -192,23 +218,27 @@ def test_render_pdf_page_uses_exact_page_scale_and_opaque_png(monkeypatch, tmp_p
         sys.modules,
         "pymupdf",
         SimpleNamespace(
-            open=lambda selected: _Context(Document()) if selected == source else None,
+            open=lambda selected: Document() if selected == source else None,
             Matrix=Matrix,
         ),
     )
 
-    assert documents._render_pdf_page(source, target, 2) == "first\nsecond"
+    document = documents._open_document(source)
+    text, path = document.page(root, 2)
+
+    assert text == "first\nsecond"
+    assert path == root / "page-02.png"
     assert calls == [
         ("page", 1),
         ("text", "text"),
         ("pixmap", Matrix(2.0, 2.0), False),
-        ("save", target),
+        ("save", path),
     ]
-    assert target.read_bytes() == b"png"
+    assert path.read_bytes() == b"png"
 
 
 @pytest.mark.parametrize("pixels", [50_000_000, 50_000_001])
-def test_render_pdf_page_enforces_exact_pixel_limit(monkeypatch, tmp_path, pixels):
+def test_a_rendered_page_holds_the_exact_pixel_limit(monkeypatch, tmp_path, pixels):
     saved = []
     pixmap = SimpleNamespace(width=pixels, height=1, save=saved.append)
     page = SimpleNamespace(
@@ -216,25 +246,31 @@ def test_render_pdf_page_enforces_exact_pixel_limit(monkeypatch, tmp_path, pixel
         get_text=lambda mode: "" if mode == "text" else None,
         get_pixmap=lambda *, matrix, alpha: pixmap,
     )
-    document = SimpleNamespace(load_page=lambda index: page if index == 0 else None)
+    document = SimpleNamespace(
+        page_count=1,
+        needs_pass=False,
+        load_page=lambda index: page if index == 0 else None,
+        close=lambda: None,
+    )
     monkeypatch.setitem(
         sys.modules,
         "pymupdf",
-        SimpleNamespace(open=lambda _path: _Context(document), Matrix=lambda x, y: (x, y)),
+        SimpleNamespace(open=lambda _path: document, Matrix=lambda x, y: (x, y)),
     )
-    target = tmp_path / "page.png"
+    opened = documents._open_document(tmp_path / "source.pdf")
+    target = tmp_path / "page-01.png"
 
     if pixels == 50_000_000:
-        assert documents._render_pdf_page(tmp_path / "source.pdf", target, 1) == ""
+        assert opened.page(tmp_path, 1) == ("", target)
         assert saved == [target]
     else:
         with pytest.raises(MediaTranscriptionError) as error:
-            documents._render_pdf_page(tmp_path / "source.pdf", target, 1)
+            opened.page(tmp_path, 1)
         _assert_media_error(error, "document-invalid", "document page dimensions are invalid")
         assert saved == []
 
 
-def test_render_tiff_page_uses_exact_page_rgb_thumbnail_and_png(monkeypatch, tmp_path):
+def test_a_scanned_page_is_seeked_converted_and_written_as_png(monkeypatch, tmp_path):
     calls = []
 
     class Rendered:
@@ -247,6 +283,7 @@ def test_render_tiff_page_uses_exact_page_rgb_thumbnail_and_png(monkeypatch, tmp
     class SourceImage:
         width = 3200
         height = 800
+        n_frames = 4
 
         def seek(self, index):
             calls.append(("seek", index))
@@ -255,28 +292,52 @@ def test_render_tiff_page_uses_exact_page_rgb_thumbnail_and_png(monkeypatch, tmp
             calls.append(("convert", mode))
             return Rendered()
 
+        def close(self):
+            calls.append(("close",))
+
     import PIL.Image
 
-    monkeypatch.setattr(PIL.Image, "open", lambda _source: _Context(SourceImage()))
-    target = tmp_path / "page.png"
+    monkeypatch.setattr(PIL.Image, "open", lambda _source: SourceImage())
 
-    assert documents._render_tiff_page(tmp_path / "source.tiff", target, 3) == ""
+    document = documents._open_document(tmp_path / "source.tiff")
+    text, path = document.page(tmp_path, 3)
+
+    assert (text, path) == ("", tmp_path / "page-03.png")
     assert calls == [
         ("seek", 2),
         ("convert", "RGB"),
         ("thumbnail", (1600, 1600)),
-        ("save", target, "PNG", False),
+        ("save", path, "PNG", False),
     ]
 
 
-def test_render_tiff_page_rejects_over_pixel_limit_with_stable_error(monkeypatch, tmp_path):
-    image = SimpleNamespace(width=50_000_001, height=1, seek=lambda _index: None)
+def test_a_scanned_page_over_the_pixel_limit_is_a_stable_refusal(monkeypatch, tmp_path):
+    image = SimpleNamespace(
+        width=50_000_001, height=1, n_frames=1, seek=lambda _index: None, close=lambda: None
+    )
     import PIL.Image
 
-    monkeypatch.setattr(PIL.Image, "open", lambda _source: _Context(image))
+    monkeypatch.setattr(PIL.Image, "open", lambda _source: image)
+
+    document = documents._open_document(tmp_path / "source.tiff")
     with pytest.raises(MediaTranscriptionError) as error:
-        documents._render_tiff_page(tmp_path / "source.tiff", tmp_path / "page.png", 1)
+        document.page(tmp_path, 1)
     _assert_media_error(error, "document-invalid", "document page dimensions are invalid")
+
+
+def test_a_reader_fault_on_one_page_is_reported_as_a_fault_about_that_page(tmp_path):
+    class Broken(documents._OpenDocument):
+        def __init__(self):
+            super().__init__(1)
+
+        def page(self, root, page_number):
+            raise RuntimeError("decoder crashed")
+
+    with pytest.raises(MediaTranscriptionError) as error:
+        documents._read_page(Broken(), tmp_path, 1)
+
+    _assert_media_error(error, "document-invalid", "document page could not be rendered")
+    assert isinstance(error.value.__cause__, RuntimeError)
 
 
 def test_svg_png_enforces_byte_bounds_and_exact_rasterizer_contract(monkeypatch, tmp_path):

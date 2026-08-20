@@ -10,8 +10,10 @@ presentation slide carrying no images has always given.
 from __future__ import annotations
 
 import asyncio
+import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import omnitensor_media_transcription.documents as documents
 import pytest
@@ -135,6 +137,45 @@ def test_a_text_document_counts_as_one_unit_of_answer(tmp_path):
     text = tmp_path / "one.txt"
     text.write_text("x", encoding="utf-8")
     assert documents._document_page_count(text) == 1
+
+
+def test_a_pdf_read_by_pypdf_is_text_with_no_page_to_describe(tmp_path, monkeypatch):
+    """The whole point of the fallback, exercised through the reader it builds.
+
+    pypdf extracts and cannot render, so the page is answered as text and the
+    picture is `None` — which the transcriber turns into a description saying
+    the page was read without rendering, rather than describing a render
+    nobody made.
+    """
+    reader = SimpleNamespace(
+        is_encrypted=False,
+        pages=[
+            SimpleNamespace(extract_text=lambda: " first line \n\n second line "),
+            SimpleNamespace(extract_text=lambda: None),
+        ],
+    )
+    monkeypatch.setattr(documents, "_pdf_reader", lambda: "pypdf")
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=lambda _source: reader))
+
+    document = documents._open_document(tmp_path / "report.pdf")
+
+    assert document.page_count == 2
+    assert document.page(tmp_path, 1) == ("first line\nsecond line", None)
+    # A page pypdf could not read any text from is still a page.
+    assert document.page(tmp_path, 2) == ("", None)
+    document.close()
+
+
+def test_an_encrypted_pdf_is_refused_by_the_reader_that_can_only_extract(tmp_path, monkeypatch):
+    reader = SimpleNamespace(is_encrypted=True, pages=[])
+    monkeypatch.setattr(documents, "_pdf_reader", lambda: "pypdf")
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=lambda _source: reader))
+
+    with pytest.raises(MediaTranscriptionError) as error:
+        documents._open_document(tmp_path / "private.pdf")
+
+    assert error.value.code == "document-invalid"
+    assert str(error.value.__cause__) == "encrypted PDF"
 
 
 def test_pymupdf_is_used_when_it_is_installed():

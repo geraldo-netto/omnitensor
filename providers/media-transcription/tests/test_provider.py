@@ -667,33 +667,35 @@ def test_svg_document_and_slide_failure_branches_are_bounded(monkeypatch, tmp_pa
     unsupported = tmp_path / "document.bin"
     unsupported.write_bytes(b"x")
     with pytest.raises(MediaTranscriptionError, match="could not be decoded"):
-        provider._document_page_count(unsupported)
+        provider._open_document(unsupported)
 
-    # A sixty-five page document is read, not refused for its length.
+    # A sixty-five page document is read, not refused for its length — and it
+    # is opened once for all of it rather than once per page.
     many = tmp_path / "pages.tiff"
     pages = [Image.new("1", (1, 1)) for _index in range(65)]
     pages[0].save(many, save_all=True, append_images=pages[1:])
-    assert provider._document_page_count(many) == 65
+    opened = provider._open_document(many)
+    try:
+        assert opened.page_count == 65
+    finally:
+        opened.close()
 
     root = tmp_path / "rendered"
     root.mkdir()
-    source = tmp_path / "page.pdf"
-    source.write_bytes(b"pdf")
     refusal = MediaTranscriptionError("document-invalid", "refused")
-    monkeypatch.setattr(
-        documents,
-        "_render_pdf_page",
-        lambda *_arguments: (_ for _ in ()).throw(refusal),
-    )
+
+    class Refusing(documents._OpenDocument):
+        def __init__(self, error):
+            super().__init__(1)
+            self._error = error
+
+        def page(self, _root, _page_number):
+            raise self._error
+
     with pytest.raises(MediaTranscriptionError, match="refused"):
-        provider._render_document_page(source, root, 1)
-    monkeypatch.setattr(
-        documents,
-        "_render_pdf_page",
-        lambda *_arguments: (_ for _ in ()).throw(RuntimeError("decoder crashed")),
-    )
+        provider._read_page(Refusing(refusal), root, 1)
     with pytest.raises(MediaTranscriptionError, match="could not be rendered"):
-        provider._render_document_page(source, root, 1)
+        provider._read_page(Refusing(RuntimeError("decoder crashed")), root, 1)
 
 
 def _install_fake_whisper(monkeypatch, *, good_device=True):

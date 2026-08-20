@@ -38,6 +38,9 @@ from .archives import MAX_PART_XML_BYTES, archive_entries, read_archive_entry, x
 from .text import joined_visible_text
 
 MAX_RENDER_DIMENSION = 1600
+# Past this a "page" is not a page: a render this size is a document that
+# says it is something it is not, and it would be read into memory to find out.
+MAX_RENDERED_PIXELS = 50_000_000
 # What a plain text file may weigh. A bound on what somebody selected rather
 # than on what they are told back: the whole file is read into memory to be
 # decoded, and the result carries all of it.
@@ -59,15 +62,13 @@ class DocumentPageTranscriber(DocumentTranscriber):
     ) -> tuple[VisualTranscript, ...]:
         if source.suffix.lower() in _TEXT_SUFFIXES:
             return await self._transcribe_text(source, cancellation)
-        page_count = await asyncio.to_thread(_document_page_count, source)
+        document = await asyncio.to_thread(_open_document, source)
         root = Path(tempfile.mkdtemp(prefix="omnitensor-document-pages-"))
         try:
             results = []
-            for page_number in range(1, page_count + 1):
+            for page_number in range(1, document.page_count + 1):
                 cancellation.raise_if_cancelled()
-                text, path = await asyncio.to_thread(
-                    _render_document_page, source, root, page_number
-                )
+                text, path = await asyncio.to_thread(_read_page, document, root, page_number)
                 if path is None:
                     # No renderer, so no picture and nothing a model could
                     # describe. The page is still answered, and the answer
@@ -88,6 +89,7 @@ class DocumentPageTranscriber(DocumentTranscriber):
                 )
             return tuple(results)
         finally:
+            await asyncio.to_thread(document.close)
             await asyncio.to_thread(shutil.rmtree, root, True)
 
     async def _transcribe_text(
@@ -173,20 +175,117 @@ def _page_description(text: str) -> str:
     )
 
 
-def _document_page_count(source: Path) -> int:
+class _OpenDocument:
+    """One source, opened once and read page by page until the job is done.
+
+    Every page used to reopen and reparse the whole file — `pymupdf.open`,
+    `PdfReader` or `Image.open` per page, and one more open for the page count
+    — so reading a document was quadratic in its length and a few hundred
+    pages spent most of the wall clock parsing the same bytes again. The
+    handle is held here instead, for exactly as long as the transcription.
+
+    Pages are still read one at a time, interleaved with the vision model, so
+    a long document reports progress while it works rather than going quiet
+    through a render-everything-first pass. Each read happens in a worker
+    thread and they are strictly sequential — awaited one after another — so
+    the handle is never touched by two threads at once.
+    """
+
+    def __init__(self, page_count: int) -> None:
+        self.page_count = page_count
+
+    def page(self, root: Path, page_number: int) -> tuple[str, Path | None]:
+        """This page's text, and the picture of it when one could be rendered."""
+        raise NotImplementedError  # pragma: no cover - every subclass answers
+
+    def close(self) -> None:
+        return None
+
+
+class _RenderedPdf(_OpenDocument):
+    """PyMuPDF: text and a rendered page, which is the whole answer."""
+
+    def __init__(self, source: Path) -> None:
+        import pymupdf  # noqa: PLC0415 - deferred: an optional or heavy dependency
+
+        self._pymupdf = pymupdf
+        self._document = pymupdf.open(source)
+        if self._document.needs_pass:
+            self._document.close()
+            raise ValueError("encrypted PDF")
+        super().__init__(self._document.page_count)
+
+    def page(self, root: Path, page_number: int) -> tuple[str, Path | None]:
+        path = _page_path(root, page_number)
+        page = self._document.load_page(page_number - 1)
+        text = joined_visible_text(page.get_text("text").splitlines())
+        longest = max(float(page.rect.width), float(page.rect.height), 1.0)
+        scale = min(2.0, MAX_RENDER_DIMENSION / longest)
+        pixmap = page.get_pixmap(matrix=self._pymupdf.Matrix(scale, scale), alpha=False)
+        if pixmap.width * pixmap.height > MAX_RENDERED_PIXELS:
+            raise MediaTranscriptionError(
+                "document-invalid", "document page dimensions are invalid"
+            )
+        pixmap.save(path)
+        return text, path
+
+    def close(self) -> None:
+        self._document.close()
+
+
+class _ExtractedPdf(_OpenDocument):
+    """pypdf: text only, which is a smaller answer rather than no answer."""
+
+    def __init__(self, source: Path) -> None:
+        from pypdf import PdfReader  # noqa: PLC0415 - deferred: an optional or heavy dependency
+
+        self._document = PdfReader(source)
+        if self._document.is_encrypted:
+            raise ValueError("encrypted PDF")
+        super().__init__(len(self._document.pages))
+
+    def page(self, root: Path, page_number: int) -> tuple[str, Path | None]:
+        page = self._document.pages[page_number - 1]
+        return joined_visible_text((page.extract_text() or "").splitlines()), None
+
+
+class _ScannedPages(_OpenDocument):
+    """A multi-page TIFF, seeked rather than reopened."""
+
+    def __init__(self, source: Path) -> None:
+        from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
+
+        self._image = Image.open(source)
+        super().__init__(self._image.n_frames)
+
+    def page(self, root: Path, page_number: int) -> tuple[str, Path | None]:
+        path = _page_path(root, page_number)
+        self._image.seek(page_number - 1)
+        if self._image.width * self._image.height > MAX_RENDERED_PIXELS:
+            raise MediaTranscriptionError(
+                "document-invalid", "document page dimensions are invalid"
+            )
+        rendered = self._image.convert("RGB")
+        rendered.thumbnail((MAX_RENDER_DIMENSION, MAX_RENDER_DIMENSION))
+        rendered.save(path, format="PNG", optimize=False)
+        return "", path
+
+    def close(self) -> None:
+        self._image.close()
+
+
+def _page_path(root: Path, page_number: int) -> Path:
+    return root / f"page-{page_number:02d}.png"
+
+
+def _open_document(source: Path) -> _OpenDocument:
+    """The source, open and ready to be read a page at a time."""
     try:
         suffix = source.suffix.lower()
-        if suffix in _TEXT_SUFFIXES:
-            # One unit of answer, not one page: a text document is paginated
-            # by whatever opens it.
-            return 1
         if suffix == ".pdf":
-            count = _pdf_page_count(source)
+            document = _RenderedPdf(source) if _pdf_reader() == "pymupdf" else _ExtractedPdf(source)
         elif suffix in {".tif", ".tiff"}:
-            from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
-
-            with Image.open(source) as image:
-                count = image.n_frames
+            document = _ScannedPages(source)
         else:  # pragma: no cover - caller suffix gate
             raise ValueError("unsupported document")
     except MediaTranscriptionError:
@@ -198,27 +297,40 @@ def _document_page_count(source: Path) -> int:
         raise MediaTranscriptionError(
             "document-invalid", "selected document could not be decoded"
         ) from error
-    if count < 1:
+    if document.page_count < 1:
+        document.close()
         raise MediaTranscriptionError("document-invalid", "document page count is invalid")
-    return count
+    return document
 
 
-def _pdf_page_count(source: Path) -> int:
-    """How many pages, from whichever reader this installation has."""
-    reader = _pdf_reader()
-    if reader == "pymupdf":
-        import pymupdf  # noqa: PLC0415 - deferred: an optional or heavy dependency
+def _document_page_count(source: Path) -> int:
+    """How many pages, for a probe that is not going to read them.
 
-        with pymupdf.open(source) as document:
-            if document.needs_pass:
-                raise ValueError("encrypted PDF")
-            return document.page_count
-    from pypdf import PdfReader  # noqa: PLC0415 - deferred: an optional or heavy dependency
+    Opens and closes the source once. Transcription does not go through here
+    — it holds the document open for the whole job — but describing a file
+    somebody selected needs the number and nothing else.
+    """
+    if source.suffix.lower() in _TEXT_SUFFIXES:
+        # One unit of answer, not one page: a text document is paginated by
+        # whatever opens it.
+        return 1
+    document = _open_document(source)
+    try:
+        return document.page_count
+    finally:
+        document.close()
 
-    document = PdfReader(source)
-    if document.is_encrypted:
-        raise ValueError("encrypted PDF")
-    return len(document.pages)
+
+def _read_page(document: _OpenDocument, root: Path, page_number: int) -> tuple[str, Path | None]:
+    """One page, with a reader fault reported as a fault about that page."""
+    try:
+        return document.page(root, page_number)
+    except MediaTranscriptionError:
+        raise
+    except Exception as error:
+        raise MediaTranscriptionError(
+            "document-invalid", "document page could not be rendered"
+        ) from error
 
 
 def _pdf_reader() -> str:
@@ -243,66 +355,3 @@ def _pdf_reader() -> str:
             "document-runtime-unavailable", "install the PyMuPDF or pypdf document reader"
         ) from error
     return "pypdf"
-
-
-def _render_document_page(source: Path, root: Path, page_number: int) -> tuple[str, Path | None]:
-    path = root / f"page-{page_number:02d}.png"
-    try:
-        if source.suffix.lower() != ".pdf":
-            text = _render_tiff_page(source, path, page_number)
-        elif _pdf_reader() == "pymupdf":
-            text = _render_pdf_page(source, path, page_number)
-        else:
-            # Text only: pypdf cannot render, and a page nobody rendered is a
-            # page nothing can describe.
-            return _extract_pdf_page(source, page_number), None
-    except MediaTranscriptionError:
-        raise
-    except Exception as error:
-        raise MediaTranscriptionError(
-            "document-invalid", "document page could not be rendered"
-        ) from error
-    return text, path
-
-
-def _extract_pdf_page(source: Path, page_number: int) -> str:
-    from pypdf import PdfReader  # noqa: PLC0415 - deferred: an optional or heavy dependency
-
-    document = PdfReader(source)
-    page = document.pages[page_number - 1]
-    return joined_visible_text((page.extract_text() or "").splitlines())
-
-
-def _render_pdf_page(source: Path, path: Path, page_number: int) -> str:
-    import pymupdf  # noqa: PLC0415 - deferred: an optional or heavy dependency
-
-    with pymupdf.open(source) as document:
-        page = document.load_page(page_number - 1)
-        text = joined_visible_text(page.get_text("text").splitlines())
-        longest = max(float(page.rect.width), float(page.rect.height), 1.0)
-        scale = min(2.0, MAX_RENDER_DIMENSION / longest)
-        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-        if pixmap.width * pixmap.height > 50_000_000:
-            raise MediaTranscriptionError(
-                "document-invalid", "document page dimensions are invalid"
-            )
-        pixmap.save(path)
-    return text
-
-
-def _render_tiff_page(source: Path, path: Path, page_number: int) -> str:
-    from PIL import Image  # noqa: PLC0415 - deferred: an optional or heavy dependency
-
-    with Image.open(source) as image:
-        image.seek(page_number - 1)
-        if image.width * image.height > 50_000_000:
-            raise MediaTranscriptionError(
-                "document-invalid", "document page dimensions are invalid"
-            )
-        rendered = image.convert("RGB")
-        rendered.thumbnail((MAX_RENDER_DIMENSION, MAX_RENDER_DIMENSION))
-        rendered.save(path, format="PNG", optimize=False)
-    return ""
-
-
-__all__ = ["DocumentPageTranscriber"]

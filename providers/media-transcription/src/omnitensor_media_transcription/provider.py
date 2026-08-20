@@ -15,12 +15,7 @@ from omnitensor.plugins.media_transcription import (
 )
 from omnitensor.sdk import current_plugin_bootstrap
 
-from .documents import (
-    DocumentPageTranscriber,
-    _document_page_count,
-    _render_document_page,
-    _render_pdf_page,
-)
+from .documents import DocumentPageTranscriber, _open_document, _read_page
 from .errors import MediaGpuError
 from .formats import (
     AUDIO_SAMPLE_RATE,
