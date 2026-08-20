@@ -103,6 +103,12 @@
             "output"
           ],
           "properties": {
+            "configurationVersion": {
+              "description": "The version of the configuration contract, not of the release. A plugin whose stored settings must be migrated declares a new version here; a release that leaves the contract alone keeps the settings a person chose. Absent means 1.0.0.",
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+              "maxLength": 32
+            },
             "configuration": {
               "type": "object",
               "maxProperties": 64

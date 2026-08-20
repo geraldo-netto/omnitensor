@@ -25,7 +25,11 @@ SETTINGS_DOCUMENT_VERSION = 1
 SETTINGS_LOCK_FILE = ".plugin-settings.lock"
 DEFAULT_MAX_SETTINGS_BYTES = 256 * 1024
 MAX_MIGRATIONS = 32
-_VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
+# The version of a *configuration contract*, which is not a release version:
+# `configuration_spec` reads it from the manifest beside the schema it versions.
+CONFIGURATION_VERSION_PATTERN = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
+)
 
 
 class PluginSettingsError(StableError, ValueError):
@@ -326,7 +330,7 @@ def _validate_plugin_id(plugin_id: str) -> None:
 
 
 def _validate_version(version: str, label: str) -> None:
-    if not isinstance(version, str) or not _VERSION.fullmatch(version):
+    if not isinstance(version, str) or not CONFIGURATION_VERSION_PATTERN.fullmatch(version):
         raise PluginSettingsError("invalid-version", f"{label} is invalid: {version!r}")
 
 
