@@ -21,6 +21,7 @@ from omnitensor.job_lifecycle import (
 from omnitensor.job_ports import JobDispatchError
 from omnitensor.plugins.job_results import JobRecord, JobResultStore
 from omnitensor.plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
+from omnitensor.plugins.supervisor_session import PluginWorkerError
 from omnitensor.registry import validate_document
 
 T = TypeVar("T")
@@ -1482,6 +1483,36 @@ def test_a_runtime_started_a_second_time_accepts_jobs_again():
 
         assert decode(await service.submit_job_text(json.dumps(submit_document())))["status"] == (
             "accepted"
+        )
+
+    run_scenario(scenario())
+
+
+def test_a_designed_refusal_reaches_the_caller_without_its_python_class_name():
+    """What the person asked for the job is told when a worker refuses it.
+
+    `PluginWorkerError` is documented as safe to surface, and `StableError`
+    already formats itself as "code: sentence".  Prefixing the class name put
+    `PluginWorkerError:` in front of every refusal a user read, which named an
+    implementation detail instead of the reason.  An unexpected exception has
+    no such sentence, so there the class name is all there is and it stays.
+    """
+
+    async def scenario():
+        refused = asyncio.get_running_loop().create_future()
+        refused.set_exception(
+            PluginWorkerError("selected-file-invalid", "selected source is empty")
+        )
+        unexpected = asyncio.get_running_loop().create_future()
+        unexpected.set_exception(ZeroDivisionError("division by zero"))
+
+        assert job_lifecycle._terminal_status(refused) == (
+            PluginResultStatus.FAILED,
+            "selected-file-invalid: selected source is empty",
+        )
+        assert job_lifecycle._terminal_status(unexpected) == (
+            PluginResultStatus.FAILED,
+            "ZeroDivisionError: division by zero",
         )
 
     run_scenario(scenario())

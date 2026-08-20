@@ -35,6 +35,7 @@ from .job_ports import (
 )
 from .plugins.job_results import JobRecord, JobResultError, JobResultStore
 from .plugins.protocol import PluginProgress, PluginResult, PluginResultStatus
+from .stable_error import StableError
 
 LOGGER = logging.getLogger("omnitensor.jobs")
 
@@ -521,5 +522,12 @@ def _terminal_status(task: asyncio.Future) -> tuple[PluginResultStatus, str]:
         return PluginResultStatus.CANCELLED, "Job cancelled"
     error = task.exception()
     if error is not None:
+        # A StableError already reads as "code: sentence" and exists to be
+        # shown to whoever asked for the job; prefixing its Python class name
+        # only puts an implementation detail in front of the explanation.
+        # Anything else is unexpected, and there the class name is the only
+        # thing identifying what went wrong, so it stays.
+        if isinstance(error, StableError):
+            return PluginResultStatus.FAILED, str(error)
         return PluginResultStatus.FAILED, f"{type(error).__name__}: {error}"
     return PluginResultStatus.SUCCEEDED, "Job completed"
