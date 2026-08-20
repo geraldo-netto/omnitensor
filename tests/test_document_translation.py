@@ -27,6 +27,7 @@ from omnitensor.plugins.protocol import (
     PluginRequest,
     PluginResultStatus,
 )
+from omnitensor.plugins.target_language import TARGET_LANGUAGE_PATTERN
 from omnitensor.registry import validate_document
 from omnitensor.sdk import CancellationController
 
@@ -332,7 +333,9 @@ def test_a_route_the_workload_cannot_address_is_refused_at_construction():
 
     for routes in (
         {"": router},
-        {"Hebr3w": router},
+        # A digit inside a name is a language tag — `es-419` is one — so what
+        # is refused is a name that does not begin as a name.
+        {"3Hebrew": router},
         {"x" * (MAX_LANGUAGE_CHARACTERS + 1): router},
     ):
         with pytest.raises(DocumentTranslationError) as invalid:
@@ -358,8 +361,10 @@ def test_a_route_the_workload_cannot_address_is_refused_at_construction():
 async def test_the_plugin_refuses_the_targets_its_own_manifest_refuses(tmp_path):
     """The input contract and the plugin have to state one rule, not two.
 
-    The manifest declares `^[A-Za-z][A-Za-z -]*$`; the plugin checked only the
-    length, so a target the published contract refuses reached the prompt.
+    The plugin used to check only the length, so a target the published
+    contract refuses reached the prompt. Both now name the same pattern, and
+    that pattern is a person's own words for a language rather than an ASCII
+    subset of them (G5).
     """
 
     store = MemoryFragmentStore()
@@ -368,9 +373,9 @@ async def test_the_plugin_refuses_the_targets_its_own_manifest_refuses(tmp_path)
     pattern = json.loads(
         (ROOT / "plugin-manifests" / "document-translation.json").read_text(encoding="utf-8")
     )["plugin"]["schemas"]["input"]["properties"]["targetLanguage"]["pattern"]
-    assert pattern == "^[A-Za-z][A-Za-z -]*$"
+    assert pattern == TARGET_LANGUAGE_PATTERN
 
-    for target in ("He9rew", "עברית", "-Hebrew"):
+    for target in ("9Hebrew", "'Hebrew'", "-Hebrew"):
         refused = await subject.execute(
             request(source, targetLanguage=target), CancellationController(), Progress()
         )

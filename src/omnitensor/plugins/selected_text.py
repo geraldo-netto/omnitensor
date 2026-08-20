@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from collections.abc import Callable, Mapping
 
@@ -35,13 +34,13 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
+from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
 
 PLUGIN_ID = "selected-text-tools"
 READ_ONCE_PERMISSION = "clipboard:read-once"
 OPERATIONS = frozenset({"explain", "summarize", "rewrite", "translate", "extract-tasks"})
 MAX_SELECTION_CHARACTERS = 32_768
-MAX_LANGUAGE_CHARACTERS = 64
-_LANGUAGE = re.compile(r"^[A-Za-z][A-Za-z -]*$")
+
 
 
 class SelectedTextError(StableError, ValueError):
@@ -210,12 +209,7 @@ class SelectedTextPlugin(ManagedPlugin):
 
 
 def _validated_language(value: object) -> str:
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or len(value) > MAX_LANGUAGE_CHARACTERS
-        or _LANGUAGE.fullmatch(value.strip()) is None
-    ):
+    if not valid_target_language(value):
         raise SelectedTextError(
             "language-invalid",
             f"translation language must contain 1-{MAX_LANGUAGE_CHARACTERS} letters",

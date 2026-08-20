@@ -55,7 +55,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64,
-            "pattern": "^[A-Za-z][A-Za-z -]*$"
+            "pattern": "^\\s*[^\\W\\d_][\\w '\\-]*\\s*$"
           }
         }
       },

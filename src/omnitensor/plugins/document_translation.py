@@ -22,7 +22,6 @@ off and a long document costs more spans rather than less text.
 from __future__ import annotations
 
 import hashlib
-import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -66,15 +65,12 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
+from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
 from .translation import Span, TranslationError, translate_document
 
 PLUGIN_ID = "document-translation"
 READ_PERMISSION = "files:read-selected"
-MAX_LANGUAGE_CHARACTERS = 64
-# The same shape the manifest's input contract declares. It was only a length
-# here, so a target the manifest refuses reached the prompt as a target
-# language: the two statements of one rule have to agree.
-_LANGUAGE = re.compile(r"^[A-Za-z][A-Za-z -]*$")
+
 # Half the window for the source, half for the translation. A translation can
 # run longer than what it translates, and the alternative to reserving room is
 # a paragraph that stops mid-sentence.
@@ -316,12 +312,7 @@ class DocumentTranslationPlugin(ManagedPlugin):
 
 def _validated_language(value: object) -> str:
     """The target a person named, in the shape the manifest declares."""
-    if (
-        not isinstance(value, str)
-        or not value.strip()
-        or len(value) > MAX_LANGUAGE_CHARACTERS
-        or _LANGUAGE.fullmatch(value.strip()) is None
-    ):
+    if not valid_target_language(value):
         raise DocumentTranslationError(
             "language-invalid",
             f"target language must be 1-{MAX_LANGUAGE_CHARACTERS} letters",

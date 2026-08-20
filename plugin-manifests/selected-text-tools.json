@@ -34,7 +34,7 @@
         "properties": {
           "selection": {"type": "string", "minLength": 1, "maxLength": 32768},
           "operation": {"enum": ["explain", "summarize", "rewrite", "translate", "extract-tasks"]},
-          "language": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z][A-Za-z -]*$"}
+          "language": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^\\s*[^\\W\\d_][\\w '\\-]*\\s*$"}
         }
       },
       "output": {"$ref": "selected-text-result.schema.json"}
