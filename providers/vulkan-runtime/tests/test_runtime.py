@@ -161,15 +161,16 @@ def test_grounding_dispatch_enforces_workload_reference_cardinality():
     assert question.evidence is grounding._citation_evidence
 
 
-def test_every_bound_workload_declares_one_registry_entry():
+def test_every_workload_this_provider_creates_declares_one_registry_entry():
     """The seven edit sites a new workload used to need are two: here, and
-    the hint registry beside it."""
-    assert set(grounding.TASK_BINDINGS) == {
-        "selected-text-tools",
-        "ask-selected-files",
-        "event-extraction",
-        "file-organizer",
-    }
+    the hint registry beside it.
+
+    Derived from the factories rather than listed. This asserted a set of four
+    literal ids, so `document-translation` — the fifth workload, shipped by
+    OMNI-0522 — was not a failing test but an absent one, and its general
+    route could not produce a valid answer at all.
+    """
+    assert set(grounding.TASK_BINDINGS) == set(factories._TASKS)
     assert set(hints.TASK_HINTS) <= set(grounding.TASK_BINDINGS)
 
 
@@ -3512,3 +3513,78 @@ def test_an_unmeasured_pair_runs_and_the_answer_says_nobody_measured_it(tmp_path
     document["workloads"]["event-extraction"]["default"] = "qwen3-8b-q4-k-m"
     _load_receipt(monkeypatch, tmp_path, document)
     assert qualification.default_model("event-extraction") == "qwen3-8b-q4-k-m"
+
+
+def test_the_general_route_can_answer_a_document_translation_span(tmp_path):
+    """The bug the derived registry check found, proved from both ends.
+
+    `document-translation` had no binding, so `citable_references` returned
+    nothing — the model was never shown the opaque reference — and
+    `bind_grounding_metadata` returned the answer untouched, leaving the model
+    to reproduce a SHA-256 it had not been given. The workload then refused
+    every span with "translation does not cite the span it was given", so only
+    the DictaLM route could answer at all.
+    """
+    store = MemoryFragmentStore()
+    control = SourceFragment("private:job-1:target-language", "a" * 64, 1, "French", "b" * 64)
+    span = SourceFragment(
+        "private:job-1:document-1-span-1",
+        "c" * 64,
+        1,
+        "The quarterly report is late.",
+        "d" * 64,
+    )
+    asyncio.run(store.publish("job-1", (control, span)))
+    task = document_translation_task()
+    request = GenerationRequest(
+        "job-1", "document-translation", (control.reference, span.reference)
+    )
+
+    # The model is told exactly one reference it may cite: the span, never the
+    # control fragment.
+    hint = hints.grounding_hint(task, request, store)
+    assert span.reference in hint
+    assert control.reference not in hint
+
+    # And what it copies back is replaced by what the host knows.
+    answered = json.dumps(
+        {
+            "version": 1,
+            "requestId": "job-1",
+            "translation": "Le rapport trimestriel est en retard.",
+            "evidence": {"sourceRef": span.reference, "textSha256": "0" * 64},
+        }
+    )
+    bound = json.loads(grounding.bind_grounding_metadata(answered, task, request, store))
+
+    assert bound["evidence"] == {
+        "sourceRef": span.reference,
+        "textSha256": span.text_sha256,
+    }
+    # The closed contract has room for nothing else, so nothing else is bound.
+    assert validate_document("document-translation-answer.schema.json", bound) == []
+
+
+def test_a_translation_citing_the_control_fragment_is_left_unbound():
+    """Bindable, but never citable: a translation of the language name is not
+    a translation of the document."""
+    store = MemoryFragmentStore()
+    control = SourceFragment("private:job-1:target-language", "a" * 64, 1, "French", "b" * 64)
+    span = SourceFragment("private:job-1:document-1-span-1", "c" * 64, 1, "text", "d" * 64)
+    asyncio.run(store.publish("job-1", (control, span)))
+    request = GenerationRequest(
+        "job-1", "document-translation", (control.reference, span.reference)
+    )
+    answered = json.dumps(
+        {
+            "version": 1,
+            "requestId": "job-1",
+            "translation": "français",
+            "evidence": {"sourceRef": control.reference, "textSha256": "0" * 64},
+        }
+    )
+
+    bound = grounding.bind_grounding_metadata(answered, document_translation_task(), request, store)
+
+    # Unchanged, so the workload's own citation check refuses it.
+    assert json.loads(bound)["evidence"]["textSha256"] == "0" * 64

@@ -90,6 +90,14 @@ class TaskBinding:
     finalize: Callable[[object, GenerationRequest, PrivateFragmentStore], None] | None = None
     span_must_match: bool = False
     binds_page: bool = True
+    # What the workload's own answer contract has room for. Every evidence
+    # object used to be given a page, a span and a source digest, which is a
+    # schema violation for a contract whose evidence is closed over fewer
+    # fields — `document-translation` states only the reference and the text
+    # digest, and binding the rest turned every answer into
+    # `provider-output-invalid`.
+    binds_span: bool = True
+    binds_source_digest: bool = True
 
     def accepts(self, references: tuple[str, ...]) -> bool:
         """Whether this request carries the fragments the task is defined for."""
@@ -303,10 +311,12 @@ def _bind_evidence(
     span = fragment_span(source)
     if binding.span_must_match and evidence.get("span") != span:
         return False
-    evidence["sourceSha256"] = source.source_sha256
+    if binding.binds_source_digest:
+        evidence["sourceSha256"] = source.source_sha256
     if binding.binds_page:
         evidence["page"] = source.page
-    evidence["span"] = span
+    if binding.binds_span:
+        evidence["span"] = span
     evidence["textSha256"] = source.text_sha256
     return True
 
@@ -345,6 +355,23 @@ TASK_BINDINGS: dict[str, TaskBinding] = {
         citable=_after_the_control_fragment,
         bindable=_after_the_control_fragment,
         normalize=(_deduplicate_document_citations,),
+    ),
+    # The span the translation cites, bound by the host rather than copied by
+    # the model: without an entry here the model was asked to reproduce an
+    # opaque reference and a SHA-256 it was never shown, so every span the
+    # general route translated was refused as "does not cite the span it was
+    # given" and only the DictaLM route could answer at all.
+    "document-translation": TaskBinding(
+        evidence=_selected_evidence,
+        exact_references=2,
+        citable=_after_the_control_fragment,
+        # Not bindable either, unlike selected-text: the control fragment here
+        # is the target language, and an answer citing it is a translation of
+        # the word "French" rather than of the document.
+        bindable=_after_the_control_fragment,
+        binds_page=False,
+        binds_span=False,
+        binds_source_digest=False,
     ),
     "event-extraction": TaskBinding(evidence=_event_evidence),
     "file-organizer": TaskBinding(
