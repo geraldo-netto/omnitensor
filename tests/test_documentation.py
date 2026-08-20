@@ -471,3 +471,74 @@ def test_installation_guide_names_every_qwen_distribution_it_installs():
         assert "providers/$provider" in guide
         loop = guide.split("for provider in", 1)[1].split("; do", 1)[0]
         assert workload_id in loop, f"{workload_id} is never built"
+
+
+# Which guide answers "what does this workload do?" for each shipped provider
+# distribution. Not derivable from the filename: `ask-selected-files` is
+# documented in `document-questions.md`, because the guide is named for the
+# question a person has and the workload for what the runtime calls it.
+WORKLOAD_GUIDES = {
+    "ask-selected-files": "docs/document-questions.md",
+    "document-translation": "docs/document-translation.md",
+    "event-extraction": "docs/event-extraction.md",
+    "file-organizer": "docs/file-organizer.md",
+    "media-transcription": "docs/media-transcription.md",
+    "selected-text-tools": "docs/selected-text-tools.md",
+}
+
+
+def shipped_workloads() -> set[str]:
+    """Every workload this repository ships a provider distribution for."""
+    return {
+        path.parent.name
+        for path in (ROOT / "providers").glob("*/pyproject.toml")
+        if "omnitensor.workloads"
+        in tomllib.loads(path.read_text(encoding="utf-8"))["project"].get("entry-points", {})
+    }
+
+
+def test_every_shipped_workload_has_a_guide_the_readme_routes_to():
+    """OMNI-0540. A workload nobody can read about is a workload nobody uses.
+
+    Derived from the tree, so shipping a sixth distribution fails here rather
+    than in the silence of a README that never mentioned it.
+    """
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert set(WORKLOAD_GUIDES) == shipped_workloads()
+    for workload_id, guide in WORKLOAD_GUIDES.items():
+        assert (ROOT / guide).is_file(), f"{workload_id} has no guide"
+        assert f"({guide})" in readme, f"the README never routes to {guide}"
+
+
+def test_every_shipped_guide_is_reachable_from_another_document():
+    """The other direction: a guide nothing links to is written and unread."""
+    guides = sorted((ROOT / "docs").glob("*.md"))
+    corpus = [ROOT / "README.md", *guides]
+
+    unreachable = [
+        guide.name
+        for guide in guides
+        if not any(
+            guide.name in other.read_text(encoding="utf-8") for other in corpus if other != guide
+        )
+    ]
+    assert unreachable == []
+
+
+def test_every_command_a_person_must_run_is_written_down():
+    """OMNI-0545. An installed command nobody documented cannot be run.
+
+    `test_ci_supply_chain.py` proves each console script resolves to a real
+    callable; a callable nothing names is still unreachable for the person who
+    has to run it.
+    """
+    scripts = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "scripts"
+    ]
+    written = (ROOT / "README.md").read_text(encoding="utf-8") + "".join(
+        guide.read_text(encoding="utf-8") for guide in sorted((ROOT / "docs").glob("*.md"))
+    )
+
+    undocumented = sorted(name for name in scripts if name not in written)
+    assert undocumented == []

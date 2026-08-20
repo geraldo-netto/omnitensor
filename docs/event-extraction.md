@@ -33,7 +33,10 @@ GPU. NPU through OpenVINO GenAI is offered only after explicit configuration
 and local qualification; it may fall back to GPU only before generation starts.
 There is no CPU lane. `plugin-manifests/event-extraction.json`, the provider
 catalog, frozen evaluation corpus, and grounded result schema are the
-coordinated contracts. A catalog entry is not runtime qualification evidence.
+coordinated contracts. Why the result schema has the shape it has — the
+`needs`-based partial events, the `readAs` evidence, and the measurements that
+forced both — is the design record in
+[The event contract](event-extraction-contract.md). A catalog entry is not runtime qualification evidence.
 
 The manifest in this repository is a packaging template, not a bundled live
 profile. A provider distribution makes the workload available by shipping that

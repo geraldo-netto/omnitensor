@@ -45,6 +45,16 @@ contract, its private fragment boundary, and its mandatory provider dependencies
 Organizing explicitly selected files? [File organizer](docs/file-organizer.md)
 documents its evidence-bound review plan and strict no-action boundary.
 
+Translating documents you selected? [Document translation](docs/document-translation.md)
+documents the review-only, never-overwritten translation contract, the
+language-to-measured-model routing, and what "unmeasured" means on today's
+receipt.
+
+Transcribing one selected audio, image, video, document, or presentation file?
+[Media transcription](docs/media-transcription.md) documents the accepted
+formats, the pinned decoding boundary, the Vulkan Whisper build, and
+`omnitensor-install-media-artifacts`.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and
@@ -169,6 +179,11 @@ same manifest and shard:
   /tmp/omnitensor-mutmut-scheduler.txt \
   --selector-file mutation-selectors.json --shard scheduler
 ```
+
+The same gate is installed as `omnitensor-check-mutation-coverage` and takes
+the same arguments. It is a CI gate rather than something a person runs to make
+the software work, but every installed command is named somewhere, so that a
+command exists is never something a reader has to discover from `pyproject.toml`.
 
 `mutmut` cannot instrument properties, decorated dataclass hooks, or functions
 with no mutation points. Keep their regression and per-function statement
