@@ -421,15 +421,21 @@ def _validate_presentation_media(media: MediaInfo) -> None:
 
 
 def _validate_document_media(media: MediaInfo) -> None:
+    """A document either has pages to count or has none at all.
+
+    `None` is the second case rather than a missing number: a Word file or a
+    plain text file is paginated by whatever opens it, and a runtime that lays
+    out neither cannot say where the breaks fall. Everything else about a
+    document is unchanged — no duration, no audio, no dimensions.
+    """
     page_count = media.page_count
+    paged = not isinstance(page_count, bool) and isinstance(page_count, int) and page_count >= 1
     if (
         media.duration_ms is not None
         or media.has_audio
         or media.width is not None
         or media.height is not None
-        or isinstance(page_count, bool)
-        or not isinstance(page_count, int)
-        or page_count < 1
+        or not (paged or page_count is None)
     ):
         raise MediaTranscriptionError("document-invalid", "document metadata is inconsistent")
 
@@ -583,11 +589,15 @@ def _valid_presentation_visuals(
 
 
 def _valid_document_visuals(items: tuple[VisualTranscript, ...], page_count: int | None) -> bool:
+    """Pages numbered from one, or one entry that claims no page at all."""
+    if not items or any(item.timestamp_ms is not None for item in items):
+        return False
+    if any(item.slide_number is not None for item in items):
+        return False
+    if page_count is None:
+        return len(items) == 1 and items[0].page_number is None
     return (
         len(items) == page_count
-        and len(items) >= 1
-        and all(item.timestamp_ms is None for item in items)
-        and all(item.slide_number is None for item in items)
         and [item.page_number for item in items] == list(range(1, len(items) + 1))
     )
 

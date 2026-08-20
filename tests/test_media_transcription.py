@@ -4,6 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+import omnitensor.plugins.media_transcription as media_transcription
 from omnitensor.plugins.media_transcription import (
     MAX_IMAGE_PIXELS,
     MAX_LANGUAGE_CHARACTERS,
@@ -423,7 +424,6 @@ async def test_cancelled_request_returns_terminal_cancelled_and_discards_frames(
         MediaInfo(MediaModality.PRESENTATION, None, None, None, False, 0),
         MediaInfo(MediaModality.PRESENTATION, None, 1, None, False, 1),
         MediaInfo(MediaModality.PRESENTATION, None, None, None, True, 1),
-        MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, None),
         MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 0),
         MediaInfo(MediaModality.DOCUMENT, None, 1, None, False, None, 1),
     ],
@@ -647,3 +647,25 @@ def test_a_long_recording_a_big_deck_and_a_long_document_are_all_accepted(tmp_pa
         (),
     )
     assert not validate_document("media-transcription-result.schema.json", document)
+
+
+def test_a_document_with_no_pages_is_a_document_this_runtime_does_not_paginate():
+    """A `.docx` or a `.txt` has no page until something lays it out.
+
+    `None` here is that, and not a number somebody forgot: the answer is one
+    entry claiming no page, which `_valid_document_visuals` requires exactly.
+    """
+    media = MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, None)
+
+    media_transcription._validate_document_media(media)
+
+    unpaged = (VisualTranscript(None, "text", "Plain text file containing text.", None, None),)
+    assert media_transcription._valid_document_visuals(unpaged, None) is True
+    # One entry and one only: a document nothing paginated cannot have a second
+    # page, and a numbered page contradicts the page count that is absent.
+    assert media_transcription._valid_document_visuals(unpaged + unpaged, None) is False
+    numbered = (VisualTranscript(None, "text", "description", None, 1),)
+    assert media_transcription._valid_document_visuals(numbered, None) is False
+    # And a paged document is unchanged: numbered from one, as many as counted.
+    assert media_transcription._valid_document_visuals(numbered, 1) is True
+    assert media_transcription._valid_document_visuals(unpaged, 1) is False
