@@ -31,6 +31,7 @@ from omnitensor.composition import (
     _env_input_roots,
     _env_path,
     _env_paths,
+    build_service,
     build_service_from_env,
 )
 from omnitensor.discovery import Device, DiscoveryPaths
@@ -48,6 +49,11 @@ from omnitensor.host import (
 )
 from omnitensor.jobs import UnavailableJobDispatcher
 from omnitensor.plugins.artifacts import ArtifactReference, ArtifactResolution
+from omnitensor.plugins.grants import GrantLedger
+from omnitensor.plugins.job_results import JobResultStore
+from omnitensor.plugins.kernel_telemetry import UnixSocketAggregateSource
+from omnitensor.plugins.summaries import ResultSummaryRegistry
+from omnitensor.plugins.telemetry import PluginTelemetryRegistry
 from omnitensor.ports import (
     PluginCatalogSnapshot,
     PluginIdentitySource,
@@ -709,9 +715,54 @@ def test_environment_composition_passes_exact_options_to_the_service_factory(tmp
         return "service"
 
     assert build_service_from_env(factory, environment) == "service"
-    assert calls == [ServiceEnvironment.read(environment).service_options()]
+    options = ServiceEnvironment.read(environment).service_options()
+    assert len(calls) == 1
+    assert {name: calls[0][name] for name in options} == options
     assert calls[0]["input_roots"] == (tmp_path / "audio", tmp_path / "תמונה")
     assert calls[0]["accelerator_device_ids"] == {"gpu": "gpu-renderD130"}
+
+
+def test_the_composition_root_constructs_the_adapters_the_runtime_used_to_build(tmp_path):
+    """OMNI-0514: choosing a grant ledger is composition, not runtime work.
+
+    The runtime kept `x or X()` defaults for each of these, so every caller
+    that did not pass one silently got the production adapter — including
+    tests, which is how a suite ends up sharing the choices it exists to
+    check. The root passes them; the runtime is told.
+    """
+    options = ServiceEnvironment.read(
+        {"OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json")}
+    ).service_options()
+    calls = []
+
+    built = build_service(lambda **given: calls.append(given), **options)
+
+    assert built is None
+    passed = calls[0]
+    assert isinstance(passed["grants"], GrantLedger)
+    assert isinstance(passed["job_results"], JobResultStore)
+    assert isinstance(passed["plugin_telemetry"], PluginTelemetryRegistry)
+    assert isinstance(passed["result_summaries"], ResultSummaryRegistry)
+    assert isinstance(passed["kernel_telemetry_source"], UnixSocketAggregateSource)
+    assert passed["cancellation_journal_path"] == tmp_path / "state" / "cancellations.json"
+    assert passed["result_summaries"]._alert_id_factory().startswith("alert-")
+
+
+def test_an_adapter_a_caller_supplies_wins_over_the_root_default(tmp_path):
+    """A substitution must not be quietly overwritten by the production one."""
+    options = ServiceEnvironment.read(
+        {"OMNITENSOR_STATE_PATH": str(tmp_path / "snapshot.json")}
+    ).service_options()
+    calls = []
+    substitute = JobResultStore()
+
+    build_service(
+        lambda **given: calls.append(given),
+        job_results=substitute,
+        **options,
+    )
+
+    assert calls[0]["job_results"] is substitute
 
 
 def test_input_root_environment_deduplicates_and_refuses_unpublishable_sets(tmp_path):

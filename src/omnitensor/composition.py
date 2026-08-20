@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib import import_module
@@ -11,6 +12,11 @@ from typing import Any
 
 from . import paths
 from .plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
+from .plugins.grants import GrantLedger
+from .plugins.job_results import JobResultStore
+from .plugins.kernel_telemetry import UnixSocketAggregateSource
+from .plugins.summaries import ResultSummaryRegistry
+from .plugins.telemetry import PluginTelemetryRegistry
 from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
 
 DEFAULT_STATE_PATH = paths.SNAPSHOT_PATH
@@ -122,11 +128,51 @@ class ServiceEnvironment:
         }
 
 
+def _alert_id() -> str:
+    return f"alert-{secrets.token_hex(16)}"
+
+
+def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
+    """The production adapters the runtime used to construct for itself.
+
+    Each of these is chosen, not derived: a different composition root may
+    hold grants in memory, drop result summaries, or aggregate kernel
+    telemetry over something other than a unix socket. The runtime only needs
+    the port, so the choice belongs here and the runtime takes what it is
+    given.
+    """
+    snapshot_path = Path(options["snapshot_path"])
+    return {
+        "grants": GrantLedger(options["grants_path"]),
+        "job_results": JobResultStore(),
+        "plugin_telemetry": PluginTelemetryRegistry(),
+        "result_summaries": ResultSummaryRegistry(alert_id_factory=_alert_id),
+        "kernel_telemetry_source": UnixSocketAggregateSource(),
+        "cancellation_journal_path": snapshot_path.parent / "cancellations.json",
+    }
+
+
+def build_service(
+    service_factory: Callable[..., object] | None = None,
+    **options: Any,
+):
+    """Construct the production adapters, then the runtime that uses them.
+
+    Callers pass the path/device options :meth:`ServiceEnvironment.service_options`
+    produces; anything else given here overrides an adapter this root would
+    otherwise choose, which is how a test substitutes one without reaching
+    into the constructor's ``or ...`` defaults.
+    """
+    if service_factory is None:
+        service_factory = import_module(".service", __package__).OmniTensorService
+    adapters = build_adapters(options)
+    adapters.update(options)
+    return service_factory(**adapters)
+
+
 def build_service_from_env(
     service_factory: Callable[..., object] | None = None,
     environ: Mapping[str, str] | None = None,
 ):
     """Build the production service while allowing a factory-boundary test."""
-    if service_factory is None:
-        service_factory = import_module(".service", __package__).OmniTensorService
-    return service_factory(**ServiceEnvironment.read(environ).service_options())
+    return build_service(service_factory, **ServiceEnvironment.read(environ).service_options())
