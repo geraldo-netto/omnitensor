@@ -352,3 +352,40 @@ def test_a_truncated_extraction_can_say_exactly_what_went_unread():
     )
     assert measured_failure_detail(TRUNCATED_SOURCE_CODE, "") == ""
     assert measured_failure_detail("extraction-failed", summary) == ""
+
+
+def test_the_ceilings_follow_the_file_instead_of_a_policy_number():
+    """OMNI-0503: 5,000,000 characters cut a long report for no reason."""
+    from omnitensor.plugins.document_ingestion import DEFAULT_MAX_EXPANSION_RATIO
+    from omnitensor.plugins.extraction import (
+        DEFAULT_MAX_CHARACTERS,
+        DEFAULT_MAX_PAGES,
+    )
+
+    default = ExtractionLimits()
+
+    # A small file keeps the floor: nothing is tightened by this.
+    assert default.for_file(1_000) is default
+    assert default.for_file(0) is default
+    assert default.for_file(None) is default
+
+    big = default.for_file(80 * 1024 * 1024)
+    assert big.max_characters == 80 * 1024 * 1024 * DEFAULT_MAX_EXPANSION_RATIO
+    assert big.max_pages == 80 * 1024 * 1024
+    assert big.max_characters > DEFAULT_MAX_CHARACTERS
+    assert big.max_pages > DEFAULT_MAX_PAGES
+    assert big.timeout_seconds == default.timeout_seconds
+
+    # A caller that named a ceiling keeps exactly that ceiling.
+    explicit = ExtractionLimits(max_characters=12, max_pages=3)
+    assert explicit.for_file(80 * 1024 * 1024) is explicit
+
+
+def test_a_six_megabyte_selection_is_extracted_whole():
+    item = IngestedFile("/home/u/docs/report.pdf", 6 * 1024 * 1024, 1_000, ".pdf", "d" * 64)
+    pages = [page(number + 1, "x" * 1_000) for number in range(6_000)]
+    result = asyncio.run(DocumentExtractor(Adapter(pages)).extract(item))
+
+    assert result.outcome is ExtractionOutcome.SUCCEEDED
+    assert len(result.pages) == 6_000
+    assert result.dropped_characters == 0

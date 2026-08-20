@@ -26,11 +26,11 @@ import asyncio
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from .document_ingestion import DocumentIngestor
+from .document_ingestion import DEFAULT_MAX_EXPANSION_RATIO, DocumentIngestor
 from .ingestion import IngestedFile
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -132,6 +132,28 @@ class ExtractionLimits:
     max_characters: int = DEFAULT_MAX_CHARACTERS
     max_regions_per_page: int = DEFAULT_MAX_REGIONS_PER_PAGE
     max_image_pixels: int = MAX_IMAGE_PIXELS
+
+    def for_file(self, size_bytes: object) -> ExtractionLimits:
+        """The ceilings this particular document deserves.
+
+        A fixed 5,000,000 characters is a policy number: it refuses the second
+        half of a long report for no reason the report knows about. What a file
+        can honestly hold is arithmetic — a page costs at least a byte, and text
+        expands by at most the ingestor's declared ratio — so both ceilings
+        follow the file's own size. A caller that set either one explicitly
+        keeps it; only the defaults are derived.
+        """
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 1:
+            return self
+        characters = self.max_characters
+        if characters == DEFAULT_MAX_CHARACTERS:
+            characters = max(characters, size_bytes * DEFAULT_MAX_EXPANSION_RATIO)
+        pages = self.max_pages
+        if pages == DEFAULT_MAX_PAGES:
+            pages = max(pages, size_bytes)
+        if characters == self.max_characters and pages == self.max_pages:
+            return self
+        return replace(self, max_characters=characters, max_pages=pages)
 
     def validate(self) -> None:
         if (
@@ -257,7 +279,7 @@ class DocumentExtractor:
             # The bomb is refused from what it claims, before a parser is
             # started at all — expanding to find out is the attack.
             return ExtractionResult(ExtractionOutcome.REFUSED, detail=refusal)
-        collector = _Collector(self._limits)
+        collector = _Collector(self._limits.for_file(item.size_bytes))
         try:
             async with asyncio.timeout(self._limits.timeout_seconds):
                 await self._drain(item, collector)
