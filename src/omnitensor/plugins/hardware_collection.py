@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import omnitensor.telemetry_types as _telemetry_types
 
-from .collection import BoundedCollector, CollectionError, SourceSnapshot
+from .collection import BoundedCollector
 
 HARDWARE_HEALTH_PLUGIN_ID = "hardware-health"
 HARDWARE_METADATA_PERMISSION = "read:hardware-health-metadata"
@@ -77,12 +77,4 @@ class HardwareHealthCollector(BoundedCollector[HardwareSample]):
         )
         return [name for name, before, after in fields if before != after]
 
-    def _validate_snapshot(self, snapshot: object) -> None:
-        # Sample types are checked before the shared checks, which read an
-        # identity off each item and would otherwise fault on a malformed one.
-        if isinstance(snapshot, SourceSnapshot):
-            for sample in snapshot.items:
-                error = hardware_sample_error(sample)
-                if error:
-                    raise CollectionError("source-invalid", error)
-        super()._validate_snapshot(snapshot)
+    sample_error = staticmethod(hardware_sample_error)

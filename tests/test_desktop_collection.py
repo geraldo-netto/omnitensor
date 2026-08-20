@@ -200,3 +200,46 @@ def test_emission_is_bounded():
     payload = collect(subject)
     assert len(payload["items"]) == 2
     assert payload["truncatedItems"] == 3
+
+
+def test_withdrawn_consent_is_visible_in_readiness_not_only_at_collection():
+    """OMNI-0429: READY was answered by a collector that refused every collect."""
+    subject = collector(consent=False)
+
+    readiness = asyncio.run(subject.readiness())
+
+    assert readiness.status is SourceStatus.UNAVAILABLE
+    assert readiness.detail == "desktop context consent has not been given"
+    with pytest.raises(CollectionError) as refused:
+        collect(subject)
+    assert refused.value.code == "consent-missing"
+
+    # The metadata grant is still reported in its own words.
+    without_metadata = collector(metadata=False)
+    assert asyncio.run(without_metadata.readiness()).detail == (
+        "desktop context metadata permission is not granted"
+    )
+
+
+def test_one_shared_sample_check_serves_every_collector_family():
+    """OMNI-0428: four profiles carried the identical validation loop."""
+    from omnitensor.plugins.collection import BoundedCollector
+    from omnitensor.plugins.hardware_collection import HardwareHealthCollector
+    from omnitensor.plugins.resource_collection import ResourceSchedulerCollector
+    from omnitensor.plugins.storage_collection import StorageIntelligenceCollector
+
+    families = (
+        DesktopContextCollector,
+        HardwareHealthCollector,
+        ResourceSchedulerCollector,
+        StorageIntelligenceCollector,
+    )
+    for family in families:
+        # Declared as data, not re-implemented: none of them overrides the loop.
+        assert family.sample_error is not BoundedCollector.sample_error
+        assert "_validate_snapshot" not in vars(family)
+
+    subject = collector(SourceSnapshot(SourceStatus.READY, 10, ("not a window sample",)))
+    with pytest.raises(CollectionError) as refused:
+        collect(subject)
+    assert refused.value.code == "source-invalid"

@@ -21,7 +21,6 @@ from omnitensor.telemetry_types import STABLE_ID as _STABLE_ID
 from .collection import (
     BoundedCollector,
     CollectionError,
-    SourceSnapshot,
     bounded_number,
 )
 
@@ -162,13 +161,7 @@ class StorageIntelligenceCollector(BoundedCollector[StorageSample]):
         )
         return [name for name, before, after in fields if before != after]
 
-    def _validate_snapshot(self, snapshot: object) -> None:
-        if isinstance(snapshot, SourceSnapshot):
-            for sample in snapshot.items:
-                error = storage_sample_error(sample)
-                if error:
-                    raise CollectionError("source-invalid", error)
-        super()._validate_snapshot(snapshot)
+    sample_error = staticmethod(storage_sample_error)
 
 
 def _shape_error(sample: object) -> str:

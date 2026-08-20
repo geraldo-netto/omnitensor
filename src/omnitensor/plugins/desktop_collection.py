@@ -18,7 +18,7 @@ import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .collection import BoundedCollector, CollectionError, SourceSnapshot
+from .collection import BoundedCollector
 
 DESKTOP_PLUGIN_ID = "desktop-context"
 DESKTOP_CONSENT_PERMISSION = "consent:desktop-context"
@@ -110,6 +110,16 @@ class DesktopContextCollector(BoundedCollector[WindowSample]):
 
     plugin_id = DESKTOP_PLUGIN_ID
     metadata_permission = DESKTOP_METADATA_PERMISSION
+    # Consent is checked separately from the metadata grant: a person can keep
+    # the plugin installed and withdraw only the desktop consent. Declared here
+    # rather than checked in collect() alone, so readiness answers the same.
+    consent_permissions = (
+        (
+            DESKTOP_CONSENT_PERMISSION,
+            "consent-missing",
+            "desktop context consent has not been given",
+        ),
+    )
     label = "desktop context metadata"
     source_name = "cinnamon-window-metadata"
 
@@ -158,13 +168,6 @@ class DesktopContextCollector(BoundedCollector[WindowSample]):
         )
         return [name for name, before, after in fields if before != after]
 
-    async def collect(self, trigger):
-        # Consent is checked separately from the metadata grant: a user can
-        # keep the plugin installed and withdraw only the desktop consent.
-        if not self._permissions.allows(DESKTOP_CONSENT_PERMISSION):
-            raise CollectionError("consent-missing", "desktop context consent has not been given")
-        return await super().collect(trigger)
-
     def session_changed(self, session: DesktopSession) -> None:
         """Adopt a new session, discarding everything the old one produced.
 
@@ -176,10 +179,4 @@ class DesktopContextCollector(BoundedCollector[WindowSample]):
         self._session = session
         self._previous = {}
 
-    def _validate_snapshot(self, snapshot: object) -> None:
-        if isinstance(snapshot, SourceSnapshot):
-            for sample in snapshot.items:
-                error = window_sample_error(sample)
-                if error:
-                    raise CollectionError("source-invalid", error)
-        super()._validate_snapshot(snapshot)
+    sample_error = staticmethod(window_sample_error)

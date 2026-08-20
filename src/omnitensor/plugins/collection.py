@@ -124,6 +124,12 @@ class BoundedCollector(Generic[Sample]):
     error_type: type[CollectionError] = CollectionError
     #: Permission that must be granted before the source is read at all.
     metadata_permission: str = ""
+    #: Further grants this profile needs, as (permission, code, detail).
+    #: Checked in readiness and in collect by the same rule: a collector that
+    #: would refuse every collection must not answer READY, or the trigger
+    #: coordinator schedules work that cannot run and the withdrawal a person
+    #: made is invisible.
+    consent_permissions: tuple[tuple[str, str, str], ...] = ()
     #: Human label used in readiness and health details.
     label: str = "source"
     #: Profile-specific wording retained for readiness and trigger diagnostics.
@@ -192,11 +198,21 @@ class BoundedCollector(Generic[Sample]):
 
     # --- the shared behaviour -----------------------------------------------------
 
-    async def readiness(self) -> CollectorReadiness:
+    def _ungranted(self) -> tuple[str, str] | None:
+        """The first grant this collector needs and does not have."""
         if not self._permissions.allows(self.metadata_permission):
+            return "permission-denied", f"{self.label} permission is not granted"
+        for permission, code, detail in self.consent_permissions:
+            if not self._permissions.allows(permission):
+                return code, detail
+        return None
+
+    async def readiness(self) -> CollectorReadiness:
+        missing = self._ungranted()
+        if missing is not None:
             return CollectorReadiness(
                 SourceStatus.UNAVAILABLE,
-                f"{self.label} permission is not granted",
+                missing[1],
                 self._clock_ms(),
             )
         try:
@@ -226,8 +242,9 @@ class BoundedCollector(Generic[Sample]):
     async def collect(self, trigger: Trigger) -> CollectedOutput:
         """Read the source once and emit only what consent and bounds allow."""
         self._validate_trigger(trigger)
-        if not self._permissions.allows(self.metadata_permission):
-            raise self.error_type("permission-denied", f"{self.label} permission is not granted")
+        missing = self._ungranted()
+        if missing is not None:
+            raise self.error_type(*missing)
         snapshot = await self._source.snapshot()
         self._validate_snapshot(snapshot)
         items = self._snapshot_items(snapshot)
@@ -345,7 +362,22 @@ class BoundedCollector(Generic[Sample]):
                 f"{self.label} returned more than {MAX_COLLECTED_ITEMS} eligible items",
             )
 
+    @staticmethod
+    def sample_error(sample: object) -> str:
+        """Why this family rejects one sample, or ``""`` when it accepts it.
+
+        Checked before the shared snapshot checks, which read an identity off
+        each item and would otherwise fault on a malformed one. Four profiles
+        used to carry the identical loop that calls this.
+        """
+        return ""
+
     def _validate_snapshot(self, snapshot: object) -> None:
+        if isinstance(snapshot, SourceSnapshot):
+            for sample in snapshot.items:
+                error = self.sample_error(sample)
+                if error:
+                    raise self.error_type("source-invalid", error)
         if not isinstance(snapshot, SourceSnapshot):
             raise self.error_type("source-invalid", f"{self.label} returned no snapshot")
         if not isinstance(snapshot.status, SourceStatus):
@@ -353,16 +385,19 @@ class BoundedCollector(Generic[Sample]):
         if _non_negative_integer_error(snapshot.observed_at_ms):
             raise self.error_type("source-invalid", f"{self.label} timestamp is invalid")
         for item in snapshot.items:
-            try:
-                identity = self.identity_of(item)
-            except (AttributeError, TypeError) as error:
-                # A source that returns the wrong shape is a stable rejection,
-                # not a traceback escaping into orchestration.
-                raise self.error_type(
-                    "source-invalid", f"{self.label} item has an invalid type"
-                ) from error
-            if not isinstance(identity, str) or not STABLE_ID.fullmatch(identity):
-                raise self.error_type("source-invalid", f"{self.label} item identity is invalid")
+            self._validate_identity(item)
+
+    def _validate_identity(self, item: object) -> None:
+        try:
+            identity = self.identity_of(item)
+        except (AttributeError, TypeError) as error:
+            # A source that returns the wrong shape is a stable rejection,
+            # not a traceback escaping into orchestration.
+            raise self.error_type(
+                "source-invalid", f"{self.label} item has an invalid type"
+            ) from error
+        if not isinstance(identity, str) or not STABLE_ID.fullmatch(identity):
+            raise self.error_type("source-invalid", f"{self.label} item identity is invalid")
 
 
 def validated_allowlist(allowed_ids: Collection[str]) -> frozenset[str]:
