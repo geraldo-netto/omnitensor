@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0551 | open | medium | s | **`OmniTensorService` step 1c of 3: the control service is the root's.** Done 2026-08-20: the root builds `PolicyStore` — its defaults are the catalog's, which is why it could not move before OMNI-0550 — and the `PluginSettingsStore` beside it, and passes both as ports. **Still outstanding: the `ControlService` itself.** All seven of the collaborators it takes are bound methods of the service — `_policy_changed`, `_profile_exists`, `_gpu_device_ids`, `_profile_models`, `_profile_configuration`, `_configuration_changed` — and each reaches the scheduler, the detected devices or the plugin runtime, none of which the root holds until OMNI-0552. Moving it before then would replace a half-built service with a half-built root. |
 
 ## Blocked
 
