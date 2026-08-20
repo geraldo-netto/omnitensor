@@ -129,14 +129,16 @@ def test_plugin_artifact_resolution_delegates_the_exact_reference(fake_nodes, tm
 
 def test_plugin_accelerator_devices_exposes_only_supported_device_nodes(fake_nodes, tmp_path):
     service = build_service(fake_nodes, tmp_path)
-    service._devices = [
-        Device("gpu-renderD128", "gpu", "GPU 0", "dri"),
-        Device("gpu-renderD129", "gpu", "GPU 1", "dri"),
-        Device("npu-accel0", "npu", "NPU 0", "accel"),
-        Device("tpu-pcie-0", "tpu", "TPU", "pcie"),
-        Device("tpu-usb", "tpu", "USB TPU", "usb"),
-        Device("gpu-card0", "gpu", "GPU card", "card"),
-    ]
+    service._devices.replace(
+        [
+            Device("gpu-renderD128", "gpu", "GPU 0", "dri"),
+            Device("gpu-renderD129", "gpu", "GPU 1", "dri"),
+            Device("npu-accel0", "npu", "NPU 0", "accel"),
+            Device("tpu-pcie-0", "tpu", "TPU", "pcie"),
+            Device("tpu-usb", "tpu", "USB TPU", "usb"),
+            Device("gpu-card0", "gpu", "GPU card", "card"),
+        ]
+    )
 
     assert service._plugin_accelerator_devices() == {
         "tpu": Path("/dev/apex_0"),
@@ -329,8 +331,8 @@ def test_saved_gpu_choice_fails_closed_when_that_device_disappears(fake_nodes, t
     add_gpu(fake_nodes, node=129)
     service = build_service(fake_nodes, tmp_path, [sample_manifest()])
     service.control.state.device_choices["sample-workload"] = "gpu-renderD129"
-    remaining = [device for device in service._devices if device.id != "gpu-renderD129"]
-    service._devices = remaining
+    remaining = [device for device in service._devices.devices if device.id != "gpu-renderD129"]
+    service._devices.replace(remaining)
     service._executors = build_executors(remaining)
 
     unavailable = service._executor_view("sample-workload")["gpu"].availability()

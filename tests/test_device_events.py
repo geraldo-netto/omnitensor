@@ -438,7 +438,7 @@ async def test_a_kernel_event_rediscovers_and_asks_for_a_publish(tmp_path):
             break
 
     assert published == [1]
-    assert [device.id for device in service._devices] == ["gpu-renderD128", "npu-accel0"]
+    assert [device.id for device in service._devices.devices] == ["gpu-renderD128", "npu-accel0"]
 
     service._stopping.set()
     discovery.announce()

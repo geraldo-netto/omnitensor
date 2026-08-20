@@ -62,6 +62,7 @@ from .contract import (
 )
 from .control import ControlService
 from .device_lanes import DeviceLanes
+from .device_registry import DeviceRegistry
 from .discovery import DiscoveryPaths
 from .execution import build_executors as build_executors
 from .execution import close_executors
@@ -205,6 +206,8 @@ class OmniTensorService:
         workloads: Mapping[str, Workload] | None = None,
         artifacts: ArtifactResolver | None = None,
         plugin_settings: PluginSettingsStore | None = None,
+        devices: DeviceRegistry | None = None,
+        control: ControlService | None = None,
     ):
         self._callers = CallerIdentityResolver()
         host = build_host_ports(
@@ -275,9 +278,8 @@ class OmniTensorService:
                 for workload_id, workload in self._workloads.items()
             },
         )
-        self.control = ControlService(
+        self.control = control or ControlService(
             storage,
-            on_applied=self._policy_changed,
             profile_exists=self._profile_exists,
             gpu_device_ids=self._gpu_device_ids,
             # The plugin runtime's own bound methods, not delegates through
@@ -286,10 +288,18 @@ class OmniTensorService:
             profile_models=getattr(self._plugin_runtime, "declared_artifacts", None),
             profile_configuration=getattr(self._plugin_runtime, "configuration_spec", None),
             settings_store=self._plugin_settings,
-            on_configuration_applied=self._configuration_changed,
         )
-        self._devices = self._discovery.detect()
-        self._executors = build_executors(self._devices)
+        # Named here whether this built the control service or was handed one:
+        # both listeners reach the scheduler, the publisher and the plugin
+        # lifecycle, none of which exists before now.
+        self.control.notifies(
+            applied=self._policy_changed,
+            configuration_applied=self._configuration_changed,
+        )
+        self._devices = devices if devices is not None else DeviceRegistry()
+        if not self._devices:
+            self._devices.replace(self._discovery.detect())
+        self._executors = build_executors(self._devices.devices)
         self._lanes = DeviceLanes(lambda: self._executors, self._gpu_device_choice)
         self._scheduler = Scheduler(
             self._executors.scheduler_executors(),
@@ -493,7 +503,7 @@ class OmniTensorService:
         return self.control.state.model_choices.get(profile_id)
 
     def _gpu_device_ids(self) -> tuple[str, ...]:
-        return tuple(device.id for device in self._devices if device.backend == "gpu")
+        return self._devices.gpu_ids()
 
     def _gpu_device_choice(self, profile_id: str) -> str | None:
         return self.control.state.device_choices.get(profile_id)
@@ -630,7 +640,7 @@ class OmniTensorService:
 
     def _plugin_accelerator_devices(self, profile_id: str | None = None) -> dict[str, Path]:
         return artifacts.plugin_accelerator_devices(
-            self._devices,
+            self._devices.devices,
             self._gpu_device_choice(profile_id) if profile_id is not None else None,
         )
 
@@ -643,7 +653,7 @@ class OmniTensorService:
 
     def _build_runtime_snapshot(self, scheduler=None) -> dict:
         return observation.runtime_snapshot(
-            devices=self._devices,
+            devices=self._devices.devices,
             device_load_of=self._device_load,
             workloads=self._workloads,
             executors=self._executors,
@@ -808,13 +818,13 @@ class OmniTensorService:
 
     def _apply_discovery(self) -> None:
         devices = self._discovery.detect()
-        devices_changed = devices != self._devices
+        previous = list(self._devices.devices)
+        devices_changed = self._devices.replace(devices)
         self._executors = build_executors(
             devices,
-            previous_devices=self._devices,
+            previous_devices=previous,
             previous_executors=self._executors,
         )
-        self._devices = devices
         self._scheduler.update_executors(self._executors.scheduler_executors())
         if devices_changed:
             self.request_publish()

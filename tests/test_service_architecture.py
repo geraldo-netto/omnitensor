@@ -35,6 +35,7 @@ from omnitensor.composition import (
     build_service,
     build_service_from_env,
 )
+from omnitensor.device_registry import DeviceRegistry
 from omnitensor.discovery import Device, DiscoveryPaths
 from omnitensor.dispatch import InferenceJobDispatcher
 from omnitensor.execution import _build_executor, build_executors
@@ -527,7 +528,7 @@ def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeyp
     )
     statuses_of = object()
     snapshot_owner = SimpleNamespace(
-        _devices=(),
+        _devices=DeviceRegistry(),
         _device_load=lambda *_args: None,
         _workloads={},
         _executors={},
@@ -778,7 +779,11 @@ def test_the_root_builds_the_catalog_and_the_resolver_the_constructor_used_to(tm
 
 
 def test_the_root_builds_the_policy_store_from_the_catalog_it_holds(tmp_path):
-    """OMNI-0551: the store's defaults are the catalog's default policies."""
+    """OMNI-0551: the store's defaults are the catalog's default policies.
+
+    Held by the control service the root now builds around it (OMNI-0561),
+    rather than passed to a constructor that builds one for itself.
+    """
     options = ServiceEnvironment.read(
         {
             "OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json"),
@@ -791,10 +796,45 @@ def test_the_root_builds_the_policy_store_from_the_catalog_it_holds(tmp_path):
     build_service(lambda **given: calls.append(given), **options)
 
     passed = calls[0]
-    assert isinstance(passed["policy_storage"], PolicyStore)
+    assert isinstance(passed["control"]._store, PolicyStore)
     assert isinstance(passed["plugin_settings"], PluginSettingsStore)
-    assert "hardware-health" in passed["policy_storage"].load().profiles
+    assert "hardware-health" in passed["control"].state.profiles
     assert passed["plugin_settings"]._root == tmp_path / "state" / "plugin-settings"
+
+
+def test_the_root_builds_the_runtime_and_the_control_service_around_each_other(tmp_path):
+    """OMNI-0561: the cycle broken where a composition root may break it.
+
+    The plugin runtime asks the control service what a workload was told to
+    run, and the control service asks the plugin runtime what a workload
+    declares. Neither can be built first — but a root may close over a local
+    it assigns further down, because every one of those closures is called
+    when a worker is built rather than while one is.
+    """
+    options = ServiceEnvironment.read(
+        {
+            "OMNITENSOR_STATE_PATH": str(tmp_path / "state" / "snapshot.json"),
+            "OMNITENSOR_WORKLOADS": str(service.bundled_workloads_path()),
+        }
+    ).service_options()
+    calls = []
+
+    build_service(lambda **given: calls.append(given), **options)
+
+    passed = calls[0]
+    runtime = passed["plugin_runtime"]
+    control = passed["control"]
+    assert control._profile_models == runtime.declared_artifacts
+    assert control._profile_configuration == runtime.configuration_spec
+    assert control._gpu_device_ids == passed["devices"].gpu_ids
+    # And the runtime's closures resolve against the control service that did
+    # not exist when they were written.
+    assert runtime._profile_model_choice("hardware-health") is None
+    assert runtime._accelerator_devices() == {}
+    # Nothing has told either of them what listens yet: that is the service's
+    # to do, and it is the only part that has to wait for one.
+    assert control._on_applied is None
+    assert control._on_configuration_applied is None
 
 
 def test_a_service_given_a_catalog_and_a_resolver_builds_neither(fake_nodes, tmp_path):

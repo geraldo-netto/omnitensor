@@ -11,16 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from . import paths
-from .artifact_readiness import ArtifactResolver
+from .artifact_readiness import ArtifactResolver, plugin_accelerator_devices
+from .control import ControlService
+from .device_registry import DeviceRegistry
 from .plugin_admission import DEFAULT_MAX_CONCURRENT, MAX_CONCURRENT_LIMIT
 from .plugins.artifact_installation import ArtifactInstaller
 from .plugins.grants import GrantLedger
 from .plugins.job_results import JobResultStore
 from .plugins.kernel_telemetry import UnixSocketAggregateSource
+from .plugins.loading import InstalledPluginRuntime
 from .plugins.settings import PluginSettingsStore
 from .plugins.summaries import ResultSummaryRegistry
 from .plugins.telemetry import PluginTelemetryRegistry
-from .registry import load_workload_catalog
+from .registry import bundled_workloads_path, load_workload_catalog
 from .snapshot import MAX_PUBLISHED_INPUT_ROOTS
 from .state import PolicyStore
 
@@ -151,32 +154,66 @@ def build_adapters(options: Mapping[str, Any]) -> dict[str, Any]:
     # each other, so they are built here rather than by a constructor reading
     # its own arguments. The resolver is told where plugins come from by
     # whoever owns the plugin runtime, which is later than this.
+    grants = GrantLedger(options["grants_path"])
     workloads = load_workload_catalog(
         options["workloads_path"],
         model_bindings_root=options.get("model_bindings_path"),
     )
     artifact_root = options.get("artifact_root")
-    return {
-        "workloads": workloads,
-        # The policy store's defaults are the catalog's, which is why it could
-        # not be built before the catalog was.
-        "policy_storage": PolicyStore(
+    artifacts = ArtifactResolver(
+        artifact_root,
+        ArtifactInstaller(artifact_root) if artifact_root else None,
+        workloads_of=lambda: workloads,
+    )
+    settings = PluginSettingsStore(snapshot_path.parent / "plugin-settings")
+    devices = DeviceRegistry()
+    # The two-way dependency the service used to hold inside its constructor,
+    # broken where a composition root is allowed to break it: `control` is a
+    # local this function assigns four lines down, and every closure below is
+    # called long after that — when a worker is built, not while one is.
+    control: ControlService | None = None
+    plugin_runtime = InstalledPluginRuntime(
+        bundled_workloads_path(),
+        grant_source=grants,
+        selected_files_root=snapshot_path.parent / "plugin-inputs",
+        worker_state_root=snapshot_path.parent / "plugin-state",
+        resolve_artifact=artifacts.resolve_plugin,
+        accelerator_devices=lambda profile_id=None: plugin_accelerator_devices(
+            devices.devices,
+            None if profile_id is None else control.state.device_choices.get(profile_id),
+        ),
+        profile_accelerator_devices=lambda profile_id=None: plugin_accelerator_devices(
+            devices.devices,
+            None if profile_id is None else control.state.device_choices.get(profile_id),
+        ),
+        profile_model_choice=lambda profile_id: control.state.model_choices.get(profile_id),
+        settings_store=settings,
+    )
+    artifacts.reads_plugins_from(lambda: plugin_runtime.snapshot.catalog.plugins)
+    control = ControlService(
+        PolicyStore(
             options["policy_path"],
             {
                 workload_id: workload.default_policy()
                 for workload_id, workload in workloads.items()
             },
         ),
-        # Beside the policy store rather than in it: a workload's tuning is
-        # validated against that workload's own schema, and a policy document
-        # holding documents no schema here describes could not be validated.
-        "plugin_settings": PluginSettingsStore(snapshot_path.parent / "plugin-settings"),
-        "artifacts": ArtifactResolver(
-            artifact_root,
-            ArtifactInstaller(artifact_root) if artifact_root else None,
-            workloads_of=lambda: workloads,
+        profile_exists=lambda profile_id: (
+            profile_id in workloads or profile_id in plugin_runtime.plugin_ids()
         ),
-        "grants": GrantLedger(options["grants_path"]),
+        gpu_device_ids=devices.gpu_ids,
+        profile_models=plugin_runtime.declared_artifacts,
+        profile_configuration=plugin_runtime.configuration_spec,
+        settings_store=settings,
+    )
+    return {
+        "workloads": workloads,
+        "devices": devices,
+        "artifacts": artifacts,
+        "plugin_settings": settings,
+        "plugin_runtime": plugin_runtime,
+        "control": control,
+        "grants": grants,
         "job_results": JobResultStore(),
         "plugin_telemetry": PluginTelemetryRegistry(),
         "result_summaries": ResultSummaryRegistry(alert_id_factory=_alert_id),

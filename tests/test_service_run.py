@@ -306,7 +306,7 @@ def test_run_serves_control_publishes_and_rediscovers(tmp_path):
     for snapshot in publisher.published:
         assert validate_document("runtime-snapshot.schema.json", snapshot) == []
     assert discovery.detect_calls >= 2
-    backends = {device.backend for device in service._devices}
+    backends = {device.backend for device in service._devices.devices}
     assert backends == {"tpu", "npu"}
     assert service._executors["tpu"] is original_tpu
     assert [device["backend"] for device in publisher.published[-1]["devices"]] == ["tpu", "npu"]
