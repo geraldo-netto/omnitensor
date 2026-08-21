@@ -496,7 +496,7 @@ OMNI_SELECTED_LOAD="$OMNI_STATE/plugin-state/selected-text-tools/selected-text-w
 
 "$OMNI_SERVICE/python" "$OMNI_SOURCE/scripts/collect-selected-text-acceptance.py" \
   --worker-load-receipt "$OMNI_SELECTED_LOAD" \
-  --qwen-model "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" \
+  --qwen-model "$OMNI_MODELS/qwen3-5-9b/Qwen3.5-9B-IQ4_XS.gguf" \
   --hebrew-model "$OMNI_MODELS/dictalm2-hebrew/dictalm2.0-instruct-Q4_K_M.gguf" \
   --output /absolute/path/to/selected-text-evidence.json
 ```
@@ -505,8 +505,14 @@ The private receipt is usable only while `describe-plugins` reports the
 current selected-text worker ready. The worker writes it after both actual
 model loads: it records the artifact digests, runtime version, physical
 device, and layer counts that actually loaded rather than enforcing a frozen
-identity — complete Vulkan layer offload with no CPU fallback is the only
-live load gate. Startup clears stale bytes; startup failure and normal
+identity — the live load gate requires a real Vulkan offload and rejects a
+reported CPU fallback while preserving the measured accelerator/total layer
+split. `--qwen-model` and `--hebrew-model` must name the local files
+that worker loaded; the receipt deliberately records digests, not filesystem
+paths. The collector maps those digests to the canonical manifest and requires
+the same artifacts to be ready in the live inventory, so this command follows
+the configured model instead of assuming a particular default. Startup clears
+stale bytes; startup failure and normal
 worker stop remove them. If `OMNITENSOR_STATE_PATH` is customized, locate
 `plugin-state` beside that snapshot instead of using the default path above.
 The collector refuses a missing, stale, malformed, or disagreeing receipt
@@ -521,8 +527,11 @@ Qualify the resulting document with:
   --output /absolute/path/to/selected-text-acceptance.json
 ```
 
-That qualification is digest-bound to both model artifacts, runtime 0.3.34,
-the frozen corpus, and the named GPU. It is not an arbitrary-text benchmark and
+The existing qualification is evidence-specific: it remains digest-bound to
+the measured Qwen3-8B and DictaLM artifacts, runtime 0.3.34, the frozen corpus,
+and the named GPU. A collection from the current Qwen3.5-9B default records its
+real live load but is not a new qualification for that model. It is not an
+arbitrary-text benchmark and
 does not authorize silently inferred or globally fixed language routing. This
 code change does not recollect or rewrite the archived run: a fresh evidence
 artifact requires reinstalling the matching wheels and observing the current

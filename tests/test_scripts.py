@@ -118,8 +118,22 @@ def test_the_selected_text_collector_parses_the_arguments_the_guide_documents():
             module._arguments(argv)
 
 
-def test_the_selected_text_collector_refuses_a_worker_that_is_not_the_qualified_one():
+def test_the_selected_text_collector_refuses_a_worker_that_is_not_ready(monkeypatch):
     module = load("collect-selected-text-acceptance.py")
+    receipt = object()
+    manifest = {"version": "1.1.0"}
+    monkeypatch.setattr(
+        module,
+        "_receipt_artifact_ids",
+        lambda observed, declared: (
+            (
+                "qwen3-8b-q4-k-m",
+                "dictalm2-hebrew-q4-k-m",
+            )
+            if observed is receipt and declared is manifest
+            else pytest.fail("wrong readiness inputs")
+        ),
+    )
     ready = {
         "plugins": [
             {
@@ -135,7 +149,7 @@ def test_the_selected_text_collector_refuses_a_worker_that_is_not_the_qualified_
         ]
     }
 
-    module._require_ready(ready)
+    module._require_ready(ready, receipt, manifest)
 
     for mutate, expected in (
         (lambda plugin: plugin.update(workerState="starting"), "is not ready"),
@@ -153,7 +167,7 @@ def test_the_selected_text_collector_refuses_a_worker_that_is_not_the_qualified_
         document = json.loads(json.dumps(ready))
         mutate(document["plugins"][0])
         with pytest.raises(RuntimeError, match=expected):
-            module._require_ready(document)
+            module._require_ready(document, receipt, manifest)
 
 
 def test_the_codec_benchmark_frames_and_measures_what_it_claims_to():

@@ -9,13 +9,19 @@ import json
 import time
 from pathlib import Path
 
-from omnitensor.atomicio import write_json_atomic
+from omnitensor.atomicio import read_json_bounded, write_json_atomic
 from omnitensor.plugins.selected_text_acceptance import (
+    SelectedTextWorkerLoadReceipt,
     load_selected_text_corpus,
     load_selected_text_worker_load_receipt,
 )
 from omnitensor.preparation import file_digest
+from omnitensor.registry import MAX_MANIFEST_BYTES, validate_workload_document
 from omnitensor.socket_transport import call_control
+
+SELECTED_TEXT_MANIFEST = (
+    Path(__file__).resolve().parents[1] / "plugin-manifests/selected-text-tools.json"
+)
 
 
 def _arguments(argv: list[str] | None = None):
@@ -101,7 +107,41 @@ async def _cancellation_latency(call, timeout: float) -> int:
     return (time.monotonic_ns() - started) // 1_000_000
 
 
-def _require_ready(inventory):
+def _load_selected_text_manifest() -> dict:
+    manifest = read_json_bounded(SELECTED_TEXT_MANIFEST, MAX_MANIFEST_BYTES)
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("id") != "selected-text-tools"
+        or validate_workload_document(manifest)
+    ):
+        raise RuntimeError("selected-text manifest is invalid")
+    return manifest
+
+
+def _receipt_artifact_ids(
+    receipt: SelectedTextWorkerLoadReceipt,
+    manifest: dict,
+) -> tuple[str, str]:
+    declared = manifest["plugin"]["artifacts"]
+
+    def match(digest: str, *, selectable: bool) -> str:
+        matches = [
+            item["id"]
+            for item in declared
+            if item["sha256"] == digest and (item.get("selectable", True) is selectable)
+        ]
+        if len(matches) != 1:
+            role = "selectable primary" if selectable else "fixed Hebrew"
+            raise RuntimeError(f"worker load receipt does not name one declared {role} artifact")
+        return matches[0]
+
+    return (
+        match(receipt.primary.model_sha256, selectable=True),
+        match(receipt.hebrew.model_sha256, selectable=False),
+    )
+
+
+def _require_ready(inventory, receipt: SelectedTextWorkerLoadReceipt, manifest: dict):
     matches = [
         item for item in inventory.get("plugins", []) if item.get("id") == "selected-text-tools"
     ]
@@ -109,12 +149,12 @@ def _require_ready(inventory):
         raise RuntimeError("installed selected-text worker identity is missing")
     plugin = matches[0]
     artifacts = {item["id"]: item for item in plugin.get("artifacts", [])}
-    if plugin.get("version") != "1.1.0" or plugin.get("workerState") != "ready":
-        raise RuntimeError("selected-text 1.1.0 worker is not ready")
-    expected = {"qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"}
+    if plugin.get("version") != manifest["version"] or plugin.get("workerState") != "ready":
+        raise RuntimeError(f"selected-text {manifest['version']} worker is not ready")
+    expected = set(_receipt_artifact_ids(receipt, manifest))
     # The manifest may declare more artifacts than this corpus exercises, so
-    # require the ones it routes to and never refuse a worker for having the
-    # rest of what the manifest asked for.
+    # require the exact two the live receipt records and never refuse a worker
+    # for having the rest of what the manifest asked for.
     missing = sorted(identifier for identifier in expected if identifier not in artifacts)
     if missing:
         raise RuntimeError(f"selected-text model artifacts are not installed: {', '.join(missing)}")
@@ -126,8 +166,10 @@ def _require_ready(inventory):
 
 
 async def _collect(arguments):
-    _require_ready(await call_control("describe-plugins", {}))
+    inventory = await call_control("describe-plugins", {})
     receipt = load_selected_text_worker_load_receipt(arguments.worker_load_receipt)
+    manifest = _load_selected_text_manifest()
+    _require_ready(inventory, receipt, manifest)
     if file_digest(arguments.qwen_model) != receipt.primary.model_sha256:
         raise RuntimeError("Qwen model path differs from the worker load receipt")
     if file_digest(arguments.hebrew_model) != receipt.hebrew.model_sha256:

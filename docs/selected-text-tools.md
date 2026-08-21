@@ -76,8 +76,10 @@ directory. That receipt records the artifact digests, runtime, physical device,
 backend, device API, total and accelerator layer counts, and CPU-fallback flag
 reported by the live worker. Startup clears stale bytes, normal stop removes
 them, and the collector accepts a receipt only after `describe-plugins` reports the current
-worker ready. The collector requires the receipt, verifies the local model
-paths against it, and copies its two measured model records verbatim into
+worker ready. The collector requires the receipt, verifies the explicitly
+provided local model paths against its digests, resolves those digests through
+the canonical manifest, requires those exact artifacts ready in live inventory,
+and copies its two measured model records verbatim into
 evidence before the normal acceptance gate runs. Invalid or absent live-load
 evidence aborts before the corpus or output file; no public inventory
 field is added.

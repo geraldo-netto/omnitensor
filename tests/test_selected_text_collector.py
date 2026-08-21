@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from omnitensor.plugins.selected_text_acceptance import (
     HEBREW_MODEL_SHA256,
@@ -16,6 +18,18 @@ from omnitensor.plugins.selected_text_acceptance import (
 )
 
 ROOT = Path(__file__).parents[1]
+DEFAULT_PRIMARY_MODEL_ID = "qwen3-5-9b-iq4-xs"
+
+
+def _manifest() -> dict:
+    return json.loads((ROOT / "plugin-manifests/selected-text-tools.json").read_text())
+
+
+DEFAULT_PRIMARY_MODEL_SHA256 = next(
+    artifact["sha256"]
+    for artifact in _manifest()["plugin"]["artifacts"]
+    if artifact["id"] == DEFAULT_PRIMARY_MODEL_ID
+)
 
 
 def _collector_module():
@@ -42,20 +56,20 @@ def _model(digest: str, layers: int) -> dict[str, object]:
     }
 
 
-def _receipt():
+def _receipt(primary_digest: str = PRIMARY_MODEL_SHA256, primary_layers: int = 37):
     return parse_selected_text_worker_load_receipt(
         {
             "receiptVersion": 1,
             "pluginId": "selected-text-tools",
             "models": {
-                "primary": _model(PRIMARY_MODEL_SHA256, 37),
+                "primary": _model(primary_digest, primary_layers),
                 "hebrewTranslation": _model(HEBREW_MODEL_SHA256, 33),
             },
         }
     )
 
 
-def _inventory() -> str:
+def _inventory(primary_id: str = "qwen3-8b-q4-k-m") -> str:
     return json.dumps(
         {
             "plugins": [
@@ -64,7 +78,7 @@ def _inventory() -> str:
                     "version": "1.1.0",
                     "workerState": "ready",
                     "artifacts": [
-                        {"id": "qwen3-8b-q4-k-m", "ready": True},
+                        {"id": primary_id, "ready": True},
                         {"id": "dictalm2-hebrew-q4-k-m", "ready": True},
                     ],
                 }
@@ -76,26 +90,27 @@ def _inventory() -> str:
 class _Control:
     """A fake ``call_control`` that answers the inventory handshake."""
 
-    def __init__(self) -> None:
+    def __init__(self, primary_id: str = "qwen3-8b-q4-k-m") -> None:
         self.calls = []
+        self.primary_id = primary_id
 
     async def __call__(self, method, params):
         self.calls.append((method, params))
         assert method == "describe-plugins"
-        return json.loads(_inventory())
+        return json.loads(_inventory(self.primary_id))
 
 
-def _install_control(monkeypatch, collector):
-    control = _Control()
+def _install_control(monkeypatch, collector, primary_id: str = "qwen3-8b-q4-k-m"):
+    control = _Control(primary_id)
     monkeypatch.setattr(collector, "call_control", control)
     return control
 
 
-def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch):
+def test_collector_accepts_the_configured_default_after_digest_agreement(monkeypatch):
     collector = _collector_module()
-    receipt = _receipt()
-    control = _install_control(monkeypatch, collector)
-    case = SimpleNamespace(case_id="case-1", expected_provider_id="qwen3-8b-q4-k-m")
+    receipt = _receipt(DEFAULT_PRIMARY_MODEL_SHA256, 33)
+    control = _install_control(monkeypatch, collector, DEFAULT_PRIMARY_MODEL_ID)
+    case = SimpleNamespace(case_id="case-1", expected_provider_id="qwen3-workloads-gpu")
     corpus = SimpleNamespace(sha256="c" * 64, cases=(case,))
 
     monkeypatch.setattr(collector, "load_selected_text_worker_load_receipt", lambda _path: receipt)
@@ -103,13 +118,15 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
     monkeypatch.setattr(
         collector,
         "file_digest",
-        lambda path: PRIMARY_MODEL_SHA256 if path.name == "qwen.gguf" else HEBREW_MODEL_SHA256,
+        lambda path: (
+            DEFAULT_PRIMARY_MODEL_SHA256 if path.name == "qwen.gguf" else HEBREW_MODEL_SHA256
+        ),
     )
 
     async def run_case(_interface, _case, _index, _timeout):
         return {
             "caseId": "case-1",
-            "result": {"providerId": "qwen3-8b-q4-k-m"},
+            "result": {"providerId": "qwen3-workloads-gpu"},
             "latencyMs": 4,
         }
 
@@ -140,7 +157,7 @@ def test_collector_copies_live_worker_models_after_digest_agreement(monkeypatch)
 def test_collector_accepts_every_artifact_the_manifest_declares():
     """A worker that installed all three manifest artifacts is ready, not broken."""
     collector = _collector_module()
-    manifest = json.loads((ROOT / "plugin-manifests/selected-text-tools.json").read_text())
+    manifest = _manifest()
     declared = [artifact["id"] for artifact in manifest["plugin"]["artifacts"]]
     assert "qwen3-5-9b-iq4-xs" in declared
 
@@ -154,20 +171,50 @@ def test_collector_accepts_every_artifact_the_manifest_declares():
                     "artifacts": [{"id": identifier, "ready": True} for identifier in declared],
                 }
             ]
-        }
+        },
+        _receipt(DEFAULT_PRIMARY_MODEL_SHA256, 33),
+        manifest,
+    )
+
+
+@given(st.permutations((DEFAULT_PRIMARY_MODEL_ID, "dictalm2-hebrew-q4-k-m", "unused")))
+def test_receipt_selected_readiness_is_independent_of_inventory_order(artifact_ids):
+    collector = _collector_module()
+    inventory = {
+        "plugins": [
+            {
+                "id": "selected-text-tools",
+                "version": "1.1.0",
+                "workerState": "ready",
+                "artifacts": [
+                    {"id": artifact_id, "ready": artifact_id != "unused"}
+                    for artifact_id in artifact_ids
+                ],
+            }
+        ]
+    }
+
+    collector._require_ready(
+        inventory,
+        _receipt(DEFAULT_PRIMARY_MODEL_SHA256, 33),
+        _manifest(),
     )
 
 
 @pytest.mark.parametrize(
     ("artifacts", "detail"),
     [
-        ([{"id": "qwen3-8b-q4-k-m", "ready": True}], "not installed: dictalm2-hebrew-q4-k-m"),
+        (
+            [{"id": DEFAULT_PRIMARY_MODEL_ID, "ready": True}],
+            "not installed: dictalm2-hebrew-q4-k-m",
+        ),
         (
             [
                 {"id": "qwen3-8b-q4-k-m", "ready": True},
+                {"id": DEFAULT_PRIMARY_MODEL_ID, "ready": False},
                 {"id": "dictalm2-hebrew-q4-k-m", "ready": False},
             ],
-            "not ready: dictalm2-hebrew-q4-k-m",
+            f"not ready: dictalm2-hebrew-q4-k-m, {DEFAULT_PRIMARY_MODEL_ID}",
         ),
     ],
 )
@@ -185,7 +232,20 @@ def test_collector_names_the_routed_artifact_that_is_missing_or_unready(artifact
                         "artifacts": artifacts,
                     }
                 ]
-            }
+            },
+            _receipt(DEFAULT_PRIMARY_MODEL_SHA256, 33),
+            _manifest(),
+        )
+
+
+def test_collector_refuses_a_receipt_model_the_manifest_does_not_declare():
+    collector = _collector_module()
+
+    with pytest.raises(RuntimeError, match="declared selectable primary"):
+        collector._require_ready(
+            json.loads(_inventory(DEFAULT_PRIMARY_MODEL_ID)),
+            _receipt("0" * 64, 33),
+            _manifest(),
         )
 
 
@@ -242,8 +302,8 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
     wrong_name, detail, monkeypatch
 ):
     collector = _collector_module()
-    receipt = _receipt()
-    control = _install_control(monkeypatch, collector)
+    receipt = _receipt(DEFAULT_PRIMARY_MODEL_SHA256, 33)
+    control = _install_control(monkeypatch, collector, DEFAULT_PRIMARY_MODEL_ID)
     monkeypatch.setattr(collector, "load_selected_text_worker_load_receipt", lambda _path: receipt)
     monkeypatch.setattr(
         collector,
@@ -255,7 +315,7 @@ def test_collector_refuses_local_model_bytes_that_disagree_with_receipt(
         if path.name == wrong_name:
             return "0" * 64
         if path.name == "qwen.gguf":
-            return PRIMARY_MODEL_SHA256
+            return DEFAULT_PRIMARY_MODEL_SHA256
         return HEBREW_MODEL_SHA256
 
     monkeypatch.setattr(collector, "file_digest", digest)

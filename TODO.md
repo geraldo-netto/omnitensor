@@ -4,7 +4,7 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0383 | open | medium | s | `scripts/collect-selected-text-acceptance.py` verifies `--qwen-model` against the live worker load receipt, but the documented invocation passes the 8B while the documented install now mounts the `qwen3-5-9b-iq4-xs` default. A default worker receipt therefore names the 9B and refuses that collector command. Take the model from the receipt, or require the operator to name the model the worker actually loaded. |
+| OMNI-0631 | open | low | xs | Add `measure-ocr-enrichment.py` to the script inventory asserted by `tests/test_scripts.py`; the current whole-file gate fails because the executable exists but the expected list still names only four scripts. |
 
 ## Blocked / Deferred
 
