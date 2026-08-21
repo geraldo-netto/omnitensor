@@ -146,10 +146,12 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         2,
         6,
         31,
-        14,
+        # snapshot-forecast grew _roots_document when OMNI-0606 merged the
+        # two root-document bodies into it.
+        15,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 232
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 233
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }

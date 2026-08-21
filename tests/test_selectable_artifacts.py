@@ -26,7 +26,13 @@ FIXED_ROLE = {
     "selected-text-tools": {"dictalm2-hebrew-q4-k-m"},
     # The vision model became choosable in OMNI-0587/0588: the 9B is the
     # default and the 7B the alternative, so only the speech model is fixed.
-    "media-transcription": {"whisper-small-multilingual"},
+    # Speech and the OCR enrichment pair (OMNI-0607) have fixed roles: the
+    # person chooses the vision model; whisper and OCR are not alternatives.
+    "media-transcription": {
+        "whisper-small-multilingual",
+        "ppocrv6-medium-det",
+        "ppocrv6-medium-rec",
+    },
     "event-extraction": set(),
     "file-organizer": set(),
 }

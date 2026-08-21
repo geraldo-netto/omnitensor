@@ -290,6 +290,10 @@ DECLARED_ARTIFACTS = {
         "qwen2-5-vl-7b-instruct",
         "qwen3-5-9b-q4-k-m",
         "whisper-small-multilingual",
+        # The OCR enrichment pair (OMNI-0607), fixed-role beside the
+        # selectable vision models.
+        "ppocrv6-medium-det",
+        "ppocrv6-medium-rec",
     ],
     "selected-text-tools": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
 }
