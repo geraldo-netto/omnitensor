@@ -779,6 +779,11 @@ class InstalledPluginRuntime:
             pending.cancel()
         if exits:
             await asyncio.gather(*exits, return_exceptions=True)
+        # A shielded stop_worker survives those cancels; the supervisor must
+        # not be stopped while one is still stopping a worker of its own.
+        stops = tuple(self._idle_stops.values())
+        if stops:
+            await asyncio.gather(*stops, return_exceptions=True)
         monitor = self._grant_monitor
         self._grant_monitor = None
         if monitor is not None:

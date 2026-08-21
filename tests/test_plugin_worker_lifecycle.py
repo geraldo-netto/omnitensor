@@ -384,3 +384,32 @@ def test_a_stop_that_fails_after_the_shield_is_cut_is_still_logged(tmp_path, cap
     with caplog.at_level("ERROR"):
         asyncio.run(scenario())
     assert any("Could not stop the idle worker" in record.message for record in caplog.records)
+
+
+def test_runtime_stop_waits_out_an_in_flight_idle_stop(tmp_path):
+    """The supervisor is not torn down while it is still stopping a worker."""
+
+    supervisor = SlowStop()
+    timer = Timer()
+    subject = runtime(tmp_path, supervisor, sleep=timer)
+
+    async def scenario():
+        await subject._acquire_worker("plugin")
+        subject._release_worker("plugin")
+        timer.release.set()
+        await supervisor.stop_entered.wait()
+        shutdown = asyncio.ensure_future(subject.stop())
+        for _turn in range(5):
+            await asyncio.sleep(0)
+        # The worker stop is still running; the supervisor stop has not begun.
+        assert "supervisor-stop" not in supervisor.order
+        supervisor.stop_release.set()
+        await shutdown
+
+    async def supervisor_stop():
+        supervisor.order.append("supervisor-stop")
+        return ()
+
+    supervisor.stop = supervisor_stop
+    asyncio.run(scenario())
+    assert supervisor.order == ["ensure", "stopped", "supervisor-stop"]
