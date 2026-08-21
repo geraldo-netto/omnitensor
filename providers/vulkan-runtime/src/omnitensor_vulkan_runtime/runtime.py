@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import json
+import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +37,8 @@ from omnitensor.plugins.tuning import WorkloadTuning
 from .grammar import grammar_schema
 from .grounding import bind_grounding_metadata, fragment_span
 from .hints import citable_hint
+
+LOGGER = logging.getLogger(__name__)
 
 MAX_RUNTIME_CONTEXT_TOKENS = 32_768
 # How many model layers to place on the GPU. -1 is llama.cpp's "all of them",
@@ -206,7 +210,8 @@ class LlamaVulkanRuntime:
             cancellation.raise_if_cancelled()
             self._active_request = request.request_id
             await progress.report(_generation_progress(request.request_id, 0.15))
-            raw = await asyncio.to_thread(self._generate_sync, task, request, cancellation)
+            beat = _DecodeBeat(asyncio.get_running_loop(), progress, request.request_id)
+            raw = await asyncio.to_thread(self._generate_sync, task, request, cancellation, beat)
             cancellation.raise_if_cancelled()
             await progress.report(_generation_progress(request.request_id, 0.95))
             return raw
@@ -378,12 +383,13 @@ class LlamaVulkanRuntime:
         task: GenerationTask,
         request: GenerationRequest,
         cancellation: CancellationToken,
+        beat: _DecodeBeat | None = None,
     ) -> str:
         with self._in_use:
             llama = self._llama
             if llama is None:
                 raise RuntimeError("model not loaded")
-            return self._generate_locked(llama, task, request, cancellation)
+            return self._generate_locked(llama, task, request, cancellation, beat)
 
     def _generate_locked(
         self,
@@ -391,6 +397,7 @@ class LlamaVulkanRuntime:
         task: GenerationTask,
         request: GenerationRequest,
         cancellation: CancellationToken,
+        beat: _DecodeBeat | None = None,
     ) -> str:
         content = _private_content(self._store, request)
         instruction = task.instruction_template.replace("{{UNTRUSTED_CONTENT}}", content)
@@ -414,7 +421,7 @@ class LlamaVulkanRuntime:
         tuning_message = self._tuning.message()
         if tuning_message is not None:
             messages.append(tuning_message)
-        raw = _complete_json(llama, messages, task, cancellation, self._stopping)
+        raw = _complete_json(llama, messages, task, cancellation, self._stopping, beat)
         reconsideration = self._prompting.reconsideration(task, hint, raw, request, self._store)
         if reconsideration is not None:
             messages.extend(
@@ -423,7 +430,7 @@ class LlamaVulkanRuntime:
                     {"role": "user", "content": reconsideration},
                 )
             )
-            raw = _complete_json(llama, messages, task, cancellation, self._stopping)
+            raw = _complete_json(llama, messages, task, cancellation, self._stopping, beat)
         return bind_grounding_metadata(raw, task, request, self._store)
 
     def _release(self) -> None:
@@ -444,12 +451,58 @@ class LlamaVulkanRuntime:
             lease.close()
 
 
+class _DecodeBeat:
+    """Progress spoken from inside the decode, so the silence clocks see life.
+
+    Both deadlines measure silence (OMNI-0578), yet this worker used to
+    speak exactly twice per call -- 0.15 before and 0.95 after the whole
+    decode -- while the chunk loop received live tokens the entire time.
+    With partial offload legal (OMNI-0586) a decode can honestly outlast
+    any fixed budget, so a demonstrably alive generation was still killed
+    as a hang. Every chunk lands here; at most one PROGRESS frame per
+    interval crosses the wire, scheduled onto the worker loop because the
+    decode runs in a thread. The fraction stays at 0.5: how far along a
+    stream of unknown length is cannot be said, only that it is moving.
+    """
+
+    _INTERVAL_SECONDS = 5.0
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, progress, request_id: str) -> None:
+        self._loop = loop
+        self._progress = progress
+        self._request_id = request_id
+        self._last = time.monotonic()
+
+    def __call__(self) -> None:
+        now = time.monotonic()
+        if now - self._last < self._INTERVAL_SECONDS:
+            return
+        self._last = now
+        future = asyncio.run_coroutine_threadsafe(
+            self._progress.report(_generation_progress(self._request_id, 0.5)), self._loop
+        )
+        future.add_done_callback(_observed)
+
+
+def _observed(future) -> None:
+    """Retrieve the report's outcome so a failure is not an unretrieved task.
+
+    A beat that could not be delivered does not fail the generation -- the
+    next chunk will try again -- but it must not die silently either.
+    """
+    if future.cancelled():
+        return
+    if future.exception() is not None:
+        LOGGER.warning("a decode progress beat was not delivered", exc_info=future.exception())
+
+
 def _complete_json(
     llama,
     messages: list[dict[str, str]],
     task: GenerationTask,
     cancellation: CancellationToken,
     stopping: threading.Event | None = None,
+    beat: _DecodeBeat | None = None,
 ) -> str:
     reply = llama.create_chat_completion(
         messages=messages,
@@ -465,6 +518,8 @@ def _complete_json(
     )
     chunks = []
     for reply_chunk in reply:
+        if beat is not None:
+            beat()
         cancellation.raise_if_cancelled()
         if stopping is not None and stopping.is_set():
             # `terminate` is waiting to close this model: stop reading it now,

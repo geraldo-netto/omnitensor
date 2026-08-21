@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0595 | open | medium | m | **A streaming decode is invisible to the silence clocks, and OMNI-0586 makes the blind stretch unbounded.** Both deadlines now measure silence (OMNI-0578), but the vulkan generation worker speaks exactly twice per call — 0.15 before and 0.95 after the whole decode (`providers/vulkan-runtime/src/omnitensor_vulkan_runtime/runtime.py:202-205`) — while `_complete_json` receives live token chunks the entire time (`:452-461`) and reports none of them. With partial offload legal, decode speed falls with the offloaded fraction, so a demonstrably alive generation that outlives `GENERATIVE_CALL_TIMEOUT_SECONDS = 1500` (`src/omnitensor/plugins/worker_budgets.py:37`) is still killed as a hang — the outcome OMNI-0578 was written to end, reachable again through the new knob. The chunk loop is the natural beat: report progress every N chunks; it already crosses as a PROGRESS frame and beats both clocks via `_BeatingReporter`. |
 
 ## Blocked
 

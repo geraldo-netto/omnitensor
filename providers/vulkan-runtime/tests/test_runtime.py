@@ -931,7 +931,8 @@ def test_runtime_generate_reloads_exact_model_and_forwards_exact_arguments(tmp_p
         adapter._llama = object()
         return NativeLoadReport("llama.cpp-vulkan", "Vulkan", 29, 29, False)
 
-    def generate(received_task, received_request, received_cancellation):
+    def generate(received_task, received_request, received_cancellation, received_beat):
+        assert isinstance(received_beat, runtime._DecodeBeat)
         calls.append(("generate", received_task, received_request, received_cancellation))
         return '{"ok":true}'
 
@@ -3692,3 +3693,80 @@ def test_a_mistyped_gpu_layer_budget_refuses_instead_of_maximising(monkeypatch):
     assert _gpu_layer_budget() == 24
     monkeypatch.delenv(GPU_LAYERS_VARIABLE)
     assert _gpu_layer_budget() == -1
+
+
+def test_a_streaming_decode_beats_the_silence_clocks(tmp_path, monkeypatch):
+    """Every chunk offers a beat, and the beats reach the reporter (OMNI-0595).
+
+    The worker used to speak exactly twice per call -- 0.15 before and 0.95
+    after the whole decode -- so both silence deadlines saw a live streaming
+    generation as a hang; with partial offload legal, a decode can honestly
+    outlast any fixed budget. The interval is zeroed here so each chunk
+    reports; in production at most one frame per interval crosses the wire.
+    """
+
+    monkeypatch.setattr(runtime, "grammar_schema", lambda _schema: {})
+    monkeypatch.setattr(runtime._DecodeBeat, "_INTERVAL_SECONDS", 0.0)
+    adapter = _runtime(tmp_path)
+    model = tmp_path / "model.gguf"
+    model.touch()
+    adapter._model_path = model
+
+    class Llama:
+        def create_chat_completion(self, **_kwargs):
+            return iter(
+                (
+                    {"choices": [{"delta": {"content": '{"ok"'}}]},
+                    {"choices": [{"delta": {"content": ":true}"}}]},
+                )
+            )
+
+        def close(self):
+            return None
+
+    adapter._llama = Llama()
+    progress = Progress()
+
+    reply = asyncio.run(
+        adapter.generate(
+            _task(),
+            GenerationRequest("job-1", "selected-text-tools", ()),
+            CancellationController(),
+            progress,
+        )
+    )
+
+    assert reply == '{"ok":true}'
+    beats = [value for value in progress.values if value.fraction == 0.5]
+    assert len(beats) == 2
+    assert beats[0] == PluginProgress("job-1", "native-generation", 0.5, "", 1)
+    # The bookends still frame the decode.
+    assert progress.values[0].fraction == 0.15
+    assert progress.values[-1].fraction == 0.95
+
+
+def test_the_beat_throttles_to_its_interval(monkeypatch):
+    """One frame per interval, however many chunks arrive between them."""
+
+    ticks = iter((0.0, 1.0, 2.0, 6.0, 7.0, 12.0))
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: next(ticks))
+    reported = []
+
+    class Loop:
+        pass
+
+    def threadsafe(coroutine, loop):
+        reported.append(coroutine)
+        coroutine.close()
+
+        class Done:
+            def add_done_callback(self, _callback):
+                return None
+
+        return Done()
+
+    monkeypatch.setattr(runtime.asyncio, "run_coroutine_threadsafe", threadsafe)
+    beat = runtime._DecodeBeat(Loop(), Progress(), "job-1")
+    for _chunk in range(5):
+        beat()
+    assert len(reported) == 2
