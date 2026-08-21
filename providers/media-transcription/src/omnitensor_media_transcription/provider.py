@@ -16,6 +16,7 @@ from omnitensor.plugins.media_transcription import (
 from omnitensor.sdk import current_plugin_bootstrap
 
 from .documents import DocumentPageTranscriber, _open_document, _read_page
+from .enrichment import EnrichedVisualTranscriber
 from .errors import MediaGpuError
 from .formats import (
     AUDIO_SAMPLE_RATE,
@@ -36,6 +37,7 @@ from .models import (
     WhisperVulkanTranscriber,
     _close_whisper,
 )
+from .ocr import VulkanOcr
 from .presentations import (
     PresentationArchiveTranscriber,
     _joined_slide_text,
@@ -52,6 +54,8 @@ VISION_ARTIFACT_ID = "qwen3-5-9b-q4-k-m"
 LEGACY_VISION_ARTIFACT_ID = "qwen2-5-vl-7b-instruct"
 SPEECH_ARTIFACT_ID = "whisper-small-multilingual"
 VISION_PROJECTOR = "mmproj.gguf"
+OCR_DET_ARTIFACT_ID = "ppocrv6-medium-det"
+OCR_REC_ARTIFACT_ID = "ppocrv6-medium-rec"
 
 
 def create() -> MediaTranscriptionPlugin:
@@ -87,6 +91,19 @@ def create() -> MediaTranscriptionPlugin:
     adapter = AvMediaAdapter()
     whisper = WhisperVulkanTranscriber(speech.path, adapter, lease)
     qwen = QwenVulkanVisualTranscriber(vision.path, projector, lease)
+    # The OCR enrichment lane (OMNI-0608/0609): found rather than required —
+    # an uninstalled pair is a refusal the receipts name, never a worker
+    # that will not start. Every visual surface — frames, slides, pages —
+    # goes through the same enriched seam, so the always-runs rule holds
+    # everywhere a frame is read.
+    ocr_det = bootstrap.find_artifact(OCR_DET_ARTIFACT_ID)
+    ocr_rec = bootstrap.find_artifact(OCR_REC_ARTIFACT_ID)
+    ocr = VulkanOcr(
+        ocr_det.path if ocr_det is not None else None,
+        ocr_rec.path if ocr_rec is not None else None,
+        ocr_rec.path.parent / "labels.txt" if ocr_rec is not None else None,
+    )
+    visual = EnrichedVisualTranscriber(ocr, qwen)
 
     async def preflight() -> None:
         await asyncio.to_thread(qwen._runtime)
@@ -98,9 +115,9 @@ def create() -> MediaTranscriptionPlugin:
         probe=adapter,
         speech=whisper,
         frames=adapter,
-        vision=qwen,
-        presentations=PresentationArchiveTranscriber(qwen),
-        documents=DocumentPageTranscriber(qwen),
+        vision=visual,
+        presentations=PresentationArchiveTranscriber(visual),
+        documents=DocumentPageTranscriber(visual),
         preflight=preflight,
     )
 

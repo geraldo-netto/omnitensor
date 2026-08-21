@@ -84,12 +84,36 @@ class VisualFrame:
 
 
 @dataclass(frozen=True, slots=True)
+class RecognisedLine:
+    """One text line a detector located, in original-image coordinates.
+
+    The OCR enrichment lane's answer (OMNI-0609): exact glyphs with pixel
+    coordinates, the one thing a vision model structurally cannot give. The
+    oriented box is named for what it is — ``thickness`` is the
+    stroke-to-stroke height, ``length`` the reading-direction extent.
+    """
+
+    text: str
+    confidence: float
+    box_score: float
+    center_x: float
+    center_y: float
+    thickness: float
+    length: float
+    angle: float
+    vertical: bool
+
+
+@dataclass(frozen=True, slots=True)
 class VisualTranscript:
     timestamp_ms: int | None
     visible_text: str
     description: str
     slide_number: int | None = None
     page_number: int | None = None
+    # Enrichment, never a gate: empty when the OCR lane refused or found
+    # nothing, and the vision model's fields above stand either way.
+    ocr_lines: tuple[RecognisedLine, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -568,12 +592,19 @@ def _validated_visual(value: object) -> VisualTranscript:
         )
     ):
         raise MediaTranscriptionError("visual-invalid", "visual transcript is invalid")
+    lines = tuple(value.ocr_lines or ())
+    if any(
+        not isinstance(line, RecognisedLine) or not isinstance(line.text, str) or not line.text
+        for line in lines
+    ):
+        raise MediaTranscriptionError("visual-invalid", "visual transcript is invalid")
     return VisualTranscript(
         value.timestamp_ms,
         _bounded_content(value.visible_text, required=False),
         _bounded_content(value.description, required=True),
         value.slide_number,
         value.page_number,
+        lines,
     )
 
 
@@ -693,6 +724,7 @@ __all__ = [
     "AUTOMATIC_LANGUAGE",
     "DocumentTranscriber",
     "FrameSampler",
+    "RecognisedLine",
     "MAX_IMAGE_PIXELS",
     "MAX_SOURCE_BYTES",
     "MediaInfo",

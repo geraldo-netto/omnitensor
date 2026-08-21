@@ -1105,8 +1105,8 @@ def test_a_chosen_vision_model_is_the_one_that_loads(monkeypatch, tmp_path):
 
     plugin = provider.create()
 
-    assert plugin._vision._model_path == vision_path
+    assert plugin._vision._vision._model_path == vision_path
 
     unchosen = PluginBootstrap(provider.PLUGIN_ID, artifacts, None, lease_path)
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: unchosen)
-    assert provider.create()._vision._model_path == nine_b_path
+    assert provider.create()._vision._vision._model_path == nine_b_path

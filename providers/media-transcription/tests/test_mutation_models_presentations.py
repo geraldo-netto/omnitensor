@@ -986,9 +986,11 @@ def test_create_wires_one_shared_adapter_lease_and_vision_into_every_port(monkey
     assert plugin._probe is plugin._frames
     assert plugin._speech._model_path == speech_path
     assert plugin._speech._decoder is plugin._probe
-    assert plugin._speech._lease is plugin._vision._lease
-    assert plugin._vision._model_path == vision_path
-    assert plugin._vision._projector_path == projector_path
+    # The visual seam is the enrichment wrapper (OMNI-0609): every surface
+    # shares the one wrapper, and the vision model inside it shares the lease.
+    assert plugin._speech._lease is plugin._vision._vision._lease
+    assert plugin._vision._vision._model_path == vision_path
+    assert plugin._vision._vision._projector_path == projector_path
     assert plugin._presentations._vision is plugin._vision
     assert plugin._documents._vision is plugin._vision
 
