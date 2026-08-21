@@ -140,6 +140,7 @@ class FilesystemSandbox:
             "1",
         ]
         command.extend(_python_environment(self.python_path))
+        command.extend(_gpu_layer_environment())
         # A worker with no declared network grant gets its own empty network
         # namespace, so a plugin cannot reach a socket, a name server, or the
         # local bus regardless of what its code attempts.
@@ -233,6 +234,19 @@ def _python_environment(python_path: str | None) -> tuple[str, ...]:
     # or relocated install otherwise points outside the mount namespace before
     # the worker can parse --import-path.
     return "--setenv", "PYTHONPATH", python_path
+
+
+def _gpu_layer_environment() -> tuple[str, ...]:
+    """The person's GPU layer budget, carried across --clearenv when set.
+
+    OMNI-0586 made the budget a knob; --clearenv stripped it, so it worked
+    only in host-side harnesses (OMNI-0589). A plain integer-shaped string,
+    forwarded verbatim — the runtime owns parsing it.
+    """
+    gpu_layers = os.environ.get("OMNITENSOR_GPU_LAYERS", "").strip()
+    if not gpu_layers:
+        return ()
+    return ("--setenv", "OMNITENSOR_GPU_LAYERS", gpu_layers)
 
 
 def _permission_path(action: str, value: str) -> str:

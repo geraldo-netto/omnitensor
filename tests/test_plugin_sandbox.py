@@ -454,3 +454,20 @@ def test_network_isolation_holds_against_real_bwrap(granted, expected):
     if completed.returncode != 0:
         pytest.skip(f"bwrap could not run here: {completed.stderr.strip()[:120]}")
     assert completed.stdout.strip() == expected
+
+
+def test_the_gpu_layer_budget_crosses_clearenv_when_set(monkeypatch, tmp_path):
+    """OMNI-0589: --clearenv stripped OMNITENSOR_GPU_LAYERS, so the
+    partial-offload knob (OMNI-0586) worked only outside the sandbox."""
+    declared = frozenset({"accelerator:gpu"})
+    sandbox = FilesystemSandbox.from_permissions(declared, declared)
+
+    monkeypatch.delenv("OMNITENSOR_GPU_LAYERS", raising=False)
+    absent = sandbox.wrap(("/usr/bin/python3", "-V"))
+    assert "OMNITENSOR_GPU_LAYERS" not in absent
+
+    monkeypatch.setenv("OMNITENSOR_GPU_LAYERS", "24")
+    carried = sandbox.wrap(("/usr/bin/python3", "-V"))
+    position = carried.index("OMNITENSOR_GPU_LAYERS")
+    assert carried[position - 1] == "--setenv"
+    assert carried[position + 1] == "24"
