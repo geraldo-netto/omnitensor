@@ -61,10 +61,14 @@ class TestFlowDeadline:
             GENERATIVE_CALL_TIMEOUT_SECONDS + FLOW_MARGIN_SECONDS
         )
 
-    def test_the_margin_never_pushes_past_the_hard_ceiling(self):
+    def test_the_margin_survives_even_the_maximum_declaration(self):
+        """Clamping the sum made both clocks equal at exactly the maximum
+        declaration, recreating the equal-clocks race the margin exists to
+        prevent (OMNI-0596). The ceiling governs declarations; this derived
+        wait always exceeds the worker budget it wraps."""
         document = manifest(budgets={"callTimeoutSeconds": MAX_CALL_TIMEOUT_SECONDS})
-        assert flow_deadline_for(document) == MAX_CALL_TIMEOUT_SECONDS
 
+        assert flow_deadline_for(document) == MAX_CALL_TIMEOUT_SECONDS + 5.0
 
 class TestLimits:
     def test_only_the_deadline_moves(self):

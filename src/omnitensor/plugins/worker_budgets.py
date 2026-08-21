@@ -71,7 +71,12 @@ def flow_deadline_for(manifest: Mapping[str, object]) -> float:
     than the profile that was waiting. So the flow waits a little longer and
     reports only when the worker has stopped reporting at all.
     """
-    return min(call_timeout_for(manifest) + FLOW_MARGIN_SECONDS, MAX_CALL_TIMEOUT_SECONDS)
+    # Not clamped to MAX_CALL_TIMEOUT_SECONDS: that ceiling governs what a
+    # manifest may *declare*, and clamping this derived sum made both clocks
+    # equal at exactly the maximum declaration — recreating the equal-clocks
+    # race the margin exists to prevent (OMNI-0596). The flow always waits
+    # the margin longer than the worker budget it wraps.
+    return call_timeout_for(manifest) + FLOW_MARGIN_SECONDS
 
 
 def _declared_timeout(candidate: object) -> float | None:
