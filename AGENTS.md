@@ -10,26 +10,28 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
   the root `TODO.md` before reporting or acting on it.
 - Do not create duplicate rows; update the existing row when a finding changes.
 - Move findings that cannot progress without external input, hardware, credentials, or a
-  dependency into the `Blocked` table; move them back to `Findings` when they become actionable.
+  dependency into `Blocked / Deferred`; move them back to `Open` when they become actionable.
 - State a dependency in the description, where it can say *why*, rather than as a bare
   list of ids: the ids column carried information nothing read, and a third of the rows
   cited ids that no longer had rows.
 - Once a finding is fully resolved and verified, remove its row in the same scoped commit as
-  the resolution. `done` is transitional only; no completed row may remain after its
-  resolution is committed.
+  the resolution; no completed row may remain after its resolution is committed.
 - A row is removed only when the work is genuinely finished. When an item is implemented
   only in part, keep its row and add to the description exactly what is still missing,
   naming the specific remainder rather than calling it partial. A row deleted after half
   the work silently loses the rest: nothing records it and nobody finds it again. Work
   that the resolution newly reveals is a new row with a new id, not a note appended to
   the old one.
-- Findings intentionally rejected or not planned move to the `Rejected / Won't fix` table with
-  the rationale in the description; never mix them into the active `Findings` table.
+- Findings intentionally rejected or not planned move to `Rejected / Won't fix` with the
+  rationale in the description; never mix them into `Open`.
 - Use stable sequential IDs in the form `OMNI-0001`.
-- Statuses in `Findings`: `open`, `in_progress`, transitional `done`.
-- Status in `Blocked`: `blocked`.
-  Statuses in `Rejected / Won't fix`: `rejected`, `wont_fix`.
-- Severities: `critical`, `high`, `medium`, `low`. Efforts: `xs`, `s`, `m`, `l`, `xl`.
+- Keep root `TODO.md` limited to `# TODO` and exactly three sections in this order: `## Open`,
+  `## Blocked / Deferred`, and `## Rejected / Won't fix`.
+- Use only `open` or `in_progress` in `Open`, and keep only work implementable now there.
+- Use only `blocked` or `deferred` in `Blocked / Deferred`.
+- Use only `rejected` or `wont_fix` in `Rejected / Won't fix`.
+- Use lowercase status, severity, and effort values. Severities: `critical`, `high`, `medium`,
+  `low`. Efforts: `xs`, `s`, `m`, `l`, `xl`. Use `—` when a value is missing.
 - Keep descriptions concise, actionable, and specific.
 - All three tables use exactly this schema:
 
