@@ -30,7 +30,13 @@ def _source(tmp_path: Path, name: str, content: bytes) -> Path:
 
 
 def _small_contract(tmp_path: Path, monkeypatch):
-    content = {"vision": b"vision", "projector": b"projector", "speech": b"speech"}
+    content = {
+        "vision": b"vision",
+        "projector": b"projector",
+        "speech": b"speech",
+        "default-vision": b"default-vision",
+        "default-projector": b"default-projector",
+    }
     paths = {name: _source(tmp_path, f"{name}.bin", value) for name, value in content.items()}
     projector_digest = hashlib.sha256(content["projector"]).hexdigest()
     vision = ArtifactReference(
@@ -46,12 +52,32 @@ def _small_contract(tmp_path: Path, monkeypatch):
         "ggml-whisper",
         hashlib.sha256(content["speech"]).hexdigest(),
     )
+    default_vision = ArtifactReference(
+        "default-vision-test",
+        "1.0.0",
+        "gguf",
+        hashlib.sha256(content["default-vision"]).hexdigest(),
+        (("mmproj.gguf", hashlib.sha256(content["default-projector"]).hexdigest()),),
+    )
     monkeypatch.setattr(installation, "VISION_REFERENCE", vision)
+    monkeypatch.setattr(installation, "DEFAULT_VISION_REFERENCE", default_vision)
+    monkeypatch.setattr(
+        installation, "DEFAULT_VISION_MODEL_SIZE_BYTES", len(content["default-vision"])
+    )
+    monkeypatch.setattr(
+        installation, "DEFAULT_VISION_PROJECTOR_SIZE_BYTES", len(content["default-projector"])
+    )
     monkeypatch.setattr(installation, "SPEECH_REFERENCE", speech)
     monkeypatch.setattr(installation, "VISION_MODEL_SIZE_BYTES", len(content["vision"]))
     monkeypatch.setattr(installation, "VISION_PROJECTOR_SIZE_BYTES", len(content["projector"]))
     monkeypatch.setattr(installation, "SPEECH_MODEL_SIZE_BYTES", len(content["speech"]))
-    sources = MediaArtifactSources(paths["vision"], paths["projector"], paths["speech"])
+    sources = MediaArtifactSources(
+        paths["vision"],
+        paths["projector"],
+        paths["speech"],
+        paths["default-vision"],
+        paths["default-projector"],
+    )
     return content, paths, sources, vision, speech
 
 
@@ -66,7 +92,11 @@ def test_installer_verifies_and_installs_pinned_vision_and_speech(tmp_path, monk
     )
 
     assert receipt["licensesAccepted"] == {"qwen": "Apache-2.0", "whisper": "MIT"}
-    assert [item["id"] for item in receipt["artifacts"]] == [vision.id, speech.id]
+    assert [item["id"] for item in receipt["artifacts"]] == [
+        vision.id,
+        "default-vision-test",
+        speech.id,
+    ]
     assert receipt["artifacts"][0]["companions"] == vision.declared_companions
     assert all(Path(item["path"]).is_file() for item in receipt["artifacts"])
 
@@ -76,7 +106,7 @@ def test_installer_verifies_and_installs_pinned_vision_and_speech(tmp_path, monk
     [("", "MIT"), ("Apache-2.0", ""), ("MIT", "Apache-2.0")],
 )
 def test_installer_requires_exact_license_acceptance(tmp_path, qwen, whisper):
-    sources = MediaArtifactSources(*(tmp_path / name for name in ("a", "b", "c")))
+    sources = MediaArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d", "e")))
 
     with pytest.raises(MediaInstallationError, match="explicitly name Apache-2.0 and MIT"):
         install_media_artifacts(
@@ -229,6 +259,8 @@ def test_parser_exposes_exact_paths_and_licenses():
         "artifact_root": (("--artifact-root",), Path, True),
         "vision_model": (("--vision-model",), Path, True),
         "vision_projector": (("--vision-projector",), Path, True),
+        "default_vision_model": (("--default-vision-model",), Path, True),
+        "default_vision_projector": (("--default-vision-projector",), Path, True),
         "speech_model": (("--speech-model",), Path, True),
         "accept_model_license": (("--accept-model-license",), None, True),
         "accept_whisper_license": (("--accept-whisper-license",), None, True),
@@ -243,7 +275,10 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
         return {"version": 1, "artifacts": []}
 
     monkeypatch.setattr(installation, "install_media_artifacts", fake_install)
-    values = [(tmp_path / name).resolve() for name in ("vision", "projector", "speech")]
+    values = [
+        (tmp_path / name).resolve()
+        for name in ("vision", "projector", "speech", "default-vision", "default-projector")
+    ]
     installation.main(
         [
             "--artifact-root",
@@ -254,6 +289,10 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
             str(values[1]),
             "--speech-model",
             str(values[2]),
+            "--default-vision-model",
+            str(values[3]),
+            "--default-vision-projector",
+            str(values[4]),
             "--accept-model-license",
             "Apache-2.0",
             "--accept-whisper-license",
@@ -274,7 +313,13 @@ def test_cli_surfaces_stable_refusal(tmp_path, monkeypatch):
 
     monkeypatch.setattr(installation, "install_media_artifacts", refused)
     argv = ["--artifact-root", str(tmp_path)]
-    for option in ("--vision-model", "--vision-projector", "--speech-model"):
+    for option in (
+        "--vision-model",
+        "--vision-projector",
+        "--speech-model",
+        "--default-vision-model",
+        "--default-vision-projector",
+    ):
         argv.extend((option, str(tmp_path / option[2:])))
     argv.extend(("--accept-model-license", "Apache-2.0"))
     argv.extend(("--accept-whisper-license", "MIT"))

@@ -23,6 +23,19 @@ from .plugins.artifacts import ArtifactReference
 VISION_MODEL_SIZE_BYTES = 4_683_072_032
 VISION_PROJECTOR_SIZE_BYTES = 1_354_162_912
 SPEECH_MODEL_SIZE_BYTES = 487_601_967
+# The default vision model since OMNI-0588; the pins mirror
+# generation-models/qwen3-5-9b-vl.json. Without it here, a documented fresh
+# install produced a manifest-declared default nothing had mounted, and the
+# whole media worker — whisper included — refused to start (OMNI-0590).
+DEFAULT_VISION_MODEL_SIZE_BYTES = 5_680_522_464
+DEFAULT_VISION_PROJECTOR_SIZE_BYTES = 918_166_080
+DEFAULT_VISION_REFERENCE = ArtifactReference(
+    "qwen3-5-9b-q4-k-m",
+    "1.0.0",
+    "gguf",
+    "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+    (("mmproj.gguf", "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"),),
+)
 VISION_REFERENCE = ArtifactReference(
     "qwen2-5-vl-7b-instruct",
     "1.0.0",
@@ -54,6 +67,8 @@ class MediaArtifactSources:
     vision_model: Path
     vision_projector: Path
     speech_model: Path
+    default_vision_model: Path
+    default_vision_projector: Path
 
 
 def install_media_artifacts(
@@ -73,6 +88,16 @@ def install_media_artifacts(
             VISION_REFERENCE.declared_companions["mmproj.gguf"],
             VISION_PROJECTOR_SIZE_BYTES,
         ),
+        (
+            sources.default_vision_model,
+            DEFAULT_VISION_REFERENCE.sha256,
+            DEFAULT_VISION_MODEL_SIZE_BYTES,
+        ),
+        (
+            sources.default_vision_projector,
+            DEFAULT_VISION_REFERENCE.declared_companions["mmproj.gguf"],
+            DEFAULT_VISION_PROJECTOR_SIZE_BYTES,
+        ),
         (sources.speech_model, SPEECH_REFERENCE.sha256, SPEECH_MODEL_SIZE_BYTES),
     )
     for path, digest, exact_size in expected:
@@ -83,11 +108,17 @@ def install_media_artifacts(
         sources.vision_model,
         companions={"mmproj.gguf": sources.vision_projector},
     )
+    default_vision = installer.install(
+        DEFAULT_VISION_REFERENCE,
+        sources.default_vision_model,
+        companions={"mmproj.gguf": sources.default_vision_projector},
+    )
     speech = installer.install(SPEECH_REFERENCE, sources.speech_model)
     return {
         "version": 1,
         "artifacts": [
             _installed_document(VISION_REFERENCE, vision.path),
+            _installed_document(DEFAULT_VISION_REFERENCE, default_vision.path),
             _installed_document(SPEECH_REFERENCE, speech.path),
         ],
         "licensesAccepted": {"qwen": "Apache-2.0", "whisper": "MIT"},
@@ -116,6 +147,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--vision-model", type=Path, required=True)
     parser.add_argument("--vision-projector", type=Path, required=True)
+    parser.add_argument("--default-vision-model", type=Path, required=True)
+    parser.add_argument("--default-vision-projector", type=Path, required=True)
     parser.add_argument("--speech-model", type=Path, required=True)
     parser.add_argument("--accept-model-license", required=True)
     parser.add_argument("--accept-whisper-license", required=True)
@@ -130,6 +163,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 arguments.vision_model,
                 arguments.vision_projector,
                 arguments.speech_model,
+                arguments.default_vision_model,
+                arguments.default_vision_projector,
             ),
             accepted_model_license=arguments.accept_model_license,
             accepted_whisper_license=arguments.accept_whisper_license,

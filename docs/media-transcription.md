@@ -84,17 +84,19 @@ the legacy `convert` executable.
 
 ## Installing the pinned artifacts
 
-`omnitensor-install-media-artifacts` is the only supported way to get the two
-model families into the artifact store: it verifies each source file's exact
+`omnitensor-install-media-artifacts` is the only supported way to get the
+three model families into the artifact store: it verifies each source file's exact
 byte count and SHA-256 against the pinned release *before* importing anything,
 then installs both families atomically. Copying the files into the store by
 hand skips that check, and a store entry whose digest does not match its
 manifest makes the provider unavailable.
 
-Obtain the three files first, at these exact revisions:
+Obtain the five files first, at these exact revisions:
 
 | File | Source |
 | --- | --- |
+| `Qwen3.5-9B-Q4_K_M.gguf` | `unsloth/Qwen3.5-9B-GGUF` at `3885219b6810b007914f3a7950a8d1b469d598a5` — the default vision model (OMNI-0588) |
+| `mmproj-F16.gguf` | the same repository and revision |
 | `Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf` | `ggml-org/Qwen2.5-VL-7B-Instruct-GGUF` at `508edd0afaa66bb9e9f40587acc2184f02daf1f6` |
 | `mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf` | the same repository and revision |
 | `ggml-small.bin` | `ggerganov/whisper.cpp` at `5359861c739e955e79d9a303bcbc70fb988958b1` |
@@ -110,6 +112,8 @@ OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
   --artifact-root "$OMNI_ARTIFACTS" \
   --vision-model /absolute/path/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf \
   --vision-projector /absolute/path/mmproj-Qwen2.5-VL-7B-Instruct-f16.gguf \
+  --default-vision-model /absolute/path/Qwen3.5-9B-Q4_K_M.gguf \
+  --default-vision-projector /absolute/path/mmproj-F16.gguf \
   --speech-model /absolute/path/ggml-small.bin \
   --accept-model-license Apache-2.0 \
   --accept-whisper-license MIT
