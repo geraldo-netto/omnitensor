@@ -190,17 +190,18 @@ def test_a_trigger_for_another_plugin_is_refused():
     assert caught.value.detail == ("storage metadata requires a storage-intelligence trigger")
 
 
-def test_emission_is_bounded_and_truncation_is_reported():
-    samples = [sample(f"disk-{index}") for index in range(4)]
+def test_every_eligible_device_is_emitted_without_truncation():
+    """OMNI-0392 regression: more devices than the old default of 32 all emit."""
+    count = 100
+    identities = [f"disk-{index:03d}" for index in range(count)]
     subject = StorageIntelligenceCollector(
-        ReplaySource([snapshot(*samples)], label="storage"),
-        permissions(*[f"disk-{index}" for index in range(4)]),
-        [f"disk-{index}" for index in range(4)],
-        max_items=2,
+        ReplaySource([snapshot(*(sample(identity) for identity in identities))], label="storage"),
+        permissions(*identities),
+        identities,
     )
     payload = collect(subject)
-    assert len(payload["items"]) == 2
-    assert payload["truncatedItems"] == 2
+    assert [item["id"] for item in payload["items"]] == identities
+    assert "truncatedItems" not in payload
 
 
 def test_an_invalid_sample_shape_is_refused():

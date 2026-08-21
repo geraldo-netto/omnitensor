@@ -127,12 +127,19 @@ def link_document(item: NetworkLinkSample) -> dict:
 
 def snapshot_document(item: NetworkSnapshot) -> dict:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "source": "network-manager-link-metadata",
         "sourceHealth": str(item.status),
         "observedAtMs": item.observed_at_ms,
         "links": [link_document(value) for value in item.links],
-        "truncatedLinks": 0,
+    }
+
+
+def snapshot_document_v1(item: NetworkSnapshot, truncated_links: int = 0) -> dict:
+    return {
+        **snapshot_document(item),
+        "schemaVersion": 1,
+        "truncatedLinks": truncated_links,
     }
 
 
@@ -275,7 +282,7 @@ def test_train_emits_identity_free_portable_report_and_valid_onnx(tmp_path):
         "b9a0ab63326e01a595c55379b55abbe73a2f08139bb0428b1d8c5feb4afc6ac2"
     )
     assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
-        "ee76da9eb83e42aafb0fe094cce4eb16e65599e47160ceb910a6b3a5e1569f98"
+        "b1a809760a1541eaa4e51caca1c7ec9eb92b5c66a84cf348e445a8d98fe74e6a"
     )
     assert [
         (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
@@ -363,18 +370,33 @@ def test_feature_row_boundary_rejections(snapshots, code):
     ("field", "value"),
     [
         ("schemaVersion", True),
-        ("schemaVersion", 2),
+        ("schemaVersion", 3),
         ("source", "packet-capture"),
         ("sourceHealth", "mystery"),
         ("observedAtMs", True),
         ("links", "bad"),
-        ("truncatedLinks", True),
-        ("truncatedLinks", 1),
+        ("truncatedLinks", 0),
     ],
 )
 def test_snapshot_document_contract_is_exact(field, value):
     document = snapshot_document(snapshot(0))
     document[field] = value
+    assert error_code(lambda: _snapshot_from_document(document)) == "snapshot-invalid"
+
+
+def test_a_persisted_version_1_snapshot_without_truncation_stays_readable():
+    parsed = _snapshot_from_document(snapshot_document_v1(snapshot(0)))
+    assert parsed == snapshot(0)
+
+
+@pytest.mark.parametrize("truncated", [True, 1, -1, "0"])
+def test_a_version_1_snapshot_missing_links_is_refused(truncated):
+    document = snapshot_document_v1(snapshot(0), truncated_links=truncated)
+    assert error_code(lambda: _snapshot_from_document(document)) == "snapshot-invalid"
+
+
+def test_a_version_2_snapshot_may_not_carry_the_retired_truncation_counter():
+    document = {**snapshot_document(snapshot(0)), "truncatedLinks": 0}
     assert error_code(lambda: _snapshot_from_document(document)) == "snapshot-invalid"
 
 
@@ -466,7 +488,9 @@ def test_replay_error_detail_and_exact_size_boundaries(tmp_path, monkeypatch):
 
     path.write_bytes(b"{}\n")
     invalid_document = training_error(lambda: load_network_replay(path))
-    assert invalid_document.detail == ("network replay line 1: network snapshot fields are invalid")
+    assert invalid_document.detail == (
+        "network replay line 1: network snapshot identity is invalid"
+    )
 
     raw = write_replay(path, normal_snapshots(2))
     monkeypatch.setattr("omnitensor.training.network.MAX_REPLAY_BYTES", len(raw))

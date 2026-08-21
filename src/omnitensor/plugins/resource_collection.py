@@ -27,7 +27,6 @@ from .kernel_telemetry import AbsentAggregateSource, KernelAggregateSource
 RESOURCE_PLUGIN_ID = "resource-scheduler"
 RESOURCE_METADATA_PERMISSION = "read:resource-metadata"
 RESOURCE_UNIT_PERMISSION_PREFIX = "read:resource-unit/"
-DEFAULT_MAX_UNITS = 64
 MAX_PERCENT_MILLI = 100_000
 MAX_MEMORY_BYTES = 2**63 - 1
 MAX_TASKS = 2**32
@@ -114,11 +113,10 @@ class ResourceSchedulerCollector(BoundedCollector[ResourceSample]):
     def __init__(
         self,
         *args,
-        max_items: int = DEFAULT_MAX_UNITS,
         kernel_source: KernelAggregateSource | None = None,
         **changes,
     ) -> None:
-        super().__init__(*args, max_items=max_items, **changes)
+        super().__init__(*args, **changes)
         # Absent unless a helper is wired in: this collector used to construct
         # the socket adapter itself, so a host with no helper paid a stat and a
         # thread hop per tick to be told, every time, that there is no helper.

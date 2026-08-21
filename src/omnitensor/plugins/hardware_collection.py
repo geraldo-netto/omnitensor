@@ -20,7 +20,6 @@ from .collection import BoundedCollector
 HARDWARE_HEALTH_PLUGIN_ID = "hardware-health"
 HARDWARE_METADATA_PERMISSION = "read:hardware-health-metadata"
 HARDWARE_SENSOR_PERMISSION_PREFIX = "read:hardware-sensor/"
-DEFAULT_MAX_SENSORS = 64
 MAX_ERROR_COUNT = _telemetry_types.MAX_ERROR_COUNT
 MAX_PERCENT = _telemetry_types.MAX_PERCENT
 MAX_TEMPERATURE_MILLIDEGREES = _telemetry_types.MAX_TEMPERATURE_MILLIDEGREES
@@ -44,9 +43,6 @@ class HardwareHealthCollector(BoundedCollector[HardwareSample]):
     metadata_permission = HARDWARE_METADATA_PERMISSION
     label = "hardware health metadata"
     source_name = "hwmon-edac-power-service"
-
-    def __init__(self, *args, max_items: int = DEFAULT_MAX_SENSORS, **changes) -> None:
-        super().__init__(*args, max_items=max_items, **changes)
 
     def identity_of(self, item: HardwareSample) -> str:
         return item.stable_id

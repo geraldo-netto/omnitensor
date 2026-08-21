@@ -85,7 +85,7 @@ def document(index: int, *, fault: bool | None = None, injected: bool = False) -
         "label": "fault" if failed else "baseline",
         "labelSource": "injected" if injected else "observed",
         "snapshot": {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "source": "hwmon-edac-power-service",
             "sourceHealth": "ready",
             "observedAtMs": observed,
@@ -108,7 +108,6 @@ def document(index: int, *, fault: bool | None = None, injected: bool = False) -
                 ),
             ],
             "churn": {"added": [], "removed": [], "changed": []},
-            "truncatedItems": 0,
         },
     }
 
@@ -241,7 +240,7 @@ def test_labelled_history_trains_private_portable_hardware_source(tmp_path):
         "c1d970b7adc9531dd00246e7ad241fe8ffe9dddedc05f37c196c8c471a1c0d23"
     )
     assert hashlib.sha256(report_path.read_bytes()).hexdigest() == (
-        "e68fa184cff210501bebd32af13c54c6001111e9d83787e54a868891eea538de"
+        "6036577c5663b8979bf28e23c4810b7b8e5d52a16872ff667b25c9d6c0d483b2"
     )
     assert [
         (item.name, hashlib.sha256(item.SerializeToString()).hexdigest())
@@ -341,13 +340,12 @@ def test_only_fault_labels_may_be_injected():
     ("field", "value"),
     [
         ("schemaVersion", True),
-        ("schemaVersion", 2),
+        ("schemaVersion", 3),
         ("source", "wrong"),
         ("sourceHealth", "degraded"),
         ("observedAtMs", True),
         ("observedAtMs", -1),
-        ("truncatedItems", True),
-        ("truncatedItems", 1),
+        ("truncatedItems", 0),
         ("churn", []),
         ("churn", {"added": [], "removed": []}),
     ],
@@ -356,6 +354,29 @@ def test_snapshot_header_is_exact(field, value):
     snapshot = document(0)["snapshot"]
     snapshot[field] = value
     assert error_code(lambda: _validate_snapshot_header(snapshot)) == "snapshot-invalid"
+
+
+def snapshot_v1(truncated_items: int = 0) -> dict:
+    return {
+        **document(0)["snapshot"],
+        "schemaVersion": 1,
+        "truncatedItems": truncated_items,
+    }
+
+
+def test_a_persisted_version_1_snapshot_without_truncation_stays_readable():
+    assert _validate_snapshot_header(snapshot_v1()) is None
+    value = document(0)
+    value["snapshot"] = snapshot_v1()
+    observation, _semantics = _observation_from_document(value, BINDINGS)
+    assert observation.label == 0
+
+
+@pytest.mark.parametrize("truncated", [True, 1, -1, "0"])
+def test_a_version_1_snapshot_missing_sensors_is_refused(truncated):
+    assert error_code(lambda: _validate_snapshot_header(snapshot_v1(truncated))) == (
+        "snapshot-invalid"
+    )
 
 
 def test_churn_values_and_items_are_arrays():

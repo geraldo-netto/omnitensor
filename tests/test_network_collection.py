@@ -118,7 +118,6 @@ def test_network_collector_runs_end_to_end_through_trigger_coordinator():
         source,
         permission_view("link-a", "link-m", "link-z"),
         ("link-z", "link-a", "link-m"),
-        max_links=2,
     )
     coordinator = TriggerCoordinator()
     coordinator.register_collector("network-peripherals", collector)
@@ -133,7 +132,7 @@ def test_network_collector_runs_end_to_end_through_trigger_coordinator():
     assert outcome.status is CollectionStatus.SUCCEEDED
     assert outcome.output == CollectedOutput(
         {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "source": "network-manager-link-metadata",
             "sourceHealth": "ready",
             "observedAtMs": 10,
@@ -176,6 +175,25 @@ def test_network_collector_runs_end_to_end_through_trigger_coordinator():
                     },
                     "observedAtMs": 9,
                 },
+                {
+                    "stableId": "link-z",
+                    "kind": "wifi",
+                    "state": "up",
+                    "connectivity": "full",
+                    "carrier": True,
+                    "metered": False,
+                    "defaultRoute": True,
+                    "signalPercent": 80,
+                    "counters": {
+                        "receivedBytes": 100,
+                        "transmittedBytes": 200,
+                        "receivedErrors": 1,
+                        "transmittedErrors": 2,
+                        "receivedDrops": 3,
+                        "transmittedDrops": 4,
+                    },
+                    "observedAtMs": 9,
+                },
             ],
             "churn": {
                 "added": [
@@ -186,7 +204,6 @@ def test_network_collector_runs_end_to_end_through_trigger_coordinator():
                 "removed": [],
                 "changed": [],
             },
-            "truncatedLinks": 1,
         }
     )
     encoded = json.dumps(outcome.output.payload)
@@ -252,13 +269,11 @@ def test_allowlist_and_per_link_grants_filter_before_bounding_and_churn():
         ),
         permission_view("link-a"),
         ("link-a", "link-b"),
-        max_links=1,
     )
 
     payload = asyncio.run(collector.collect(trigger())).payload
 
     assert [item["stableId"] for item in payload["links"]] == ["link-a"]
-    assert payload["truncatedLinks"] == 0
     assert payload["churn"] == {
         "added": [{"stableId": "link-a", "kind": "ethernet"}],
         "removed": [],
@@ -276,7 +291,6 @@ def test_empty_allowlist_emits_nothing_even_when_link_grant_exists():
     payload = asyncio.run(collector.collect(trigger())).payload
 
     assert payload["links"] == []
-    assert payload["truncatedLinks"] == 0
     assert payload["churn"] == {"added": [], "removed": [], "changed": []}
 
 
@@ -376,14 +390,14 @@ def test_invalid_output_does_not_replace_last_successful_churn_state():
 
     def invalid_document(*arguments):
         document = build_document(*arguments)
-        document["schemaVersion"] = 2
+        document["schemaVersion"] = 1
         return document
 
     collector._output_document = invalid_document
     with pytest.raises(NetworkCollectionError) as caught:
         asyncio.run(collector.collect(trigger()))
     assert caught.value.code == "output-invalid"
-    assert caught.value.detail == "schemaVersion: 1 was expected"
+    assert caught.value.detail == "schemaVersion: 2 was expected"
 
     collector._output_document = build_document
     recovered = asyncio.run(collector.collect(trigger())).payload
@@ -420,7 +434,8 @@ def test_revoked_link_is_forgotten_without_post_revocation_identity_output():
     assert after_revoke["churn"] == {"added": [], "removed": [], "changed": []}
 
 
-def test_truncated_link_remains_in_churn_until_it_really_disappears():
+def test_every_allowlisted_link_is_emitted_and_tracked_until_it_really_disappears():
+    """OMNI-0392: link-b is emitted alongside link-a, never silently omitted."""
     collector = NetworkMetadataCollector(
         ReplayNetworkMetadataSource(
             [
@@ -431,20 +446,36 @@ def test_truncated_link_remains_in_churn_until_it_really_disappears():
         ),
         permission_view("link-a", "link-b"),
         ("link-a", "link-b"),
-        max_links=1,
     )
 
     initial = asyncio.run(collector.collect(trigger())).payload
     changed = asyncio.run(collector.collect(trigger())).payload
     removed = asyncio.run(collector.collect(trigger())).payload
 
-    assert [item["stableId"] for item in initial["links"]] == ["link-a"]
+    assert [item["stableId"] for item in initial["links"]] == ["link-a", "link-b"]
     assert [item["stableId"] for item in initial["churn"]["added"]] == [
         "link-a",
         "link-b",
     ]
     assert [item["stableId"] for item in changed["churn"]["changed"]] == ["link-b"]
     assert [item["stableId"] for item in removed["churn"]["removed"]] == ["link-b"]
+
+
+def test_more_links_than_the_old_default_are_all_emitted():
+    """OMNI-0392 regression: 100 allowlisted links exceed the old default of 64."""
+    identities = [f"link-{index:03d}" for index in range(100)]
+    collector = NetworkMetadataCollector(
+        ReplayNetworkMetadataSource(
+            [snapshot(*(link(identity) for identity in identities))]
+        ),
+        permission_view(*identities),
+        tuple(identities),
+    )
+
+    payload = asyncio.run(collector.collect(trigger())).payload
+
+    assert [item["stableId"] for item in payload["links"]] == identities
+    assert "truncatedLinks" not in payload
 
 
 @pytest.mark.parametrize(
@@ -544,13 +575,12 @@ def test_replay_requires_a_sequence(value):
 
 
 @pytest.mark.parametrize(
-    ("source", "permissions", "allowlist", "max_links", "clock", "reason"),
+    ("source", "permissions", "allowlist", "clock", "reason"),
     [
         (
             object(),
             permission_view(),
             (),
-            1,
             None,
             "source must implement NetworkMetadataSource",
         ),
@@ -558,7 +588,6 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             object(),
             (),
-            1,
             None,
             "permissions must implement CollectionPermissionGate",
         ),
@@ -566,7 +595,6 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             permission_view(),
             "link-a",
-            1,
             None,
             "allowed_link_ids must be a sequence",
         ),
@@ -574,7 +602,6 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             permission_view(),
             ("link-a", "link-a"),
-            1,
             None,
             "allowed link identities must be unique",
         ),
@@ -582,7 +609,6 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             permission_view(),
             (["unhashable"],),
-            1,
             None,
             "network link stable identity is invalid",
         ),
@@ -590,7 +616,6 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             permission_view(),
             tuple(f"link-{index}" for index in range(MAX_NETWORK_LINKS + 1)),
-            1,
             None,
             f"at most {MAX_NETWORK_LINKS} link identities may be allowed",
         ),
@@ -598,48 +623,28 @@ def test_replay_requires_a_sequence(value):
             ReplayNetworkMetadataSource([]),
             permission_view(),
             (),
-            0,
-            None,
-            f"max_links must be an integer from 1 to {MAX_NETWORK_LINKS}",
-        ),
-        (
-            ReplayNetworkMetadataSource([]),
-            permission_view(),
-            (),
-            True,
-            None,
-            f"max_links must be an integer from 1 to {MAX_NETWORK_LINKS}",
-        ),
-        (
-            ReplayNetworkMetadataSource([]),
-            permission_view(),
-            (),
-            MAX_NETWORK_LINKS + 1,
-            None,
-            f"max_links must be an integer from 1 to {MAX_NETWORK_LINKS}",
-        ),
-        (
-            ReplayNetworkMetadataSource([]),
-            permission_view(),
-            (),
-            1,
             1,
             "clock_ms must be callable",
         ),
     ],
 )
-def test_collector_configuration_is_strict(
-    source, permissions, allowlist, max_links, clock, reason
-):
+def test_collector_configuration_is_strict(source, permissions, allowlist, clock, reason):
     with pytest.raises((TypeError, ValueError)) as excinfo:
         NetworkMetadataCollector(
             source,
             permissions,
             allowlist,
-            max_links=max_links,
             clock_ms=clock,
         )
     assert str(excinfo.value) == reason
+
+
+def test_the_removed_link_emission_cap_is_not_silently_accepted():
+    """OMNI-0392: the max_links ceiling is gone, not ignored."""
+    with pytest.raises(TypeError):
+        NetworkMetadataCollector(
+            ReplayNetworkMetadataSource([]), permission_view(), (), max_links=8
+        )
 
 
 @pytest.mark.parametrize("stable_id", [None, 1, "", "Bad identity", "-bad", "bad-"])
@@ -757,7 +762,7 @@ def test_arbitrary_allowlist_and_grant_intersections_never_leak(allowed, granted
     expected = sorted(allowed & granted)
     assert [item["stableId"] for item in payload["links"]] == expected
     assert [item["stableId"] for item in payload["churn"]["added"]] == expected
-    assert payload["truncatedLinks"] == 0
+    assert "truncatedLinks" not in payload
 
 
 def test_network_collector_documentation_freezes_privacy_and_bounds():
@@ -769,5 +774,6 @@ def test_network_collector_documentation_freezes_privacy_and_bounds():
     assert "read:network-metadata" in guide
     assert "read:network-link/<stable-id>" in guide
     assert "does not capture packets, addresses, SSIDs" in guide
-    assert "64 links by default (256 hard maximum)" in guide
+    assert "contains every allowlisted, granted" in guide
+    assert "at most 256 identities" in guide
     assert "repeated replay snapshot produces empty churn" in guide

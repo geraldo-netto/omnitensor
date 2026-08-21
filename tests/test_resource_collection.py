@@ -222,17 +222,18 @@ def test_a_trigger_for_another_plugin_is_refused():
     assert caught.value.detail == "resource metadata requires a resource-scheduler trigger"
 
 
-def test_emission_is_bounded():
-    samples = [sample(f"unit-{index}.slice") for index in range(4)]
+def test_every_eligible_unit_is_emitted_without_truncation():
+    """OMNI-0392 regression: more units than the old default of 64 all emit."""
+    count = 100
+    identities = [f"unit-{index:03d}.slice" for index in range(count)]
     subject = ResourceSchedulerCollector(
-        ReplaySource([snapshot(*samples)], label="resource"),
-        permissions(*[f"unit-{index}.slice" for index in range(4)]),
-        [f"unit-{index}.slice" for index in range(4)],
-        max_items=2,
+        ReplaySource([snapshot(*(sample(identity) for identity in identities))], label="resource"),
+        permissions(*identities),
+        identities,
     )
     payload = collect(subject)
-    assert len(payload["items"]) == 2
-    assert payload["truncatedItems"] == 2
+    assert [item["id"] for item in payload["items"]] == identities
+    assert "truncatedItems" not in payload
 
 
 def test_an_invalid_sample_shape_is_refused():

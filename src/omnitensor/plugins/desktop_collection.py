@@ -23,7 +23,6 @@ from .collection import BoundedCollector
 DESKTOP_PLUGIN_ID = "desktop-context"
 DESKTOP_CONSENT_PERMISSION = "consent:desktop-context"
 DESKTOP_METADATA_PERMISSION = "read:desktop-context-metadata"
-DEFAULT_MAX_WINDOWS = 64
 MAX_WORKSPACES = 64
 MAX_DIMENSION = 65_536
 
@@ -129,13 +128,11 @@ class DesktopContextCollector(BoundedCollector[WindowSample]):
         permissions,
         session: DesktopSession,
         allowed_ids=(),
-        *,
-        max_items: int = DEFAULT_MAX_WINDOWS,
         **changes,
     ) -> None:
         if not isinstance(session, DesktopSession):
             raise TypeError("session must be a DesktopSession")
-        super().__init__(source, permissions, allowed_ids, max_items=max_items, **changes)
+        super().__init__(source, permissions, allowed_ids, **changes)
         self._session = session
 
     @property

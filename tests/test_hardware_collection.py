@@ -165,31 +165,33 @@ def test_readiness_reports_a_degraded_source():
     assert "degraded" in readiness.detail
 
 
-def test_emission_is_bounded_and_truncation_is_reported():
-    samples = [sample(f"sensor-{index}") for index in range(5)]
+def test_every_allowlisted_sensor_is_emitted_without_truncation():
+    """OMNI-0392 regression: more sensors than the old default of 64 all emit."""
+    count = 100
+    samples = [sample(f"sensor-{index:03d}") for index in range(count)]
+    identities = [f"sensor-{index:03d}" for index in range(count)]
     subject = HardwareHealthCollector(
         ReplaySource([snapshot(*samples)], label="hardware"),
-        permissions(*[f"sensor-{index}" for index in range(5)]),
-        [f"sensor-{index}" for index in range(5)],
-        max_items=2,
+        permissions(*identities),
+        identities,
     )
 
     payload = collect(subject)
 
-    assert len(payload["items"]) == 2
-    assert payload["truncatedItems"] == 3
+    assert [item["id"] for item in payload["items"]] == identities
+    assert "truncatedItems" not in payload
 
 
-def test_churn_covers_every_eligible_sensor_not_only_the_emitted_ones():
-    """A sensor past the cap is still attached, so it is not a removal."""
+def test_churn_covers_exactly_the_emitted_eligible_sensors():
     source = ReplaySource([snapshot(sample("sensor-a"), sample("sensor-b"))] * 2, label="hardware")
     subject = HardwareHealthCollector(
-        source, permissions("sensor-a", "sensor-b"), ("sensor-a", "sensor-b"), max_items=1
+        source, permissions("sensor-a", "sensor-b"), ("sensor-a", "sensor-b")
     )
 
     first = asyncio.run(subject.collect(trigger())).payload
     second = asyncio.run(subject.collect(trigger())).payload
 
+    assert [item["id"] for item in first["items"]] == ["sensor-a", "sensor-b"]
     assert [item["id"] for item in first["churn"]["added"]] == ["sensor-a", "sensor-b"]
     assert second["churn"] == {"added": [], "removed": [], "changed": []}
 
@@ -332,12 +334,29 @@ def test_an_allowlist_must_be_a_collection():
         validated_allowlist("cpu-package-0")
 
 
-@pytest.mark.parametrize("bound", [0, MAX_COLLECTED_ITEMS + 1, True, "8"])
-def test_the_item_bound_is_validated(bound):
-    with pytest.raises(ValueError, match="max_items"):
-        HardwareHealthCollector(
-            ReplaySource([snapshot()]), permissions(CPU), (CPU,), max_items=bound
-        )
+def test_the_removed_emission_cap_is_not_silently_accepted():
+    """OMNI-0392: the max_items ceiling is gone, not ignored."""
+    with pytest.raises(TypeError):
+        HardwareHealthCollector(ReplaySource([snapshot()]), permissions(CPU), (CPU,), max_items=8)
+
+
+def test_an_allowlist_beyond_the_protocol_bound_is_refused():
+    identities = tuple(f"sensor-{index:04d}" for index in range(MAX_COLLECTED_ITEMS + 1))
+    with pytest.raises(ValueError, match=f"at most {MAX_COLLECTED_ITEMS}"):
+        HardwareHealthCollector(ReplaySource([snapshot()]), permissions(CPU), identities)
+
+
+@given(count=st.integers(min_value=1, max_value=96))
+def test_every_eligible_sensor_is_always_emitted(count):
+    """Property: emission equals the allowlisted, granted set at any size."""
+    identities = [f"sensor-{index:03d}" for index in range(count)]
+    subject = HardwareHealthCollector(
+        ReplaySource([snapshot(*(sample(identity) for identity in identities))]),
+        permissions(*identities),
+        identities,
+    )
+    payload = collect(subject)
+    assert [item["id"] for item in payload["items"]] == identities
 
 
 def test_the_source_and_gate_types_are_enforced():

@@ -401,7 +401,9 @@ operation, then run:
 
 The explicit confirmation is enforced by the Python API as well as the CLI.
 It is not proof that the replay is representative. The loader accepts at most
-64 MiB and 200,000 closed-schema snapshots, refuses truncated/unhealthy data,
+64 MiB and 200,000 closed-schema snapshots (current version 2 documents, or
+version 1 documents only when their `truncatedLinks` counter is 0), refuses
+unhealthy data,
 counter regressions, duplicate or decreasing times, and never accepts packet
 payloads. Stable link IDs are used transiently to compute counter deltas, then
 discarded. The report retains only a digest of the exact replay bytes and
@@ -478,7 +480,7 @@ integration must export one closed JSON object per line in increasing time
 order:
 
 ```json
-{"label":"baseline","labelSource":"observed","snapshot":{"schemaVersion":1,"source":"hwmon-edac-power-service","sourceHealth":"ready","observedAtMs":1000,"items":[],"churn":{"added":[],"removed":[],"changed":[]},"truncatedItems":0}}
+{"label":"baseline","labelSource":"observed","snapshot":{"schemaVersion":2,"source":"hwmon-edac-power-service","sourceHealth":"ready","observedAtMs":1000,"items":[],"churn":{"added":[],"removed":[],"changed":[]}}}
 ```
 
 The example shows the wrapper, not a trainable empty sensor set. Every real
@@ -499,7 +501,8 @@ line. Identities are used during intake and omitted from the report:
   --confirm-labels I-confirm-hardware-labels-are-reviewed
 ```
 
-Intake is bounded, rejects truncated/unhealthy snapshots, sensor-set or
+Intake is bounded, accepts version 2 snapshots (or version 1 snapshots whose
+`truncatedItems` counter is 0), rejects unhealthy snapshots, sensor-set or
 kind/unit drift, duplicate/decreasing timestamps, unknown fields, and
 unreviewed labels. Per role it encodes the log-scaled numeric value plus exact
 degraded, critical, and missing indicators over an oldest-first window. The

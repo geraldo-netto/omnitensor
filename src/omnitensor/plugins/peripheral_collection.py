@@ -23,7 +23,6 @@ from .triggers import CollectorReadiness, SourceStatus
 
 PERIPHERAL_METADATA_PERMISSION = "read:peripheral-metadata"
 PERIPHERAL_DEVICE_PERMISSION_PREFIX = "read:peripheral-device/"
-DEFAULT_MAX_PERIPHERAL_DEVICES = 32
 MAX_PERIPHERAL_DEVICES = 64
 MAX_PERIPHERAL_SOURCE_DEVICES = 256
 MAX_PERIPHERAL_ERROR_COUNT = 2**31 - 1
@@ -131,7 +130,6 @@ class PeripheralMetadataCollector(BoundedCollector[PeripheralSample]):
     trigger_label = "peripheral collector"
     source_name = "usb-bluetooth-health-metadata"
     items_key = "devices"
-    truncated_items_key = "truncatedDevices"
     require_allowlist = True
     sort_changed_fields = False
 
@@ -141,7 +139,6 @@ class PeripheralMetadataCollector(BoundedCollector[PeripheralSample]):
         permissions: CollectionPermissionGate,
         allowed_device_ids: Sequence[str],
         *,
-        max_devices: int = DEFAULT_MAX_PERIPHERAL_DEVICES,
         clock_ms: Callable[[], int] | None = None,
     ):
         if not isinstance(source, PeripheralMetadataSource):
@@ -149,13 +146,10 @@ class PeripheralMetadataCollector(BoundedCollector[PeripheralSample]):
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
         allowed = _validated_allowlist(allowed_device_ids)
-        if type(max_devices) is not int or not 1 <= max_devices <= MAX_PERIPHERAL_DEVICES:
-            raise ValueError(f"max_devices must be an integer from 1 to {MAX_PERIPHERAL_DEVICES}")
         super().__init__(
             source,
             permissions,
             allowed,
-            max_items=max_devices,
             clock_ms=clock_ms,
         )
 

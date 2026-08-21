@@ -109,7 +109,6 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
         source,
         permissions,
         ("device-z", "device-a", "device-m", "device-ungranted"),
-        max_devices=2,
     )
     coordinator = TriggerCoordinator()
     coordinator.register_collector("network-peripherals", collector)
@@ -123,7 +122,7 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
     assert outcome.status is CollectionStatus.SUCCEEDED
     assert outcome.output == CollectedOutput(
         {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "source": "usb-bluetooth-health-metadata",
             "sourceHealth": "ready",
             "observedAtMs": 10,
@@ -154,9 +153,23 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
                     "errorCount": 0,
                     "observedAtMs": 9,
                 },
+                {
+                    "stableId": "device-z",
+                    "bus": "bluetooth",
+                    "class": "input",
+                    "health": "ready",
+                    "connected": True,
+                    "authorized": True,
+                    "paired": True,
+                    "trusted": False,
+                    "batteryPercent": None,
+                    "errorCount": 0,
+                    "observedAtMs": 9,
+                },
             ],
-            # Churn covers every eligible device, including the one past
-            # max_devices whose metadata is not emitted (OMNI-0155).
+            # Churn covers exactly the eligible devices, all of which are
+            # emitted (OMNI-0392); unlisted and ungranted devices appear in
+            # neither list.
             "churn": {
                 "added": [
                     {"stableId": "device-a", "bus": "usb"},
@@ -166,7 +179,6 @@ def test_peripheral_collector_filters_grants_and_runs_through_coordinator():
                 "removed": [],
                 "changed": [],
             },
-            "truncatedDevices": 1,
         }
     )
     encoded = json.dumps(outcome.output.payload)
@@ -458,13 +470,12 @@ def test_replay_requires_a_sequence(value):
 
 
 @pytest.mark.parametrize(
-    ("source", "permissions", "allowlist", "max_devices", "clock", "reason"),
+    ("source", "permissions", "allowlist", "clock", "reason"),
     [
         (
             object(),
             permission_view(),
             (),
-            1,
             None,
             "source must implement PeripheralMetadataSource",
         ),
@@ -472,7 +483,6 @@ def test_replay_requires_a_sequence(value):
             ReplayPeripheralMetadataSource([]),
             object(),
             (),
-            1,
             None,
             "permissions must implement CollectionPermissionGate",
         ),
@@ -480,7 +490,6 @@ def test_replay_requires_a_sequence(value):
             ReplayPeripheralMetadataSource([]),
             permission_view(),
             "device-a",
-            1,
             None,
             "allowed_device_ids must be a sequence",
         ),
@@ -488,7 +497,6 @@ def test_replay_requires_a_sequence(value):
             ReplayPeripheralMetadataSource([]),
             permission_view(),
             ("device-a", "device-a"),
-            1,
             None,
             "allowed device identities must be unique",
         ),
@@ -496,7 +504,6 @@ def test_replay_requires_a_sequence(value):
             ReplayPeripheralMetadataSource([]),
             permission_view(),
             tuple(f"device-{index}" for index in range(MAX_PERIPHERAL_DEVICES + 1)),
-            1,
             None,
             f"at most {MAX_PERIPHERAL_DEVICES} device identities may be allowed",
         ),
@@ -504,48 +511,28 @@ def test_replay_requires_a_sequence(value):
             ReplayPeripheralMetadataSource([]),
             permission_view(),
             (),
-            0,
-            None,
-            f"max_devices must be an integer from 1 to {MAX_PERIPHERAL_DEVICES}",
-        ),
-        (
-            ReplayPeripheralMetadataSource([]),
-            permission_view(),
-            (),
-            True,
-            None,
-            f"max_devices must be an integer from 1 to {MAX_PERIPHERAL_DEVICES}",
-        ),
-        (
-            ReplayPeripheralMetadataSource([]),
-            permission_view(),
-            (),
-            MAX_PERIPHERAL_DEVICES + 1,
-            None,
-            f"max_devices must be an integer from 1 to {MAX_PERIPHERAL_DEVICES}",
-        ),
-        (
-            ReplayPeripheralMetadataSource([]),
-            permission_view(),
-            (),
-            1,
             1,
             "clock_ms must be callable",
         ),
     ],
 )
-def test_collector_configuration_is_strict(
-    source, permissions, allowlist, max_devices, clock, reason
-):
+def test_collector_configuration_is_strict(source, permissions, allowlist, clock, reason):
     with pytest.raises((TypeError, ValueError)) as excinfo:
         PeripheralMetadataCollector(
             source,
             permissions,
             allowlist,
-            max_devices=max_devices,
             clock_ms=clock,
         )
     assert str(excinfo.value) == reason
+
+
+def test_the_removed_device_emission_cap_is_not_silently_accepted():
+    """OMNI-0392: the max_devices ceiling is gone, not ignored."""
+    with pytest.raises(TypeError):
+        PeripheralMetadataCollector(
+            ReplayPeripheralMetadataSource([]), permission_view(), (), max_devices=8
+        )
 
 
 @pytest.mark.parametrize("stable_id", [None, 1, "", "Bad identity", "-bad", "bad-"])
@@ -646,12 +633,13 @@ def test_peripheral_documentation_freezes_privacy_grants_churn_and_bounds():
     assert "read:peripheral-metadata" in guide
     assert "read:peripheral-device/<stable-id>" in guide
     assert "serials, Bluetooth addresses and names" in guide
-    assert "32 devices by" in guide
+    assert "contains every allowlisted" in guide
+    assert "at most 64 identities" in guide
     assert "repeated replay snapshot produces empty churn" in guide
 
 
-def test_a_device_past_the_emission_limit_is_not_reported_as_removed():
-    """Tracking only what fit made a still-attached device churn in and out."""
+def test_every_allowlisted_device_is_emitted_and_a_stable_world_has_no_churn():
+    """OMNI-0392: emission and churn cover the same complete eligible set."""
     source = ReplayPeripheralMetadataSource(
         [
             snapshot(device("device-a"), device("device-b")),
@@ -662,7 +650,6 @@ def test_a_device_past_the_emission_limit_is_not_reported_as_removed():
         source,
         permission_view("device-a", "device-b"),
         ("device-a", "device-b"),
-        max_devices=1,
     )
 
     async def scenario():
@@ -672,13 +659,30 @@ def test_a_device_past_the_emission_limit_is_not_reported_as_removed():
 
     first, second = asyncio.run(scenario())
 
-    assert [entry["stableId"] for entry in first["devices"]] == ["device-a"]
-    assert first["truncatedDevices"] == 1
+    assert [entry["stableId"] for entry in first["devices"]] == ["device-a", "device-b"]
+    assert "truncatedDevices" not in first
     assert [entry["stableId"] for entry in first["churn"]["added"]] == [
         "device-a",
         "device-b",
     ]
     assert second["churn"] == {"added": [], "removed": [], "changed": []}
+
+
+def test_more_devices_than_the_old_default_are_all_emitted():
+    """OMNI-0392 regression: 50 allowlisted devices exceed the old default of 32."""
+    identities = [f"device-{index:02d}" for index in range(50)]
+    collector = PeripheralMetadataCollector(
+        ReplayPeripheralMetadataSource(
+            [snapshot(*(device(identity) for identity in identities))]
+        ),
+        permission_view(*identities),
+        tuple(identities),
+    )
+
+    payload = asyncio.run(collector.collect(trigger())).payload
+
+    assert [entry["stableId"] for entry in payload["devices"]] == identities
+    assert "truncatedDevices" not in payload
 
 
 def test_a_device_that_really_detaches_is_still_reported_as_removed():
@@ -692,7 +696,6 @@ def test_a_device_that_really_detaches_is_still_reported_as_removed():
         source,
         permission_view("device-a", "device-b"),
         ("device-a", "device-b"),
-        max_devices=1,
     )
 
     async def scenario():
@@ -704,7 +707,7 @@ def test_a_device_that_really_detaches_is_still_reported_as_removed():
     assert [entry["stableId"] for entry in second["churn"]["removed"]] == ["device-b"]
 
 
-def test_a_truncated_device_still_reports_a_real_change():
+def test_an_emitted_device_still_reports_a_real_change():
     source = ReplayPeripheralMetadataSource(
         [
             snapshot(device("device-a"), device("device-b")),
@@ -715,7 +718,6 @@ def test_a_truncated_device_still_reports_a_real_change():
         source,
         permission_view("device-a", "device-b"),
         ("device-a", "device-b"),
-        max_devices=1,
     )
 
     async def scenario():

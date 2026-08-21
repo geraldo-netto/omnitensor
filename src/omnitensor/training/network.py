@@ -74,8 +74,10 @@ _SNAPSHOT_KEYS = {
     "sourceHealth",
     "observedAtMs",
     "links",
-    "truncatedLinks",
 }
+# Version 1 documents carried a truncation counter; a persisted replay from
+# that era stays readable, but only when it holds every link (truncated == 0).
+_SNAPSHOT_KEYS_V1 = _SNAPSHOT_KEYS | {"truncatedLinks"}
 _LINK_KEYS = {
     "stableId",
     "kind",
@@ -350,22 +352,32 @@ def _training_report(
     )
 
 
-def _snapshot_from_document(document: object) -> NetworkSnapshot:
-    if not isinstance(document, dict) or set(document) != _SNAPSHOT_KEYS:
-        raise TrainingError("snapshot-invalid", "network snapshot fields are invalid")
+def _not_exact_zero(value: object) -> bool:
+    return type(value) is not int or value != 0
+
+
+def _validated_snapshot_version(document: dict) -> int:
     schema_version = document.get("schemaVersion")
     if (
         type(schema_version) is not int
-        or schema_version != 1
+        or schema_version not in (1, 2)
         or document.get("source") != "network-manager-link-metadata"
     ):
         raise TrainingError("snapshot-invalid", "network snapshot identity is invalid")
-    truncated_links = document.get("truncatedLinks")
-    if (
-        type(truncated_links) is not int
-        or truncated_links != 0
-        or not isinstance(document.get("links"), list)
-    ):
+    return schema_version
+
+
+def _snapshot_from_document(document: object) -> NetworkSnapshot:
+    if not isinstance(document, dict):
+        raise TrainingError("snapshot-invalid", "network snapshot fields are invalid")
+    schema_version = _validated_snapshot_version(document)
+    expected_keys = _SNAPSHOT_KEYS_V1 if schema_version == 1 else _SNAPSHOT_KEYS
+    if set(document) != expected_keys:
+        raise TrainingError("snapshot-invalid", "network snapshot fields are invalid")
+    if schema_version == 1 and _not_exact_zero(document.get("truncatedLinks")):
+        # A version 1 replay carrying truncation is incomplete, not readable.
+        raise TrainingError("snapshot-invalid", "network snapshot must contain every link")
+    if not isinstance(document.get("links"), list):
         raise TrainingError("snapshot-invalid", "network snapshot must contain every link")
     try:
         status = SourceStatus(document["sourceHealth"])

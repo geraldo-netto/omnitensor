@@ -3,8 +3,10 @@
 The network and peripheral collectors arrived at the same structure
 independently, and every remaining profile needs it too: consent before
 anything is read, a source that can be replayed instead of touching hardware,
-an allowlist of what may be emitted, a hard cap on how much, and churn reported
-against what was *eligible* rather than what happened to fit.
+an allowlist of what may be emitted, and churn reported over exactly what was
+eligible.  Every allowlisted, granted item is emitted; the allowlist (bounded
+by the schema's protocol frame limit of ``MAX_COLLECTED_ITEMS``) is the only
+ceiling, so nothing a person selected is silently omitted.
 
 Writing that seven more times would be seven more places for one of those rules
 to be forgotten — and the ones that get forgotten are the privacy rules, because
@@ -134,9 +136,8 @@ class BoundedCollector(Generic[Sample]):
     trigger_label: str = ""
     #: Schema identifier written into every emitted document.
     source_name: str = "source"
-    #: Family-specific collection keys; the rest of the envelope stays shared.
+    #: Family-specific collection key; the rest of the envelope stays shared.
     items_key: str = "items"
-    truncated_items_key: str = "truncatedItems"
     #: Privacy-sensitive families require a non-empty explicit allowlist.
     require_allowlist: bool = False
     #: Existing collectors sort changed field names in their churn contract.
@@ -152,21 +153,17 @@ class BoundedCollector(Generic[Sample]):
         permissions: CollectionPermissionGate,
         allowed_ids: Collection[str] = (),
         *,
-        max_items: int = 64,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         if not isinstance(source, MetadataSource):
             raise TypeError("source must implement MetadataSource")
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
-        if type(max_items) is not int or not 1 <= max_items <= MAX_COLLECTED_ITEMS:
-            raise ValueError(f"max_items must be an integer from 1 to {MAX_COLLECTED_ITEMS}")
         if clock_ms is not None and not callable(clock_ms):
             raise TypeError("clock_ms must be callable")
         self._source = source
         self._permissions = permissions
         self._allowed_ids = validated_allowlist(allowed_ids)
-        self._max_items = max_items
         self._clock_ms = clock_ms or _now_ms
         self._previous: dict[str, Sample] = {}
 
@@ -249,21 +246,14 @@ class BoundedCollector(Generic[Sample]):
             key=self.identity_of,
         )
         self._validate_eligible(eligible)
-        selected = eligible[: self._max_items]
-        # Churn is tracked against everything eligible, not the truncated
-        # emission list: an item past the cap is still present, and reporting
-        # it removed would be churn the user never experienced.
+        # Every eligible item is emitted, so churn and emission cover exactly
+        # the same set: what was allowlisted and granted.
         current = {self.identity_of(item): item for item in eligible}
         authorized_previous = {
             identity: item for identity, item in self._previous.items() if self._may_emit(identity)
         }
         churn = self._churn(authorized_previous, current)
-        document = self._output_document(
-            snapshot,
-            selected,
-            churn,
-            len(eligible) - len(selected),
-        )
+        document = self._output_document(snapshot, eligible, churn)
         document.update(await self._output_extensions())
         output = self._collected_output(document)
         # Churn is transactional: invalid snapshots or output construction
@@ -280,16 +270,14 @@ class BoundedCollector(Generic[Sample]):
         snapshot: object,
         selected: Sequence[Sample],
         churn: dict[str, list],
-        truncated: int,
     ) -> dict[str, object]:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "source": self.source_name,
             "sourceHealth": str(snapshot.status),
             "observedAtMs": snapshot.observed_at_ms,
             self.items_key: [self.document_of(item) for item in selected],
             "churn": churn,
-            self.truncated_items_key: truncated,
         }
 
     def _collected_output(self, document: dict[str, object]) -> CollectedOutput:

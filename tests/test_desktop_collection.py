@@ -188,18 +188,18 @@ def test_a_malformed_sample_is_refused(changes):
     assert window_sample_error(sample(**changes)) != ""
 
 
-def test_emission_is_bounded():
-    samples = [sample(window_identity("session-a", f"0x{index}")) for index in range(5)]
+def test_every_eligible_window_is_emitted_without_truncation():
+    """OMNI-0392 regression: more windows than the old default of 64 all emit."""
+    samples = [sample(window_identity("session-a", f"0x{index:03d}")) for index in range(100)]
     subject = DesktopContextCollector(
         ReplaySource([snapshot(*samples)], label="desktop"),
         permissions(),
         SESSION,
         (),
-        max_items=2,
     )
     payload = collect(subject)
-    assert len(payload["items"]) == 2
-    assert payload["truncatedItems"] == 3
+    assert len(payload["items"]) == 100
+    assert "truncatedItems" not in payload
 
 
 def test_withdrawn_consent_is_visible_in_readiness_not_only_at_collection():

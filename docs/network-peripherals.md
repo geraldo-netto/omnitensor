@@ -17,9 +17,10 @@ link observations: opaque stable identity, link kind/state, connectivity,
 carrier, metering, default-route status, signal percentage, monotonic byte,
 error, and drop counters, source health, and timestamps.
 
-Output is sorted by stable identity and capped at 64 links by default (256 hard maximum).
-Extra eligible links are counted, not emitted. Churn is computed over every
-eligible link, including links past the output cap, using only stable identity
+Output is sorted by stable identity and contains every allowlisted, granted
+link; the allowlist itself accepts at most 256 identities, so nothing a person
+selected is silently omitted. Churn is computed over the same eligible links,
+using only stable identity
 and link kind for additions and removals. Changes name public aggregate fields;
 poll timestamps alone do not create changes, and a repeated replay snapshot
 produces empty churn. Duplicate or malformed
@@ -44,9 +45,10 @@ connection/authorization/pairing/trust flags, battery percentage, an aggregate
 error count, and timestamps. It excludes USB descriptors, vendor/product IDs,
 serials, Bluetooth addresses and names, HID events, file contents, and traffic.
 
-Eligible output is sorted by stable identity and capped at 32 devices by
-default (64 hard maximum); source input is rejected above 256 devices. Churn is
-computed over every eligible device, including devices past the output cap:
+Eligible output is sorted by stable identity and contains every allowlisted,
+granted device; the allowlist itself accepts at most 64 identities, and source
+input is rejected above 256 devices. Churn is
+computed over the same eligible devices:
 additions, removals, and changed public fields are stable-sorted. Poll timestamps
 alone do not create changes, and a
 repeated replay snapshot produces empty churn.

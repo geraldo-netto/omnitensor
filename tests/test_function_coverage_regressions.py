@@ -96,10 +96,10 @@ def sample_trigger() -> Trigger:
     return Trigger("sample-plugin", "sample-1", TriggerKind.MANUAL, {}, 1)
 
 
-def sample_collector(*snapshots, max_items=64) -> SampleCollector:
+def sample_collector(*snapshots) -> SampleCollector:
     source = ReplaySource(snapshots, label="sample")
     permissions = SimpleNamespace(allows=lambda _permission: True)
-    return SampleCollector(source, permissions, max_items=max_items)
+    return SampleCollector(source, permissions)
 
 
 def test_base_collector_requires_each_subclass_to_declare_a_plugin_id():
@@ -154,13 +154,10 @@ def test_base_collector_rejects_every_invalid_source_boundary(snapshot):
 
 def test_base_collector_accepts_the_exact_item_limit():
     items = tuple(SimpleNamespace(identity=f"item-{index}") for index in range(MAX_COLLECTED_ITEMS))
-    subject = sample_collector(
-        SourceSnapshot(SourceStatus.READY, 0, items),
-        max_items=MAX_COLLECTED_ITEMS,
-    )
+    subject = sample_collector(SourceSnapshot(SourceStatus.READY, 0, items))
     output = asyncio.run(subject.collect(sample_trigger())).payload
     assert len(output["items"]) == MAX_COLLECTED_ITEMS
-    assert output["truncatedItems"] == 0
+    assert "truncatedItems" not in output
 
 
 def test_target_companion_copy_removes_partial_output_on_overflow(tmp_path):

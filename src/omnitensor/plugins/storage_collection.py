@@ -27,7 +27,6 @@ from .collection import (
 STORAGE_PLUGIN_ID = "storage-intelligence"
 STORAGE_METADATA_PERMISSION = "read:storage-metadata"
 STORAGE_DEVICE_PERMISSION_PREFIX = "read:storage-device/"
-DEFAULT_MAX_DEVICES = 32
 MAX_PERCENT = 100
 MAX_TEMPERATURE_CELSIUS = 150
 MAX_COUNTER = 2**53
@@ -112,9 +111,6 @@ class StorageIntelligenceCollector(BoundedCollector[StorageSample]):
     metadata_permission = STORAGE_METADATA_PERMISSION
     label = "storage metadata"
     source_name = "smart-nvme-io"
-
-    def __init__(self, *args, max_items: int = DEFAULT_MAX_DEVICES, **changes) -> None:
-        super().__init__(*args, max_items=max_items, **changes)
 
     def identity_of(self, item: StorageSample) -> str:
         return item.stable_id

@@ -18,7 +18,6 @@ from .triggers import CollectorReadiness
 NETWORK_METADATA_PERMISSION = "read:network-metadata"
 NETWORK_LINK_PERMISSION_PREFIX = "read:network-link/"
 NETWORK_PERIPHERALS_PLUGIN_ID = "network-peripherals"
-DEFAULT_MAX_NETWORK_LINKS = 64
 MAX_NETWORK_COUNTER = _telemetry_types.MAX_NETWORK_COUNTER
 MAX_NETWORK_LINKS = _telemetry_types.MAX_NETWORK_LINKS
 NetworkConnectivity = _telemetry_types.NetworkConnectivity
@@ -88,7 +87,6 @@ class NetworkMetadataCollector(BoundedCollector[NetworkLinkSample]):
     trigger_label = "network collector"
     source_name = "network-manager-link-metadata"
     items_key = "links"
-    truncated_items_key = "truncatedLinks"
     require_allowlist = True
     sort_changed_fields = False
 
@@ -98,7 +96,6 @@ class NetworkMetadataCollector(BoundedCollector[NetworkLinkSample]):
         permissions: CollectionPermissionGate,
         allowed_link_ids: Sequence[str],
         *,
-        max_links: int = DEFAULT_MAX_NETWORK_LINKS,
         clock_ms: Callable[[], int] | None = None,
     ):
         if not isinstance(source, NetworkMetadataSource):
@@ -106,13 +103,10 @@ class NetworkMetadataCollector(BoundedCollector[NetworkLinkSample]):
         if not isinstance(permissions, CollectionPermissionGate):
             raise TypeError("permissions must implement CollectionPermissionGate")
         allowed = _validated_link_allowlist(allowed_link_ids)
-        if type(max_links) is not int or not 1 <= max_links <= MAX_NETWORK_LINKS:
-            raise ValueError(f"max_links must be an integer from 1 to {MAX_NETWORK_LINKS}")
         super().__init__(
             source,
             permissions,
             allowed,
-            max_items=max_links,
             clock_ms=clock_ms,
         )
 

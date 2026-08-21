@@ -13,7 +13,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "source": {
       "enum": [
@@ -44,15 +44,6 @@
     },
     "devices": {
       "$ref": "#/$defs/items"
-    },
-    "truncatedItems": {
-      "$ref": "#/$defs/truncated"
-    },
-    "truncatedLinks": {
-      "$ref": "#/$defs/truncated"
-    },
-    "truncatedDevices": {
-      "$ref": "#/$defs/truncated"
     },
     "churn": {
       "type": "object",
@@ -106,8 +97,7 @@
         }
       },
       "required": [
-        "items",
-        "truncatedItems"
+        "items"
       ],
       "not": {
         "anyOf": [
@@ -116,12 +106,6 @@
           },
           {
             "required": ["devices"]
-          },
-          {
-            "required": ["truncatedLinks"]
-          },
-          {
-            "required": ["truncatedDevices"]
           }
         ]
       }
@@ -133,8 +117,7 @@
         }
       },
       "required": [
-        "links",
-        "truncatedLinks"
+        "links"
       ],
       "not": {
         "anyOf": [
@@ -143,12 +126,6 @@
           },
           {
             "required": ["devices"]
-          },
-          {
-            "required": ["truncatedItems"]
-          },
-          {
-            "required": ["truncatedDevices"]
           }
         ]
       }
@@ -160,8 +137,7 @@
         }
       },
       "required": [
-        "devices",
-        "truncatedDevices"
+        "devices"
       ],
       "not": {
         "anyOf": [
@@ -170,12 +146,6 @@
           },
           {
             "required": ["links"]
-          },
-          {
-            "required": ["truncatedItems"]
-          },
-          {
-            "required": ["truncatedLinks"]
           }
         ]
       }
@@ -218,11 +188,6 @@
         "type": "object",
         "maxProperties": 32
       }
-    },
-    "truncated": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 1024
     },
     "stableId": {
       "type": "string",

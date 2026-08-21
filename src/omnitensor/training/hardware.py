@@ -61,8 +61,10 @@ _SNAPSHOT_KEYS = {
     "observedAtMs",
     "items",
     "churn",
-    "truncatedItems",
 }
+# Version 1 documents carried a truncation counter; a persisted history from
+# that era stays readable, but only when it holds every sensor (truncated == 0).
+_SNAPSHOT_KEYS_V1 = _SNAPSHOT_KEYS | {"truncatedItems"}
 _ITEM_KEYS = {"id", "kind", "health", "value", "unit", "label", "observedAtMs"}
 
 
@@ -231,7 +233,7 @@ def _observation_from_document(
     if source == "injected" and label != "fault":
         raise TrainingError("label-invalid", "only a fault may have an injected label")
     snapshot = document.get("snapshot")
-    if not isinstance(snapshot, dict) or set(snapshot) != _SNAPSHOT_KEYS:
+    if not isinstance(snapshot, dict) or set(snapshot) not in (_SNAPSHOT_KEYS, _SNAPSHOT_KEYS_V1):
         raise TrainingError("snapshot-invalid", "hardware snapshot fields are invalid")
     _validate_snapshot_header(snapshot)
     items = snapshot["items"]
@@ -252,9 +254,10 @@ def _observation_from_document(
 
 
 def _validate_snapshot_header(snapshot: dict) -> None:
+    schema_version = snapshot.get("schemaVersion")
     if (
-        type(snapshot.get("schemaVersion")) is not int
-        or snapshot["schemaVersion"] != 1
+        type(schema_version) is not int
+        or schema_version not in (1, 2)
         or snapshot.get("source") != "hwmon-edac-power-service"
         or snapshot.get("sourceHealth") != str(SourceStatus.READY)
     ):
@@ -262,7 +265,12 @@ def _validate_snapshot_header(snapshot: dict) -> None:
     observed = snapshot.get("observedAtMs")
     if isinstance(observed, bool) or not isinstance(observed, int) or observed < 0:
         raise TrainingError("snapshot-invalid", "hardware snapshot time is invalid")
-    if type(snapshot.get("truncatedItems")) is not int or snapshot["truncatedItems"] != 0:
+    expected_keys = _SNAPSHOT_KEYS_V1 if schema_version == 1 else _SNAPSHOT_KEYS
+    if set(snapshot) != expected_keys:
+        raise TrainingError("snapshot-invalid", "hardware snapshot fields are invalid")
+    if schema_version == 1 and (
+        type(snapshot.get("truncatedItems")) is not int or snapshot["truncatedItems"] != 0
+    ):
         raise TrainingError("snapshot-invalid", "hardware snapshot must contain every sensor")
     churn = snapshot.get("churn")
     if not isinstance(churn, dict) or set(churn) != {"added", "removed", "changed"}:

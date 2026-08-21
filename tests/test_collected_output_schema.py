@@ -8,9 +8,9 @@ from omnitensor.plugins.collection import COLLECTED_OUTPUT_SCHEMA
 from omnitensor.registry import validate_document
 
 
-def collected_document(source: str, items_key: str, truncated_key: str) -> dict:
+def collected_document(source: str, items_key: str) -> dict:
     document = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "source": source,
         "sourceHealth": "ready",
         "observedAtMs": 10,
@@ -20,7 +20,6 @@ def collected_document(source: str, items_key: str, truncated_key: str) -> dict:
             "removed": [],
             "changed": [{"id": "sample-a", "fields": ["state"]}],
         },
-        truncated_key: 0,
     }
     if source == "cgroup-systemd-pressure":
         document.update(
@@ -39,21 +38,33 @@ def collected_document(source: str, items_key: str, truncated_key: str) -> dict:
     return document
 
 
-@pytest.mark.parametrize(
-    ("source", "items_key", "truncated_key"),
-    [
-        ("cgroup-systemd-pressure", "items", "truncatedItems"),
-        ("cinnamon-window-metadata", "items", "truncatedItems"),
-        ("hwmon-edac-power-service", "items", "truncatedItems"),
-        ("smart-nvme-io", "items", "truncatedItems"),
-        ("network-manager-link-metadata", "links", "truncatedLinks"),
-        ("usb-bluetooth-health-metadata", "devices", "truncatedDevices"),
-    ],
-)
-def test_canonical_schema_accepts_every_collector_family(source, items_key, truncated_key):
-    document = collected_document(source, items_key, truncated_key)
+FAMILIES = [
+    ("cgroup-systemd-pressure", "items"),
+    ("cinnamon-window-metadata", "items"),
+    ("hwmon-edac-power-service", "items"),
+    ("smart-nvme-io", "items"),
+    ("network-manager-link-metadata", "links"),
+    ("usb-bluetooth-health-metadata", "devices"),
+]
+
+
+@pytest.mark.parametrize(("source", "items_key"), FAMILIES)
+def test_canonical_schema_accepts_every_collector_family(source, items_key):
+    document = collected_document(source, items_key)
 
     assert validate_document(COLLECTED_OUTPUT_SCHEMA, document) == []
+
+
+@pytest.mark.parametrize(("source", "items_key"), FAMILIES)
+def test_canonical_schema_accepts_the_full_protocol_item_bound(source, items_key):
+    """OMNI-0392 regression: every allowlisted item is emitted, up to maxItems."""
+    document = collected_document(source, items_key)
+    document[items_key] = [{"id": f"sample-{index}"} for index in range(1024)]
+
+    assert validate_document(COLLECTED_OUTPUT_SCHEMA, document) == []
+
+    document[items_key].append({"id": "sample-overflow"})
+    assert validate_document(COLLECTED_OUTPUT_SCHEMA, document)
 
 
 @pytest.mark.parametrize(
@@ -62,6 +73,10 @@ def test_canonical_schema_accepts_every_collector_family(source, items_key, trun
         lambda document: document.update(source="unknown-source"),
         lambda document: document.update(privatePayload="must never escape"),
         lambda document: document.update(items=document.pop("links")),
+        lambda document: document.update(schemaVersion=1),
+        lambda document: document.update(truncatedLinks=0),
+        lambda document: document.update(truncatedItems=0),
+        lambda document: document.update(truncatedDevices=0),
         lambda document: document.update(
             kernelTelemetry={
                 "version": 1,
@@ -75,7 +90,7 @@ def test_canonical_schema_accepts_every_collector_family(source, items_key, trun
     ],
 )
 def test_canonical_schema_rejects_wrong_family_and_extension_shapes(mutation):
-    document = collected_document("network-manager-link-metadata", "links", "truncatedLinks")
+    document = collected_document("network-manager-link-metadata", "links")
     changed = copy.deepcopy(document)
     mutation(changed)
 
