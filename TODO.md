@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0606 | open | low | xs | `input_roots_document` and `selected_files_document` (src/omnitensor/snapshot.py:40-73 and 80-105) are line-for-line duplicates — same `list(roots)`, same `MAX_PUBLISHED_INPUT_ROOTS` guard, same `{roots, maxBytes}` shape — differing only in the over-limit message and default `max_bytes`. The bound check already exists twice and the next edit will land in one copy only (the docstrings deliberately differ; the mechanics need not). Extract one private `_roots_document(roots, max_bytes, over_limit_message)` helper both call. |
 
 ## Blocked
 

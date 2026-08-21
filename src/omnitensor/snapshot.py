@@ -52,22 +52,7 @@ def input_roots_document(
     Empty is the honest answer for the default configuration: this service will
     read no referenced file at all.
     """
-    declared = list(roots)
-    if len(declared) > MAX_PUBLISHED_INPUT_ROOTS:
-        # Truncating would leave the service reading from a directory it never
-        # told anyone about: the applet would not list that root's pictures for
-        # a path the runtime would happily accept, which is the discoverability
-        # gap this block exists to close. A configuration nobody can publish is
-        # a configuration error, said at startup rather than half-honoured.
-        raise ValueError(
-            f"{len(declared)} input roots are configured; at most "
-            f"{MAX_PUBLISHED_INPUT_ROOTS} can be published, and a root the "
-            "snapshot cannot name is one no consumer can use"
-        )
-    return {
-        "roots": [str(root) for root in declared],
-        "maxBytes": int(max_bytes),
-    }
+    return _roots_document(roots, max_bytes, "input roots", "one no consumer can use")
 
 
 # What a selected source may weigh, which is the same number the workloads
@@ -92,12 +77,25 @@ def selected_files_document(
     Empty is the honest answer for the default configuration: this service
     will read no selected file at all.
     """
+    return _roots_document(
+        roots, max_bytes, "selected-file roots", "one no client can check a source against"
+    )
+
+
+def _roots_document(roots: Sequence[Path | str], max_bytes: int, kind: str, unusable: str) -> dict:
+    """The one shape both root documents share (OMNI-0606); the facts differ.
+
+    Truncating would leave the service reading from a directory it never
+    told anyone about — the discoverability gap the guard exists to close.
+    A configuration nobody can publish is a configuration error, said at
+    startup rather than half-honoured.
+    """
     declared = list(roots)
     if len(declared) > MAX_PUBLISHED_INPUT_ROOTS:
         raise ValueError(
-            f"{len(declared)} selected-file roots are configured; at most "
+            f"{len(declared)} {kind} are configured; at most "
             f"{MAX_PUBLISHED_INPUT_ROOTS} can be published, and a root the "
-            "snapshot cannot name is one no client can check a source against"
+            f"snapshot cannot name is {unusable}"
         )
     return {
         "roots": [str(root) for root in declared],
