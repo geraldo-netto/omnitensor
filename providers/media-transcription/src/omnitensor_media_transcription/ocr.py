@@ -44,6 +44,7 @@ class VulkanOcr:
         self._rec_param = rec_param
         self._dictionary = dictionary
         self._engine: Any = None
+        self._resident = False
         self._refusal: OcrRefusal | None = None
         if det_param is None or rec_param is None or dictionary is None:
             self._refusal = OcrRefusal(
@@ -63,7 +64,14 @@ class VulkanOcr:
         try:
             engine = self._ensure_engine()
             image = self._loaded(image_path)
-            return engine.read(image)
+            try:
+                return engine.read(image)
+            finally:
+                if not self._resident:
+                    # Sharing the vision model's device: the ~700 MiB engine
+                    # is given back after every frame rather than held
+                    # beside a loaded 9B (OMNI-0610).
+                    self.close()
         except BaseException as error:  # noqa: BLE001 - the refusal is the report
             refusal = OcrRefusal(self._code_for(error), str(error))
             if self._engine is None:
@@ -90,16 +98,28 @@ class VulkanOcr:
             blobs=("input", "output"),
             dictionary_includes_blank=True,
         )
-        self._engine = OcrEngine(models, device=self._device())
+        device, self._resident = self._placement()
+        self._engine = OcrEngine(models, device=device)
         return self._engine
 
-    def _device(self):
-        """Which hardware device the engine should hold, None for the default.
+    def _placement(self):
+        """Which device the engine holds, and whether it stays resident.
 
-        Refined by OMNI-0610; the default selection is correct everywhere it
-        can run at all.
+        With two hardware devices the lane takes the second-ranked one — on
+        this desk the iGPU — and stays resident there: zero VRAM beside the
+        vision model, ~0 wall-clock beside its decode, and no contention
+        with the lease that guards the device the models own (OMNI-0610).
+        With one device the engine shares it, inside the worker that already
+        holds the lease, and is rebuilt per frame so the ~700 MiB never sits
+        beside a loaded 9B.
         """
-        return None
+        import ncnn  # noqa: PLC0415 - optional lane
+        from vulkanocr.device import hardware_devices  # noqa: PLC0415
+
+        devices = hardware_devices(ncnn)
+        if len(devices) > 1:
+            return devices[1], True
+        return devices[0], False
 
     @staticmethod
     def _loaded(image_path: Path):
