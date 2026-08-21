@@ -144,3 +144,39 @@ bound into the provider receipt; changing evidence, native runtimes, model
 artifacts, or provider version makes startup fail closed. Generating a new
 fixture set does not rewrite that historical evidence: the new manifest must
 be qualified and archived by a fresh hardware run.
+
+## The OCR enrichment lane (OMNI-0607..0614)
+
+Every visual frame — image, video sample, slide, document page — is read by
+two lanes at once, and both answers are carried in full (owner priority
+2026-08-22: capture over speed):
+
+- **Qwen (mandatory).** The vision model transcribes every frame,
+  unconditionally: the merge seam takes its transcript as a non-optional
+  argument, so no code path — and no future "optimization" — can skip it
+  because OCR looked complete. Its `visibleText` and `description` stand
+  untouched by the lane; frames reach it at up to 1600 px (768 lost 3 of 30
+  sixteen-pixel rows on a measured dense page; 1600 captured 30/30).
+- **VulkanOCR (best-effort).** PP-OCRv6 medium on ncnn/Vulkan adds what the
+  model structurally cannot: verbatim glyphs with per-line pixel coordinates,
+  published as the result's optional `ocrLines`. Every failure — artifacts
+  not installed, no device, a torn frame — degrades the answer to model-only
+  with a stable `ocr-*` code; nothing the lane does can fail, gate, or delay
+  a job.
+
+The two lanes are complementary by measurement: OCR reads the 16 px Latin
+text exactly (including the accents a VLM normalises), the model reads the
+Hebrew the OCR dictionary cannot express at all.
+
+Placement, measured on this host (RX 6600 XT + Radeon 610M): with two
+hardware devices the OCR lane runs **in its own process**, resident on the
+second-ranked device — a thread was not enough, because the ncnn binding
+holds the GIL through `extract` and stalled the model's token loop ~2 s on a
+dense 46-line page even across devices. Process-isolated, the lane's median
+cost beside the model is **+64 ms** with answers byte-identical. With one
+device the engine is built per frame inside the lease-holding worker and
+given back, so its ~700 MiB never sits beside a loaded 9B.
+
+`scripts/measure-ocr-enrichment.py` reproduces all of it: per-frame wall
+clock model-alone vs enriched, the live always-runs check, and both lanes'
+text side by side.
