@@ -37,7 +37,7 @@ from ..sdk import (
     workload_result,
 )
 from ..stable_error import StableError
-from .document_spans import select_question_sources
+from .document_spans import DocumentQuestionError, select_question_sources
 from .event_workload import (
     EventWorkloadError,
     MemoryFragmentStore,
@@ -50,6 +50,7 @@ from .extraction import (
     SelectedDocumentReader,
     measured_failure_detail,
 )
+from .file_operations import operate_on_selected_files
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
@@ -311,6 +312,79 @@ class DocumentTranslationPlugin(ManagedPlugin):
         await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
 
 
+class DocumentTranslationAlias(DocumentTranslationPlugin):
+    """``document-translation``, answered by the file-side translate.
+
+    OMNI-0617 stage 3a: the workload id, manifest, artifacts, and
+    `document-translation-result.schema.json` are unchanged — an old window
+    or an old job sees exactly the contract it always had — but the work is
+    the stage-2 operations pipeline pinned to ``operation="translate"``,
+    with ``targetLanguage`` mapped onto the core's ``language``. The
+    envelope's ``documents`` are already this contract's documents; the
+    adapter folds them back under the alias's own result schema.
+    """
+
+    async def execute(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        return await workload_result(
+            request,
+            lambda: self._translate(request, cancellation, progress),
+            completed_at_ms=self._clock_ms,
+            cancelled_detail="document translation cancelled",
+            failures=(
+                # The file-side pipeline refuses in its own stable type; the
+                # alias's contract is that a refusal is a result, not a crash.
+                DocumentQuestionError,
+                DocumentTranslationError,
+                EventWorkloadError,
+                FragmentStoreError,
+                GenerationError,
+                SDKContractError,
+                TranslationError,
+            ),
+            detail_of=_translation_failure_detail,
+            discard=self._store.discard,
+        )
+
+    async def _translate(
+        self,
+        request: PluginRequest,
+        cancellation: CancellationToken,
+        progress: ProgressReporter,
+    ) -> PluginResult:
+        _selected, language = self._validate_request(request)
+        envelope = await operate_on_selected_files(
+            request,
+            operation="translate",
+            language=language,
+            reader=self._reader,
+            adapters=self._adapters,
+            router=self._route(language),
+            store=self._store,
+            clock_ms=self._clock_ms,
+            cancellation=cancellation,
+            progress=progress,
+        )
+        output = translated_documents_result(
+            request.job_id,
+            language,
+            envelope["documents"],
+            provider_id=envelope["providerId"],
+            accelerator=envelope["accelerator"],
+        )
+        await self._report(request, progress, "terminal", 1.0)
+        return succeeded_result(
+            request,
+            output,
+            completed_at_ms=self._clock_ms(),
+            detail="selected documents translated in full",
+        )
+
+
 def _validated_language(value: object) -> str:
     """The target a person named, in the shape the manifest declares."""
     return validated_language(value, DocumentTranslationError, noun="target language")
@@ -430,6 +504,7 @@ __all__ = [
     "MAX_LANGUAGE_CHARACTERS",
     "PLUGIN_ID",
     "READ_PERMISSION",
+    "DocumentTranslationAlias",
     "DocumentTranslationError",
     "DocumentTranslationPlugin",
     "document_translation_task",

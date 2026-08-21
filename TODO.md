@@ -4,7 +4,7 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0627 | open | medium | m | **Operations core, stage 3.** document-translation aliases onto the file-side translate (3a), xpuwlm re-points (3b), one guarded removal commit (3c) — map §4 stage 3. Implementable now: stage 2's dispatch and the decided one-envelope contract shipped (2026-08-21); 3b's client half lives in the xpuwlm repository. |
+| OMNI-0627 | in_progress | medium | m | **Operations core, stage 3.** 3a shipped (2026-08-21): `create_document_translation` builds `DocumentTranslationAlias` — the file-side pipeline pinned to `operation="translate"`, `targetLanguage` mapped to `language`, result folded back under `document-translation-result.schema.json`; every pin untouched. Remaining: 3b, the xpuwlm client re-point (SPECS window replaced by a translate entry over the file side — that repo); then 3c, the one guarded removal commit (manifest + wheel + `document_translation.py` + `document-translation-*` schemas together with every pin the map's §4 stage 3c lists). |
 | OMNI-0632 | open | low | xs | `test_qwen3_catalog_is_official_revision_pinned_and_gpu_default` is red since 6e66d55: `generation-models/qwen3-8b.json` now records no default GPU provider (the workload default moved to the 9B) while the test still asserts `('gpu', True)`. Align the catalog or the test with the moved default. |
 
 ## Blocked / Deferred
