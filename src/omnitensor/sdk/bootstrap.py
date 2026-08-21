@@ -60,6 +60,22 @@ class PluginBootstrap:
             )
         return matches[0]
 
+    def find_artifact(self, artifact_id: str) -> BootstrapArtifact | None:
+        """The mounted artifact by this name, or None when it is not mounted.
+
+        For artifacts a workload enriches with rather than depends on
+        (OMNI-0608): `require_artifact` refusing took the whole worker down
+        over a model whose absence the workload is designed to survive. An
+        ambiguous mount is still a refusal — two artifacts with one name is
+        corruption, not absence.
+        """
+        matches = tuple(item for item in self.artifacts if item.id == artifact_id)
+        if len(matches) > 1:
+            raise SDKContractError(
+                "artifact-unavailable", f"exactly one mounted artifact must be named {artifact_id}"
+            )
+        return matches[0] if matches else None
+
 
 def current_plugin_bootstrap(plugin_id: str) -> PluginBootstrap:
     """Return the immutable resources for the factory currently being loaded."""

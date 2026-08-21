@@ -464,3 +464,17 @@ def test_required_is_unchanged_by_the_default_exemption():
     with pytest.raises(sdk.SDKContractError) as excinfo:
         sdk.ConfigurationView({}).required("label", str)
     assert excinfo.value.code == "configuration-missing"
+
+
+def test_find_artifact_answers_none_for_absence_and_refuses_ambiguity():
+    """Absence is survivable for an enrichment lane; duplication never is."""
+    from omnitensor.sdk.bootstrap import BootstrapArtifact, PluginBootstrap
+    from omnitensor.sdk.helpers import SDKContractError
+
+    one = BootstrapArtifact("det", "1.0.0", "ncnn", "a" * 64, Path("/mounted/det/model.param"))
+    bootstrap = PluginBootstrap("media-transcription", (one,), None)
+    assert bootstrap.find_artifact("det") is one
+    assert bootstrap.find_artifact("rec") is None
+    doubled = PluginBootstrap("media-transcription", (one, one), None)
+    with pytest.raises(SDKContractError):
+        doubled.find_artifact("det")
