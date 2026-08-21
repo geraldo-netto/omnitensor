@@ -309,9 +309,18 @@ class LlamaVulkanRuntime:
                 generation_started=False,
             )
         if offloaded is None and facts.devices and facts.layers:
-            # The structured answer stands on its own: layers were placed on a
-            # device, and the model has this many of them.
-            offloaded, total = facts.layers, facts.layers
+            # The structured calls prove *a* GPU load — some device holds
+            # layers — but `llama_model_n_layer` is the model's total, which
+            # says nothing about placement: claiming `total/total` here would
+            # report a partial offload as full the day a build binds
+            # `llama_model_n_devices` (0.3.34 does not, so this branch is
+            # currently unreachable). Without a readable split the split is
+            # unverified, and the honest answer is to say so (OMNI-0592).
+            raise ProviderGenerationError(
+                "model-load-unverified",
+                "llama.cpp placed layers on a device but reported no offload split",
+                generation_started=False,
+            )
         if offloaded is None or total is None:
             raise ProviderGenerationError(
                 "model-load-unverified",

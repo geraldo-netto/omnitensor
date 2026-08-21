@@ -1110,8 +1110,11 @@ def _log_only_api(callbacks):
 def test_runtime_native_load_reads_the_layer_count_from_the_api_when_it_has_one(
     tmp_path, monkeypatch
 ):
-    """An upstream rewording of one debug line must not fail every GPU load:
-    where the build answers through its C entry points, they answer first."""
+    """An upstream rewording of one debug line ends as *unverified*, not as a
+    fabricated full offload. `llama_model_n_layer` is the model's total and
+    says nothing about placement, so a build that answers through its C entry
+    points but words its log differently proves a GPU load without proving
+    the split — and the split must not be invented (OMNI-0592)."""
     adapter = _runtime(tmp_path)
     adapter._model_path = tmp_path / "model.gguf"
     callbacks = {}
@@ -1134,10 +1137,10 @@ def test_runtime_native_load_reads_the_layer_count_from_the_api_when_it_has_one(
         sys.modules, "llama_cpp", SimpleNamespace(Llama=RewordedLlama, llama_cpp=native_api)
     )
 
-    report = adapter._acquire_and_load()
-
-    assert report == NativeLoadReport("llama.cpp-vulkan", "Vulkan", 36, 36, False)
-    assert adapter.physical_device == "AMD Radeon RX 6600 XT (RADV NAVI23)"
+    with pytest.raises(ProviderGenerationError) as unverified:
+        adapter._acquire_and_load()
+    assert unverified.value.code == "model-load-unverified"
+    assert "no offload split" in unverified.value.detail
     adapter._release()
 
 
