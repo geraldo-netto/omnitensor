@@ -291,7 +291,12 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
                 temperature=0.0,
                 top_p=1.0,
                 seed=0,
-                max_tokens=768,
+                # No token ceiling: a dense page of visible text needs what it
+                # needs, and a truncated answer lands mid-object and surfaces
+                # as visual-invalid — the ceiling-shaped wrong answer the
+                # no-capping rule names. The model's stop token and the
+                # context window are the only real bounds (OMNI-0600).
+                max_tokens=None,
                 # The 9B was observed looping a phrase to the token cap once
                 # on strongly rotated text (its catalog entry says "serve
                 # with a repeat penalty"); 0.3.34's default is 1.0, i.e.

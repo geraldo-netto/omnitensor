@@ -373,7 +373,9 @@ def test_qwen_transcription_preserves_exact_prompt_schema_and_decode_arguments(
         "temperature": 0.0,
         "top_p": 1.0,
         "seed": 0,
-        "max_tokens": 768,
+        # No ceiling on the answer (OMNI-0600): a dense page needs what it
+        # needs, and truncation surfaced as visual-invalid.
+        "max_tokens": None,
         # Guards the 9B's observed repetition runaway (OMNI-0591); mild
         # enough that legitimately repeated words still transcribe.
         "repeat_penalty": 1.15,
