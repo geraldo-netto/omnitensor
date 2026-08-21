@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 import tomllib
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 import omnitensor.generation_installation as installation
 from omnitensor.generation_installation import (
+    DEFAULT_GENERATION_MODEL_REFERENCE,
     GENERATION_MODEL_REFERENCE,
     GenerationArtifactSources,
     GenerationInstallationError,
@@ -43,12 +47,14 @@ def _reference(artifact_id: str, model_format: str, content: bytes, companions=(
 
 def _small_sources(tmp_path: Path):
     content = {
+        "default_qwen": b"default-shared-qwen",
         "qwen": b"shared-qwen",
         "param": b"bge-param",
         "bin": b"bge-bin",
         "tokenizer": b"bge-tokenizer",
     }
     paths = {name: _source(tmp_path, f"{name}.bin", value) for name, value in content.items()}
+    default_qwen = _reference("qwen-default", "gguf", content["default_qwen"])
     qwen = _reference("qwen-shared", "gguf", content["qwen"])
     bge = _reference(
         "bge-ask",
@@ -60,15 +66,25 @@ def _small_sources(tmp_path: Path):
         ),
     )
     sources = GenerationArtifactSources(
-        paths["qwen"], paths["param"], paths["bin"], paths["tokenizer"]
+        paths["qwen"],
+        paths["default_qwen"],
+        paths["param"],
+        paths["bin"],
+        paths["tokenizer"],
     )
-    return content, paths, sources, qwen, bge
+    return content, paths, sources, default_qwen, qwen, bge
 
 
 def test_installer_verifies_and_atomically_installs_shared_qwen_and_bge(tmp_path, monkeypatch):
-    content, _paths, sources, qwen, bge = _small_sources(tmp_path)
+    content, _paths, sources, default_qwen, qwen, bge = _small_sources(tmp_path)
+    monkeypatch.setattr(installation, "DEFAULT_GENERATION_MODEL_REFERENCE", default_qwen)
     monkeypatch.setattr(installation, "GENERATION_MODEL_REFERENCE", qwen)
     monkeypatch.setattr(installation, "BGE_REFERENCE", bge)
+    monkeypatch.setattr(
+        installation,
+        "DEFAULT_GENERATION_MODEL_SIZE_BYTES",
+        len(content["default_qwen"]),
+    )
     monkeypatch.setattr(installation, "GENERATION_MODEL_SIZE_BYTES", len(content["qwen"]))
 
     document = install_generation_artifacts(
@@ -80,10 +96,11 @@ def test_installer_verifies_and_atomically_installs_shared_qwen_and_bge(tmp_path
 
     assert document["licensesAccepted"] == {"bge": "MIT", "qwen": "Apache-2.0"}
     assert [item["id"] for item in document["artifacts"]] == [
+        "qwen-default",
         "qwen-shared",
         "bge-ask",
     ]
-    assert document["artifacts"][1]["companions"] == bge.declared_companions
+    assert document["artifacts"][2]["companions"] == bge.declared_companions
     for item in document["artifacts"]:
         assert Path(item["path"]).is_file()
 
@@ -93,7 +110,7 @@ def test_installer_verifies_and_atomically_installs_shared_qwen_and_bge(tmp_path
     [("", "MIT"), ("Apache-2.0", ""), ("MIT", "Apache-2.0")],
 )
 def test_installer_requires_exact_explicit_license_acceptance(tmp_path, qwen_license, bge_license):
-    sources = GenerationArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d")))
+    sources = GenerationArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d", "e")))
 
     with pytest.raises(GenerationInstallationError, match="explicitly name Apache-2.0 and MIT"):
         install_generation_artifacts(
@@ -104,11 +121,25 @@ def test_installer_requires_exact_explicit_license_acceptance(tmp_path, qwen_lic
         )
 
 
-def test_installer_verifies_every_source_before_creating_the_store(tmp_path, monkeypatch):
-    content, paths, sources, qwen, bge = _small_sources(tmp_path)
-    paths["tokenizer"].write_bytes(b"substituted")
+@pytest.mark.parametrize(
+    "substituted_source",
+    ["default_qwen", "qwen", "param", "bin", "tokenizer"],
+)
+def test_installer_verifies_every_source_before_creating_the_store(
+    tmp_path,
+    monkeypatch,
+    substituted_source,
+):
+    content, paths, sources, default_qwen, qwen, bge = _small_sources(tmp_path)
+    paths[substituted_source].write_bytes(b"substituted")
+    monkeypatch.setattr(installation, "DEFAULT_GENERATION_MODEL_REFERENCE", default_qwen)
     monkeypatch.setattr(installation, "GENERATION_MODEL_REFERENCE", qwen)
     monkeypatch.setattr(installation, "BGE_REFERENCE", bge)
+    monkeypatch.setattr(
+        installation,
+        "DEFAULT_GENERATION_MODEL_SIZE_BYTES",
+        len(content["default_qwen"]),
+    )
     monkeypatch.setattr(installation, "GENERATION_MODEL_SIZE_BYTES", len(content["qwen"]))
 
     class UnexpectedInstaller:
@@ -117,7 +148,9 @@ def test_installer_verifies_every_source_before_creating_the_store(tmp_path, mon
 
     monkeypatch.setattr(installation, "ArtifactInstaller", UnexpectedInstaller)
 
-    with pytest.raises(GenerationInstallationError, match="digest does not match"):
+    with pytest.raises(
+        GenerationInstallationError, match="size does not match|digest does not match"
+    ):
         install_generation_artifacts(
             tmp_path / "artifacts",
             sources,
@@ -148,6 +181,20 @@ def test_source_verification_refuses_missing_relative_wrong_size_and_wrong_diges
     with pytest.raises(GenerationInstallationError) as digest_error:
         installation._verify_source(absolute, "0" * 64, 5)
     assert str(digest_error.value) == "provider artifact digest does not match its manifest"
+
+
+@given(st.binary(max_size=64))
+def test_default_qwen_pin_refuses_arbitrary_nonrelease_bytes(content):
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory, "model.gguf").resolve()
+        source.write_bytes(content)
+
+        with pytest.raises(GenerationInstallationError, match="size does not match"):
+            installation._verify_source(
+                source,
+                DEFAULT_GENERATION_MODEL_REFERENCE.sha256,
+                installation.DEFAULT_GENERATION_MODEL_SIZE_BYTES,
+            )
 
 
 def test_installed_document_is_the_exact_bounded_public_receipt(tmp_path):
@@ -209,6 +256,7 @@ def test_parser_exposes_the_exact_required_path_and_license_contract():
     assert parser.description == ("Verify and install pinned artifacts for Qwen workload providers")
     assert actions == {
         "artifact_root": (("--artifact-root",), Path, True),
+        "default_qwen_model": (("--default-qwen-model",), Path, True),
         "qwen_model": (("--qwen-model",), Path, True),
         "bge_param": (("--bge-param",), Path, True),
         "bge_bin": (("--bge-bin",), Path, True),
@@ -226,19 +274,23 @@ def test_cli_passes_all_sources_and_prints_stable_receipt(tmp_path, monkeypatch,
         return {"version": 1, "artifacts": []}
 
     monkeypatch.setattr(installation, "install_generation_artifacts", fake_install)
-    values = [str((tmp_path / name).resolve()) for name in ("qwen", "param", "bin", "tok")]
+    values = [
+        str((tmp_path / name).resolve()) for name in ("default-qwen", "qwen", "param", "bin", "tok")
+    ]
     installation.main(
         [
             "--artifact-root",
             str(tmp_path / "artifacts"),
-            "--qwen-model",
+            "--default-qwen-model",
             values[0],
-            "--bge-param",
+            "--qwen-model",
             values[1],
-            "--bge-bin",
+            "--bge-param",
             values[2],
-            "--bge-tokenizer",
+            "--bge-bin",
             values[3],
+            "--bge-tokenizer",
+            values[4],
             "--accept-model-license",
             "Apache-2.0",
             "--accept-bge-license",
@@ -246,7 +298,11 @@ def test_cli_passes_all_sources_and_prints_stable_receipt(tmp_path, monkeypatch,
         ]
     )
 
-    assert observed["sources"] == GenerationArtifactSources(*(Path(value) for value in values))
+    assert observed["sources"] == GenerationArtifactSources(
+        Path(values[1]),
+        Path(values[0]),
+        *(Path(value) for value in values[2:]),
+    )
     assert observed["licenses"] == {
         "accepted_model_license": "Apache-2.0",
         "accepted_bge_license": "MIT",
@@ -260,7 +316,13 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
         "install_generation_artifacts",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(GenerationInstallationError("refused")),
     )
-    repeated = ["--qwen-model", "--bge-param", "--bge-bin", "--bge-tokenizer"]
+    repeated = [
+        "--default-qwen-model",
+        "--qwen-model",
+        "--bge-param",
+        "--bge-bin",
+        "--bge-tokenizer",
+    ]
     argv = ["--artifact-root", str(tmp_path)]
     for option in repeated:
         argv.extend((option, str(tmp_path / option[2:])))
@@ -347,24 +409,25 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(plugin_id
     assert entry_points == {plugin_id: f"{module}:create"}
     assert manifest["id"] == manifest["plugin"]["entryPoint"] == plugin_id
     assert [item["id"] for item in manifest["plugin"]["artifacts"]] == DECLARED_ARTIFACTS[plugin_id]
-    qwen_artifacts = [
-        artifact
-        for artifact in manifest["plugin"]["artifacts"]
-        if artifact["id"] == GENERATION_MODEL_REFERENCE.id
-    ]
-    assert qwen_artifacts in (
-        [],
-        [
-            {
-                "id": GENERATION_MODEL_REFERENCE.id,
-                "version": GENERATION_MODEL_REFERENCE.version,
-                "format": GENERATION_MODEL_REFERENCE.format,
-                "sha256": GENERATION_MODEL_REFERENCE.sha256,
-                "sourceUri": GENERATION_MODEL_REFERENCE.source_uri,
-                "licenseSpdx": GENERATION_MODEL_REFERENCE.license_spdx,
-            }
-        ],
-    )
+    for reference in (DEFAULT_GENERATION_MODEL_REFERENCE, GENERATION_MODEL_REFERENCE):
+        qwen_artifacts = [
+            artifact
+            for artifact in manifest["plugin"]["artifacts"]
+            if artifact["id"] == reference.id
+        ]
+        assert qwen_artifacts in (
+            [],
+            [
+                {
+                    "id": reference.id,
+                    "version": reference.version,
+                    "format": reference.format,
+                    "sha256": reference.sha256,
+                    "sourceUri": reference.source_uri,
+                    "licenseSpdx": reference.license_spdx,
+                }
+            ],
+        )
     assert "accelerator:gpu" in manifest["plugin"]["permissions"]
     assert validate_document("workload-manifest.schema.json", manifest) == []
     assert (
@@ -419,6 +482,50 @@ def test_qwen8b_catalog_pins_official_source_and_shared_qualification():
             "frozen per-workload acceptance on the named GPU; arbitrary-domain quality not claimed"
         ),
     }
+    assert catalog["providers"][0]["default"] is False
+
+
+def test_default_qwen_catalog_pins_upstream_bytes_and_shared_qualification():
+    catalog = json.loads((ROOT / "generation-models/qwen3-5-9b.json").read_text())
+    receipt = json.loads(
+        (
+            ROOT / "providers/vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json"
+        ).read_text()
+    )
+
+    assert catalog["id"] == DEFAULT_GENERATION_MODEL_REFERENCE.id
+    assert catalog["license"]["spdx"] == "Apache-2.0"
+    assert catalog["upstream"] == {
+        "uri": (
+            "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/tree/"
+            "3885219b6810b007914f3a7950a8d1b469d598a5"
+        ),
+        "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+    }
+    assert catalog["source"] == {
+        "uri": DEFAULT_GENERATION_MODEL_REFERENCE.source_uri,
+        "filename": "Qwen3.5-9B-IQ4_XS.gguf",
+        "sha256": DEFAULT_GENERATION_MODEL_REFERENCE.sha256,
+        "sizeBytes": installation.DEFAULT_GENERATION_MODEL_SIZE_BYTES,
+    }
+    assert catalog["qualification"] == {
+        "receipt": ("providers/vulkan-runtime/src/omnitensor_vulkan_runtime/qualification.json"),
+        "device": "AMD Radeon RX 6600 XT (RADV NAVI23)",
+        "cpuFallback": "forbidden",
+        "workloads": [
+            "ask-selected-files",
+            "event-extraction",
+            "file-organizer",
+            "selected-text-tools",
+        ],
+        "scope": (
+            "frozen per-workload acceptance on the named GPU; arbitrary-domain quality not claimed"
+        ),
+    }
+    assert catalog["providers"][0]["default"] is True
+    assert receipt["models"][DEFAULT_GENERATION_MODEL_REFERENCE.id]["sha256"] == (
+        DEFAULT_GENERATION_MODEL_REFERENCE.sha256
+    )
 
 
 def shim_distributions() -> dict[str, Path]:

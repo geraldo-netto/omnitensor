@@ -1,28 +1,28 @@
 {
   "catalogVersion": 1,
-  "id": "qwen3-8b-q4-k-m",
+  "id": "qwen3-5-9b-iq4-xs",
   "version": "1.0.0",
   "license": {
     "spdx": "Apache-2.0",
-    "termsUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/blob/7c41481f57cb95916b40956ab2f0b139b296d974/LICENSE",
-    "attribution": "Qwen Team, Qwen3-8B and official Q4_K_M GGUF"
+    "termsUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/blob/3885219b6810b007914f3a7950a8d1b469d598a5/README.md",
+    "attribution": "Qwen Team, Qwen3.5-9B; unsloth IQ4_XS GGUF conversion"
   },
   "upstream": {
-    "uri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/tree/7c41481f57cb95916b40956ab2f0b139b296d974",
-    "revision": "7c41481f57cb95916b40956ab2f0b139b296d974"
+    "uri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/tree/3885219b6810b007914f3a7950a8d1b469d598a5",
+    "revision": "3885219b6810b007914f3a7950a8d1b469d598a5"
   },
   "source": {
-    "uri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
-    "filename": "Qwen3-8B-Q4_K_M.gguf",
-    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
-    "sizeBytes": 5027783488
+    "uri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-IQ4_XS.gguf",
+    "filename": "Qwen3.5-9B-IQ4_XS.gguf",
+    "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+    "sizeBytes": 5168653536
   },
   "providers": [
     {
       "providerId": "qwen3-workloads-gpu",
       "accelerator": "gpu",
       "runtime": "llama.cpp-vulkan",
-      "default": false,
+      "default": true,
       "status": "requires-local-workload-acceptance"
     },
     {

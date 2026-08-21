@@ -1,6 +1,6 @@
 # Installing the Qwen workload providers
 
-This is the operator procedure for the four local, manually triggered Qwen
+This is the operator procedure for the five local, manually triggered Qwen
 workloads:
 
 - `event-extraction` reads only files selected for that request and returns an
@@ -8,7 +8,9 @@ workloads:
 - `ask-selected-files` retrieves BGE spans from selected documents and answers
   with exact file, page, span, and digest citations;
 - `selected-text-tools` explains, summarizes, rewrites, translates, or extracts
-  tasks from one explicit clipboard selection; and
+  tasks from one explicit clipboard selection;
+- `document-translation` translates selected documents into one requested
+  target language without writing the result back to disk; and
 - `file-organizer` returns a review-only naming, tagging, folder, and exact
   duplicate plan. It cannot move, rename, overwrite, or delete a file.
 
@@ -79,9 +81,13 @@ all five text workloads is `qwen3-5-9b-iq4-xs`, recorded in the runtime
 wheel's `qualification.json` with SHA-256
 `7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429`; the
 manifests declare its origin as the `unsloth/Qwen3.5-9B-GGUF`
-`Qwen3.5-9B-IQ4_XS.gguf` upload. The one-shot installer below currently
-imports only the Qwen3-8B artifact; installing the 9B default is a separate
-verified import against that manifest digest.
+`Qwen3.5-9B-IQ4_XS.gguf` upload at upstream revision
+`3885219b6810b007914f3a7950a8d1b469d598a5`. It is Apache-2.0,
+5,168,653,536 bytes, and the checked-in
+[Qwen3.5-9B catalog](../generation-models/qwen3-5-9b.json) binds those bytes,
+their provenance, and the qualified workload scope. Review the pinned
+[Qwen3.5-9B Apache-2.0 terms](https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/blob/3885219b6810b007914f3a7950a8d1b469d598a5/README.md)
+before downloading it.
 
 The shared Qwen3-8B artifact is the official
 `Qwen/Qwen3-8B-GGUF` `Qwen3-8B-Q4_K_M.gguf` at upstream revision
@@ -134,8 +140,8 @@ ncnn export is not interchangeable with this graph.
 | A real Vulkan GPU, Vulkan loader, and vendor ICD | There is no CPU provider or CPU fallback; software Vulkan devices do not qualify |
 | Access to the selected `/dev/dri/renderD*` device | The sandbox mounts only the device granted to that worker |
 | The exact accepted `llama-cpp-python==0.3.34` Vulkan wheel | In-process Qwen execution inside the seccomp worker; startup verifies its native-library hashes, so an arbitrary rebuild or ordinary CPU wheel is not acceptable |
-| All five provider wheels | The runtime implementation and all four independently discoverable workload identities |
-| At least one pinned Qwen generation GGUF (the Qwen3.5-9B IQ4_XS default, or the Qwen3-8B Q4_K_M this guide installs) | A digest-locked generation artifact declared by all four workload providers |
+| All seven provider wheels | The runtime, embedder, and five independently discoverable workload identities |
+| Both pinned Qwen generation GGUFs (the Qwen3.5-9B IQ4_XS default and Qwen3-8B Q4_K_M alternative) | Digest-locked generation artifacts declared by all five workload providers |
 | The pinned DictaLM2.0 7B Instruct Q4_K_M GGUF | Explicit Hebrew translation for selected-text tools only |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
 | A user runtime directory (`$XDG_RUNTIME_DIR`) | The OmniTensor control socket and job-result surface |
@@ -277,12 +283,24 @@ Install optional document/media parsing only when needed:
 ## 3. Acquire and verify the artifacts
 
 Downloading is an explicit operator action. Review the Apache-2.0 terms linked
-in the generation catalog before running:
+in the generation catalogs before running:
 
 ```sh
 OMNI_MODELS=~/.local/share/omnitensor/provider-sources
+mkdir -p "$OMNI_MODELS/qwen3-5-9b"
 mkdir -p "$OMNI_MODELS/qwen3-8b"
 mkdir -p "$OMNI_MODELS/dictalm2-hebrew"
+
+curl --fail --location \
+  'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-IQ4_XS.gguf' \
+  --output "$OMNI_MODELS/qwen3-5-9b/Qwen3.5-9B-IQ4_XS.gguf"
+
+printf '%s  %s\n' \
+  '7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429' \
+  "$OMNI_MODELS/qwen3-5-9b/Qwen3.5-9B-IQ4_XS.gguf" | \
+  sha256sum --check --strict
+test "$(stat --format=%s "$OMNI_MODELS/qwen3-5-9b/Qwen3.5-9B-IQ4_XS.gguf")" \
+  -eq 5168653536
 
 curl --fail --location \
   'https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf' \
@@ -319,16 +337,17 @@ BGE_TOKENIZER=/absolute/path/to/qualified-bge/tokenizer.json
 sha256sum "$BGE_PARAM" "$BGE_BIN" "$BGE_TOKENIZER"
 ```
 
-The one-shot installer uses one `Apache-2.0` acknowledgement for the official
-Qwen artifact and requires both license identifiers literally. It verifies
-all four source files, including the Qwen byte count and every declared digest,
-before importing immutable versions into the artifact store:
+The one-shot installer uses one `Apache-2.0` acknowledgement for both Qwen
+artifacts and requires both license identifiers literally. It verifies all five
+source files, including both Qwen byte counts and every declared digest, before
+importing immutable versions into the artifact store:
 
 ```sh
 OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
 
 "$OMNI_SERVICE/omnitensor-install-generation-artifacts" \
   --artifact-root "$OMNI_ARTIFACTS" \
+  --default-qwen-model "$OMNI_MODELS/qwen3-5-9b/Qwen3.5-9B-IQ4_XS.gguf" \
   --qwen-model "$OMNI_MODELS/qwen3-8b/Qwen3-8B-Q4_K_M.gguf" \
   --bge-param "$BGE_PARAM" \
   --bge-bin "$BGE_BIN" \
