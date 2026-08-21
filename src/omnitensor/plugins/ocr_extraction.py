@@ -90,18 +90,14 @@ class VulkanOcrExtractionAdapter:
 
     def _read_array(self, rgb) -> str:
         try:
-            from vulkanocr.engine import OcrEngine, OcrModels  # noqa: PLC0415 - optional lane
+            from vulkanocr import models_for_port  # noqa: PLC0415 - optional lane
+            from vulkanocr.engine import OcrEngine  # noqa: PLC0415
         except ImportError as error:
             raise EventWorkloadError(
                 "adapter-unavailable", "the vulkanocr engine is not installed"
             ) from error
-        models = OcrModels(
-            det_param=self._det_param,
-            rec_param=self._rec_param,
-            dictionary=self._dictionary,
-            blobs=("input", "output"),
-            dictionary_includes_blank=True,
-        )
+        # The port is named, not restated (OMNI-0622/VOCR-0061).
+        models = models_for_port("avafly-v6", self._det_param, self._rec_param, self._dictionary)
         # Built per source and given back: extraction runs before generation
         # in this workload, so nothing contends — and the engine's ~700 MiB
         # never lingers into the phases that need the memory.

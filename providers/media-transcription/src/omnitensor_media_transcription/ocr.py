@@ -72,15 +72,12 @@ def _load_image(image_path: Path):
 
 
 def _build_engine(det_param: Path, rec_param: Path, dictionary: Path, device=None):
-    from vulkanocr.engine import OcrEngine, OcrModels  # noqa: PLC0415 - optional lane
+    from vulkanocr import models_for_port  # noqa: PLC0415 - optional lane
+    from vulkanocr.engine import OcrEngine  # noqa: PLC0415
 
-    models = OcrModels(
-        det_param=det_param,
-        rec_param=rec_param,
-        dictionary=dictionary,
-        blobs=("input", "output"),
-        dictionary_includes_blank=True,
-    )
+    # The port is named, not restated: its blob names and blank convention
+    # come from vulkanocr's own registry (OMNI-0622/VOCR-0061).
+    models = models_for_port("avafly-v6", det_param, rec_param, dictionary)
     return OcrEngine(models, device=device)
 
 
