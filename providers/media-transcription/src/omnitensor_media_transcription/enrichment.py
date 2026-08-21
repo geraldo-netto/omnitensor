@@ -41,8 +41,16 @@ class EnrichedVisualTranscriber:
     async def transcribe(
         self, frame: VisualFrame, cancellation: CancellationToken
     ) -> VisualTranscript:
-        reading = await asyncio.to_thread(self._ocr.read, frame.path)
-        transcript = await self._vision.transcribe(frame, cancellation)
+        # Concurrent, not sequential: on a two-device desk the lanes hold
+        # different silicon, and running OCR first cost the dense-page read
+        # 3.6 s of iGPU time the vision model spent waiting for (measured,
+        # OMNI-0612). gather never drops the vision half: an OCR thread
+        # failure is impossible by ocr.read's contract, and a vision failure
+        # propagates exactly as it did before the lane existed.
+        reading, transcript = await asyncio.gather(
+            asyncio.to_thread(self._ocr.read, frame.path),
+            self._vision.transcribe(frame, cancellation),
+        )
         return self._merged(reading, transcript)
 
     def _merged(self, reading, transcript: VisualTranscript) -> VisualTranscript:
