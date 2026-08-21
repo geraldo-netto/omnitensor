@@ -58,6 +58,7 @@ from .generation import (
     generation_request,
     parse_generation_task,
 )
+from .operations import validated_language, validated_translation_routes
 from .protocol import (
     CancellationToken,
     PluginRequest,
@@ -65,7 +66,7 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
-from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
+from .target_language import MAX_LANGUAGE_CHARACTERS
 from .translation import Span, TranslationError, translate_document
 
 PLUGIN_ID = "document-translation"
@@ -312,38 +313,14 @@ class DocumentTranslationPlugin(ManagedPlugin):
 
 def _validated_language(value: object) -> str:
     """The target a person named, in the shape the manifest declares."""
-    if not valid_target_language(value):
-        raise DocumentTranslationError(
-            "language-invalid",
-            f"target language must be 1-{MAX_LANGUAGE_CHARACTERS} letters",
-        )
-    return value.strip()
+    return validated_language(value, DocumentTranslationError, noun="target language")
 
 
 def _validated_translation_routes(
     value: Mapping[str, GenerationRouter] | None,
 ) -> dict[str, GenerationRouter]:
     """Language-specific routes, keyed by the same normalisation the request is."""
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise DocumentTranslationError(
-            "provider-invalid", "translation routes must be a language mapping"
-        )
-    routes: dict[str, GenerationRouter] = {}
-    for language, router in value.items():
-        try:
-            normalized = _validated_language(language).casefold()
-        except DocumentTranslationError as error:
-            raise DocumentTranslationError(
-                "provider-invalid", "translation route language is invalid"
-            ) from error
-        if normalized in routes or not isinstance(router, GenerationRouter):
-            raise DocumentTranslationError(
-                "provider-invalid", "translation routes must be unique generation routers"
-            )
-        routes[normalized] = router
-    return routes
+    return validated_translation_routes(value, DocumentTranslationError)
 
 
 def _translation_tokens(task) -> int:

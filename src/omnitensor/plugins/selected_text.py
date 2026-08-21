@@ -27,6 +27,15 @@ from .generation import (
     generation_request,
     parse_generation_task,
 )
+from .operations import (
+    ECHOED_SELECTION_REPROMPT,
+    OPERATIONS,
+    RESTATEMENT_IS_A_NON_ANSWER,
+    OperationPrompting,
+    operation_instruction,
+    validated_language,
+    validated_translation_routes,
+)
 from .protocol import (
     CancellationToken,
     PluginRequest,
@@ -34,15 +43,12 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
-from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
+from .target_language import MAX_LANGUAGE_CHARACTERS
 
 PLUGIN_ID = "selected-text-tools"
 READ_ONCE_PERMISSION = "clipboard:read-once"
-OPERATIONS = frozenset({"explain", "summarize", "rewrite", "translate", "extract-tasks"})
-# The three that promise something other than what was handed in. A
-# translation into the language the selection is already in is legitimately
-# the same words, and an extraction that finds nothing says so in `tasks`.
-RESTATEMENT_IS_A_NON_ANSWER = frozenset({"explain", "summarize", "rewrite"})
+# The enum and its restatement rule live in the operations core (OMNI-0617
+# stage 0); re-exported here so every existing import keeps working.
 MAX_SELECTION_CHARACTERS = 32_768
 
 
@@ -212,35 +218,13 @@ class SelectedTextPlugin(ManagedPlugin):
 
 
 def _validated_language(value: object) -> str:
-    if not valid_target_language(value):
-        raise SelectedTextError(
-            "language-invalid",
-            f"translation language must contain 1-{MAX_LANGUAGE_CHARACTERS} letters",
-        )
-    return value.strip()
+    return validated_language(value, SelectedTextError, noun="translation language")
 
 
 def _validated_translation_routes(
     value: Mapping[str, GenerationRouter] | None,
 ) -> dict[str, GenerationRouter]:
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise SelectedTextError("provider-invalid", "translation routes must be a language mapping")
-    routes: dict[str, GenerationRouter] = {}
-    for language, router in value.items():
-        try:
-            normalized = _validated_language(language).casefold()
-        except SelectedTextError as error:
-            raise SelectedTextError(
-                "provider-invalid", "translation route language is invalid"
-            ) from error
-        if normalized in routes or not isinstance(router, GenerationRouter):
-            raise SelectedTextError(
-                "provider-invalid", "translation routes must be unique generation routers"
-            )
-        routes[normalized] = router
-    return routes
+    return validated_translation_routes(value, SelectedTextError, noun="translation route language")
 
 
 def grounded_selected_text_result(
@@ -326,151 +310,25 @@ def selected_text_task():
     )
 
 
-class SelectedTextPrompting:
-    """What this workload tells the model beyond its own task prompt.
-
-    The operation a person chose is in a trusted control fragment, not in the
-    task: one prompt serves five operations, and which one was asked for
-    decides what a correct answer looks like. It used to be assembled inside
-    the GPU adapter, which had to know what a selected-text operation is.
-    """
+class SelectedTextPrompting(OperationPrompting):
+    """The inline workload's prompting: the operations core, on this task id."""
 
     __slots__ = ()
 
-    def hint(self, task, request, store) -> str:
-        if task.task_id != PLUGIN_ID or len(request.content_references) != 2:
-            return ""
-        try:
-            control = json.loads(
-                store.resolve(request.request_id, request.content_references[0]).text
-            )
-        except (FragmentStoreError, UnicodeError, json.JSONDecodeError):
-            return ""
-        if not isinstance(control, dict) or set(control) != {"language", "operation"}:
-            return ""
-        instruction = _operation_instruction(control.get("operation"), control.get("language"))
-        if not instruction:
-            return ""
-        return (
-            f"Trusted selected-text operation is {json.dumps(control['operation'])}. "
-            f"{instruction} Return operation exactly as named.\n"
-        )
-
-    def reconsideration(self, task, hint: str, raw: str, request=None, store=None) -> str | None:
-        """One re-ask when the answer is the selection handed straight back.
-
-        Measured on the live desk: `explain` on "The mitochondrion is the
-        powerhouse of the cell." returned that sentence as its own
-        explanation. Telling the model not to, in the instruction, did not
-        stop it — so the workload checks. Explaining, summarising and
-        rewriting all promise something *other* than the input; translating
-        into the language it is already in, or extracting nothing when there
-        is nothing, do not, which is why only three are checked.
-
-        A re-ask rather than a refusal: the second answer is returned whatever
-        it is, so this can only replace a non-answer with an answer, never
-        take one away (OMNI-0571).
-        """
-        if task.task_id != PLUGIN_ID or request is None or store is None:
-            return None
-        selection = _selection_text(request, store)
-        answered = _answer_result(raw)
-        if not selection or not answered:
-            return None
-        if _restates(answered, selection):
-            return ECHOED_SELECTION_REPROMPT
-        return None
-
-
-# What to say when an answer is the question. Not a refusal and not a rule
-# about length: the model is told what it did and asked once more.
-ECHOED_SELECTION_REPROMPT = (
-    "That answer repeats the selection word for word, which is not the operation you were "
-    "asked for. Answer again in your own words: keep the same closed JSON contract, the same "
-    "operation, and the same evidence, and make result something other than the selection.\n"
-    "/no_think"
-)
-
-
-def _selection_text(request, store) -> str:
-    """The selection this request was about, or nothing readable."""
-    references = getattr(request, "content_references", ())
-    if len(references) != 2:
-        return ""
-    try:
-        return store.resolve(request.request_id, references[1]).text or ""
-    except Exception:  # noqa: BLE001 - a fragment this cannot read is one it cannot judge
-        return ""
-
-
-def _answer_result(raw: str) -> str:
-    """The `result` the model returned, or nothing when it returned no JSON."""
-    try:
-        document = json.loads(raw)
-    except (UnicodeError, ValueError):
-        return ""
-    if not isinstance(document, dict):
-        return ""
-    if document.get("operation") not in RESTATEMENT_IS_A_NON_ANSWER:
-        return ""
-    result = document.get("result")
-    return result if isinstance(result, str) else ""
-
-
-def _restates(answered: str, selection: str) -> str:
-    """Whether the answer is the selection, ignoring surrounding blanks.
-
-    Deliberately exact rather than fuzzy: a rewrite that changed two words is
-    a rewrite, and a similarity threshold would start refusing answers for
-    being close to a short input.
-    """
-    return answered.strip() == selection.strip()
+    def __init__(self) -> None:
+        super().__init__(PLUGIN_ID)
 
 
 def _operation_instruction(operation: object, language: object) -> str:
-    translate = (
-        # `ensure_ascii=False`: a person asking for "Português" was quoting a
-        # name the model then read as `"Portugu\u00eas"`, which is not the
-        # language they asked for and not a word in any of them.
-        f"Translate the selection into {json.dumps(language, ensure_ascii=False)} in result; "
-        "preserve the exact "
-        "meaning of every noun, verb, number, and name; use only the target language and its "
-        "script; transliterate proper names; do not add a label; tasks must be empty."
-        if isinstance(language, str) and language
-        else ""
-    )
-    # Each of the three says not to hand the selection back. A one-sentence
-    # factoid — "The mitochondrion is the powerhouse of the cell." — came back
-    # verbatim as its own explanation, which reads to the person exactly like
-    # an answer and is none: the labelled cases pass because their selections
-    # are long enough that repeating one is obviously not a summary. Saying it
-    # costs a clause and refuses nothing (OMNI-0571).
-    return {
-        "explain": (
-            "Explain the selection clearly in result, in your own words; never return the "
-            "selection unchanged, even when it is one sentence; tasks must be empty."
-        ),
-        "summarize": (
-            "Summarize the selection concisely in result; never return the selection "
-            "unchanged; tasks must be empty."
-        ),
-        "rewrite": (
-            "Rewrite the selection while preserving its meaning; never return it unchanged, "
-            "even when it already reads well; tasks must be empty."
-        ),
-        "translate": translate,
-        "extract-tasks": (
-            "List every explicit actionable item in tasks. If any action is present, tasks "
-            "must not be empty. Result must briefly introduce the extracted tasks, not echo "
-            "the selection."
-        ),
-    }.get(operation, "")
+    return operation_instruction(operation, language)
 
 
 __all__ = [
+    "ECHOED_SELECTION_REPROMPT",
     "MAX_LANGUAGE_CHARACTERS",
     "MAX_SELECTION_CHARACTERS",
     "OPERATIONS",
+    "RESTATEMENT_IS_A_NON_ANSWER",
     "PLUGIN_ID",
     "READ_ONCE_PERMISSION",
     "SelectedTextError",
