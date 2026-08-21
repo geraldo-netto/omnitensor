@@ -522,7 +522,7 @@ def test_qwen_load_releases_resources_and_reports_exact_unproved_offload(tmp_pat
             observed["callback"](
                 1,
                 b"using device Vulkan0 (Qualified GPU) (0000:00:00.0)\n"
-                b"offloaded 32/33 layers to GPU\n",
+                b"offloaded 0/33 layers to GPU\n",
                 None,
             )
 
@@ -532,7 +532,7 @@ def test_qwen_load_releases_resources_and_reports_exact_unproved_offload(tmp_pat
     transcriber._runtime = lambda: (Llama, native, Handler)
     with pytest.raises(provider.MediaGpuError) as error:
         transcriber._ensure_loaded()
-    assert str(error.value) == "Qwen VL did not prove full Vulkan offload"
+    assert str(error.value) == "Qwen VL did not prove a Vulkan load"
     assert observed["handler"]._exit_stack.closed is True
     assert observed["llama"].closed is True
     assert lease.released == [lease.stream]

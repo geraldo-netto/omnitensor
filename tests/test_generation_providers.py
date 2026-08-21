@@ -567,11 +567,15 @@ def test_gpu_worker_verifies_artifacts_loads_once_and_generates(tmp_path):
         NativeLoadReport("llama.cpp-vulkan", "CPU", 28, 28, False),
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 28, True),
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 0, 0, False),
-        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 27, False),
+        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 0, False),
+        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 28, 29, False),
         object(),
     ],
 )
-def test_gpu_worker_refuses_every_incomplete_offload_report(tmp_path, report):
+def test_gpu_worker_refuses_every_load_that_missed_the_gpu(tmp_path, report):
+    """A declared partial offload is accepted since OMNI-0586; what is still
+    refused is a load that reached no Vulkan device at all, one llama.cpp
+    flags as a CPU fallback, or a report whose arithmetic cannot be true."""
     primary, digest = artifact(tmp_path, "model.gguf", b"model")
     worker = LlamaCppVulkanWorker(descriptor(digest=digest), NativeRuntime(report), (primary,))
 

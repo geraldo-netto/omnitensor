@@ -348,19 +348,29 @@ def test_shared_cli_refuses_without_writing_or_printing_success(tmp_path, capsys
         NativeLoadReport("llama.cpp-vulkan", "CPU", 1, 1, False),
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, True),
         NativeLoadReport("llama.cpp-vulkan", "Vulkan", 0, 0, False),
-        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 2, 1, False),
+        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 2, 0, False),
+        NativeLoadReport("llama.cpp-vulkan", "Vulkan", 2, 3, False),
     ],
 )
-def test_public_gpu_validator_rejects_backend_device_fallback_and_layer_drift(report):
+def test_public_gpu_validator_rejects_a_load_that_missed_the_gpu(report):
+    """Wrong backend, wrong device, a flagged CPU fallback, zero layers
+    placed, or arithmetic that cannot be true. A declared *partial* offload
+    is no longer here — it is work (OMNI-0586)."""
     with pytest.raises(ProviderGenerationError) as caught:
         validate_gpu_load(report)
     assert caught.value.code == "model-load-failed"
-    assert caught.value.detail == "llama.cpp did not prove complete Vulkan model-layer offload"
+    assert caught.value.detail == "llama.cpp did not prove a Vulkan model load"
     assert caught.value.generation_started is False
 
 
 def test_public_gpu_validator_accepts_the_minimum_complete_offload():
     validate_gpu_load(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 1, 1, False))
+
+
+def test_public_gpu_validator_accepts_a_declared_partial_offload():
+    """24 of 48 layers on the card and the rest in RAM is a real load: the
+    measured example is Qwen3-Coder-30B at 15.9 tok/s on this desk."""
+    validate_gpu_load(NativeLoadReport("llama.cpp-vulkan", "Vulkan", 48, 24, False))
 
 
 @pytest.mark.parametrize(

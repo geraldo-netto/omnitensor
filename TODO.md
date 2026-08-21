@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0586 | open | high | m | **Partial GPU offload is refused as if it were a CPU fallback, which caps what this machine may run.** Owner decision 2026-08-21 ("remove this limitation... I have asked for no capping"): a Qwen3-Coder-30B-A3B measured 15.9 tok/s here with 24 of its layers on the GPU and its MoE experts in RAM — real, usable work — and four gates refuse exactly that shape: `acceptance_kit.validate_gpu_load` (`accelerator_layers != total_model_layers`), `vulkan-runtime runtime._prove_full_offload` (`offloaded != total`), the media provider's `did not prove full Vulkan offload`, and `n_gpu_layers=-1` hard-coded so an oversized model cannot even ask for fewer layers. The rule these gates served is against *silent CPU fallback*; a declared, reported partial offload is not that. Accept any load that puts at least one layer on the GPU, carry the real offloaded/total split through `NativeLoadReport` and the receipts so nothing is silent, keep refusing only a load that reaches the GPU not at all, make the layer count settable, and rewrite the CLAUDE.md rule to say what it now means. |
 
 ## Blocked
 

@@ -1055,7 +1055,12 @@ def test_runtime_native_load_requires_import_and_proven_full_offload(tmp_path, m
     assert callbacks["closed"] is True
 
 
-def test_runtime_native_load_rejects_partial_offload(tmp_path, monkeypatch):
+def test_runtime_native_load_accepts_a_declared_partial_offload(tmp_path, monkeypatch):
+    """3 of 4 layers on the GPU is a load, not a refusal (OMNI-0586).
+
+    Refusing partial offload capped what the machine may run: a model larger
+    than VRAM with its experts in RAM is real work. The report carries the
+    honest split, so nothing about the placement is silent."""
     adapter = _runtime(tmp_path)
     adapter._model_path = tmp_path / "model.gguf"
     callbacks = {}
@@ -1083,17 +1088,10 @@ def test_runtime_native_load_rejects_partial_offload(tmp_path, monkeypatch):
         SimpleNamespace(Llama=PartialLlama, llama_cpp=NativeApi),
     )
 
-    with pytest.raises(ProviderGenerationError) as partial_offload:
-        adapter._acquire_and_load()
-    assert (
-        partial_offload.value.code,
-        partial_offload.value.detail,
-        partial_offload.value.generation_started,
-    ) == (
-        "model-load-failed",
-        "llama.cpp did not prove full Vulkan layer offload",
-        False,
-    )
+    report = adapter._acquire_and_load()
+
+    assert (report.accelerator_layers, report.total_model_layers) == (3, 4)
+    assert report.backend == "llama.cpp-vulkan" and not report.cpu_fallback
     adapter._release()
 
 

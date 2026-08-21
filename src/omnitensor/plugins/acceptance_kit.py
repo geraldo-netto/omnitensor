@@ -398,18 +398,31 @@ def run_acceptance_cli(
 
 
 def validate_gpu_load(report: NativeLoadReport) -> None:
-    """Require complete llama.cpp Vulkan model-layer offload."""
+    """Require a llama.cpp Vulkan load that actually reaches the GPU.
+
+    This used to require *complete* layer offload, which turned "never fall
+    back to the CPU silently" into "refuse any model larger than VRAM". The
+    owner's standing rule is no capping (decided 2026-08-21, OMNI-0586): a
+    Qwen3-Coder-30B MoE with 24 of its layers on this card and its experts in
+    RAM is real work at a measured 15.9 tok/s, and refusing it answers nobody.
+
+    What is still refused is the thing the rule was always about: a load that
+    reaches the GPU not at all, or one llama.cpp itself flags as a CPU
+    fallback. A partial offload is not silent — the report carries the real
+    accelerator/total split, and the receipts publish it.
+    """
     if (
         not isinstance(report, NativeLoadReport)
         or report.backend != "llama.cpp-vulkan"
         or report.device != "Vulkan"
         or report.cpu_fallback
         or report.total_model_layers < 1
-        or report.accelerator_layers != report.total_model_layers
+        or report.accelerator_layers < 1
+        or report.accelerator_layers > report.total_model_layers
     ):
         raise ProviderGenerationError(
             "model-load-failed",
-            "llama.cpp did not prove complete Vulkan model-layer offload",
+            "llama.cpp did not prove a Vulkan model load",
             generation_started=False,
         )
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import json
+import os
 import re
 import threading
 from collections.abc import Mapping
@@ -36,6 +37,24 @@ from .grounding import bind_grounding_metadata, fragment_span
 from .hints import citable_hint
 
 MAX_RUNTIME_CONTEXT_TOKENS = 32_768
+# How many model layers to place on the GPU. -1 is llama.cpp's "all of them",
+# which is right for every model that fits — and was hard-coded, so a model
+# larger than VRAM could not even ask for fewer. The environment variable is
+# the person's knob (OMNI-0586): set it and the load carries however many
+# layers fit, with the real offloaded/total split published in the receipt.
+GPU_LAYERS_VARIABLE = "OMNITENSOR_GPU_LAYERS"
+
+
+def _gpu_layer_budget() -> int:
+    configured = os.environ.get(GPU_LAYERS_VARIABLE, "").strip()
+    if not configured:
+        return -1
+    try:
+        return int(configured)
+    except ValueError:
+        return -1
+
+
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)
 _DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.IGNORECASE)
 
@@ -255,16 +274,20 @@ class LlamaVulkanRuntime:
             # other one's load logs. Hand the global sink back to something
             # that keeps nothing.
             self._discard_llama_logs(llama_cpp)
-        layers = self._prove_full_offload(llama_cpp, "".join(logs))
-        self._load_report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", layers, layers, False)
+        offloaded, total = self._prove_gpu_offload(llama_cpp, "".join(logs))
+        self._load_report = NativeLoadReport("llama.cpp-vulkan", "Vulkan", total, offloaded, False)
         logs.clear()
         return self._load_report
 
-    def _prove_full_offload(self, llama_cpp, text: str) -> int:
-        """Every layer on the GPU, and the card that took them, or a refusal.
+    def _prove_gpu_offload(self, llama_cpp, text: str) -> tuple[int, int]:
+        """How many layers reached the GPU, out of how many — or a refusal.
 
-        The no-CPU guarantee used to rest entirely on one English sentence in
-        a debug log, so an upstream rewording would have failed every load.
+        This used to demand every layer and refuse otherwise, which capped
+        what the machine may run: a model larger than VRAM with its experts
+        in RAM is real work, not a fallback (OMNI-0586). The refusals that
+        remain are the honest ones — a load that reached no device at all,
+        and a build whose answers cannot be read either way.
+
         The structured calls answer first where the installed build binds
         them; the log is the fallback, and a log that cannot be read at all is
         reported as unverified rather than as a proven partial offload.
@@ -289,10 +312,10 @@ class LlamaVulkanRuntime:
                 "llama.cpp reported neither a device count nor a readable offload log",
                 generation_started=False,
             )
-        if offloaded != total:
+        if offloaded < 1:
             raise ProviderGenerationError(
                 "model-load-failed",
-                "llama.cpp did not prove full Vulkan layer offload",
+                "llama.cpp placed no model layer on a Vulkan device",
                 generation_started=False,
             )
         device = _DEVICE.search(text)
@@ -305,7 +328,7 @@ class LlamaVulkanRuntime:
                 generation_started=False,
             )
         self._physical_device = device.group(1)
-        return total
+        return offloaded, total
 
     def _discard_llama_logs(self, llama_cpp) -> None:
         @llama_cpp.llama_log_callback
@@ -321,7 +344,7 @@ class LlamaVulkanRuntime:
         return Llama(
             model_path=str(self._model_path),
             n_ctx=MAX_RUNTIME_CONTEXT_TOKENS,
-            n_gpu_layers=-1,
+            n_gpu_layers=_gpu_layer_budget(),
             main_gpu=0,
             offload_kqv=True,
             op_offload=True,

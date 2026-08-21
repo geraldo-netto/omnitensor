@@ -578,10 +578,13 @@ def test_qualification_rejects_stale_identity_or_unnamed_device(tmp_path, change
     )
 
 
-def test_qualification_rejects_partial_or_cpu_generation_load(tmp_path):
+def test_qualification_rejects_a_load_that_missed_the_gpu(tmp_path):
+    """CPU fallback and a foreign backend are refused; a declared *partial*
+    offload is valid evidence since OMNI-0586 — the receipt records the
+    split rather than refusing the machine that produced it."""
     corpus, evidence, _report = _accepted(tmp_path)
     for load in (
-        replace(evidence.generator_load, accelerator_layers=28),
+        replace(evidence.generator_load, accelerator_layers=0),
         replace(evidence.generator_load, cpu_fallback=True),
         replace(evidence.generator_load, backend="cpu"),
     ):
@@ -590,8 +593,11 @@ def test_qualification_rejects_partial_or_cpu_generation_load(tmp_path):
                 corpus, replace(evidence, generator_load=load)
             ),
             "device-unqualified",
-            "llama.cpp did not prove complete Vulkan model-layer offload",
+            "llama.cpp did not prove a Vulkan model load",
         )
+
+    partial = replace(evidence.generator_load, accelerator_layers=28)
+    qualify_document_questions(corpus, replace(evidence, generator_load=partial))
 
 
 @pytest.mark.parametrize(

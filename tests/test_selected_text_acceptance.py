@@ -154,8 +154,11 @@ def test_worker_load_receipt_round_trips_the_exact_evidence_models():
             "device-unqualified",
         ),
         (
-            lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=36),
-            "device-unqualified",
+            # A receipt recording zero GPU layers is not even expressible: the
+            # parser refuses it before any device check. A *partial* offload
+            # (36 of 37) is valid evidence since OMNI-0586 and parses fine.
+            lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=0),
+            "receipt-invalid",
         ),
     ],
 )
@@ -380,11 +383,6 @@ def test_evidence_digest_is_bound_to_the_parsed_descriptor_snapshot(tmp_path, mo
             "runtime identity",
         ),
         (
-            lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=1),
-            "device-unqualified",
-            "complete Vulkan",
-        ),
-        (
             lambda value: value["models"]["hebrewTranslation"].update(deviceName="cpu"),
             "device-unqualified",
             "named GPU load",
@@ -420,6 +418,25 @@ def test_acceptance_fails_closed_on_stale_quality_device_route_or_safety_evidenc
         qualify_selected_text(corpus, evidence)
     assert captured.value.code == code
     assert detail in captured.value.detail
+
+
+def test_evidence_cannot_even_record_a_load_that_missed_the_gpu(tmp_path):
+    """Zero accelerator layers is refused at load: such evidence describes no
+    GPU work at all. A partial offload (36 of 37) loads and qualifies —
+    valid evidence since OMNI-0586."""
+    corpus, path = _write_evidence(
+        tmp_path,
+        lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=0),
+    )
+    with pytest.raises(SelectedTextAcceptanceError) as captured:
+        load_selected_text_evidence(path)
+    assert captured.value.code == "evidence-invalid"
+
+    corpus, path = _write_evidence(
+        tmp_path,
+        lambda value: value["models"]["primary"]["load"].update(acceleratorLayers=36),
+    )
+    qualify_selected_text(corpus, load_selected_text_evidence(path))
 
 
 def test_script_normalization_accepts_hebrew_punctuation_but_rejects_mixed_scripts():

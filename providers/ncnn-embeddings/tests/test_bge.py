@@ -252,5 +252,3 @@ def test_bge_refuses_a_missing_lease_and_an_invalid_vector(tmp_path, monkeypatch
     monkeypatch.setattr(bge, "VulkanBgeRunner", InvalidVector)
     with pytest.raises(ValueError, match="invalid embedding"):
         embedder._embed_sync(("text",), False, CancellationController())
-
-

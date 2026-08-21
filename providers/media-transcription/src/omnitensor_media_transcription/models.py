@@ -354,12 +354,14 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
             raise
         offload = _OFFLOAD.search("".join(logs))
         device = _LLAMA_DEVICE.search("".join(logs))
-        if offload is None or device is None or offload.group(1) != offload.group(2):
-            # Every layer on a Vulkan device, whichever device that is. The
-            # part worth refusing over is a partial offload, which runs the
-            # rest on the CPU.
+        if offload is None or device is None or int(offload.group(1)) < 1:
+            # A load that names no Vulkan device, or put no layer on one, is
+            # not a GPU load. A *partial* offload is (OMNI-0586): declared,
+            # visible in the log, and real work — refusing it capped what
+            # this machine may run, which is the owner's standing no-capping
+            # rule said the other way round.
             self._release_sync()
-            raise MediaGpuError("Qwen VL did not prove full Vulkan offload")
+            raise MediaGpuError("Qwen VL did not prove a Vulkan load")
         return self._llama
 
     @staticmethod

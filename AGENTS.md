@@ -56,8 +56,14 @@ venv (`.venv/bin/python`, `.venv/bin/pip`) for every command.
   generation is the context window itself, which is arithmetic rather than policy.
   Bounds on what a person *selected* (how many files, how large) and protocol frame
   limits are not this; ceilings on what they are told back always are.
-- There is deliberately NO CPU backend anywhere (gpu > npu > tpu only). Never add CPU
-  execution paths or fallbacks, however convenient.
+- There is deliberately NO CPU *backend* (gpu > npu > tpu only), and no silent CPU
+  fallback: a load must reach the accelerator and say how much of it did. A **declared
+  partial offload is work, not a fallback** (owner decision 2026-08-21, OMNI-0586) — a
+  model larger than VRAM may run with some layers on the GPU and the rest resident in
+  RAM, with the real accelerator/total split carried in `NativeLoadReport` and the
+  receipts. What stays refused is a load that reaches the GPU not at all, or one the
+  runtime itself flags as a CPU fallback. Never refuse work because only part of it
+  fits — that is the capping rule wearing a lane costume.
 - Keep architecture proportional; record unavoidable compromises in `TODO.md`.
 
 ## Quality gates

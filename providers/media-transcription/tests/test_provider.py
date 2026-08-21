@@ -819,7 +819,10 @@ def _install_fake_llama(monkeypatch, *, good_device=True, content=None):  # noqa
     # Which card it is is no longer asserted; a partial offload is, because
     # the remainder of it runs on the CPU.
     device_name = "AMD Radeon RX 6600 XT"
-    offloaded = "33/33" if good_device else "20/33"
+    # `good_device` now means the load reached the GPU at all: a declared
+    # partial offload is accepted since OMNI-0586, so the refusal case is a
+    # load that put no layer on any Vulkan device.
+    offloaded = "33/33" if good_device else "0/33"
     response_content = _fake_visual_content(content)
 
     def callback_type(callback):
