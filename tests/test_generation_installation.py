@@ -284,7 +284,13 @@ DECLARED_ARTIFACTS = {
     ],
     "event-extraction": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
     "file-organizer": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
-    "media-transcription": ["qwen2-5-vl-7b-instruct", "whisper-small-multilingual"],
+    # The 9B sits between them since OMNI-0587: the selectable vision model
+    # a person may choose over the default, measured better on Hebrew.
+    "media-transcription": [
+        "qwen2-5-vl-7b-instruct",
+        "qwen3-5-9b-q4-k-m",
+        "whisper-small-multilingual",
+    ],
     "selected-text-tools": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
 }
 

@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0587 | open | high | m | **The vision model behind media-transcription is hard-pinned, so the measured-better Qwen3.5-9B cannot be chosen.** Benchmarked 2026-08-21 on the 55-image corpus: Qwen3.5-9B reads at CER 0.0101/WER 0.0144 vs the pinned Qwen2.5-VL-7B's 0.0080/0.0097 on Latin — statistically close — but is the only model of the three that read Hebrew nearly perfectly (one letter-swap), where 7B slipped twice and 4B invented words. The provider's `create()` uses `require_artifact(VISION_ARTIFACT_ID)` with the id a constant, so no model choice can reach it even though the runtime already carries per-profile `model_choices` into worker bootstraps. Onboard `qwen3-5-9b-q4-k-m` (Q4_K_M + mmproj companion) as a pinned recipe and store artifact, declare it selectable in the media-transcription manifest, and make the provider honour the chosen vision artifact with the 7B remaining the default. |
 
 ## Blocked
 

@@ -67,7 +67,13 @@ def create() -> MediaTranscriptionPlugin:
     bootstrap = current_plugin_bootstrap(PLUGIN_ID)
     if bootstrap.accelerator_lease_path is None:
         raise MediaGpuError("GPU accelerator grant is unavailable")
-    vision = bootstrap.require_artifact(VISION_ARTIFACT_ID)
+    # The vision model is the person's to choose (OMNI-0587): the manifest
+    # declares qwen3-5-9b-q4-k-m as selectable beside the default, and the
+    # runtime carries the choice into this bootstrap. `chosen_or` refuses
+    # rather than falling back when a chosen model is not mounted, so nobody
+    # silently gets the other one. Both ship their projector under the same
+    # companion name, which is what keeps the path logic below model-agnostic.
+    vision = bootstrap.chosen_or(VISION_ARTIFACT_ID)
     speech = bootstrap.require_artifact(SPEECH_ARTIFACT_ID)
     projector = vision.path.parent / VISION_PROJECTOR
     if not projector.is_file():

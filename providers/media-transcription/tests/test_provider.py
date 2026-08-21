@@ -1057,3 +1057,41 @@ def test_public_provider_exports_are_bounded():
     assert provider.QwenVulkanVisualTranscriber.__module__.endswith(".models")
     assert provider.DocumentPageTranscriber.__module__.endswith(".documents")
     assert provider.PresentationArchiveTranscriber.__module__.endswith(".presentations")
+
+
+def test_a_chosen_vision_model_is_the_one_that_loads(monkeypatch, tmp_path):
+    """OMNI-0587: the 9B reads Hebrew where the default cannot; choosing it
+    must actually mount it, and a choice that is not mounted must refuse
+    rather than quietly serve the default."""
+    vision_path = tmp_path / "vl-model.gguf"
+    nine_b_path = tmp_path / "9b-model.gguf"
+    speech_path = tmp_path / "speech.bin"
+    lease_path = tmp_path / "lease"
+    for path in (vision_path, nine_b_path, speech_path, lease_path):
+        path.touch()
+    (tmp_path / provider.VISION_PROJECTOR).touch()
+    artifacts = (
+        BootstrapArtifact(
+            provider.VISION_ARTIFACT_ID, "1.0.0", "gguf", "vl", vision_path,
+            ((provider.VISION_PROJECTOR, "vl-proj"),),
+        ),
+        BootstrapArtifact(
+            "qwen3-5-9b-q4-k-m", "1.0.0", "gguf", "9b", nine_b_path,
+            ((provider.VISION_PROJECTOR, "9b-proj"),),
+        ),
+        BootstrapArtifact(
+            provider.SPEECH_ARTIFACT_ID, "1.0.0", "ggml-whisper", "speech", speech_path,
+        ),
+    )
+    chosen = PluginBootstrap(
+        provider.PLUGIN_ID, artifacts, None, lease_path, model_choice="qwen3-5-9b-q4-k-m"
+    )
+    monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: chosen)
+
+    plugin = provider.create()
+
+    assert plugin._vision._model_path == nine_b_path
+
+    unchosen = PluginBootstrap(provider.PLUGIN_ID, artifacts, None, lease_path)
+    monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: unchosen)
+    assert provider.create()._vision._model_path == vision_path
