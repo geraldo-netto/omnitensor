@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import itertools
 import json
 import os
@@ -182,6 +183,7 @@ class SocketControlTransport:
         self._serials = itertools.count(1)
         self._connections: set[asyncio.StreamWriter] = set()
         self._bound = False
+        self._lock = None
 
     @property
     def socket_path(self) -> Path:
@@ -190,13 +192,31 @@ class SocketControlTransport:
     async def start(self, handler: RuntimeHandler) -> None:
         self._dispatch = _dispatch_table(handler)
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # Two instances would publish to the same snapshot path, so a socket
-        # that still answers means another omnitensor is running and this one
-        # must refuse to start.  A socket file nobody answers is the residue
-        # of an instance that died without stop(); bind() refuses an existing
-        # path, and the unlink is safe because only this user can reach the
-        # directory.
+        # The check/unlink/bind below was a TOCTOU (OMNI-0604): two starts
+        # could both find nothing served, and the loser unlinked the winner's
+        # just-bound socket — then its stop() unlinked the other's too. The
+        # whole startup is now serialized by an flock on a sibling lock file,
+        # held for the instance's lifetime: the kernel releases it when the
+        # holder dies, so a stale lock cannot refuse anybody.
+        lock = (self._path.parent / f"{self._path.name}.lock").open("a+b")
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock.close()
+            raise RuntimeError(
+                f"{self._path} is already served; another omnitensor instance is running"
+            ) from None
+        except BaseException:
+            lock.close()
+            raise
+        self._lock = lock
+        # Held lock in hand, a socket that still answers is another instance
+        # running without the lock discipline — refuse rather than fight it.
+        # A socket file nobody answers is the residue of an instance that
+        # died without stop(); bind() refuses an existing path, and the
+        # unlink is safe because only this user can reach the directory.
         if self._path.exists() and await self._is_served():
+            self._release_lock()
             raise RuntimeError(
                 f"{self._path} is already served; another omnitensor instance is running"
             )
@@ -222,6 +242,13 @@ class SocketControlTransport:
             self._bound = False
             with contextlib.suppress(FileNotFoundError):
                 self._path.unlink()
+        self._release_lock()
+
+    def _release_lock(self) -> None:
+        lock, self._lock = self._lock, None
+        if lock is not None:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
 
     async def _is_served(self) -> bool:
         """Whether something is accepting connections on the socket path."""

@@ -406,3 +406,30 @@ def test_a_result_too_large_to_send_is_named_not_dropped(socket_path):
         asyncio.run(scenario())
     assert captured.value.code == "result-too-large"
     assert str(MAX_FRAME_BYTES) in captured.value.detail
+
+
+def test_the_lock_refuses_a_racer_even_when_the_served_check_lies(socket_path, monkeypatch):
+    """Startup is serialized by the flock, not by the probe (OMNI-0604).
+
+    Two starts could both pass _is_served() before either bound; the loser
+    then unlinked the winner's just-bound socket, and its stop() later
+    unlinked the replacement too. The probe is forced to lie here — the
+    exact race window — and the lock alone must still refuse the second
+    instance without touching the first's socket.
+    """
+
+    async def scenario():
+        async with serve(RecordingHandler(), socket_path):
+            second = SocketControlTransport(socket_path=socket_path)
+
+            async def nothing_served():
+                return False
+
+            monkeypatch.setattr(second, "_is_served", nothing_served)
+            with pytest.raises(RuntimeError, match="already served"):
+                await second.start(RecordingHandler())
+            await second.stop()
+            # The first instance's socket is untouched and still answers.
+            return await call_control("describe-contract", {}, socket_path=socket_path)
+
+    assert asyncio.run(scenario()) == {"answered": "describe-contract"}
