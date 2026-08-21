@@ -22,6 +22,7 @@ from .ports import (
     PluginCatalogSnapshot,
     PluginPermissionSource,
     PluginRuntimeSnapshot,
+    PluginSettingsSource,
     PluginSnapshotSource,
 )
 from .profile_selection import profile_statuses
@@ -190,12 +191,20 @@ def describe_plugins(
         if isinstance(plugin_runtime, PluginPermissionSource)
         else lambda _plugin_id: ()
     )
+    # A runtime that persists settings answers with the stored values and
+    # their revision; one that does not simply publishes neither field.
+    stored_settings = (
+        plugin_runtime.stored_settings
+        if isinstance(plugin_runtime, PluginSettingsSource)
+        else lambda _plugin_id: None
+    )
     document = build_plugin_inventory(
         retained.catalog.plugins,
         resolve_artifact=resolve_artifact,
         granted_permissions=granted_permissions,
         worker_states=states.get,
         worker_details=details.get,
+        stored_settings=stored_settings,
         generated_at_ms=clock_ms(),
     )
     return json.dumps(document, separators=(",", ":"))

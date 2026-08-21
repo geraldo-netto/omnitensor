@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import functools
 import logging
 import os
@@ -32,6 +33,7 @@ from .protocol import JsonObject, PluginProgress, PluginRequest, PluginResultSta
 from .sandbox import SELECTED_FILES_PERMISSION
 from .settings import (
     PluginConfigurationSpec,
+    PluginSettings,
     PluginSettingsError,
     PluginSettingsStore,
 )
@@ -274,22 +276,28 @@ class InstalledPluginRuntime:
                 return None
             raise
 
-    def stored_configuration(self, plugin_id: str) -> JsonObject | None:
-        """What this workload was tuned to, or nothing.
+    def stored_settings(self, plugin_id: str) -> PluginSettings | None:
+        """The stored settings this workload runs on: revision and values.
 
-        A store that refuses — a plugin upgraded across a configuration
-        contract with no migration, an unreadable document — starts the worker
-        on the defaults its manifest declares rather than not at all: a
-        workload lost to a tunable it does not need would be the worse answer,
-        and the log names it.
+        ``None`` when the manifest declares no configuration contract, or when
+        the store refuses — a plugin upgraded across a contract with no
+        migration, an unreadable document — because a revision this runtime
+        cannot read is one it must not invent. A declared contract with no
+        store, or no stored file, answers revision 0 on the manifest defaults,
+        which is exactly what its worker starts on.
         """
-        if self._settings_store is None:
-            return None
         spec = self.configuration_spec(plugin_id)
         if spec is None:
             return None
+        if self._settings_store is None:
+            return PluginSettings(
+                spec.plugin_id,
+                spec.plugin_version,
+                0,
+                copy.deepcopy(dict(spec.defaults)),
+            )
         try:
-            return self._settings_store.load(spec).configuration
+            return self._settings_store.load(spec)
         except (PluginSettingsError, OSError):
             LOGGER.warning(
                 "Could not read the stored configuration for %s; its worker starts on the"
@@ -298,6 +306,18 @@ class InstalledPluginRuntime:
                 exc_info=True,
             )
             return None
+
+    def stored_configuration(self, plugin_id: str) -> JsonObject | None:
+        """What this workload was tuned to, or nothing.
+
+        A store that refuses starts the worker on the defaults its manifest
+        declares rather than not at all: a workload lost to a tunable it does
+        not need would be the worse answer, and the log names it.
+        """
+        if self._settings_store is None:
+            return None
+        settings = self.stored_settings(plugin_id)
+        return None if settings is None else settings.configuration
 
     def granted_permissions(self, plugin_id: str) -> frozenset[str]:
         """What this plugin was actually granted when its worker started."""

@@ -167,6 +167,18 @@ class PluginPermissionSource(Protocol):
 
 
 @runtime_checkable
+class PluginSettingsSource(Protocol):
+    """Stored per-plugin settings, for a runtime that persists them.
+
+    The answer carries ``revision`` and ``configuration``; ``None`` means the
+    plugin declares no configuration contract, or the store refused and the
+    honest answer is no answer.
+    """
+
+    def stored_settings(self, plugin_id: str) -> object | None: ...
+
+
+@runtime_checkable
 class AcceleratorReloadableRuntime(Protocol):
     """A plugin runtime whose worker sandboxes can adopt new device leases."""
 

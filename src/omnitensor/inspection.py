@@ -6,20 +6,23 @@ cannot speak.  All of that is knowable from installed metadata and the artifact
 store, so the inventory is built without importing a single plugin module —
 answering "what does this plugin require" must never mean running its code.
 
-Two things are deliberately absent from the document.  Configuration *values*
-never appear, only the declared schema, because a value can be a resolved
-secret.  Secret-marked fields are named as such so a consumer renders a control
-rather than a value.
+Stored configuration values are published so a consumer can show what a
+workload actually runs on — with every key named in the secret-marked set
+withheld, because a stored value can be a resolved secret.  Secret-marked
+fields are named as such so a consumer renders a control rather than a value;
+their values never reach the wire.
 """
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
 from .plugins.artifacts import ArtifactResolution
 from .plugins.identity import ResolvedPlugin
 from .plugins.secrets import SECRET_SCHEMA_MARKER
+from .plugins.settings import PluginSettings
 from .registry import validate_document
 
 PLUGIN_INVENTORY_VERSION = 1
@@ -106,12 +109,15 @@ def plugin_inventory_entry(
     granted_permissions: Collection[str] = (),
     worker_state: str | None = None,
     worker_detail: str | None = None,
+    settings: PluginSettings | None = None,
 ) -> dict:
     """One plugin's capabilities, readiness, schema, and permission state."""
     declaration = plugin.manifest["plugin"]
     declared = list(declaration["permissions"])
     granted = set(granted_permissions)
     configuration_schema = declaration["schemas"]["configuration"]
+    input_schema = declaration["schemas"].get("input")
+    secret_keys = secret_configuration_keys(configuration_schema)
     return {
         "id": plugin.plugin_id,
         "version": plugin.version,
@@ -146,7 +152,28 @@ def plugin_inventory_entry(
             for permission in sorted(declared)
         ],
         "configurationSchema": configuration_schema,
-        "secretConfigurationKeys": list(secret_configuration_keys(configuration_schema)),
+        "secretConfigurationKeys": list(secret_keys),
+        # Verbatim from the manifest, so a consumer can build the payload a
+        # job submission is validated against. Optional, like workerDetail:
+        # an entry that always carried it would be a field an older consumer
+        # rejects.
+        **({"inputSchema": copy.deepcopy(input_schema)} if isinstance(input_schema, dict) else {}),
+        # The stored values this workload actually runs on, with every
+        # secret-marked key withheld — a stored value can be a resolved
+        # secret reference. Absent, never null, when the manifest declares
+        # no configuration contract.
+        **(
+            {
+                "configuration": {
+                    key: copy.deepcopy(value)
+                    for key, value in settings.configuration.items()
+                    if key not in secret_keys
+                },
+                "settingsRevision": settings.revision,
+            }
+            if settings is not None
+            else {}
+        ),
     }
 
 
@@ -157,6 +184,7 @@ def build_plugin_inventory(
     granted_permissions: Callable[[str], Collection[str]] = lambda _plugin_id: (),
     worker_states: Callable[[str], str | None] = lambda _plugin_id: None,
     worker_details: Callable[[str], str | None] = lambda _plugin_id: None,
+    stored_settings: Callable[[str], PluginSettings | None] = lambda _plugin_id: None,
     generated_at_ms: int,
 ) -> dict:
     """Build the contract-valid inventory document, in stable plugin order."""
@@ -170,6 +198,7 @@ def build_plugin_inventory(
                 granted_permissions=granted_permissions(plugin.plugin_id),
                 worker_state=worker_states(plugin.plugin_id),
                 worker_detail=worker_details(plugin.plugin_id),
+                settings=stored_settings(plugin.plugin_id),
             )
             for plugin in sorted(plugins, key=lambda item: item.plugin_id)
         ],

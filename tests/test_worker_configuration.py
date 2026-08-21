@@ -196,6 +196,94 @@ def test_a_runtime_with_no_store_starts_its_workers_untuned(tmp_path):
     assert runtime.stored_configuration("external-example") is None
 
 
+def test_the_stored_settings_carry_the_revision_the_store_holds(tmp_path):
+    """The inventory publishes what a workload runs on *and* the revision a
+    compare-and-swap update must name, so both come from the same read."""
+    from omnitensor.plugins import PluginSettingsStore, manifest_configuration_spec
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    manifest = {
+        "plugin": {
+            "schemas": {
+                "configuration": {
+                    "type": "object",
+                    "properties": {"guidance": {"type": "string", "default": ""}},
+                },
+                "input": {},
+                "output": {},
+            }
+        }
+    }
+    store = PluginSettingsStore(tmp_path / "settings")
+    store.update(
+        manifest_configuration_spec("external-example", manifest),
+        expected_revision=0,
+        configuration={"guidance": "cite sources"},
+    )
+    runtime = InstalledPluginRuntime(tmp_path / "bundled", settings_store=store)
+    runtime.configuration_spec = lambda plugin_id: manifest_configuration_spec(plugin_id, manifest)
+
+    settings = runtime.stored_settings("external-example")
+
+    assert settings.revision == 1
+    assert settings.configuration == {"guidance": "cite sources"}
+
+
+def test_a_declared_contract_with_no_store_answers_the_defaults_at_revision_zero(tmp_path):
+    """Nothing is stored, so what the worker runs on is the manifest defaults."""
+    from omnitensor.plugins import manifest_configuration_spec
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    manifest = {
+        "plugin": {
+            "schemas": {
+                "configuration": {
+                    "type": "object",
+                    "properties": {"guidance": {"type": "string", "default": "cite"}},
+                },
+                "input": {},
+                "output": {},
+            }
+        }
+    }
+    runtime = InstalledPluginRuntime(tmp_path / "bundled")
+    runtime.configuration_spec = lambda plugin_id: manifest_configuration_spec(plugin_id, manifest)
+
+    settings = runtime.stored_settings("external-example")
+
+    assert settings.revision == 0
+    assert settings.configuration == {"guidance": "cite"}
+
+
+def test_a_plugin_without_a_configuration_contract_has_no_stored_settings(tmp_path):
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    runtime = InstalledPluginRuntime(tmp_path / "bundled")
+
+    assert runtime.stored_settings("external-example") is None
+
+
+def test_a_store_that_refuses_reports_no_settings_rather_than_inventing_a_revision(
+    tmp_path, caplog
+):
+    import logging
+
+    from omnitensor.plugins import manifest_configuration_spec
+    from omnitensor.plugins.loading import InstalledPluginRuntime
+
+    manifest = {"plugin": {"schemas": {"configuration": {}, "input": {}, "output": {}}}}
+
+    class Refusing:
+        def load(self, _spec):
+            raise OSError("unreadable")
+
+    runtime = InstalledPluginRuntime(tmp_path / "bundled", settings_store=Refusing())
+    runtime.configuration_spec = lambda plugin_id: manifest_configuration_spec(plugin_id, manifest)
+
+    with caplog.at_level(logging.WARNING, logger="omnitensor.plugins.loading"):
+        assert runtime.stored_settings("external-example") is None
+
+
 def test_a_store_that_refuses_starts_the_worker_on_the_manifests_defaults(tmp_path, caplog):
     """A workload lost to an unreadable tunable would be the worse answer."""
     import logging

@@ -491,6 +491,58 @@ def test_invalid_plugin_runtime_returns_empty_inventory_without_reading_clock():
     ) == {"version": 1, "generatedAt": 1, "plugins": []}
 
 
+def test_the_inventory_carries_stored_settings_when_the_runtime_persists_them():
+    """OMNI-0558: the wire carries the values a workload runs on and the
+    revision an update must name; a runtime that persists nothing publishes
+    neither field rather than null."""
+    from conftest import sample_plugin_manifest  # noqa: PLC0415
+
+    from omnitensor.plugins.settings import PluginSettings
+    from omnitensor.registry import validate_document
+
+    plugin = SimpleNamespace(
+        plugin_id="events",
+        version="1.0.0",
+        source="external",
+        distribution_name="omnitensor-events",
+        manifest=sample_plugin_manifest("events"),
+    )
+    snapshot = SimpleNamespace(
+        catalog=SimpleNamespace(plugins=(plugin,)),
+        workers=(),
+    )
+
+    class PersistingRuntime:
+        snapshot = None
+
+        def stored_settings(self, plugin_id):
+            return PluginSettings(plugin_id, "1.0.0", 5, {"mode": "fast"})
+
+    class ForgetfulRuntime:
+        snapshot = None
+
+    for runtime_type in (PersistingRuntime, ForgetfulRuntime):
+        runtime = runtime_type()
+        runtime.snapshot = snapshot
+        document = json.loads(
+            telemetry_observation.describe_plugins(
+                runtime,
+                lambda _artifact_id: None,
+                clock_ms=lambda: 1_700_000_000_000,
+            )
+        )
+        assert validate_document("plugin-inventory.schema.json", document) == []
+        [entry] = document["plugins"]
+        if runtime_type is PersistingRuntime:
+            assert entry["settingsRevision"] == 5
+            assert entry["configuration"] == {"mode": "fast"}
+        else:
+            assert "settingsRevision" not in entry
+            assert "configuration" not in entry
+        # OMNI-0567: the manifest's input contract travels with the entry.
+        assert entry["inputSchema"] == plugin.manifest["plugin"]["schemas"]["input"]
+
+
 def test_service_lifecycle_wrappers_resolve_owner_functions_at_call_time(monkeypatch):
     workload = SimpleNamespace(id="profile")
     calls = []

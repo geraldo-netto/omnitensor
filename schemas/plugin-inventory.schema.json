@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://cinnamon.org/omnitensor/plugin-inventory.schema.json",
   "title": "OmniTensor plugin inventory",
-  "description": "Read-only description of installed plugins: what each declares, what it still needs, and whether it can run. Contains no configuration values, because a value can be a resolved secret.",
+  "description": "Read-only description of installed plugins: what each declares, what it still needs, and whether it can run. Stored configuration values are published with every key named in secretConfigurationKeys withheld, because a withheld value can be a resolved secret; a secret-marked key never appears in configuration.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -203,6 +203,19 @@
         "configurationSchema": {
           "type": "object",
           "maxProperties": 64
+        },
+        "inputSchema": {
+          "description": "Verbatim copy of the manifest's plugin.schemas.input: what this workload accepts as a job payload. Optional, like workerDetail: an entry that always carried it would be a field an older consumer rejects.",
+          "type": "object"
+        },
+        "configuration": {
+          "description": "The stored configuration values this workload actually runs on, with every key named in secretConfigurationKeys withheld. Optional: absent when the manifest declares no configuration contract.",
+          "type": "object"
+        },
+        "settingsRevision": {
+          "description": "The stored settings revision these configuration values carry; 0 means the manifest defaults with no stored file. Optional: absent when the manifest declares no configuration contract.",
+          "type": "integer",
+          "minimum": 0
         },
         "secretConfigurationKeys": {
           "type": "array",
