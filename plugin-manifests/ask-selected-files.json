@@ -1,7 +1,7 @@
 {
  "manifestVersion": 2,
  "id": "ask-selected-files",
- "version": "1.2.0",
+ "version": "1.3.0",
  "capabilities": [
   "explicit-file-selection",
   "grounded-document-question-answering"
@@ -43,8 +43,7 @@
     "type": "object",
     "additionalProperties": false,
     "required": [
-     "sources",
-     "question"
+     "sources"
     ],
     "properties": {
      "sources": {
@@ -64,13 +63,83 @@
       "maxLength": 4096
      },
      "operation": {
-      "description": "Which operation to run over the selected files. Optional and defaulting to ask, so every existing caller stays valid; the enum grows as the file side learns the shared operations (OMNI-0625, stage 1 of docs/operations-core-migration.md).",
+      "description": "Which shared operation to run over the selected files (OMNI-0617 stage 2). Optional and defaulting to ask, so every existing caller stays valid; question is required exactly when asking and language exactly when translating.",
       "enum": [
-       "ask"
+       "ask",
+       "explain",
+       "summarize",
+       "rewrite",
+       "translate",
+       "extract-tasks"
       ],
       "default": "ask"
+     },
+     "language": {
+      "description": "The translation target, accepted only when operation is translate.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^\\s*[^\\W\\d_][\\w '\\-]*\\s*$"
      }
-    }
+    },
+    "allOf": [
+     {
+      "if": {
+       "anyOf": [
+        {
+         "not": {
+          "required": [
+           "operation"
+          ]
+         }
+        },
+        {
+         "properties": {
+          "operation": {
+           "const": "ask"
+          }
+         }
+        }
+       ]
+      },
+      "then": {
+       "required": [
+        "question"
+       ]
+      },
+      "else": {
+       "not": {
+        "required": [
+         "question"
+        ]
+       }
+      }
+     },
+     {
+      "if": {
+       "required": [
+        "operation"
+       ],
+       "properties": {
+        "operation": {
+         "const": "translate"
+        }
+       }
+      },
+      "then": {
+       "required": [
+        "language"
+       ]
+      },
+      "else": {
+       "not": {
+        "required": [
+         "language"
+        ]
+       }
+      }
+     }
+    ]
    },
    "output": {
     "$ref": "document-question-result.schema.json"
@@ -133,6 +202,15 @@
      "model.bin": "8245e47e944c0dff7d4583b2c8c11d362d99d7f144777439e2435e2e6b116b96",
      "labels.txt": "e07ed91571983f5ee096df61ad7cb585eb79411715553ff14f5882b6052b24e0"
     }
+   },
+   {
+    "id": "dictalm2-hebrew-q4-k-m",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "gguf",
+    "sha256": "dc53cc29a30444677a7760af31f807a61999477c526cdbe6552803259a94c735",
+    "sourceUri": "https://huggingface.co/dicta-il/dictalm2.0-instruct-GGUF/resolve/9ed3346a1440643825287abf86e28800005ec9b3/dictalm2.0-instruct-Q4_K_M.gguf",
+    "licenseSpdx": "Apache-2.0"
    }
   ],
   "permissions": [
@@ -209,6 +287,27 @@
    "target": 500,
    "unit": "milliseconds",
    "description": "Revoked selected-file permission refuses queued work within this bound."
+  },
+  {
+   "metric": "span-coverage",
+   "comparator": "equal",
+   "target": 1,
+   "unit": "ratio",
+   "description": "Every span of every frozen document is translated and reassembled in order."
+  },
+  {
+   "metric": "target-script-integrity",
+   "comparator": "equal",
+   "target": 1,
+   "unit": "ratio",
+   "description": "Every frozen translation is written in the requested script and no other."
+  },
+  {
+   "metric": "provider-route-integrity",
+   "comparator": "equal",
+   "target": 1,
+   "unit": "ratio",
+   "description": "Only an explicit Hebrew translation target uses Dicta; every other operation and language stays on Qwen."
   }
  ]
 }

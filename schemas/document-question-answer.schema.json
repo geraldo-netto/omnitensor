@@ -4,43 +4,100 @@
   "title": "Grounded selected-file answer",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "requestId", "answer", "citations"],
+  "required": [
+    "version",
+    "requestId",
+    "answer",
+    "citations"
+  ],
   "properties": {
-    "version": {"const": 1},
+    "version": {
+      "const": 1
+    },
     "requestId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,120}$"
     },
-    "answer": {"type": "string", "minLength": 1},
+    "answer": {
+      "type": "string",
+      "minLength": 1
+    },
     "citations": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/$defs/citation"}
+      "items": {
+        "$ref": "#/$defs/citation"
+      }
+    },
+    "operation": {
+      "description": "Which shared operation this answer serves. Absent for a plain ask; the operations core states the enum (OMNI-0617 stage 2).",
+      "enum": [
+        "ask",
+        "explain",
+        "summarize",
+        "rewrite",
+        "translate",
+        "extract-tasks"
+      ]
+    },
+    "tasks": {
+      "description": "Extracted actionable items. Only extract-tasks may fill it; every other operation keeps it absent or empty, and the workload refuses an answer that does not (the conditional lives in code and in the public result schema, never here: this schema is projected into a generation grammar, which understands no conditionals).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "citation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourceRef", "sourceSha256", "page", "span", "textSha256"],
+      "required": [
+        "sourceRef",
+        "sourceSha256",
+        "page",
+        "span",
+        "textSha256"
+      ],
       "properties": {
         "sourceRef": {
           "type": "string",
           "pattern": "^private:[A-Za-z0-9._:-]{1,220}$"
         },
-        "sourceSha256": {"$ref": "#/$defs/digest"},
-        "page": {"type": "integer", "minimum": 1},
+        "sourceSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
         "span": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["start", "end"],
+          "required": [
+            "start",
+            "end"
+          ],
           "properties": {
-            "start": {"type": "integer", "minimum": 0},
-            "end": {"type": "integer", "minimum": 1}
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
-        "textSha256": {"$ref": "#/$defs/digest"}
+        "textSha256": {
+          "$ref": "#/$defs/digest"
+        }
       }
     }
   }

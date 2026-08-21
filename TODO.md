@@ -4,16 +4,16 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0627 | open | medium | m | **Operations core, stage 3.** document-translation aliases onto the file-side translate (3a), xpuwlm re-points (3b), one guarded removal commit (3c) — map §4 stage 3. Implementable now: stage 2's dispatch and the decided one-envelope contract shipped (2026-08-21); 3b's client half lives in the xpuwlm repository. |
+| OMNI-0631 | open | low | xs | `test_qwen3_catalog_is_official_revision_pinned_and_gpu_default` is red since 6e66d55: `generation-models/qwen3-8b.json` now records no default GPU provider (the workload default moved to the 9B) while the test still asserts `('gpu', True)`. Align the catalog or the test with the moved default. |
 
 ## Blocked / Deferred
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
 | OMNI-0630 | blocked | medium | s | Wire `ocr_extraction.py` into `visual-library` indexing so exact OCR text and coordinates become searchable alongside embeddings. Blocked until the workload's models, inference, and acceptance tracked by OMNI-0097, OMNI-0098, and OMNI-0101 exist. |
-| OMNI-0626 | blocked | high | l | Decide the file-operations output contract: universal `answer + citations`, optional structured `documents` and `tasks` sections, or per-operation result schemas. The choice changes what xpuwlm renders and requires cross-repository schema coordination. |
-| OMNI-0627 | blocked | medium | m | **Operations core, stage 3 — after OMNI-0626.** document-translation aliases onto the file-side translate, xpuwlm re-points, one guarded removal commit (map §4 stage 3). Cannot start before stage 2's dispatch and output contract exist. |
-| OMNI-0628 | blocked | low | s | **Operations core, stage 4 — after OMNI-0626/0627.** The client's ASK_ACTIONS proto-enum becomes real operations; ask over inline selection considered. |
-| OMNI-0629 | blocked | medium | s | **document-translation ships unmeasured — closes with the operations core.** Either stage 2's translate metrics measure it under the file side, or stage 3 retires the workload; both wait on OMNI-0626's contract decision. |
+| OMNI-0628 | blocked | low | s | **Operations core, stage 4.** The client's ASK_ACTIONS proto-enum becomes real operations; ask over inline selection considered. The output contract is decided and stage 2 shipped (2026-08-21); this still waits on stage 3's client re-point (OMNI-0627), which is what gives the client one operations surface to grow. |
+| OMNI-0629 | blocked | medium | s | **document-translation ships unmeasured — closes with the operations core.** Decided path (2026-08-21): stage 3 retires document-translation, and translate is measured under the file side. The remainder is a live GPU acceptance run of `ask-selected-files` with installed artifacts — the stage-2 prompt moved its task digest, so both Qwen pairs and the new translate metrics (span-coverage, target-script-integrity, provider-route-integrity) sit `unmeasured` in `qualification.json` until that run happens. |
 | OMNI-0613 | blocked | medium | s | Decide whether `media-transcription` keeps Qwen3.5-9B as its general default or returns to 7B and reserves 9B for the OCR lane. Either choice changes fresh-install behavior. |
 | OMNI-0575 | blocked | high | m | Decide whether each collector may persist training samples for its own profile. Existing unattended snapshot recording exposes only scheduler aggregates; profile-specific persistence would create a history of personal hardware activity and requires an explicit privacy decision. |
 | OMNI-0574 | blocked | high | m | Decide whether six advisory workloads must wait for qualified models and licensed labeled corpora or may answer from their existing permission-gated measurements using explicit deterministic arithmetic. This changes the definition of an advisory workload. |

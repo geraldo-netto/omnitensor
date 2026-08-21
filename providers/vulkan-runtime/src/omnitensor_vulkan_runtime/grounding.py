@@ -146,6 +146,21 @@ def _normalize_selected_text_tasks(document: object) -> None:
         document["tasks"] = []
 
 
+def _normalize_file_operation_tasks(document: object) -> None:
+    """The same placeholder rule, for a contract where `tasks` is optional.
+
+    An ask answer never carried the field, so it is cleared rather than
+    injected: only an answer that stated tasks it was not asked for loses
+    them (OMNI-0617 stage 2).
+    """
+    if (
+        isinstance(document, dict)
+        and "tasks" in document
+        and document.get("operation") != "extract-tasks"
+    ):
+        document["tasks"] = []
+
+
 def _merge_organizer_suggestions(document: object) -> None:
     """Merge compatible same-file span suggestions without inventing metadata."""
     suggestions = document.get("suggestions") if isinstance(document, dict) else None
@@ -354,7 +369,7 @@ TASK_BINDINGS: dict[str, TaskBinding] = {
         minimum_references=2,
         citable=_after_the_control_fragment,
         bindable=_after_the_control_fragment,
-        normalize=(_deduplicate_document_citations,),
+        normalize=(_normalize_file_operation_tasks, _deduplicate_document_citations),
     ),
     # The span the translation cites, bound by the host rather than copied by
     # the model: without an entry here the model was asked to reproduce an

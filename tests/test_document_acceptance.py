@@ -171,6 +171,12 @@ def test_manifest_declares_the_same_operational_thresholds_and_answer_bound():
         "p95-question-latency": policy["maximumP95LatencyMs"],
         "cancellation-latency": policy["maximumCancellationLatencyMs"],
         "grant-revocation-latency": policy["maximumRevocationLatencyMs"],
+        # The translate metrics (OMNI-0617 stage 2), stated the way the
+        # translating manifests state them: absolute promises, not tunables
+        # from the catalog policy.
+        "span-coverage": 1,
+        "target-script-integrity": 1,
+        "provider-route-integrity": 1,
     }
     private_schema = json.loads((ROOT / "schemas/document-question-answer.schema.json").read_text())
     public_schema = json.loads((ROOT / "schemas/document-question-result.schema.json").read_text())

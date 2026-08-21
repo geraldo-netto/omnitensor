@@ -33,6 +33,7 @@ from omnitensor.plugins.event_workload import (
     MemoryFragmentStore,
     event_generation_task,
 )
+from omnitensor.plugins.file_operations import FileOperationsPrompting
 from omnitensor.plugins.file_organizer import file_organizer_task
 from omnitensor.plugins.fragments import SourceFragment
 from omnitensor.plugins.generation import GenerationRequest
@@ -64,8 +65,12 @@ CANONICAL = {
             ),
         ),
     ),
+    # The ask request stays canonical for the golden file: the operations
+    # prompting contributes nothing to it (the first fragment is a question,
+    # not a closed control), so the reviewed ask prompt is what it was.
+    # The operation hint is asserted separately below.
     "ask-selected-files": (
-        NO_PROMPTING,
+        FileOperationsPrompting(),
         (
             ("private:job-1:question", "What is the total due?"),
             ("private:job-1:span:0-42", "The invoice totals 412.90 EUR, due on 30 September."),
@@ -358,6 +363,114 @@ def test_without_the_request_there_is_nothing_to_compare_against():
     assert (
         SelectedTextPrompting().reconsideration(
             selected_text_task(), "hint", _answer("explain", SENTENCE), None, None
+        )
+        is None
+    )
+
+
+def _file_operation_request(operation: str, language: str | None, content: str):
+    store = MemoryFragmentStore()
+    control = SourceFragment(
+        "private:job-1:control",
+        "a" * 64,
+        1,
+        json.dumps({"operation": operation, "language": language}),
+        "b" * 64,
+    )
+    fragment = SourceFragment("private:job-1:operation-content-1", "c" * 64, 1, content, "d" * 64)
+    asyncio.run(store.publish("job-1", (control, fragment)))
+    return store, GenerationRequest(
+        "job-1", "ask-selected-files", (control.reference, fragment.reference)
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "required"),
+    [
+        ("explain", "Explain the selection"),
+        ("summarize", "Summarize the selection"),
+        ("rewrite", "Rewrite the selection"),
+        ("extract-tasks", "List every explicit actionable item"),
+    ],
+)
+def test_every_file_side_operation_reaches_the_model_as_an_instruction(operation, required):
+    """OMNI-0617 stage 2: the file side runs the same instruction table."""
+    store, request = _file_operation_request(operation, None, "Some text.")
+
+    hint = FileOperationsPrompting().hint(document_question_task(), request, store)
+
+    assert f'operation is "{operation}"' in hint
+    assert required in hint
+
+
+def test_a_file_side_translation_names_the_language_it_was_asked_for():
+    store, request = _file_operation_request("translate", "Português", "Some text.")
+
+    hint = FileOperationsPrompting().hint(document_question_task(), request, store)
+
+    assert '"Português"' in hint
+    assert "only the target language" in hint
+
+
+def test_an_ask_request_gets_no_operation_hint():
+    """The question is not a control object, so the core contributes nothing
+    and the reviewed ask prompt stays exactly what it was."""
+    prompting, store, request = _request("ask-selected-files")
+
+    assert prompting.hint(document_question_task(), request, store) == ""
+
+
+def _file_answer(operation: str, answer: str) -> str:
+    return json.dumps(
+        {
+            "version": 1,
+            "requestId": "job-1",
+            "operation": operation,
+            "answer": answer,
+            "citations": [
+                {
+                    "sourceRef": "private:job-1:operation-content-1",
+                    "sourceSha256": "c" * 64,
+                    "span": {"start": 0, "end": len(SENTENCE)},
+                    "page": 1,
+                    "textSha256": "d" * 64,
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("operation", ["explain", "summarize", "rewrite"])
+def test_a_file_side_answer_that_is_the_content_earns_one_re_ask(operation):
+    store, request = _file_operation_request(operation, None, SENTENCE)
+
+    reprompt = FileOperationsPrompting().reconsideration(
+        document_question_task(), "hint", _file_answer(operation, SENTENCE), request, store
+    )
+
+    assert reprompt is not None
+    assert "repeats the selection" in reprompt
+
+
+@pytest.mark.parametrize("operation", ["translate", "extract-tasks"])
+def test_a_file_side_operation_that_may_repeat_the_words_is_left_alone(operation):
+    store, request = _file_operation_request(operation, None, SENTENCE)
+
+    assert (
+        FileOperationsPrompting().reconsideration(
+            document_question_task(), "hint", _file_answer(operation, SENTENCE), request, store
+        )
+        is None
+    )
+
+
+def test_a_real_file_side_answer_is_not_re_asked():
+    store, request = _file_operation_request("explain", None, SENTENCE)
+    answered = _file_answer("explain", "Mitochondria make most of a cell's usable energy.")
+
+    assert (
+        FileOperationsPrompting().reconsideration(
+            document_question_task(), "hint", answered, request, store
         )
         is None
     )

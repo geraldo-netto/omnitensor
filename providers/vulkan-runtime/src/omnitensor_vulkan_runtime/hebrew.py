@@ -118,11 +118,36 @@ def _document_translation_answer(request: GenerationRequest, selection, translat
     }
 
 
+def _file_operations_answer(request: GenerationRequest, selection, translation: str) -> dict:
+    """The file-side operations envelope: the translation, citing its span.
+
+    `ask-selected-files` publishes the same closed `{language, operation}`
+    control the inline workload does (OMNI-0617 stage 2), so the control
+    contract is shared and only the answer shape is this workload's own.
+    """
+    return {
+        "version": 1,
+        "requestId": request.request_id,
+        "operation": "translate",
+        "answer": translation,
+        "citations": [
+            {
+                "sourceRef": selection.reference,
+                "sourceSha256": selection.source_sha256,
+                "page": selection.page,
+                "span": {"start": 0, "end": len(selection.text)},
+                "textSha256": selection.text_sha256,
+            }
+        ],
+    }
+
+
 # Which workloads may reach DictaLM, and the answer each one's contract states.
 # Written as a pair per workload rather than as branches: the model is the same
 # translation either way, and what differs is only the envelope it is asked for.
 _CONTRACTS: dict[str, tuple[Callable[..., None], Callable[..., dict]]] = {
     "selected-text-tools": (_selected_text_control, _selected_text_answer),
+    "ask-selected-files": (_selected_text_control, _file_operations_answer),
     "document-translation": (_document_translation_control, _document_translation_answer),
 }
 

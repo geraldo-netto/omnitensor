@@ -83,15 +83,17 @@ class OperationPrompting:
 
     The operation a person chose is in a trusted control fragment, not in
     the task: one prompt serves every operation, and which one was asked for
-    decides what a correct answer looks like. Parameterised by task id so
-    the file-side workload (stage 2) builds its own prompting from the same
-    core the inline side uses.
+    decides what a correct answer looks like. Parameterised by task id and by
+    the field the workload's answer contract puts the prose in — ``result``
+    inline, ``answer`` on the file side — so the file-side workload (stage 2)
+    builds its own prompting from the same core the inline side uses.
     """
 
-    __slots__ = ("_task_id",)
+    __slots__ = ("_answer_field", "_task_id")
 
-    def __init__(self, task_id: str) -> None:
+    def __init__(self, task_id: str, *, answer_field: str = "result") -> None:
         self._task_id = task_id
+        self._answer_field = answer_field
 
     def hint(self, task, request, store) -> str:
         if task.task_id != self._task_id or len(request.content_references) != 2:
@@ -130,7 +132,7 @@ class OperationPrompting:
         if task.task_id != self._task_id or request is None or store is None:
             return None
         selection = _selection_text(request, store)
-        answered = _answer_result(raw)
+        answered = _answer_result(raw, self._answer_field)
         if not selection or not answered:
             return None
         if _restates(answered, selection):
@@ -149,8 +151,8 @@ def _selection_text(request, store) -> str:
         return ""
 
 
-def _answer_result(raw: str) -> str:
-    """The `result` the model returned, or nothing when it returned no JSON."""
+def _answer_result(raw: str, answer_field: str) -> str:
+    """The answer text the model returned, or nothing when it returned no JSON."""
     try:
         document = json.loads(raw)
     except (UnicodeError, ValueError):
@@ -159,7 +161,7 @@ def _answer_result(raw: str) -> str:
         return ""
     if document.get("operation") not in RESTATEMENT_IS_A_NON_ANSWER:
         return ""
-    result = document.get("result")
+    result = document.get(answer_field)
     return result if isinstance(result, str) else ""
 
 

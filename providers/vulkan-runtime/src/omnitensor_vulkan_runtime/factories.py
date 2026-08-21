@@ -351,6 +351,13 @@ def _hebrew_route(bootstrap, store):
     return GenerationRouter((worker,)), hebrew_runtime, hebrew_model, hebrew_qualification
 
 
+# Public under its own name because the ask-selected-files wheel assembles its
+# plugin from `generation_context` and needs the same measured Hebrew route the
+# in-tree factories use (OMNI-0617 stage 2); an underscore name was a promise
+# this package never made to another distribution.
+hebrew_route = _hebrew_route
+
+
 def create_document_translation() -> QualifiedWorkload:
     bootstrap, store, runtime, model, qualification, router = generation_context(
         "document-translation"

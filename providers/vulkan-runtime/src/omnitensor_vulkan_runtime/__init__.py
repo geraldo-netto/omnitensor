@@ -7,6 +7,7 @@ from .factories import (
     create_file_organizer,
     create_selected_text_tools,
     generation_context,
+    hebrew_route,
     workload_tasks,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "create_file_organizer",
     "create_selected_text_tools",
     "generation_context",
+    "hebrew_route",
     "workload_tasks",
 ]

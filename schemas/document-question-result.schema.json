@@ -4,46 +4,215 @@
   "title": "Public grounded selected-file answer",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "requestId", "answer", "providerId", "accelerator", "citations"],
+  "required": [
+    "version",
+    "requestId",
+    "answer",
+    "providerId",
+    "accelerator",
+    "citations"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
-    "answer": {"type": "string", "minLength": 1},
-    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "accelerator": {"enum": ["gpu", "npu"]},
+    "version": {
+      "const": 1
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,120}$"
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "accelerator": {
+      "enum": [
+        "gpu",
+        "npu"
+      ]
+    },
     "citations": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/$defs/citation"}
+      "items": {
+        "$ref": "#/$defs/citation"
+      }
+    },
+    "operation": {
+      "description": "Which shared operation this result serves (OMNI-0617 stage 2). Absent means ask, so every result ever published stays valid.",
+      "enum": [
+        "ask",
+        "explain",
+        "summarize",
+        "rewrite",
+        "translate",
+        "extract-tasks"
+      ]
+    },
+    "tasks": {
+      "description": "Extracted actionable items, present exactly when operation is extract-tasks.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "documents": {
+      "description": "The translated documents, present exactly when operation is translate; the shape document-translation-result states, folded in here.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/document"
+      }
     }
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "citation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fileId", "fileName", "sourceSha256", "page", "span", "textSha256"],
+      "required": [
+        "fileId",
+        "fileName",
+        "sourceSha256",
+        "page",
+        "span",
+        "textSha256"
+      ],
       "properties": {
-        "fileId": {"type": "string", "pattern": "^selected-file-[1-9][0-9]*$"},
+        "fileId": {
+          "type": "string",
+          "pattern": "^selected-file-[1-9][0-9]*$"
+        },
         "fileName": {
           "type": "string",
           "minLength": 1,
           "maxLength": 255,
           "pattern": "^[^/\\\\]+$"
         },
-        "sourceSha256": {"$ref": "#/$defs/digest"},
-        "page": {"type": "integer", "minimum": 1},
+        "sourceSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
         "span": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["start", "end"],
+          "required": [
+            "start",
+            "end"
+          ],
           "properties": {
-            "start": {"type": "integer", "minimum": 0},
-            "end": {"type": "integer", "minimum": 1}
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
-        "textSha256": {"$ref": "#/$defs/digest"}
+        "textSha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentId",
+        "fileName",
+        "sourceSha256",
+        "spanCount",
+        "text",
+        "translationSha256"
+      ],
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "pattern": "^selected-document-[0-9]{1,6}$"
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "spanCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "translationSha256": {
+          "$ref": "#/$defs/digest"
+        }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "const": "translate"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "documents"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "documents"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "const": "extract-tasks"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tasks"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "tasks"
+          ]
+        }
+      }
+    }
+  ]
 }

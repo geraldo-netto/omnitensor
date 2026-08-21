@@ -50,11 +50,17 @@ from .extraction import (
     ExtractionAdapter,
     SelectedDocumentReader,
 )
+from .file_operations import FILE_OPERATIONS, operate_on_selected_files
 from .fragments import FragmentStoreError, SourceFragment
 from .generation import (
     GenerationError,
     GenerationRouter,
     generation_request,
+)
+from .operations import (
+    translation_route,
+    validated_language,
+    validated_translation_routes,
 )
 from .protocol import (
     CancellationToken,
@@ -63,6 +69,7 @@ from .protocol import (
     ProgressReporter,
     ScaledProgressReporter,
 )
+from .translation import TranslationError
 
 PLUGIN_ID = "ask-selected-files"
 READ_PERMISSION = "files:read-selected"
@@ -80,6 +87,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
         router: GenerationRouter,
         fragment_store: MemoryFragmentStore,
         *,
+        translation_routes: Mapping[str, GenerationRouter] | None = None,
         adapters: Mapping[str, ExtractionAdapter] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
@@ -95,6 +103,9 @@ class DocumentQuestionPlugin(ManagedPlugin):
             raise DocumentQuestionError("clock-invalid", "clock must be callable")
         self._embedder = embedder
         self._router = router
+        self._translation_routes = validated_translation_routes(
+            translation_routes, DocumentQuestionError, noun="translation route language"
+        )
         self._store = fragment_store
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         defaults: dict[str, ExtractionAdapter] = {
@@ -113,6 +124,8 @@ class DocumentQuestionPlugin(ManagedPlugin):
         self.permissions.require(READ_PERMISSION)
         _validate_embedding_provider(self._embedder.descriptor, require_qualified=True)
         self._router.require_ready()
+        for route in self._translation_routes.values():
+            route.require_ready()
 
     async def on_health(self) -> PluginHealth:
         descriptor = self._embedder.descriptor
@@ -141,6 +154,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
                 FragmentStoreError,
                 GenerationError,
                 SDKContractError,
+                TranslationError,
             ),
             detail_of=_answer_failure_detail,
             discard=self._store.discard,
@@ -152,8 +166,38 @@ class DocumentQuestionPlugin(ManagedPlugin):
         cancellation: CancellationToken,
         progress: ProgressReporter,
     ) -> PluginResult:
-        """Retrieve, generate in as many passes as the selection needs, cite."""
-        question = self._validate_request(request)
+        """Dispatch on the operation; ask keeps its retrieval path unchanged.
+
+        The ask branch retrieves, generates in as many passes as the selection
+        needs, and cites; every other operation of the shared enum runs
+        through :mod:`file_operations` (OMNI-0617 stage 2).
+        """
+        operation, question, language = self._validate_request(request)
+        if operation != "ask":
+            output = await operate_on_selected_files(
+                request,
+                operation=operation,
+                language=language,
+                reader=self._reader,
+                adapters=self._adapters,
+                router=self._route(operation, language),
+                store=self._store,
+                clock_ms=self._clock_ms,
+                cancellation=cancellation,
+                progress=progress,
+            )
+            await self._progress(request, progress, "terminal", 1.0)
+            return succeeded_result(
+                request,
+                output,
+                completed_at_ms=self._clock_ms(),
+                detail=(
+                    "selected documents translated in full"
+                    if operation == "translate"
+                    else "operation result grounded in selected files"
+                ),
+            )
+        assert question is not None
         selected = select_question_sources(request.job_id, request.payload.get("sources"))
         await self._progress(request, progress, "extract", 0.05)
         spans = await self._extract_spans(request, selected, cancellation, progress)
@@ -247,7 +291,7 @@ class DocumentQuestionPlugin(ManagedPlugin):
             detail="answer grounded in selected files",
         )
 
-    def _validate_request(self, request: PluginRequest) -> str:
+    def _validate_request(self, request: PluginRequest) -> tuple[str, str | None, str | None]:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:
             raise DocumentQuestionError("request-invalid", "request names another plugin")
         if request.trigger != "manual":
@@ -257,25 +301,27 @@ class DocumentQuestionPlugin(ManagedPlugin):
         self.permissions.require(READ_PERMISSION)
         # The operation joined the wire contract as optional-with-default
         # (OMNI-0625): an absent field is the ask every payload has always
-        # meant, and the schema admits nothing else until the dispatch
-        # exists (stage 2). Checked here as well because a worker defends
+        # meant. Since stage 2 (OMNI-0617) the whole shared enum dispatches
+        # here. Checked as well as schema-validated because a worker defends
         # its own contract, not just the schema's.
         operation = request.payload.get("operation", "ask")
-        if operation != "ask":
+        if operation not in FILE_OPERATIONS:
             raise DocumentQuestionError(
-                "operation-unsupported", "only ask is served until the file side dispatches"
+                "operation-invalid", "selected-file operation is unsupported"
             )
-        question = request.payload.get("question")
-        if (
-            not isinstance(question, str)
-            or not question.strip()
-            or len(question) > MAX_QUESTION_CHARACTERS
-        ):
-            raise DocumentQuestionError(
-                "question-invalid",
-                f"question must contain 1-{MAX_QUESTION_CHARACTERS} characters",
-            )
-        return question.strip()
+        return _validated_parameters(
+            str(operation),
+            request.payload.get("question"),
+            request.payload.get("language"),
+        )
+
+    def _route(self, operation: str, language: str | None) -> GenerationRouter:
+        """The route this operation rides: language-specific for translate,
+        the general one for everything else — the same rule the inline side
+        states, so DictaLM answers exactly an explicit Hebrew target."""
+        if operation != "translate" or language is None:
+            return self._router
+        return translation_route(self._router, self._translation_routes, language)
 
     async def _extract_spans(
         self,
@@ -325,6 +371,38 @@ class DocumentQuestionPlugin(ManagedPlugin):
         fraction: float,
     ) -> None:
         await progress.report(PluginProgress(request.job_id, stage, fraction, "", self._clock_ms()))
+
+
+def _validated_parameters(
+    operation: str, question: object, language: object
+) -> tuple[str, str | None, str | None]:
+    """question exactly when asking, language exactly when translating."""
+    if operation == "ask":
+        if language is not None:
+            raise DocumentQuestionError(
+                "language-invalid", "language is accepted only for translation"
+            )
+        if (
+            not isinstance(question, str)
+            or not question.strip()
+            or len(question) > MAX_QUESTION_CHARACTERS
+        ):
+            raise DocumentQuestionError(
+                "question-invalid",
+                f"question must contain 1-{MAX_QUESTION_CHARACTERS} characters",
+            )
+        return "ask", question.strip(), None
+    if question is not None:
+        raise DocumentQuestionError("question-invalid", "a question is accepted only when asking")
+    if operation == "translate":
+        return (
+            operation,
+            None,
+            validated_language(language, DocumentQuestionError, noun="translation language"),
+        )
+    if language is not None:
+        raise DocumentQuestionError("language-invalid", "language is accepted only for translation")
+    return operation, None, None
 
 
 def _validate_embedding_provider(descriptor: object, *, require_qualified: bool = False) -> None:

@@ -9,9 +9,10 @@ installation that wanted answers.
 """
 
 from omnitensor_ncnn_embeddings import BgeVulkanEmbedder
-from omnitensor_vulkan_runtime import QualifiedWorkload, generation_context
+from omnitensor_vulkan_runtime import QualifiedWorkload, generation_context, hebrew_route
 
 from omnitensor.plugins.document_qa import DocumentQuestionPlugin
+from omnitensor.plugins.file_operations import FileOperationsPrompting
 from omnitensor.plugins.ocr_extraction import VulkanOcrExtractionAdapter
 
 BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
@@ -21,7 +22,13 @@ OCR_REC_ARTIFACT_ID = "ppocrv6-medium-rec"
 
 def create() -> QualifiedWorkload:
     bootstrap, store, runtime, model, qualification, router = generation_context(
-        "ask-selected-files"
+        "ask-selected-files", FileOperationsPrompting()
+    )
+    # The measured Hebrew translation route, exactly as the inline workload
+    # wires it: the file side grew the shared operation enum (OMNI-0617
+    # stage 2), and an explicit Hebrew translate target rides DictaLM.
+    hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = hebrew_route(
+        bootstrap, store
     )
     bge = bootstrap.require_artifact(BGE_ARTIFACT_ID)
     companions = dict(bge.companions)
@@ -47,11 +54,18 @@ def create() -> QualifiedWorkload:
         )
         adapters = dict.fromkeys((".pdf", ".png", ".jpg", ".jpeg", ".webp"), reader)
     return QualifiedWorkload(
-        DocumentQuestionPlugin(embedder, router, store, adapters=adapters),
+        DocumentQuestionPlugin(
+            embedder,
+            router,
+            store,
+            translation_routes={"Hebrew": hebrew_router},
+            adapters=adapters,
+        ),
         runtime,
         model.path,
         qualification,
         embedder,
+        additional_runtimes=((hebrew_runtime, hebrew_model.path, hebrew_qualification),),
     )
 
 

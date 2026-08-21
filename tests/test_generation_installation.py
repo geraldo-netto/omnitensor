@@ -345,6 +345,10 @@ DECLARED_ARTIFACTS = {
         # The OCR extraction pair (OMNI-0615), fixed-role beside the embedder.
         "ppocrv6-medium-det",
         "ppocrv6-medium-rec",
+        # The measured Hebrew translation route (OMNI-0617 stage 2): the file
+        # side grew the shared operation enum, and translate rides DictaLM
+        # for an explicit Hebrew target exactly as the inline side does.
+        "dictalm2-hebrew-q4-k-m",
     ],
     "document-translation": [
         "qwen3-5-9b-iq4-xs",

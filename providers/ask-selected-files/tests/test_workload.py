@@ -10,6 +10,7 @@ the generation runtime and the ncnn embedder compose into one workload.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import omnitensor_ask_selected_files as workload
 import pytest
@@ -22,13 +23,8 @@ from omnitensor.sdk import BootstrapArtifact
 QUALIFIED_DEVICE = "AMD Radeon RX 6600 XT (RADV NAVI23)"
 
 
-def _qualification(layers=4):
-    return qualification_module.Qualification(
-        QUALIFIED_DEVICE,
-        layers,
-        "1.0.0",
-        (),
-    )
+def _qualification():
+    return qualification_module.Qualification(QUALIFIED_DEVICE)
 
 
 class FakeEmbedder:
@@ -70,6 +66,18 @@ def bootstrapped(tmp_path, monkeypatch):
         "https://example.invalid/bge.param",
         "MIT",
     )
+    # The Hebrew translation route (OMNI-0617 stage 2): the file side offers
+    # translate, and an explicit Hebrew target rides DictaLM.
+    dicta = BootstrapArtifact(
+        factories.HEBREW_ARTIFACT_ID,
+        "1.0.0",
+        "gguf",
+        "f" * 64,
+        tmp_path / "dicta.gguf",
+        (),
+        "https://example.invalid/dicta.gguf",
+        "Apache-2.0",
+    )
 
     class Bootstrap:
         model_choice = ""
@@ -80,10 +88,14 @@ def bootstrapped(tmp_path, monkeypatch):
             return self.require_artifact(self.model_choice or default_artifact_id)
 
         def require_artifact(self, artifact_id):
-            return {qwen.id: qwen, bge.id: bge}[artifact_id]
+            return {qwen.id: qwen, bge.id: bge, dicta.id: dicta}[artifact_id]
+
+        def find_artifact(self, _artifact_id):
+            return None
 
     monkeypatch.setattr(factories, "current_plugin_bootstrap", lambda _plugin_id: Bootstrap())
     monkeypatch.setattr(factories, "load_qualification", lambda *_arguments: _qualification())
+    monkeypatch.setattr(factories, "load_model_qualification", lambda *_arguments: _qualification())
     monkeypatch.setattr(workload, "BgeVulkanEmbedder", FakeEmbedder)
     return lease, bge
 
@@ -101,6 +113,11 @@ def test_the_entry_point_builds_a_workload_out_of_both_distributions(bootstrappe
         bge.sha256,
         lease,
     )
+    # The Hebrew route is wired the way the inline workload wires it
+    # (OMNI-0617 stage 2): a dedicated runtime beside the primary, and the
+    # plugin holding the route under the person's own spelling of the target.
+    assert len(built._runtimes) == 2
+    assert set(built._plugin._translation_routes) == {"hebrew"}
     assert workload.__all__ == ["create"]
 
 
@@ -126,3 +143,42 @@ def test_the_embedder_this_distribution_uses_is_the_ncnn_one():
 def test_the_packaged_manifest_declares_this_workload():
     root = Path(__file__).resolve().parents[1]
     assert (root / "src/omnitensor_ask_selected_files").is_dir()
+
+
+def test_the_pinned_ocr_pair_becomes_the_image_and_pdf_adapter(bootstrapped, monkeypatch, tmp_path):
+    """OMNI-0615: when both OCR artifacts are installed, selected images and
+    scans are read verbatim through VulkanOCR rather than refused."""
+
+    from omnitensor.plugins.extraction import AdapterKind
+
+    class FakeReader:
+        kind = AdapterKind.OCR
+
+        def __init__(self, *arguments):
+            self.arguments = arguments
+
+        def pages(self, item):
+            raise NotImplementedError
+
+    det = SimpleNamespace(path=tmp_path / "det.param")
+    rec = SimpleNamespace(path=tmp_path / "ocr" / "rec.param")
+    found = {workload.OCR_DET_ARTIFACT_ID: det, workload.OCR_REC_ARTIFACT_ID: rec}
+
+    original = factories.current_plugin_bootstrap
+
+    def with_ocr(plugin_id):
+        bootstrap = original(plugin_id)
+        bootstrap.find_artifact = staticmethod(found.get)
+        return bootstrap
+
+    monkeypatch.setattr(factories, "current_plugin_bootstrap", with_ocr)
+    monkeypatch.setattr(workload, "VulkanOcrExtractionAdapter", FakeReader)
+
+    built = workload.create()
+
+    adapters = built._plugin._adapters
+    readers = {adapters[suffix] for suffix in (".pdf", ".png", ".jpg", ".jpeg", ".webp")}
+    assert len(readers) == 1
+    (reader,) = readers
+    assert isinstance(reader, FakeReader)
+    assert reader.arguments == (det.path, rec.path, rec.path.parent / "labels.txt")

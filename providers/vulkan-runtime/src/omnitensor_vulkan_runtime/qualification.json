@@ -39,12 +39,10 @@
    "default": "qwen3-5-9b-iq4-xs",
    "models": {
     "qwen3-5-9b-iq4-xs": {
-     "result": "passed",
-     "taskSha256": "6d1711de3e9ef5d9cb5e33f9be62d457af63af4ef6da3b8e9603695b7f547d58"
+     "result": "unmeasured"
     },
     "qwen3-8b-q4-k-m": {
-     "result": "passed",
-     "taskSha256": "6d1711de3e9ef5d9cb5e33f9be62d457af63af4ef6da3b8e9603695b7f547d58"
+     "result": "unmeasured"
     }
    }
   },

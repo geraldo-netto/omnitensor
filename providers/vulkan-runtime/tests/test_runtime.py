@@ -3770,3 +3770,97 @@ def test_the_beat_throttles_to_its_interval(monkeypatch):
     for _chunk in range(5):
         beat()
     assert len(reported) == 2
+
+
+def test_hebrew_runtime_answers_a_file_operations_span_in_that_contract(tmp_path):
+    """OMNI-0617 stage 2: the file side offers translate, on the shared control.
+
+    `ask-selected-files` publishes the same closed `{language, operation}`
+    control the inline workload does, so `_selected_text_control` serves both;
+    what is per-workload is only the envelope — here the file-operations
+    answer, whose one citation is the span the translation came from.
+    """
+    adapter = _hebrew_runtime(tmp_path)
+    control_text = json.dumps({"language": "Hebrew", "operation": "translate"})
+    control = SourceFragment("private:job-1:control", "a" * 64, 1, control_text, "b" * 64)
+    span = SourceFragment(
+        "private:job-1:document-1-span-1",
+        "c" * 64,
+        2,
+        "The quarterly report is late.",
+        "d" * 64,
+    )
+    asyncio.run(adapter._store.publish("job-1", (control, span)))
+
+    class Llama:
+        def create_chat_completion(self, **_kwargs):
+            return iter(({"choices": [{"delta": {"content": "הדוח הרבעוני מאחר."}}]},))
+
+    adapter._llama = Llama()
+    answer = json.loads(
+        adapter._generate_sync(
+            document_question_task(),
+            GenerationRequest("job-1", "ask-selected-files", (control.reference, span.reference)),
+            CancellationController(),
+        )
+    )
+
+    assert answer == {
+        "version": 1,
+        "requestId": "job-1",
+        "operation": "translate",
+        "answer": "הדוח הרבעוני מאחר.",
+        "citations": [
+            {
+                "sourceRef": span.reference,
+                "sourceSha256": span.source_sha256,
+                "page": span.page,
+                "span": {"start": 0, "end": len(span.text)},
+                "textSha256": span.text_sha256,
+            }
+        ],
+    }
+    # The contract the workload validates the answer against, not a shape
+    # this provider invented.
+    assert validate_document("document-question-answer.schema.json", answer) == []
+
+
+@pytest.mark.parametrize(
+    "control_document",
+    [
+        {"operation": "summarize", "language": "Hebrew"},
+        {"operation": "translate", "language": "Italian"},
+    ],
+)
+def test_hebrew_runtime_refuses_a_file_operations_control_it_is_not_for(tmp_path, control_document):
+    adapter = _hebrew_runtime(tmp_path)
+    control = SourceFragment(
+        "private:job-1:control", "a" * 64, 1, json.dumps(control_document), "b" * 64
+    )
+    span = SourceFragment("private:job-1:document-1-span-1", "c" * 64, 1, "text", "d" * 64)
+    asyncio.run(adapter._store.publish("job-1", (control, span)))
+
+    with pytest.raises(ProviderGenerationError) as captured:
+        hebrew._translation_fragment(
+            adapter._store,
+            document_question_task(),
+            GenerationRequest("job-1", "ask-selected-files", (control.reference, span.reference)),
+        )
+    assert captured.value.detail == hebrew._NOT_HEBREW
+
+
+def test_file_operation_task_normalization_clears_only_unasked_tasks():
+    """A placeholder the model volunteered is dropped; an extraction keeps
+    its items; an ask answer that never carried the field stays untouched."""
+    extracted = {"operation": "extract-tasks", "tasks": ["One"]}
+    summarized = {"operation": "summarize", "tasks": ["Placeholder"]}
+    asked = {"answer": "The total is 412.90 EUR."}
+
+    grounding._normalize_file_operation_tasks(None)
+    grounding._normalize_file_operation_tasks(extracted)
+    grounding._normalize_file_operation_tasks(summarized)
+    grounding._normalize_file_operation_tasks(asked)
+
+    assert extracted["tasks"] == ["One"]
+    assert summarized["tasks"] == []
+    assert "tasks" not in asked

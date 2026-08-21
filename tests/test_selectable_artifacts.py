@@ -21,12 +21,14 @@ MANIFESTS = ROOT / "plugin-manifests"
 # person makes, `bootstrap.require_artifact(...)` is one the workload makes for
 # itself.
 FIXED_ROLE = {
-    # The embedder and the OCR extraction pair (OMNI-0615) have fixed
-    # roles; the person chooses only the generation model.
+    # The embedder, the OCR extraction pair (OMNI-0615) and the Hebrew
+    # translation route (OMNI-0617 stage 2) have fixed roles; the person
+    # chooses only the generation model.
     "ask-selected-files": {
         "bge-small-en-v1-5-ask-gpu",
         "ppocrv6-medium-det",
         "ppocrv6-medium-rec",
+        "dictalm2-hebrew-q4-k-m",
     },
     "document-translation": {"dictalm2-hebrew-q4-k-m"},
     "selected-text-tools": {"dictalm2-hebrew-q4-k-m"},
@@ -143,6 +145,7 @@ def test_the_inventory_says_of_every_artifact_whether_it_may_be_chosen():
         "bge-small-en-v1-5-ask-gpu": False,
         "ppocrv6-medium-det": False,
         "ppocrv6-medium-rec": False,
+        "dictalm2-hebrew-q4-k-m": False,
     }
     assert ArtifactReadiness("a", "1.0.0", "gguf", True, "").selectable is True
 
