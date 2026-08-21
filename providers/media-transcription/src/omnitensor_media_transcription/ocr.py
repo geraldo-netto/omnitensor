@@ -100,14 +100,20 @@ def _lane_worker(det_param, rec_param, dictionary, requests, replies) -> None:
     try:
         replies.put(("ready", engine.device_name))
         while True:
-            item = requests.get()
-            if item is None:
+            message = requests.get()
+            if message is None:
                 return
+            # Every request and reply carries its frame's sequence: a frame
+            # abandoned by cancellation leaves its reply behind, and an
+            # untagged successor consumed it as its own — the previous
+            # frame's lines on the next frame's page (OMNI-0619; the same
+            # defect vulkanocr's pool fixed as VOCR-0036).
+            sequence, item = message
             try:
                 result = engine.read(_load_image(Path(item)))
-                replies.put(("ok", tuple(result.lines)))
+                replies.put(("ok", sequence, tuple(result.lines)))
             except BaseException as error:  # noqa: BLE001 - the reply is the report
-                replies.put(("error", _code_for(error), str(error)))
+                replies.put(("error", sequence, _code_for(error), str(error)))
     finally:
         engine.close()
 
@@ -141,6 +147,7 @@ class VulkanOcr:
         self._process: Any = None
         self._requests: Any = None
         self._replies: Any = None
+        self._sequence = 0
         self._refusal: OcrRefusal | None = None
         if det_param is None or rec_param is None or dictionary is None:
             self._refusal = OcrRefusal(
@@ -204,6 +211,9 @@ class VulkanOcr:
         context = mp.get_context("spawn")
         self._requests = context.Queue()
         self._replies = context.Queue()
+        # Fresh queues, fresh numbering: a stale reply can only come from
+        # this lane's own past, never from a predecessor's queues.
+        self._sequence = 0
         self._process = context.Process(
             target=_lane_worker,
             args=(
@@ -221,16 +231,23 @@ class VulkanOcr:
             raise _LaneRefusalError(reply[1], reply[2])
 
     def _lane_read(self, image_path: Path):
-        self._requests.put(str(image_path))
-        try:
-            reply = self._lane_reply(_LANE_READ_TIMEOUT_S)
-        except BaseException:
-            # A dead or hung lane is retired; the next frame rebuilds it.
-            self.close()
-            raise
-        if reply[0] == "ok":
-            return OcrReading(reply[1])
-        return OcrRefusal(reply[1], reply[2])
+        self._sequence += 1
+        sequence = self._sequence
+        self._requests.put((sequence, str(image_path)))
+        while True:
+            try:
+                reply = self._lane_reply(_LANE_READ_TIMEOUT_S)
+            except BaseException:
+                # A dead or hung lane is retired; the next frame rebuilds it.
+                self.close()
+                raise
+            if reply[1] != sequence:
+                # A leftover from a frame cancellation abandoned; its page
+                # is gone (OMNI-0619).
+                continue
+            if reply[0] == "ok":
+                return OcrReading(reply[2])
+            return OcrRefusal(reply[2], reply[3])
 
     def _lane_reply(self, timeout_s: float):
         deadline = timeout_s

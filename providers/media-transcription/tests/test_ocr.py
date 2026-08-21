@@ -40,6 +40,7 @@ def test_a_failed_frame_does_not_condemn_the_next(tmp_path, monkeypatch):
     for name in ("det.param", "rec.param", "keys.txt"):
         (tmp_path / name).write_text("x")
     reader = VulkanOcr(tmp_path / "det.param", tmp_path / "rec.param", tmp_path / "keys.txt")
+
     def placed(self):
         self._placed = True
         self._ever_placed = True
@@ -124,7 +125,7 @@ def test_two_devices_run_the_lane_in_its_own_process(tmp_path, monkeypatch):
 
     _devices(monkeypatch, 2)
     line = SimpleNamespace(text="hello")
-    context = _FakeContext([("ready", "gpu-1"), ("ok", (line,)), ("ok", (line,))])
+    context = _FakeContext([("ready", "gpu-1"), ("ok", 1, (line,)), ("ok", 2, (line,))])
     monkeypatch.setattr(ocr_module.mp, "get_context", lambda _method: context)
     reader = _mounted(tmp_path)
 
@@ -135,7 +136,7 @@ def test_two_devices_run_the_lane_in_its_own_process(tmp_path, monkeypatch):
     assert isinstance(first, OcrReading) and isinstance(second, OcrReading)
     assert first.lines == (line,)
     # Two frames crossed one resident lane.
-    assert context.sent == [str(tmp_path / "a.png"), str(tmp_path / "b.png")]
+    assert context.sent == [(1, str(tmp_path / "a.png")), (2, str(tmp_path / "b.png"))]
     reader.close()
     # Shut down like the vulkanocr pool: sentinel, then the queues dropped.
     assert context.sent[-1] is None
@@ -144,7 +145,7 @@ def test_two_devices_run_the_lane_in_its_own_process(tmp_path, monkeypatch):
 def test_a_lane_error_reply_is_a_named_refusal_for_that_frame(tmp_path, monkeypatch):
     _devices(monkeypatch, 2)
     context = _FakeContext(
-        [("ready", "gpu-1"), ("error", "ocr-image-invalid", "expected uint8 pixels")]
+        [("ready", "gpu-1"), ("error", 1, "ocr-image-invalid", "expected uint8 pixels")]
     )
     monkeypatch.setattr(ocr_module.mp, "get_context", lambda _method: context)
     reader = _mounted(tmp_path)
@@ -231,10 +232,10 @@ def test_a_retired_lane_is_rebuilt_not_refused_forever(tmp_path, monkeypatch):
     def next_context(_method):
         if not contexts:
             # First lane: ready, one answer, then silence with a dead worker.
-            context = _FakeContext([("ready", "gpu-1"), ("ok", ())])
+            context = _FakeContext([("ready", "gpu-1"), ("ok", 1, ())])
             context.process.is_alive = lambda: len(context.replies) > 0
         else:
-            context = _FakeContext([("ready", "gpu-1"), ("ok", (SimpleNamespace(text="back"),))])
+            context = _FakeContext([("ready", "gpu-1"), ("ok", 1, (SimpleNamespace(text="back"),))])
         contexts.append(context)
         return context
 
@@ -249,3 +250,30 @@ def test_a_retired_lane_is_rebuilt_not_refused_forever(tmp_path, monkeypatch):
     assert isinstance(revived, OcrReading)
     assert [line.text for line in revived.lines] == ["back"]
     assert len(contexts) == 2
+
+
+def test_a_stale_reply_from_an_abandoned_frame_cannot_poison_the_next(tmp_path, monkeypatch):
+    """The lane protocol carries sequences and drains leftovers (OMNI-0619).
+
+    A cancelled job abandons its lane read mid-flight; the lane finishes
+    anyway and its reply sits in the queue. Untagged, the next frame
+    consumed it as its own answer — the previous page\'s lines on the new
+    page.
+    """
+
+    _devices(monkeypatch, 2)
+    stale = SimpleNamespace(text="OLD PAGE")
+    fresh = SimpleNamespace(text="this page")
+    context = _FakeContext([("ready", "gpu-1"), ("ok", 1, (SimpleNamespace(text="first"),))])
+    monkeypatch.setattr(ocr_module.mp, "get_context", lambda _method: context)
+    reader = _mounted(tmp_path)
+    assert isinstance(reader.read(tmp_path / "a.png"), OcrReading)
+
+    # Frame 2 was abandoned by a cancellation: its reply arrives late,
+    # after frame 3 has already been requested.
+    reader._sequence = 2
+    context.replies.extend([("ok", 2, (stale,)), ("ok", 3, (fresh,))])
+    outcome = reader.read(tmp_path / "c.png")
+
+    assert isinstance(outcome, OcrReading)
+    assert [line.text for line in outcome.lines] == ["this page"]
