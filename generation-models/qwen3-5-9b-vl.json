@@ -34,8 +34,8 @@
    "providerId": "media-transcription-vulkan",
    "accelerator": "gpu",
    "runtime": "llama.cpp-vulkan",
-   "default": false,
-   "status": "selectable-vision-model"
+   "default": true,
+   "status": "default-vision-model"
   }
  ],
  "notes": "Benchmarked 2026-08-21 on the 55-image OCR corpus (see vulkanocr/docs/benchmarks.md methodology): CER 0.0101, WER 0.0144, 48/54 exact, and the only local model that read Hebrew nearly perfectly. One repetition runaway observed on 12-degree skew; serve with a repeat penalty."
