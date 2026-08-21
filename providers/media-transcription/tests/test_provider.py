@@ -1071,19 +1071,34 @@ def test_a_chosen_vision_model_is_the_one_that_loads(monkeypatch, tmp_path):
     (tmp_path / provider.VISION_PROJECTOR).touch()
     artifacts = (
         BootstrapArtifact(
-            provider.LEGACY_VISION_ARTIFACT_ID, "1.0.0", "gguf", "vl", vision_path,
+            provider.LEGACY_VISION_ARTIFACT_ID,
+            "1.0.0",
+            "gguf",
+            "vl",
+            vision_path,
             ((provider.VISION_PROJECTOR, "vl-proj"),),
         ),
         BootstrapArtifact(
-            provider.VISION_ARTIFACT_ID, "1.0.0", "gguf", "9b", nine_b_path,
+            provider.VISION_ARTIFACT_ID,
+            "1.0.0",
+            "gguf",
+            "9b",
+            nine_b_path,
             ((provider.VISION_PROJECTOR, "9b-proj"),),
         ),
         BootstrapArtifact(
-            provider.SPEECH_ARTIFACT_ID, "1.0.0", "ggml-whisper", "speech", speech_path,
+            provider.SPEECH_ARTIFACT_ID,
+            "1.0.0",
+            "ggml-whisper",
+            "speech",
+            speech_path,
         ),
     )
     chosen = PluginBootstrap(
-        provider.PLUGIN_ID, artifacts, None, lease_path,
+        provider.PLUGIN_ID,
+        artifacts,
+        None,
+        lease_path,
         model_choice=provider.LEGACY_VISION_ARTIFACT_ID,
     )
     monkeypatch.setattr(provider, "current_plugin_bootstrap", lambda _plugin_id: chosen)

@@ -374,6 +374,9 @@ def test_qwen_transcription_preserves_exact_prompt_schema_and_decode_arguments(
         "top_p": 1.0,
         "seed": 0,
         "max_tokens": 768,
+        # Guards the 9B's observed repetition runaway (OMNI-0591); mild
+        # enough that legitimately repeated words still transcribe.
+        "repeat_penalty": 1.15,
         "response_format": {
             "type": "json_object",
             "schema": {

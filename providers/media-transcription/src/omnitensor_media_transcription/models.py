@@ -292,6 +292,12 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
                 top_p=1.0,
                 seed=0,
                 max_tokens=768,
+                # The 9B was observed looping a phrase to the token cap once
+                # on strongly rotated text (its catalog entry says "serve
+                # with a repeat penalty"); 0.3.34's default is 1.0, i.e.
+                # none. Mild enough not to distort transcriptions, which
+                # legitimately repeat words.
+                repeat_penalty=1.15,
                 response_format={"type": "json_object", "schema": schema},
                 stream=True,
             )
@@ -362,6 +368,17 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
             # rule said the other way round.
             self._release_sync()
             raise MediaGpuError("Qwen VL did not prove a Vulkan load")
+
+        # The capture sink has done its job; leaving it installed appended
+        # every later llama.cpp line to a list nothing reads for the life of
+        # the worker (OMNI-0593) — the same leak the vulkan runtime already
+        # fixed with its own discard callback.
+        @llama_cpp.llama_log_callback
+        def discard(_level, _message, _data):
+            return None
+
+        self._log_callback = discard
+        llama_cpp.llama_log_set(discard, None)
         return self._llama
 
     @staticmethod
