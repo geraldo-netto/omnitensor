@@ -102,6 +102,11 @@ class RecognisedLine:
     length: float
     angle: float
     vertical: bool
+    # The vision model's verdict on this line (OMNI-0618): "confirmed" when
+    # its reading contains the line, "disputed" when it read that region
+    # differently, "ocr-only" when it did not mention it. Empty when no
+    # validation ran.
+    verdict: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +119,10 @@ class VisualTranscript:
     # Enrichment, never a gate: empty when the OCR lane refused or found
     # nothing, and the vision model's fields above stand either way.
     ocr_lines: tuple[RecognisedLine, ...] = ()
+    # What the model read that no OCR line corroborates (OMNI-0618) —
+    # out-of-dictionary scripts, regions the detector missed. Empty when
+    # everything was corroborated or no validation ran.
+    model_only_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,6 +614,7 @@ def _validated_visual(value: object) -> VisualTranscript:
         value.slide_number,
         value.page_number,
         lines,
+        value.model_only_text if isinstance(value.model_only_text, str) else "",
     )
 
 
@@ -741,6 +751,11 @@ def _visual_document(item: VisualTranscript) -> dict:
             }
             for line in item.ocr_lines
         ]
+        for entry, line in zip(document["ocrLines"], item.ocr_lines, strict=True):
+            if line.verdict:
+                entry["verdict"] = line.verdict
+        if item.model_only_text:
+            document["modelOnlyText"] = item.model_only_text
     return document
 
 

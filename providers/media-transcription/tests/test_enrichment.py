@@ -114,3 +114,70 @@ def test_release_closes_the_ocr_engine_and_the_vision_model():
 
 def _cancellation():
     return SimpleNamespace(raise_if_cancelled=lambda: None, cancelled=False)
+
+
+def test_the_model_judges_every_line_and_keeps_its_own_remainder():
+    """Validation and completion in one pass (OMNI-0618).
+
+    The model's reading confirms the lines it contains, disputes the region
+    it read differently, leaves the line it never saw as ocr-only — and what
+    no line corroborates comes back as the model-only remainder.
+    """
+    from omnitensor_media_transcription.enrichment import _validated_lines
+
+    def line(text):
+        return SimpleNamespace(
+            text=text,
+            confidence=0.9,
+            box_score=0.9,
+            center_x=1.0,
+            center_y=1.0,
+            thickness=1.0,
+            length=1.0,
+            angle=90.0,
+            vertical=False,
+        )
+
+    lines, remainder = _validated_lines(
+        [line("GPU load 0%"), line("Qeue 0 jobs waiting"), line("watermark")],
+        "GPU load 0% — Queue 0 jobs waiting — שלום עולם",
+    )
+    assert [item.verdict for item in lines] == ["confirmed", "disputed", "ocr-only"]
+    # The Hebrew only the model could read survives as the remainder.
+    assert "שלום עולם" in remainder
+    assert "gpu load 0%" not in remainder
+
+
+def test_an_empty_model_reading_leaves_lines_single_source():
+    from omnitensor_media_transcription.enrichment import _validated_lines
+
+    lines, remainder = _validated_lines(
+        [
+            SimpleNamespace(
+                text="only ocr saw this",
+                confidence=0.9,
+                box_score=0.9,
+                center_x=1.0,
+                center_y=1.0,
+                thickness=1.0,
+                length=1.0,
+                angle=90.0,
+                vertical=False,
+            )
+        ],
+        "",
+    )
+    assert [item.verdict for item in lines] == ["ocr-only"]
+    assert remainder == ""
+
+
+def test_the_merged_transcript_carries_verdicts_and_remainder():
+    vision = RecordingVision()
+    ocr = FullCoverageOcr()
+    subject = EnrichedVisualTranscriber(ocr, vision)
+    transcript = asyncio.run(
+        subject.transcribe(VisualFrame(Path("/frame.png"), None), _cancellation())
+    )
+    # FullCoverageOcr's one line matches the model's reading exactly.
+    assert transcript.ocr_lines[0].verdict == "confirmed"
+    assert transcript.model_only_text == ""

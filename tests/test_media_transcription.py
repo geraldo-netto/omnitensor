@@ -766,4 +766,36 @@ def test_ocr_lines_cross_into_the_document_and_validate(tmp_path):
     # A transcript without lines emits no key at all: old documents stay
     # byte-identical, and absent and empty read the same.
     assert "ocrLines" not in document["visuals"][1]
+    assert "modelOnlyText" not in document["visuals"][1]
     assert enriched.ocr_lines == (line,)
+
+
+def test_verdicts_and_the_model_remainder_cross_into_the_document(tmp_path):
+    """Validation and completion reach the contract (OMNI-0618)."""
+    from omnitensor.plugins.media_transcription import (
+        MediaInfo,
+        MediaModality,
+        MediaProviderIdentity,
+        RecognisedLine,
+        SpeechTranscript,
+        VisualTranscript,
+        media_result,
+    )
+
+    source = tmp_path / "page.png"
+    source.write_bytes(b"png-bytes")
+    judged = RecognisedLine("GPU 0%", 0.9, 0.9, 1.0, 2.0, 3.0, 4.0, 90.0, False, "confirmed")
+    visual = VisualTranscript(
+        None, "GPU 0% and more", "a page", None, 1, (judged,), "and more"
+    )
+    document = media_result(
+        "job-1",
+        source,
+        MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 1),
+        MediaProviderIdentity("media-transcription-vulkan", "gpu"),
+        SpeechTranscript(None, ()),
+        (visual,),
+    )
+    emitted = document["visuals"][0]
+    assert emitted["ocrLines"][0]["verdict"] == "confirmed"
+    assert emitted["modelOnlyText"] == "and more"

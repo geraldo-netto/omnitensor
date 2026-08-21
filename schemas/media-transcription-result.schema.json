@@ -178,6 +178,10 @@
           "items": {
             "$ref": "#/$defs/ocrLine"
           }
+        },
+        "modelOnlyText": {
+          "description": "What the vision model read that no OCR line corroborates — out-of-dictionary scripts, regions the detector missed. Absent when everything was corroborated or no validation ran.",
+          "type": "string"
         }
       }
     },
@@ -229,6 +233,14 @@
         },
         "vertical": {
           "type": "boolean"
+        },
+        "verdict": {
+          "description": "The vision model's verdict on this line (OMNI-0618): confirmed when its reading contains the line, disputed when it read that region differently, ocr-only when it did not mention it. Absent when no validation ran.",
+          "enum": [
+            "confirmed",
+            "disputed",
+            "ocr-only"
+          ]
         }
       }
     }
