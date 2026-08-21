@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0624 | open | medium | s | **The spawned OCR lane is unverified inside the real sandbox.** Every live measurement ran outside bwrap; the lane spawns a grandchild process from the sandboxed media worker (`ocr.py:_start_lane`) and must be proven under `--clearenv`, the granted device nodes and the worker's import paths at the next reinstall/reload — with the graceful refusal (not a hang) as the required failure mode if the sandbox forbids it. |
 
 ## Blocked
 
