@@ -218,6 +218,7 @@ class InstalledPluginRuntime:
         self._sleep = sleep or asyncio.sleep
         self._inflight: dict[str, int] = {}
         self._idle_exits: dict[str, asyncio.Task] = {}
+        self._idle_stops: dict[str, asyncio.Task] = {}
 
     @property
     def snapshot(self) -> InstalledPluginSnapshot:
@@ -411,6 +412,7 @@ class InstalledPluginRuntime:
         self._cancel_idle_exit(plugin_id)
         self._inflight[plugin_id] = self._inflight.get(plugin_id, 0) + 1
         try:
+            await self._await_idle_stop(plugin_id)
             status = await self._ready_or_waited(plugin_id)
         except BaseException:
             self._release_worker(plugin_id)
@@ -488,12 +490,28 @@ class InstalledPluginRuntime:
         if pending is not None:
             pending.cancel()
 
+    async def _await_idle_stop(self, plugin_id: str) -> None:
+        """Wait out a stop already tearing this worker down.
+
+        A request that arrives after `_exit_when_idle` has re-checked
+        `_inflight` cancels a task the shield no longer lets die, and used to
+        race it to the supervisor: when `ensure_ready` won, the job was
+        answered READY off the still-present slot and the stop then killed
+        the worker under it. The stop cannot be called off any more, so the
+        request waits for it to finish and starts a fresh worker afterwards.
+        A stop that failed is the stop's problem, logged where it ran; this
+        job's outcome is decided by `ensure_ready`, not by the corpse.
+        """
+        stopping = self._idle_stops.get(plugin_id)
+        if stopping is not None:
+            await asyncio.wait((stopping,))
+
     async def _exit_when_idle(self, plugin_id: str) -> None:
         """Stop a worker that has had nothing to do for the idle timeout.
 
-        A job still queued for admission has not touched its worker yet, so
-        nothing is lost by stopping one here: when that job is finally served
-        it starts the worker back up and is answered in full.
+        A job that arrives once the stop is underway waits it out in
+        `_await_idle_stop` and starts the worker back up afterwards, so it
+        is answered in full either way.
         """
         try:
             try:
@@ -502,17 +520,39 @@ class InstalledPluginRuntime:
                 return
             if self._inflight.get(plugin_id):
                 return
+            # Registered in the same step as the inflight check — no await
+            # between them — so every later request sees either no stop at
+            # all or the one it must wait out. Shielded because a request
+            # arriving mid-stop cancels this task, and a half-stopped worker
+            # would leak its process and its lease; the done callback both
+            # clears the registry and retrieves the outcome, so a failure is
+            # logged even when the cancellation lands on the shield first.
+            stopping = asyncio.ensure_future(
+                self._supervisor.stop_worker(plugin_id, IDLE_EXIT_DETAIL)
+            )
+            self._idle_stops[plugin_id] = stopping
+            stopping.add_done_callback(functools.partial(self._idle_stop_finished, plugin_id))
             try:
-                # Shielded: a request arriving mid-stop cancels this task, and
-                # a half-stopped worker would leak its process and its lease.
-                await asyncio.shield(self._supervisor.stop_worker(plugin_id, IDLE_EXIT_DETAIL))
+                await asyncio.shield(stopping)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - supervisors are external
-                LOGGER.exception("Could not stop the idle worker for %s", plugin_id)
+            except Exception:  # noqa: BLE001 - already logged by the callback
+                pass
         finally:
             if self._idle_exits.get(plugin_id) is asyncio.current_task():
                 self._idle_exits.pop(plugin_id, None)
+
+    def _idle_stop_finished(self, plugin_id: str, stopping: asyncio.Task) -> None:
+        if self._idle_stops.get(plugin_id) is stopping:
+            self._idle_stops.pop(plugin_id, None)
+        if stopping.cancelled():
+            return
+        if stopping.exception() is not None:
+            LOGGER.error(
+                "Could not stop the idle worker for %s",
+                plugin_id,
+                exc_info=stopping.exception(),
+            )
 
     async def _stage_payload(
         self, job_id: str, plugin_id: str, payload: dict

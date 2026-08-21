@@ -292,3 +292,95 @@ def test_work_that_arrived_while_the_timer_slept_keeps_the_worker(tmp_path):
 
     asyncio.run(scenario())
     assert supervisor.stopped == []
+
+
+class SlowStop(Supervisor):
+    """A stop that takes time, so a request can arrive while it runs."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.stop_entered = asyncio.Event()
+        self.stop_release = asyncio.Event()
+        self.order: list[str] = []
+
+    async def ensure_ready(self, plugin_id):
+        self.order.append("ensure")
+        return await super().ensure_ready(plugin_id)
+
+    async def stop_worker(self, plugin_id, detail):
+        self.stop_entered.set()
+        await self.stop_release.wait()
+        self.order.append("stopped")
+        return await super().stop_worker(plugin_id, detail)
+
+
+def test_a_request_arriving_mid_stop_waits_the_stop_out(tmp_path):
+    """The stop cannot be called off, so the request must not race it.
+
+    A request landing after `_exit_when_idle` had re-checked `_inflight`
+    used to reach `ensure_ready` while the shielded stop was still running;
+    when the request won, it was answered READY off the still-present slot
+    and the stop then killed the worker under the job. Now the request
+    waits for the stop to finish and starts a fresh worker afterwards.
+    """
+
+    supervisor = SlowStop()
+    timer = Timer()
+    subject = runtime(tmp_path, supervisor, sleep=timer)
+
+    async def scenario():
+        await subject._acquire_worker("plugin")
+        subject._release_worker("plugin")
+        timer.release.set()
+        await supervisor.stop_entered.wait()
+        # The stop is underway and registered; a new request arrives now.
+        request = asyncio.ensure_future(subject._acquire_worker("plugin"))
+        for _turn in range(5):
+            await asyncio.sleep(0)
+        # It has not asked the supervisor for the worker yet.
+        assert supervisor.order == ["ensure"]
+        supervisor.stop_release.set()
+        await request
+        subject._release_worker("plugin")
+        await subject.stop()
+
+    asyncio.run(scenario())
+    # The stop finished before the second request touched the supervisor.
+    assert supervisor.order == ["ensure", "stopped", "ensure"]
+    assert supervisor.stopped == [("plugin", IDLE_EXIT_DETAIL)]
+
+
+def test_a_stop_that_fails_after_the_shield_is_cut_is_still_logged(tmp_path, caplog):
+    """Nobody awaits the shielded task once its guard is cancelled.
+
+    The failure used to surface only as "Task exception was never
+    retrieved"; the done callback now retrieves and logs it.
+    """
+
+    class BreakingSlowStop(SlowStop):
+        async def stop_worker(self, plugin_id, detail):
+            self.stop_entered.set()
+            await self.stop_release.wait()
+            raise RuntimeError("the supervisor lost the process")
+
+    supervisor = BreakingSlowStop()
+    timer = Timer()
+    subject = runtime(tmp_path, supervisor, sleep=timer)
+
+    async def scenario():
+        await subject._acquire_worker("plugin")
+        subject._release_worker("plugin")
+        timer.release.set()
+        await supervisor.stop_entered.wait()
+        # The arriving request cancels the exit task; the stop lives on.
+        request = asyncio.ensure_future(subject._acquire_worker("plugin"))
+        await asyncio.sleep(0)
+        supervisor.stop_release.set()
+        await request
+        assert subject._idle_stops == {}
+        subject._release_worker("plugin")
+        await subject.stop()
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(scenario())
+    assert any("Could not stop the idle worker" in record.message for record in caplog.records)
