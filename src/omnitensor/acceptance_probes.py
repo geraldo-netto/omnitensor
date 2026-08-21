@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 
 def _executor_for(module: str):
@@ -134,6 +135,16 @@ class SocketApplyCommandProbe:
         async def call() -> str:
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._timeout_s
+            # The readiness signal, not blind connect churn (XTPU-0191): run
+            # right after `systemctl --user restart`, the probe used to spend
+            # its whole budget against a service still creating its socket.
+            # The socket file appearing IS the service saying it is ready to
+            # be dialled, so existence is awaited first — within the same
+            # deadline, and only when this probe dials a real socket. A path
+            # that never appears falls through to the call phase, whose
+            # refusal names the actual cause.
+            if self._caller is None:
+                await self._socket_present(loop, deadline)
             # A probe that retries for its whole budget and then reports the
             # deadline says "TimeoutError" for a service that never created its
             # socket — accurate about the probe and useless about the cause.
@@ -151,6 +162,17 @@ class SocketApplyCommandProbe:
                     await asyncio.sleep(min(self._retry_interval_s, remaining))
 
         return asyncio.run(call())
+
+    async def _socket_present(self, loop, deadline: float) -> None:
+        import asyncio  # noqa: PLC0415
+
+        from .socket_transport import default_socket_path  # noqa: PLC0415
+
+        path = Path(self._socket_path) if self._socket_path else default_socket_path()
+        while not path.exists():
+            if loop.time() >= deadline:
+                return
+            await asyncio.sleep(min(self._retry_interval_s or 0.05, 0.25))
 
 
 # `systemctl --user is-active` answers immediately or not at all: a stalled

@@ -114,3 +114,58 @@ def test_the_service_probe_reports_a_unit_that_never_answers():
     check = check_service(probe)
     assert check.ok is False
     assert "did not answer" in check.detail
+
+
+def test_the_probe_waits_for_the_socket_before_dialling(tmp_path):
+    """The socket file appearing is the readiness signal (XTPU-0191).
+
+    Run right after a restart, the probe used to spend its whole budget
+    dialling a socket the service had not created yet; now it watches for
+    the file and dials the moment it exists.
+    """
+    import asyncio
+    import threading
+    import time
+
+    from omnitensor.acceptance_probes import SocketApplyCommandProbe
+
+    socket_path = tmp_path / "control.sock"
+    dialled = []
+
+    probe = SocketApplyCommandProbe(socket_path=socket_path, timeout_s=5.0, retry_interval_s=0.05)
+
+    async def watch_only():
+        loop = asyncio.get_running_loop()
+        await probe._socket_present(loop, loop.time() + 5.0)
+        dialled.append(time.monotonic())
+
+    def create_later():
+        time.sleep(0.2)
+        socket_path.write_bytes(b"")
+
+    creator = threading.Thread(target=create_later)
+    started = time.monotonic()
+    creator.start()
+    asyncio.run(watch_only())
+    creator.join()
+    waited = dialled[0] - started
+    # It waited for the file, then moved on promptly — well inside the
+    # budget it used to burn whole.
+    assert 0.15 <= waited < 1.0
+
+
+def test_a_socket_that_never_appears_falls_through_to_the_call_phase(tmp_path):
+    import asyncio
+
+    from omnitensor.acceptance_probes import SocketApplyCommandProbe
+
+    probe = SocketApplyCommandProbe(
+        socket_path=tmp_path / "never.sock", timeout_s=0.3, retry_interval_s=0.05
+    )
+
+    async def watch_only():
+        loop = asyncio.get_running_loop()
+        await probe._socket_present(loop, loop.time() + 0.3)
+
+    # Returns rather than raising: the call phase owns the refusal.
+    asyncio.run(watch_only())

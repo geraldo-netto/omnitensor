@@ -785,9 +785,7 @@ def test_verdicts_and_the_model_remainder_cross_into_the_document(tmp_path):
     source = tmp_path / "page.png"
     source.write_bytes(b"png-bytes")
     judged = RecognisedLine("GPU 0%", 0.9, 0.9, 1.0, 2.0, 3.0, 4.0, 90.0, False, "confirmed")
-    visual = VisualTranscript(
-        None, "GPU 0% and more", "a page", None, 1, (judged,), "and more"
-    )
+    visual = VisualTranscript(None, "GPU 0% and more", "a page", None, 1, (judged,), "and more")
     document = media_result(
         "job-1",
         source,
