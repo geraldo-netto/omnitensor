@@ -285,24 +285,34 @@ class DocumentQuestionPlugin(ManagedPlugin):
         progress: ProgressReporter,
     ) -> tuple[IndexedSpan, ...]:
         spans: list[IndexedSpan] = []
-        for index, source in enumerate(selected):
-            cancellation.raise_if_cancelled()
-            extraction = await self._reader.read(source.item)
-            spans.extend(
-                page_spans(
-                    request.job_id,
-                    index + 1,
-                    Path(source.item.path).name,
-                    source.item.digest,
-                    extraction.pages,
+        try:
+            for index, source in enumerate(selected):
+                cancellation.raise_if_cancelled()
+                extraction = await self._reader.read(source.item)
+                spans.extend(
+                    page_spans(
+                        request.job_id,
+                        index + 1,
+                        Path(source.item.path).name,
+                        source.item.digest,
+                        extraction.pages,
+                    )
                 )
-            )
-            await self._progress(
-                request,
-                progress,
-                "extract",
-                0.05 + (0.4 * (index + 1) / len(selected)),
-            )
+                await self._progress(
+                    request,
+                    progress,
+                    "extract",
+                    0.05 + (0.4 * (index + 1) / len(selected)),
+                )
+        finally:
+            # An adapter that holds an engine gives it back here, whatever
+            # happened: extraction is the only phase that needs it, and
+            # embedding and generation need the memory (OMNI-0621).
+            unique = {id(adapter): adapter for adapter in self._adapters.values()}
+            for adapter in unique.values():
+                closer = getattr(adapter, "close", None)
+                if callable(closer):
+                    closer()
         if not spans:
             raise DocumentQuestionError("source-empty", "selected files produced no text spans")
         return tuple(spans)

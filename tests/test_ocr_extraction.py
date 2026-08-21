@@ -96,6 +96,55 @@ def test_a_pdf_keeps_its_text_layer_and_reads_only_the_scans(tmp_path, monkeypat
     assert len(read) == 1
 
 
+def test_one_engine_serves_every_page_and_close_gives_it_back(tmp_path, monkeypatch):
+    """Per-request, not per-page (OMNI-0621): a twenty-page scan used to
+    pay twenty model loads."""
+    import vulkanocr.engine as engine_module
+
+    built = []
+
+    class Engine:
+        def __init__(self, _models, **_kwargs):
+            self.closed = False
+            built.append(self)
+
+        def read(self, _rgb):
+            return SimpleNamespace(lines=(SimpleNamespace(text="line"),))
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(engine_module, "OcrEngine", Engine)
+    adapter = _adapter(tmp_path)
+    assert adapter._read_array("page-one") == "line"
+    assert adapter._read_array("page-two") == "line"
+    assert len(built) == 1
+    adapter.close()
+    assert built[0].closed is True
+    # Reopened on the next request's first page.
+    assert adapter._read_array("next-request") == "line"
+    assert len(built) == 2
+
+
+def test_engine_refusals_cross_in_the_adapters_vocabulary(tmp_path, monkeypatch):
+    """An OcrEngineError must not escape raw into the workload (OMNI-0621)."""
+
+    class Breaking:
+        def read(self, _rgb):
+            from vulkanocr.engine import OcrEngineError
+
+            raise OcrEngineError("image-invalid", "expected uint8 pixels")
+
+        def close(self):
+            return None
+
+    adapter = _adapter(tmp_path)
+    adapter._engine = Breaking()
+    with pytest.raises(EventWorkloadError) as caught:
+        adapter._read_array("page")
+    assert caught.value.code == "image-invalid"
+
+
 MODELS = Path("/backups/disk2/projects/cinnamon/vulkanocr/PaddleOCR-ncnn-CPP/models")
 
 

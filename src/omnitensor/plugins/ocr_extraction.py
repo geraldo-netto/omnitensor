@@ -38,6 +38,12 @@ class VulkanOcrExtractionAdapter:
         self._det_param = Path(det_param)
         self._rec_param = Path(rec_param)
         self._dictionary = Path(dictionary)
+        # One engine serves however many sources and pages a request
+        # extracts (OMNI-0621): it was being rebuilt per page, which priced
+        # a twenty-page scan at twenty model loads. The workload closes it
+        # after its extraction phase, so the ~700 MiB never lingers into
+        # embedding or generation.
+        self._engine = None
 
     async def pages(self, item: IngestedFile) -> AsyncIterator[PageContent]:
         path = Path(item.path)
@@ -90,6 +96,20 @@ class VulkanOcrExtractionAdapter:
 
     def _read_array(self, rgb) -> str:
         try:
+            result = self._ensure_engine().read(rgb)
+        except EventWorkloadError:
+            raise
+        except BaseException as error:  # noqa: BLE001 - mapped into the adapter's vocabulary
+            # The engine's own refusals carry stable codes; they cross into
+            # this adapter's error domain instead of escaping raw (OMNI-0621).
+            code = getattr(error, "code", "") or "ocr-failed"
+            raise EventWorkloadError(str(code), str(error)) from error
+        return "\n".join(line.text for line in result.lines)
+
+    def _ensure_engine(self):
+        if self._engine is not None:
+            return self._engine
+        try:
             from vulkanocr import models_for_port  # noqa: PLC0415 - optional lane
             from vulkanocr.engine import OcrEngine  # noqa: PLC0415
         except ImportError as error:
@@ -98,12 +118,14 @@ class VulkanOcrExtractionAdapter:
             ) from error
         # The port is named, not restated (OMNI-0622/VOCR-0061).
         models = models_for_port("avafly-v6", self._det_param, self._rec_param, self._dictionary)
-        # Built per source and given back: extraction runs before generation
-        # in this workload, so nothing contends — and the engine's ~700 MiB
-        # never lingers into the phases that need the memory.
-        with OcrEngine(models) as engine:
-            result = engine.read(rgb)
-        return "\n".join(line.text for line in result.lines)
+        self._engine = OcrEngine(models)
+        return self._engine
+
+    def close(self) -> None:
+        """Give the engine back; the workload calls this after extraction."""
+        engine, self._engine = self._engine, None
+        if engine is not None:
+            engine.close()
 
 
 __all__ = ["VulkanOcrExtractionAdapter"]
