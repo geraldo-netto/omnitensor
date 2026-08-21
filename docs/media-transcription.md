@@ -85,13 +85,16 @@ the legacy `convert` executable.
 ## Installing the pinned artifacts
 
 `omnitensor-install-media-artifacts` is the only supported way to get the
-three model families into the artifact store: it verifies each source file's exact
-byte count and SHA-256 against the pinned release *before* importing anything,
-then installs both families atomically. Copying the files into the store by
+four model families into the artifact store — two vision models, speech, and
+the VulkanOCR enrichment pair: it verifies each source file's exact byte
+count and SHA-256 against the pinned release *before* importing anything,
+then installs every family atomically. Copying the files into the store by
 hand skips that check, and a store entry whose digest does not match its
 manifest makes the provider unavailable.
 
-Obtain the five files first, at these exact revisions:
+Obtain the ten files first, at these exact revisions (the OCR five come
+from `Avafly/PaddleOCR-ncnn-CPP` release v0.3.0, MIT — the same clone the
+VulkanOCR README's setup fetches):
 
 | File | Source |
 | --- | --- |
@@ -115,6 +118,11 @@ OMNI_ARTIFACTS=~/.local/share/omnitensor/artifacts
   --default-vision-model /absolute/path/Qwen3.5-9B-Q4_K_M.gguf \
   --default-vision-projector /absolute/path/mmproj-F16.gguf \
   --speech-model /absolute/path/ggml-small.bin \
+  --ocr-det-param /absolute/path/PP_OCRv6_medium_det.param \
+  --ocr-det-bin /absolute/path/PP_OCRv6_medium_det.bin \
+  --ocr-rec-param /absolute/path/PP_OCRv6_medium_rec.param \
+  --ocr-rec-bin /absolute/path/PP_OCRv6_medium_rec.bin \
+  --ocr-dictionary /absolute/path/ppocr_keys_v6.txt \
   --accept-model-license Apache-2.0 \
   --accept-whisper-license MIT
 ```

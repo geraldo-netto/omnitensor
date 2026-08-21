@@ -22,6 +22,10 @@ dependencies = [
   # which is a smaller answer rather than no answer.
   "pypdf>=4.3,<7",
   "pywhispercpp==1.5.0",
+  # The OCR enrichment lane (OMNI-0607): exact glyphs and coordinates beside
+  # the vision model's reading. A local sibling wheel, the same pattern
+  # omnitensor-vulkan-runtime already is; tagged v0.1.0 for this pin.
+  "vulkanocr>=0.1,<1",
 ]
 
 [project.entry-points."omnitensor.workloads"]

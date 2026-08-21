@@ -36,6 +36,11 @@ def _small_contract(tmp_path: Path, monkeypatch):
         "speech": b"speech",
         "default-vision": b"default-vision",
         "default-projector": b"default-projector",
+        "ocr-det": b"7767517-det",
+        "ocr-det-bin": b"det-weights",
+        "ocr-rec": b"7767517-rec",
+        "ocr-rec-bin": b"rec-weights",
+        "ocr-keys": b"a\nb\n",
     }
     paths = {name: _source(tmp_path, f"{name}.bin", value) for name, value in content.items()}
     projector_digest = hashlib.sha256(content["projector"]).hexdigest()
@@ -71,12 +76,41 @@ def _small_contract(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(installation, "VISION_MODEL_SIZE_BYTES", len(content["vision"]))
     monkeypatch.setattr(installation, "VISION_PROJECTOR_SIZE_BYTES", len(content["projector"]))
     monkeypatch.setattr(installation, "SPEECH_MODEL_SIZE_BYTES", len(content["speech"]))
+    ocr_det = ArtifactReference(
+        "ocr-det-test",
+        "1.0.0",
+        "ncnn",
+        hashlib.sha256(content["ocr-det"]).hexdigest(),
+        (("model.bin", hashlib.sha256(content["ocr-det-bin"]).hexdigest()),),
+    )
+    ocr_rec = ArtifactReference(
+        "ocr-rec-test",
+        "1.0.0",
+        "ncnn",
+        hashlib.sha256(content["ocr-rec"]).hexdigest(),
+        (
+            ("labels.txt", hashlib.sha256(content["ocr-keys"]).hexdigest()),
+            ("model.bin", hashlib.sha256(content["ocr-rec-bin"]).hexdigest()),
+        ),
+    )
+    monkeypatch.setattr(installation, "OCR_DET_REFERENCE", ocr_det)
+    monkeypatch.setattr(installation, "OCR_REC_REFERENCE", ocr_rec)
+    monkeypatch.setattr(installation, "OCR_DET_SIZE_BYTES", len(content["ocr-det"]))
+    monkeypatch.setattr(installation, "OCR_DET_BIN_SIZE_BYTES", len(content["ocr-det-bin"]))
+    monkeypatch.setattr(installation, "OCR_REC_SIZE_BYTES", len(content["ocr-rec"]))
+    monkeypatch.setattr(installation, "OCR_REC_BIN_SIZE_BYTES", len(content["ocr-rec-bin"]))
+    monkeypatch.setattr(installation, "OCR_DICTIONARY_SIZE_BYTES", len(content["ocr-keys"]))
     sources = MediaArtifactSources(
         paths["vision"],
         paths["projector"],
         paths["speech"],
         paths["default-vision"],
         paths["default-projector"],
+        paths["ocr-det"],
+        paths["ocr-det-bin"],
+        paths["ocr-rec"],
+        paths["ocr-rec-bin"],
+        paths["ocr-keys"],
     )
     return content, paths, sources, vision, speech
 
@@ -91,11 +125,13 @@ def test_installer_verifies_and_installs_pinned_vision_and_speech(tmp_path, monk
         accepted_whisper_license="MIT",
     )
 
-    assert receipt["licensesAccepted"] == {"qwen": "Apache-2.0", "whisper": "MIT"}
+    assert receipt["licensesAccepted"] == {"qwen": "Apache-2.0", "whisper": "MIT", "ocr": "MIT"}
     assert [item["id"] for item in receipt["artifacts"]] == [
         vision.id,
         "default-vision-test",
         speech.id,
+        "ocr-det-test",
+        "ocr-rec-test",
     ]
     assert receipt["artifacts"][0]["companions"] == vision.declared_companions
     assert all(Path(item["path"]).is_file() for item in receipt["artifacts"])
@@ -106,7 +142,9 @@ def test_installer_verifies_and_installs_pinned_vision_and_speech(tmp_path, monk
     [("", "MIT"), ("Apache-2.0", ""), ("MIT", "Apache-2.0")],
 )
 def test_installer_requires_exact_license_acceptance(tmp_path, qwen, whisper):
-    sources = MediaArtifactSources(*(tmp_path / name for name in ("a", "b", "c", "d", "e")))
+    sources = MediaArtifactSources(
+        *(tmp_path / name for name in ("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"))
+    )
 
     with pytest.raises(MediaInstallationError, match="explicitly name Apache-2.0 and MIT"):
         install_media_artifacts(
@@ -262,6 +300,11 @@ def test_parser_exposes_exact_paths_and_licenses():
         "default_vision_model": (("--default-vision-model",), Path, True),
         "default_vision_projector": (("--default-vision-projector",), Path, True),
         "speech_model": (("--speech-model",), Path, True),
+        "ocr_det_param": (("--ocr-det-param",), Path, True),
+        "ocr_det_bin": (("--ocr-det-bin",), Path, True),
+        "ocr_rec_param": (("--ocr-rec-param",), Path, True),
+        "ocr_rec_bin": (("--ocr-rec-bin",), Path, True),
+        "ocr_dictionary": (("--ocr-dictionary",), Path, True),
         "accept_model_license": (("--accept-model-license",), None, True),
         "accept_whisper_license": (("--accept-whisper-license",), None, True),
     }
@@ -277,7 +320,18 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(installation, "install_media_artifacts", fake_install)
     values = [
         (tmp_path / name).resolve()
-        for name in ("vision", "projector", "speech", "default-vision", "default-projector")
+        for name in (
+            "vision",
+            "projector",
+            "speech",
+            "default-vision",
+            "default-projector",
+            "ocr-det",
+            "ocr-det-bin",
+            "ocr-rec",
+            "ocr-rec-bin",
+            "ocr-keys",
+        )
     ]
     installation.main(
         [
@@ -293,6 +347,16 @@ def test_cli_passes_sources_and_prints_receipt(tmp_path, monkeypatch, capsys):
             str(values[3]),
             "--default-vision-projector",
             str(values[4]),
+            "--ocr-det-param",
+            str(values[5]),
+            "--ocr-det-bin",
+            str(values[6]),
+            "--ocr-rec-param",
+            str(values[7]),
+            "--ocr-rec-bin",
+            str(values[8]),
+            "--ocr-dictionary",
+            str(values[9]),
             "--accept-model-license",
             "Apache-2.0",
             "--accept-whisper-license",
@@ -319,6 +383,11 @@ def test_cli_surfaces_stable_refusal(tmp_path, monkeypatch):
         "--speech-model",
         "--default-vision-model",
         "--default-vision-projector",
+        "--ocr-det-param",
+        "--ocr-det-bin",
+        "--ocr-rec-param",
+        "--ocr-rec-bin",
+        "--ocr-dictionary",
     ):
         argv.extend((option, str(tmp_path / option[2:])))
     argv.extend(("--accept-model-license", "Apache-2.0"))

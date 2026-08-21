@@ -1,174 +1,199 @@
 {
-  "manifestVersion": 2,
-  "id": "media-transcription",
-  "version": "1.0.0",
-  "capabilities": [
-    "explicit-file-selection",
-    "media-transcription",
-    "multilingual-speech-transcription",
-    "paged-document-transcription",
-    "text-document-transcription",
-    "presentation-transcription",
-    "visual-content-transcription"
-  ],
-  "plugin": {
-    "entryPoint": "media-transcription",
-    "protocol": {
-      "minimum": 1,
-      "maximum": 1,
-      "capabilities": [
-        "cancel",
-        "execute",
-        "health",
-        "progress"
-      ]
-    },
-    "schemas": {
-      "configuration": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "speechLanguage": {
-            "description": "The language the speech in a recording is in, when the person knows it. `auto` detects it from the first window that carries audio, which is where a recording of noise, music, or one borrowed English word gets the whole transcript in the wrong language. Any language code the speech model understands is accepted; this is not a list of the languages the service approves of.",
-            "type": "string",
-            "pattern": "^(auto|[a-z]{2,3}(-[A-Za-z]{2,4})?)$",
-            "maxLength": 12,
-            "default": "auto"
-          }
-        }
-      },
-      "input": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "sources"
-        ],
-        "properties": {
-          "sources": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4096
-            }
-          }
-        }
-      },
-      "output": {
-        "$ref": "media-transcription-result.schema.json"
-      }
-    },
-    "triggers": [
-      "manual"
-    ],
-    "artifacts": [
-      {
-        "id": "qwen2-5-vl-7b-instruct",
-        "selectable": true,
-        "version": "1.0.0",
-        "format": "gguf",
-        "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
-        "sourceUri": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/508edd0afaa66bb9e9f40587acc2184f02daf1f6/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
-        "licenseSpdx": "Apache-2.0",
-        "companions": {
-          "mmproj.gguf": "c24a7f5fcfc68286f0a217023b6738e73bea4f11787a43e8238d4bb1b8604cde"
-        }
-      },
-      {
-        "id": "qwen3-5-9b-q4-k-m",
-        "selectable": true,
-        "version": "1.0.0",
-        "format": "gguf",
-        "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
-        "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf",
-        "licenseSpdx": "Apache-2.0",
-        "companions": {
-          "mmproj.gguf": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
-        }
-      },
-      {
-        "id": "whisper-small-multilingual",
-        "selectable": false,
-        "version": "1.0.0",
-        "format": "ggml-whisper",
-        "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
-        "sourceUri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
-        "licenseSpdx": "MIT"
-      }
-    ],
-    "permissions": [
-      "accelerator:gpu",
-      "files:read-selected"
-    ]
+ "manifestVersion": 2,
+ "id": "media-transcription",
+ "version": "1.0.0",
+ "capabilities": [
+  "explicit-file-selection",
+  "media-transcription",
+  "multilingual-speech-transcription",
+  "paged-document-transcription",
+  "text-document-transcription",
+  "presentation-transcription",
+  "visual-content-transcription"
+ ],
+ "plugin": {
+  "entryPoint": "media-transcription",
+  "protocol": {
+   "minimum": 1,
+   "maximum": 1,
+   "capabilities": [
+    "cancel",
+    "execute",
+    "health",
+    "progress"
+   ]
   },
-  "requirements": {
-    "runtimeApi": 1,
-    "accelerator": "gpu",
-    "acceleratorPreference": [
-      "gpu"
-    ],
-    "minimumDevices": 1,
-    "model": null
-  },
-  "ui": {
-    "title": "Media transcription",
-    "group": "Local workflows",
-    "description": "Speech, document pages, slide text, visible text, and visual descriptions from selected media",
-    "icon": "audio-x-generic-symbolic",
-    "order": 95
-  },
-  "defaults": {
-    "enabled": false,
-    "weight": 1
-  },
-  "pipeline": {
-    "hostResponsibilities": [
-      "Broker one explicitly selected file into an isolated worker",
-      "Decode bounded audio/image/video without treating host codecs as inference backends",
-      "Safely rasterize SVG and render bounded PDF/TIFF pages without network access",
-      "Parse bounded PPTX and ODP slide archives without office-suite subprocesses",
-      "Run speech and visual inference only on the granted accelerator",
-      "Sample at most twelve video frames and return timestamped text only"
-    ]
-  },
-  "acceptance": [
-    {
-      "metric": "speech-word-error-rate",
-      "comparator": "at-most",
-      "target": 0.2,
-      "unit": "ratio",
-      "description": "Word error rate on frozen multilingual speech fixtures."
-    },
-    {
-      "metric": "visible-text-character-recall",
-      "comparator": "at-least",
-      "target": 0.9,
-      "unit": "ratio",
-      "description": "Expected Latin and Hebrew visible characters retained from frozen image fixtures."
-    },
-    {
-      "metric": "visual-concept-recall",
-      "comparator": "at-least",
-      "target": 0.9,
-      "unit": "ratio",
-      "description": "Expected scene concepts retained from frozen image and sampled-video fixtures."
-    },
-    {
-      "metric": "malformed-media-isolation",
-      "comparator": "equal",
-      "target": 1,
-      "unit": "ratio",
-      "description": "Every malformed fixture is refused without worker or desktop failure."
-    },
-    {
-      "metric": "cancellation-latency",
-      "comparator": "at-most",
-      "target": 2000,
-      "unit": "milliseconds",
-      "description": "Cancelled media work reaches a terminal result within this bound."
+  "schemas": {
+   "configuration": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "speechLanguage": {
+      "description": "The language the speech in a recording is in, when the person knows it. `auto` detects it from the first window that carries audio, which is where a recording of noise, music, or one borrowed English word gets the whole transcript in the wrong language. Any language code the speech model understands is accepted; this is not a list of the languages the service approves of.",
+      "type": "string",
+      "pattern": "^(auto|[a-z]{2,3}(-[A-Za-z]{2,4})?)$",
+      "maxLength": 12,
+      "default": "auto"
+     }
     }
+   },
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "sources"
+    ],
+    "properties": {
+     "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 4096
+      }
+     }
+    }
+   },
+   "output": {
+    "$ref": "media-transcription-result.schema.json"
+   }
+  },
+  "triggers": [
+   "manual"
+  ],
+  "artifacts": [
+   {
+    "id": "qwen2-5-vl-7b-instruct",
+    "selectable": true,
+    "version": "1.0.0",
+    "format": "gguf",
+    "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",
+    "sourceUri": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/508edd0afaa66bb9e9f40587acc2184f02daf1f6/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+    "licenseSpdx": "Apache-2.0",
+    "companions": {
+     "mmproj.gguf": "c24a7f5fcfc68286f0a217023b6738e73bea4f11787a43e8238d4bb1b8604cde"
+    }
+   },
+   {
+    "id": "qwen3-5-9b-q4-k-m",
+    "selectable": true,
+    "version": "1.0.0",
+    "format": "gguf",
+    "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+    "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf",
+    "licenseSpdx": "Apache-2.0",
+    "companions": {
+     "mmproj.gguf": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+    }
+   },
+   {
+    "id": "whisper-small-multilingual",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ggml-whisper",
+    "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    "sourceUri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
+    "licenseSpdx": "MIT"
+   },
+   {
+    "id": "ppocrv6-medium-det",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ncnn",
+    "sha256": "cb793ea8234616c9c1469ac4ea4232d0da484eb88bc6c964f9a48a87d5478a74",
+    "sourceUri": "https://github.com/Avafly/PaddleOCR-ncnn-CPP/raw/v0.3.0/models/PP_OCRv6_medium_det.param",
+    "licenseSpdx": "MIT",
+    "companions": {
+     "model.bin": "cd94affa5d099a21fe709c7ab258b2bcf98463d4a6b502bf4678a0d25d1324f9"
+    }
+   },
+   {
+    "id": "ppocrv6-medium-rec",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ncnn",
+    "sha256": "bf7c1cf8492af152754716dbc61bd58682a9e161c06479ca7d4e0522e3a6b2d5",
+    "sourceUri": "https://github.com/Avafly/PaddleOCR-ncnn-CPP/raw/v0.3.0/models/PP_OCRv6_medium_rec.param",
+    "licenseSpdx": "MIT",
+    "companions": {
+     "model.bin": "8245e47e944c0dff7d4583b2c8c11d362d99d7f144777439e2435e2e6b116b96",
+     "labels.txt": "e07ed91571983f5ee096df61ad7cb585eb79411715553ff14f5882b6052b24e0"
+    }
+   }
+  ],
+  "permissions": [
+   "accelerator:gpu",
+   "files:read-selected"
   ]
+ },
+ "requirements": {
+  "runtimeApi": 1,
+  "accelerator": "gpu",
+  "acceleratorPreference": [
+   "gpu"
+  ],
+  "minimumDevices": 1,
+  "model": null
+ },
+ "ui": {
+  "title": "Media transcription",
+  "group": "Local workflows",
+  "description": "Speech, document pages, slide text, visible text, and visual descriptions from selected media",
+  "icon": "audio-x-generic-symbolic",
+  "order": 95
+ },
+ "defaults": {
+  "enabled": false,
+  "weight": 1
+ },
+ "pipeline": {
+  "hostResponsibilities": [
+   "Broker one explicitly selected file into an isolated worker",
+   "Decode bounded audio/image/video without treating host codecs as inference backends",
+   "Safely rasterize SVG and render bounded PDF/TIFF pages without network access",
+   "Parse bounded PPTX and ODP slide archives without office-suite subprocesses",
+   "Run speech and visual inference only on the granted accelerator",
+   "Sample at most twelve video frames and return timestamped text only"
+  ]
+ },
+ "acceptance": [
+  {
+   "metric": "speech-word-error-rate",
+   "comparator": "at-most",
+   "target": 0.2,
+   "unit": "ratio",
+   "description": "Word error rate on frozen multilingual speech fixtures."
+  },
+  {
+   "metric": "visible-text-character-recall",
+   "comparator": "at-least",
+   "target": 0.9,
+   "unit": "ratio",
+   "description": "Expected Latin and Hebrew visible characters retained from frozen image fixtures."
+  },
+  {
+   "metric": "visual-concept-recall",
+   "comparator": "at-least",
+   "target": 0.9,
+   "unit": "ratio",
+   "description": "Expected scene concepts retained from frozen image and sampled-video fixtures."
+  },
+  {
+   "metric": "malformed-media-isolation",
+   "comparator": "equal",
+   "target": 1,
+   "unit": "ratio",
+   "description": "Every malformed fixture is refused without worker or desktop failure."
+  },
+  {
+   "metric": "cancellation-latency",
+   "comparator": "at-most",
+   "target": 2000,
+   "unit": "milliseconds",
+   "description": "Cancelled media work reaches a terminal result within this bound."
+  }
+ ]
 }

@@ -49,6 +49,33 @@ SPEECH_REFERENCE = ArtifactReference(
     "ggml-whisper",
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
 )
+# The VulkanOCR enrichment lane (OMNI-0607): PP-OCRv6 medium det+rec, the
+# Avafly v0.3.0 ncnn ports of PaddleOCR's Apache-2.0 weights, MIT. The CTC
+# dictionary rides as the recognition model's labels companion — exactly the
+# drift the optional slot exists to pin: a keys file that drifts from its
+# weights renames every decoded character.
+OCR_DET_SIZE_BYTES = 23_194
+OCR_DET_BIN_SIZE_BYTES = 31_034_096
+OCR_REC_SIZE_BYTES = 14_876
+OCR_REC_BIN_SIZE_BYTES = 38_293_100
+OCR_DICTIONARY_SIZE_BYTES = 74_949
+OCR_DET_REFERENCE = ArtifactReference(
+    "ppocrv6-medium-det",
+    "1.0.0",
+    "ncnn",
+    "cb793ea8234616c9c1469ac4ea4232d0da484eb88bc6c964f9a48a87d5478a74",
+    (("model.bin", "cd94affa5d099a21fe709c7ab258b2bcf98463d4a6b502bf4678a0d25d1324f9"),),
+)
+OCR_REC_REFERENCE = ArtifactReference(
+    "ppocrv6-medium-rec",
+    "1.0.0",
+    "ncnn",
+    "bf7c1cf8492af152754716dbc61bd58682a9e161c06479ca7d4e0522e3a6b2d5",
+    (
+        ("labels.txt", "e07ed91571983f5ee096df61ad7cb585eb79411715553ff14f5882b6052b24e0"),
+        ("model.bin", "8245e47e944c0dff7d4583b2c8c11d362d99d7f144777439e2435e2e6b116b96"),
+    ),
+)
 
 
 # Compatibility alias retained for callers that catch the old public name.
@@ -69,6 +96,11 @@ class MediaArtifactSources:
     speech_model: Path
     default_vision_model: Path
     default_vision_projector: Path
+    ocr_det_param: Path
+    ocr_det_bin: Path
+    ocr_rec_param: Path
+    ocr_rec_bin: Path
+    ocr_dictionary: Path
 
 
 def install_media_artifacts(
@@ -99,6 +131,23 @@ def install_media_artifacts(
             DEFAULT_VISION_PROJECTOR_SIZE_BYTES,
         ),
         (sources.speech_model, SPEECH_REFERENCE.sha256, SPEECH_MODEL_SIZE_BYTES),
+        (sources.ocr_det_param, OCR_DET_REFERENCE.sha256, OCR_DET_SIZE_BYTES),
+        (
+            sources.ocr_det_bin,
+            OCR_DET_REFERENCE.declared_companions["model.bin"],
+            OCR_DET_BIN_SIZE_BYTES,
+        ),
+        (sources.ocr_rec_param, OCR_REC_REFERENCE.sha256, OCR_REC_SIZE_BYTES),
+        (
+            sources.ocr_rec_bin,
+            OCR_REC_REFERENCE.declared_companions["model.bin"],
+            OCR_REC_BIN_SIZE_BYTES,
+        ),
+        (
+            sources.ocr_dictionary,
+            OCR_REC_REFERENCE.declared_companions["labels.txt"],
+            OCR_DICTIONARY_SIZE_BYTES,
+        ),
     )
     for path, digest, exact_size in expected:
         _verify_source(path, digest, exact_size)
@@ -114,14 +163,28 @@ def install_media_artifacts(
         companions={"mmproj.gguf": sources.default_vision_projector},
     )
     speech = installer.install(SPEECH_REFERENCE, sources.speech_model)
+    ocr_det = installer.install(
+        OCR_DET_REFERENCE,
+        sources.ocr_det_param,
+        companions={"model.bin": sources.ocr_det_bin},
+    )
+    ocr_rec = installer.install(
+        OCR_REC_REFERENCE,
+        sources.ocr_rec_param,
+        companions={"model.bin": sources.ocr_rec_bin, "labels.txt": sources.ocr_dictionary},
+    )
     return {
         "version": 1,
         "artifacts": [
             _installed_document(VISION_REFERENCE, vision.path),
             _installed_document(DEFAULT_VISION_REFERENCE, default_vision.path),
             _installed_document(SPEECH_REFERENCE, speech.path),
+            _installed_document(OCR_DET_REFERENCE, ocr_det.path),
+            _installed_document(OCR_REC_REFERENCE, ocr_rec.path),
         ],
-        "licensesAccepted": {"qwen": "Apache-2.0", "whisper": "MIT"},
+        # The OCR ports are MIT like whisper's weights; the same explicit MIT
+        # acceptance covers both, and the receipt says so per family.
+        "licensesAccepted": {"qwen": "Apache-2.0", "whisper": "MIT", "ocr": "MIT"},
     }
 
 
@@ -150,6 +213,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--default-vision-model", type=Path, required=True)
     parser.add_argument("--default-vision-projector", type=Path, required=True)
     parser.add_argument("--speech-model", type=Path, required=True)
+    parser.add_argument("--ocr-det-param", type=Path, required=True)
+    parser.add_argument("--ocr-det-bin", type=Path, required=True)
+    parser.add_argument("--ocr-rec-param", type=Path, required=True)
+    parser.add_argument("--ocr-rec-bin", type=Path, required=True)
+    parser.add_argument("--ocr-dictionary", type=Path, required=True)
     parser.add_argument("--accept-model-license", required=True)
     parser.add_argument("--accept-whisper-license", required=True)
     return parser
@@ -165,6 +233,11 @@ def main(argv: Sequence[str] | None = None) -> None:
                 arguments.speech_model,
                 arguments.default_vision_model,
                 arguments.default_vision_projector,
+                arguments.ocr_det_param,
+                arguments.ocr_det_bin,
+                arguments.ocr_rec_param,
+                arguments.ocr_rec_bin,
+                arguments.ocr_dictionary,
             ),
             accepted_model_license=arguments.accept_model_license,
             accepted_whisper_license=arguments.accept_whisper_license,
