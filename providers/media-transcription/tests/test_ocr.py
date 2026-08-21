@@ -40,7 +40,11 @@ def test_a_failed_frame_does_not_condemn_the_next(tmp_path, monkeypatch):
     for name in ("det.param", "rec.param", "keys.txt"):
         (tmp_path / name).write_text("x")
     reader = VulkanOcr(tmp_path / "det.param", tmp_path / "rec.param", tmp_path / "keys.txt")
-    monkeypatch.setattr(VulkanOcr, "_place", lambda self: setattr(self, "_placed", True))
+    def placed(self):
+        self._placed = True
+        self._ever_placed = True
+
+    monkeypatch.setattr(VulkanOcr, "_place", placed)
     answers = iter([ValueError("torn frame"), OcrReading(())])
 
     def scripted(_self, _path):
@@ -211,3 +215,37 @@ def test_live_read_answers_lines_with_coordinates(tmp_path):
         assert result.lines[0].center_y < 80
     finally:
         reader.close()
+
+
+def test_a_retired_lane_is_rebuilt_not_refused_forever(tmp_path, monkeypatch):
+    """A lane that served frames and then died rebuilds (OMNI-0620).
+
+    close() resets _placed, and the refusal-memory check used to read that
+    as never-placed — so one timeout or worker death condemned every later
+    frame to model-only answers, against the documented rebuild.
+    """
+
+    _devices(monkeypatch, 2)
+    contexts = []
+
+    def next_context(_method):
+        if not contexts:
+            # First lane: ready, one answer, then silence with a dead worker.
+            context = _FakeContext([("ready", "gpu-1"), ("ok", ())])
+            context.process.is_alive = lambda: len(context.replies) > 0
+        else:
+            context = _FakeContext([("ready", "gpu-1"), ("ok", (SimpleNamespace(text="back"),))])
+        contexts.append(context)
+        return context
+
+    monkeypatch.setattr(ocr_module.mp, "get_context", next_context)
+    reader = _mounted(tmp_path)
+    assert isinstance(reader.read(tmp_path / "a.png"), OcrReading)
+    # The lane dies mid-wait: this frame refuses with a name...
+    died = reader.read(tmp_path / "b.png")
+    assert isinstance(died, OcrRefusal)
+    # ...and the next frame gets a fresh lane instead of the dead one's ghost.
+    revived = reader.read(tmp_path / "c.png")
+    assert isinstance(revived, OcrReading)
+    assert [line.text for line in revived.lines] == ["back"]
+    assert len(contexts) == 2

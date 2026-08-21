@@ -132,6 +132,11 @@ class VulkanOcr:
         self._rec_param = rec_param
         self._dictionary = dictionary
         self._placed = False
+        # Whether placement has EVER succeeded: a refusal is remembered only
+        # for a lane that could never be built — a lane that died after
+        # serving frames is retired and rebuilt, because close() resets
+        # _placed and the old check read that as never-placed (OMNI-0620).
+        self._ever_placed = False
         self._resident = False
         self._process: Any = None
         self._requests: Any = None
@@ -160,7 +165,7 @@ class VulkanOcr:
             return self._shared_read(image_path)
         except BaseException as error:  # noqa: BLE001 - the refusal is the report
             refusal = getattr(error, "refusal", None) or OcrRefusal(_code_for(error), str(error))
-            if not self._placed:
+            if not self._ever_placed:
                 self._refusal = refusal
             return refusal
 
@@ -193,6 +198,7 @@ class VulkanOcr:
         if self._resident:
             self._start_lane()
         self._placed = True
+        self._ever_placed = True
 
     def _start_lane(self) -> None:
         context = mp.get_context("spawn")
