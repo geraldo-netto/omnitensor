@@ -4,64 +4,232 @@
   "title": "Public bounded multimedia transcription",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "requestId", "providerId", "accelerator", "source", "speech", "visuals"],
+  "required": [
+    "version",
+    "requestId",
+    "providerId",
+    "accelerator",
+    "source",
+    "speech",
+    "visuals"
+  ],
   "properties": {
-    "version": {"const": 1},
-    "requestId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$"},
-    "providerId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "accelerator": {"enum": ["gpu", "npu"]},
-    "source": {"$ref": "#/$defs/source"},
-    "speech": {"$ref": "#/$defs/speech"},
+    "version": {
+      "const": 1
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,120}$"
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "accelerator": {
+      "enum": [
+        "gpu",
+        "npu"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "speech": {
+      "$ref": "#/$defs/speech"
+    },
     "visuals": {
       "type": "array",
-      "items": {"$ref": "#/$defs/visual"}
+      "items": {
+        "$ref": "#/$defs/visual"
+      }
     }
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["fileName", "sourceSha256", "modality", "durationMs"],
+      "required": [
+        "fileName",
+        "sourceSha256",
+        "modality",
+        "durationMs"
+      ],
       "properties": {
-        "fileName": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$"},
-        "sourceSha256": {"$ref": "#/$defs/digest"},
-        "modality": {"enum": ["audio", "document", "image", "video", "presentation"]},
-        "durationMs": {"type": ["integer", "null"], "minimum": 1}
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "modality": {
+          "enum": [
+            "audio",
+            "document",
+            "image",
+            "video",
+            "presentation"
+          ]
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
       }
     },
     "speech": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["language", "segments"],
+      "required": [
+        "language",
+        "segments"
+      ],
       "properties": {
-        "language": {"type": ["string", "null"], "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$", "maxLength": 35},
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+          "maxLength": 35
+        },
         "segments": {
           "type": "array",
-          "items": {"$ref": "#/$defs/speechSegment"}
+          "items": {
+            "$ref": "#/$defs/speechSegment"
+          }
         }
       }
     },
     "speechSegment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["startMs", "endMs", "text"],
+      "required": [
+        "startMs",
+        "endMs",
+        "text"
+      ],
       "properties": {
-        "startMs": {"type": "integer", "minimum": 0},
-        "endMs": {"type": "integer", "minimum": 1},
-        "text": {"type": "string", "minLength": 1}
+        "startMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "visual": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["timestampMs", "slideNumber", "pageNumber", "visibleText", "description"],
+      "required": [
+        "timestampMs",
+        "slideNumber",
+        "pageNumber",
+        "visibleText",
+        "description"
+      ],
       "properties": {
-        "timestampMs": {"type": ["integer", "null"], "minimum": 0},
-        "slideNumber": {"type": ["integer", "null"], "minimum": 1},
-        "pageNumber": {"type": ["integer", "null"], "minimum": 1},
-        "visibleText": {"type": "string"},
-        "description": {"type": "string", "minLength": 1}
+        "timestampMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "slideNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "pageNumber": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "visibleText": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ocrLines": {
+          "description": "Exact text lines the OCR enrichment lane located, with pixel coordinates in the original frame. Absent when the lane was unavailable or found nothing; the model's visibleText and description stand either way.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ocrLine"
+          }
+        }
+      }
+    },
+    "ocrLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "confidence",
+        "boxScore",
+        "centerX",
+        "centerY",
+        "thickness",
+        "length",
+        "angle",
+        "vertical"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "boxScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "centerX": {
+          "type": "number"
+        },
+        "centerY": {
+          "type": "number"
+        },
+        "thickness": {
+          "type": "number",
+          "minimum": 0
+        },
+        "length": {
+          "type": "number",
+          "minimum": 0
+        },
+        "angle": {
+          "type": "number"
+        },
+        "vertical": {
+          "type": "boolean"
+        }
       }
     }
   }

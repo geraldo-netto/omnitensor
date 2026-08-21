@@ -70,6 +70,7 @@ class TestFlowDeadline:
 
         assert flow_deadline_for(document) == MAX_CALL_TIMEOUT_SECONDS + 5.0
 
+
 class TestLimits:
     def test_only_the_deadline_moves(self):
         limits = limits_for(manifest(artifacts=[{"format": "gguf"}]))

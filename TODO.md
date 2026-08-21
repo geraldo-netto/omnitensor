@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0611 | open | medium | m | **ocrLines in the result contract.** VisualTranscript grows optional ocr_lines (text, confidence, boxScore, centerX/Y, thickness, length, angle, vertical) and the result schema an additive optional ocrLines array; receipts name the OCR engine+models or its refusal code. Coordinate every consumer of media-transcription-result.schema.json before landing (xpuwlm render path, applet if it reads media results). |
 | OMNI-0612 | open | medium | s | **Measured verification of the combined pipeline.** A committed runner drives merge end-to-end on the benchmark corpus + a Hebrew page: accuracy/quality (ocrLines CER vs vulkanocr-alone; visibleText unchanged vs VLM-alone) and performance (two-device concurrent vs single-device serial wall clock, dGPU VRAM headroom beside the loaded 9B). Numbers land in docs, replacing the hand-run VLM comparison. |
 
 ## Blocked

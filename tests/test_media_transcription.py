@@ -714,3 +714,53 @@ def test_a_document_with_no_pages_is_a_document_this_runtime_does_not_paginate()
     # And a paged document is unchanged: numbered from one, as many as counted.
     assert media_transcription._valid_document_visuals(numbered, 1) is True
     assert media_transcription._valid_document_visuals(unpaged, 1) is False
+
+
+def test_ocr_lines_cross_into_the_document_and_validate(tmp_path):
+    """The enrichment lane's coordinates reach the contract (OMNI-0611)."""
+    from omnitensor.plugins.media_transcription import (
+        MediaInfo,
+        MediaModality,
+        MediaProviderIdentity,
+        RecognisedLine,
+        SpeechTranscript,
+        VisualTranscript,
+        media_result,
+    )
+
+    source = tmp_path / "page.png"
+    source.write_bytes(b"png-bytes")
+    line = RecognisedLine("GPU 0%", 0.97, 0.92, 120.0, 40.0, 14.0, 96.0, 90.0, False)
+    enriched = VisualTranscript(None, "GPU 0%", "a status row", None, None, (line,))
+    plain = VisualTranscript(None, "", "a plain page", None, 2)
+    media = MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 2)
+    identity = MediaProviderIdentity("media-transcription-vulkan", "gpu")
+    document = media_result(
+        "job-1",
+        source,
+        media,
+        identity,
+        SpeechTranscript(None, ()),
+        (
+            VisualTranscript(None, "GPU 0%", "a status row", None, 1, (line,)),
+            plain,
+        ),
+    )
+    visual = document["visuals"][0]
+    assert visual["ocrLines"] == [
+        {
+            "text": "GPU 0%",
+            "confidence": 0.97,
+            "boxScore": 0.92,
+            "centerX": 120.0,
+            "centerY": 40.0,
+            "thickness": 14.0,
+            "length": 96.0,
+            "angle": 90.0,
+            "vertical": False,
+        }
+    ]
+    # A transcript without lines emits no key at all: old documents stay
+    # byte-identical, and absent and empty read the same.
+    assert "ocrLines" not in document["visuals"][1]
+    assert enriched.ocr_lines == (line,)

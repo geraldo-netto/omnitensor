@@ -703,20 +703,39 @@ def media_result(
                 for item in speech.segments
             ],
         },
-        "visuals": [
-            {
-                "timestampMs": item.timestamp_ms,
-                "visibleText": item.visible_text,
-                "description": item.description,
-                "slideNumber": item.slide_number,
-                "pageNumber": item.page_number,
-            }
-            for item in visuals
-        ],
+        "visuals": [_visual_document(item) for item in visuals],
     }
     violations = validate_document("media-transcription-result.schema.json", document)
     if violations:
         raise MediaTranscriptionError("result-invalid", violations[0])
+    return document
+
+
+def _visual_document(item: VisualTranscript) -> dict:
+    document = {
+        "timestampMs": item.timestamp_ms,
+        "visibleText": item.visible_text,
+        "description": item.description,
+        "slideNumber": item.slide_number,
+        "pageNumber": item.page_number,
+    }
+    if item.ocr_lines:
+        # Emitted only when the lane answered: absent and empty read the
+        # same to a consumer, and old documents stay byte-identical.
+        document["ocrLines"] = [
+            {
+                "text": line.text,
+                "confidence": line.confidence,
+                "boxScore": line.box_score,
+                "centerX": line.center_x,
+                "centerY": line.center_y,
+                "thickness": line.thickness,
+                "length": line.length,
+                "angle": line.angle,
+                "vertical": line.vertical,
+            }
+            for line in item.ocr_lines
+        ]
     return document
 
 
