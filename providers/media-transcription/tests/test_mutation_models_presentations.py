@@ -476,6 +476,7 @@ def test_qwen_load_and_release_preserve_every_vulkan_resource(tmp_path):
         "chat_handler": transcriber._handler,
         "n_ctx": 8192,
         "n_batch": 1024,
+        # -1 is "all layers": the knob was unset in this scenario.
         "n_gpu_layers": -1,
         "main_gpu": 0,
         "offload_kqv": True,
@@ -995,3 +996,22 @@ def test_create_wires_one_shared_adapter_lease_and_vision_into_every_port(monkey
     with pytest.raises(provider.MediaGpuError) as error:
         provider.create()
     assert str(error.value) == "the visual projector is unavailable"
+
+
+def test_the_gpu_layer_knob_reaches_the_vision_load(monkeypatch):
+    """The same knob the vulkan runtime honours works here (OMNI-0601).
+
+    n_gpu_layers was hard-coded to -1, so a vision model larger than VRAM
+    could not ask this provider for a partial offload at all — the
+    refusal-by-omission the knob exists to end. A typo refuses rather than
+    quietly maximising.
+    """
+
+    monkeypatch.delenv(models.GPU_LAYERS_VARIABLE, raising=False)
+    assert models._gpu_layer_budget() == -1
+    monkeypatch.setenv(models.GPU_LAYERS_VARIABLE, " 24 ")
+    assert models._gpu_layer_budget() == 24
+    monkeypatch.setenv(models.GPU_LAYERS_VARIABLE, "many")
+    with pytest.raises(provider.MediaGpuError) as refusal:
+        models._gpu_layer_budget()
+    assert "must be an integer, not 'many'" in str(refusal.value)

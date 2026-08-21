@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0601 | open | medium | s | **The media transcriber ignores the GPU layer knob.** `models.py:349` hard-codes `n_gpu_layers=-1` while the vulkan generation runtime honours `OMNITENSOR_GPU_LAYERS` (OMNI-0586) and the sandbox forwards it to every worker (OMNI-0589). A vision model larger than VRAM cannot ask this provider for a partial offload at all — the same refusal-by-omission the knob exists to end. Read the variable the way `_gpu_layer_budget` does (typo refuses, absent means all) and keep the existing >=1-offloaded proof. |
 
 ## Blocked
 

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import fcntl
 import json
+import os
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -30,6 +31,26 @@ _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.I)
 _LLAMA_DEVICE = re.compile(r"using device Vulkan\d+ \((.+)\) \([0-9a-fA-F:.]+\)", re.I)
 _WHISPER_DEVICE = re.compile(r"ggml_vulkan:\s*\d+\s*=\s*(.+?)\s*\(", re.I)
 _WHISPER_BACKEND = re.compile(r"using Vulkan(\d+) backend", re.I)
+
+# The same knob the vulkan generation runtime honours (OMNI-0586): how many
+# model layers to place on the GPU, -1 meaning all of them. The sandbox
+# forwards it to every worker; ignoring it here meant a vision model larger
+# than VRAM could not ask this provider for a partial offload at all.
+GPU_LAYERS_VARIABLE = "OMNITENSOR_GPU_LAYERS"
+
+
+def _gpu_layer_budget() -> int:
+    configured = os.environ.get(GPU_LAYERS_VARIABLE, "").strip()
+    if not configured:
+        return -1
+    try:
+        return int(configured)
+    except ValueError:
+        # "-1, meaning all layers" is the exact opposite of what somebody who
+        # set a budget asked for; a typo must refuse, not maximise.
+        raise MediaGpuError(
+            f"{GPU_LAYERS_VARIABLE} must be an integer, not {configured!r}"
+        ) from None
 
 
 def _window_segments(spoken, offset_ms: int, window_ms: int):
@@ -353,7 +374,7 @@ class QwenVulkanVisualTranscriber(VisualTranscriber):
                 chat_handler=self._handler,
                 n_ctx=8192,
                 n_batch=1024,
-                n_gpu_layers=-1,
+                n_gpu_layers=_gpu_layer_budget(),
                 main_gpu=0,
                 offload_kqv=True,
                 op_offload=True,
