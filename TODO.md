@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0631 | open | low | xs | Add `measure-ocr-enrichment.py` to the script inventory asserted by `tests/test_scripts.py`; the current whole-file gate fails because the executable exists but the expected list still names only four scripts. |
 
 ## Blocked / Deferred
 

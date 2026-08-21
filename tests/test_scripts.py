@@ -60,6 +60,7 @@ def test_there_are_scripts_to_cover():
         "benchmark-transport-codecs.py",
         "collect-selected-text-acceptance.py",
         "generate-media-acceptance-fixtures.py",
+        "measure-ocr-enrichment.py",
         "provider-requirements.py",
     ]
 
