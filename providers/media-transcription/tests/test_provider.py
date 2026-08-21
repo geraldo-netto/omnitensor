@@ -903,7 +903,9 @@ def test_qwen_vulkan_proves_full_offload_transcribes_and_releases(monkeypatch, t
     payload = sys.modules["llama_cpp"].llama_cpp.completion_kwargs["messages"][1]["content"][0]
     encoded = payload["image_url"]["url"].split(",", 1)[1]
     with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
-        assert normalized.size == (768, 512)
+        # A 900x600 source sits under the 1600 inference bound (OMNI-0614):
+        # no longer downscaled — small text survives to the model.
+        assert normalized.size == (900, 600)
     assert transcriber._ensure_loaded() is transcriber._llama
     transcriber._release_sync()
     assert transcriber._llama is None

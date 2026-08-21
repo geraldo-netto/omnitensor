@@ -44,7 +44,13 @@ _DOCUMENT_SUFFIXES = frozenset({".docx", ".pdf", ".tif", ".tiff", ".txt"})
 _UNPAGED_SUFFIXES = frozenset({".docx", ".txt"})
 MAX_SVG_BYTES = 8 * 1024 * 1024
 MAX_RENDER_DIMENSION = 1600
-MAX_INFERENCE_DIMENSION = 768
+# What the vision model is shown, same bound as what pages are rendered at:
+# 768 threw away the small text of exactly the frames a person most wants
+# read — a dense page, a desktop screenshot — before inference could try
+# (OMNI-0614; owner priority 2026-08-22: capture over speed). The bound is
+# arithmetic against the model rather than policy: Qwen2.5-VL at 1600² is
+# ~3.3k image tokens against n_ctx 8192, leaving room for prompt and answer.
+MAX_INFERENCE_DIMENSION = 1600
 
 
 class _WindowBuffer:

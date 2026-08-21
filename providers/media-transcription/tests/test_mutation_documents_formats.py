@@ -499,7 +499,9 @@ def test_svg_url_fetcher_only_delegates_embedded_images(monkeypatch):
 
 def test_visual_payload_is_exact_rgb_png_with_bounded_dimensions(tmp_path):
     source = tmp_path / "alpha.png"
-    Image.new("RGBA", (1536, 768), (10, 20, 30, 40)).save(source)
+    # Wider than the 1600 inference bound (OMNI-0614), so the downscale is
+    # still exercised — at the bound that matches what pages render at.
+    Image.new("RGBA", (3200, 1600), (10, 20, 30, 40)).save(source)
     payload = formats._visual_payload(source)
 
     assert payload.startswith(b"\x89PNG\r\n\x1a\n")
@@ -507,7 +509,7 @@ def test_visual_payload_is_exact_rgb_png_with_bounded_dimensions(tmp_path):
         image.load()
         assert image.format == "PNG"
         assert image.mode == "RGB"
-        assert image.size == (768, 384)
+        assert image.size == (1600, 800)
         assert np.allclose(image.getpixel((0, 0)), (10, 20, 30), atol=2)
 
     with pytest.raises(MediaTranscriptionError) as error:
