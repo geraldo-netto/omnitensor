@@ -730,7 +730,10 @@ def test_ocr_lines_cross_into_the_document_and_validate(tmp_path):
 
     source = tmp_path / "page.png"
     source.write_bytes(b"png-bytes")
-    line = RecognisedLine("GPU 0%", 0.97, 0.92, 120.0, 40.0, 14.0, 96.0, 90.0, False)
+    # Deliberately out of range: the engine's confidence is a probability
+    # for the pinned models, but the emitter clamps rather than letting a
+    # future port's head fail the whole job on schema (OMNI-0623).
+    line = RecognisedLine("GPU 0%", 1.3, -0.2, 120.0, 40.0, 14.0, 96.0, 90.0, False)
     enriched = VisualTranscript(None, "GPU 0%", "a status row", None, None, (line,))
     plain = VisualTranscript(None, "", "a plain page", None, 2)
     media = MediaInfo(MediaModality.DOCUMENT, None, None, None, False, None, 2)
@@ -750,8 +753,8 @@ def test_ocr_lines_cross_into_the_document_and_validate(tmp_path):
     assert visual["ocrLines"] == [
         {
             "text": "GPU 0%",
-            "confidence": 0.97,
-            "boxScore": 0.92,
+            "confidence": 1.0,
+            "boxScore": 0.0,
             "centerX": 120.0,
             "centerY": 40.0,
             "thickness": 14.0,

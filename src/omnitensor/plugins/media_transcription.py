@@ -725,8 +725,13 @@ def _visual_document(item: VisualTranscript) -> dict:
         document["ocrLines"] = [
             {
                 "text": line.text,
-                "confidence": line.confidence,
-                "boxScore": line.box_score,
+                # Clamped at the schema boundary (OMNI-0623): the engine's
+                # confidence is a probability for the pinned models, but no
+                # contract guarantees a future port's head stays one — and a
+                # single 1.0000001 must not fail the whole job as
+                # result-invalid after the work was done.
+                "confidence": min(1.0, max(0.0, line.confidence)),
+                "boxScore": min(1.0, max(0.0, line.box_score)),
                 "centerX": line.center_x,
                 "centerY": line.center_y,
                 "thickness": line.thickness,
