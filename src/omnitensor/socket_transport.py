@@ -347,6 +347,18 @@ class SocketControlTransport:
         return {"version": CONTROL_PROTOCOL_VERSION, "id": request_id, "result": result}
 
 
+async def _connected(path: Path):
+    try:
+        return await asyncio.open_unix_connection(str(path))
+    except OSError as error:
+        # The most common failure — no service running — used to escape as a
+        # bare ConnectionRefusedError/FileNotFoundError, past the stable-code
+        # contract every caller branches on (OMNI-0605).
+        raise ControlSocketError(
+            "connect-failed", f"could not connect to {path}: {error}"
+        ) from error
+
+
 async def call_control(
     method: str,
     params: dict | None = None,
@@ -366,7 +378,7 @@ async def call_control(
     path = Path(socket_path) if socket_path is not None else default_socket_path()
 
     async def exchange() -> dict:
-        reader, writer = await asyncio.open_unix_connection(str(path))
+        reader, writer = await _connected(path)
         try:
             request = {
                 "version": CONTROL_PROTOCOL_VERSION,

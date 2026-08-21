@@ -23,7 +23,6 @@ audit's dependency order without weakening the required status schema.
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0605 | open | low | xs | `call_control` leaks raw OS errors past its stable-code contract: the docstring promises it "raises ControlSocketError carrying the envelope error's code otherwise" (src/omnitensor/socket_transport.py:332), but `asyncio.open_unix_connection` failures inside `exchange()` (socket_transport.py:342) — `ConnectionRefusedError` when no service is running, `FileNotFoundError` when the socket path is absent — propagate as bare OSError. A client branching on `ControlSocketError.code` (the pattern the module documents) misses the most common failure, "service not running". Wrap connection-setup OSError in `ControlSocketError("connect-failed", ...)` naming the path. |
 | OMNI-0606 | open | low | xs | `input_roots_document` and `selected_files_document` (src/omnitensor/snapshot.py:40-73 and 80-105) are line-for-line duplicates — same `list(roots)`, same `MAX_PUBLISHED_INPUT_ROOTS` guard, same `{roots, maxBytes}` shape — differing only in the over-limit message and default `max_bytes`. The bound check already exists twice and the next edit will land in one copy only (the docstrings deliberately differ; the mechanics need not). Extract one private `_roots_document(roots, max_bytes, over_limit_message)` helper both call. |
 
 ## Blocked

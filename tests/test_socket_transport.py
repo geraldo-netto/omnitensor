@@ -337,9 +337,12 @@ def test_the_client_refuses_a_nonpositive_timeout(socket_path):
     assert captured.value.code == "timeout-invalid"
 
 
-def test_a_missing_service_raises_the_underlying_connection_error(socket_path):
-    with pytest.raises((FileNotFoundError, ConnectionRefusedError)):
+def test_a_missing_service_raises_the_stable_connect_code(socket_path):
+    """Superseded expectation: this used to pin the raw OSError leak that
+    OMNI-0605 removed; the stable vocabulary covers it now."""
+    with pytest.raises(ControlSocketError) as refusal:
         asyncio.run(call_control("describe-contract", {}, socket_path=socket_path))
+    assert refusal.value.code == "connect-failed"
 
 
 def test_stop_is_not_held_hostage_by_an_open_connection(socket_path):
@@ -433,3 +436,29 @@ def test_the_lock_refuses_a_racer_even_when_the_served_check_lies(socket_path, m
             return await call_control("describe-contract", {}, socket_path=socket_path)
 
     assert asyncio.run(scenario()) == {"answered": "describe-contract"}
+
+
+def test_no_service_is_a_stable_code_not_a_bare_oserror(tmp_path):
+    """call_control's contract is ControlSocketError codes (OMNI-0605).
+
+    A client branching on .code — the pattern this module documents —
+    missed the most common failure of all, "service not running", which
+    escaped as a raw FileNotFoundError or ConnectionRefusedError.
+    """
+
+    absent = tmp_path / "never-bound.sock"
+    with pytest.raises(ControlSocketError) as refusal:
+        asyncio.run(call_control("describe-contract", {}, socket_path=absent))
+    assert refusal.value.code == "connect-failed"
+    assert str(absent) in str(refusal.value)
+
+    # A path that exists but nobody serves: bind and close a raw socket.
+    import socket as socket_module
+
+    stale = tmp_path / "stale.sock"
+    holder = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    holder.bind(str(stale))
+    holder.close()
+    with pytest.raises(ControlSocketError) as refused:
+        asyncio.run(call_control("describe-contract", {}, socket_path=stale))
+    assert refused.value.code == "connect-failed"
