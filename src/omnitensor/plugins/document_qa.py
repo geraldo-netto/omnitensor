@@ -255,6 +255,16 @@ class DocumentQuestionPlugin(ManagedPlugin):
                 "request-invalid", "selected-file questions are manual only"
             )
         self.permissions.require(READ_PERMISSION)
+        # The operation joined the wire contract as optional-with-default
+        # (OMNI-0625): an absent field is the ask every payload has always
+        # meant, and the schema admits nothing else until the dispatch
+        # exists (stage 2). Checked here as well because a worker defends
+        # its own contract, not just the schema's.
+        operation = request.payload.get("operation", "ask")
+        if operation != "ask":
+            raise DocumentQuestionError(
+                "operation-unsupported", "only ask is served until the file side dispatches"
+            )
         question = request.payload.get("question")
         if (
             not isinstance(question, str)

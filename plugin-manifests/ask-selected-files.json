@@ -1,7 +1,7 @@
 {
  "manifestVersion": 2,
  "id": "ask-selected-files",
- "version": "1.1.0",
+ "version": "1.2.0",
  "capabilities": [
   "explicit-file-selection",
   "grounded-document-question-answering"
@@ -62,6 +62,13 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4096
+     },
+     "operation": {
+      "description": "Which operation to run over the selected files. Optional and defaulting to ask, so every existing caller stays valid; the enum grows as the file side learns the shared operations (OMNI-0625, stage 1 of docs/operations-core-migration.md).",
+      "enum": [
+       "ask"
+      ],
+      "default": "ask"
      }
     }
    },

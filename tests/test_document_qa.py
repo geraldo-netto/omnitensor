@@ -634,6 +634,17 @@ async def test_request_validation_trims_question_accepts_exact_bound_and_has_exa
     assert plugin._validate_request(padded) == "question"  # noqa: SLF001
     exact = request(source, question="x" * 4096)
     assert plugin._validate_request(exact) == "x" * 4096  # noqa: SLF001
+    # Stage 1 of the operations core (OMNI-0625): an explicit ask is the
+    # same request the absent field has always meant, and anything else is
+    # refused by the worker's own guard until the dispatch exists.
+    explicit = request(source, question="question")
+    explicit.payload["operation"] = "ask"
+    assert plugin._validate_request(explicit) == "question"  # noqa: SLF001
+    unsupported = request(source, question="question")
+    unsupported.payload["operation"] = "summarize"
+    with pytest.raises(DocumentQuestionError) as refused:
+        plugin._validate_request(unsupported)  # noqa: SLF001
+    assert refused.value.code == "operation-unsupported"
 
     cases = (
         (
@@ -1117,3 +1128,23 @@ def test_the_span_index_and_the_answer_contract_are_their_own_modules():
     assert document_qa.__all__ == ["DocumentQuestionPlugin"]
     assert document_qa.grounded_answer_document is document_answer.grounded_answer_document
     assert document_spans.DocumentQuestionError is document_answer.DocumentQuestionError
+
+
+def test_the_operation_field_defaults_to_ask_and_defends_the_contract():
+    """Stage 1 of the operations core (OMNI-0625).
+
+    Absent means ask — every payload ever sent stays valid — and a value
+    the schema does not admit is refused by the worker's own guard too,
+    because a worker defends its contract rather than trusting the wire.
+    """
+    import json
+    import pathlib
+
+    manifest = json.loads(
+        (pathlib.Path(__file__).parents[1] / "plugin-manifests/ask-selected-files.json").read_text()
+    )
+    operation = manifest["plugin"]["schemas"]["input"]["properties"]["operation"]
+    assert operation["default"] == "ask"
+    assert operation["enum"] == ["ask"]
+    assert "operation" not in manifest["plugin"]["schemas"]["input"]["required"]
+    assert manifest["version"] == "1.2.0"
