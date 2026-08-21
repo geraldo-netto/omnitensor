@@ -52,7 +52,13 @@ def _gpu_layer_budget() -> int:
     try:
         return int(configured)
     except ValueError:
-        return -1
+        # "-1, meaning all layers" is the exact opposite of what somebody who
+        # set a budget asked for; a typo must refuse, not maximise.
+        raise ProviderGenerationError(
+            "model-load-failed",
+            f"{GPU_LAYERS_VARIABLE} must be an integer, not {configured!r}",
+            generation_started=False,
+        ) from None
 
 
 _OFFLOAD = re.compile(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", re.IGNORECASE)

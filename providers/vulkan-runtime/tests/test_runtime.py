@@ -3673,3 +3673,19 @@ def test_an_answer_the_workload_rejects_is_asked_once_more(tmp_path):
     assert observed[1]["messages"][-2]["role"] == "assistant"
     assert "repeats the selection" in observed[1]["messages"][-1]["content"]
     assert json.loads(generated)["result"] == "Mitochondria make the cell's energy."
+
+
+def test_a_mistyped_gpu_layer_budget_refuses_instead_of_maximising(monkeypatch):
+    """OMNI-0597: an unparseable budget silently became -1 — every layer —
+    which is the opposite of what the person asked for."""
+    from omnitensor_vulkan_runtime.runtime import GPU_LAYERS_VARIABLE, _gpu_layer_budget
+
+    monkeypatch.setenv(GPU_LAYERS_VARIABLE, "twenty")
+    with pytest.raises(ProviderGenerationError) as refusal:
+        _gpu_layer_budget()
+    assert "must be an integer" in refusal.value.detail
+
+    monkeypatch.setenv(GPU_LAYERS_VARIABLE, "24")
+    assert _gpu_layer_budget() == 24
+    monkeypatch.delenv(GPU_LAYERS_VARIABLE)
+    assert _gpu_layer_budget() == -1
