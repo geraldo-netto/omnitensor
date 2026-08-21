@@ -355,3 +355,41 @@ def test_bounded_read_accepts_exactly_what_fits(tmp_path_factory, payload):
     assert read_json_bounded(target, size) == payload
     with pytest.raises(JsonTooLargeError):
         read_json_bounded(target, size - 1)
+
+
+def test_a_failed_publish_does_not_close_the_descriptor_twice(tmp_path, monkeypatch):
+    """After fdopen takes ownership, the raw fd is not ours any more (OMNI-0602).
+
+    The failure handler used to os.close(handle) unconditionally; once the
+    stream had already closed that descriptor, the number could belong to
+    anything a worker thread opened in the meantime — a live control-socket
+    connection, a lease — and the handler closed it.
+    """
+    from omnitensor import atomicio
+
+    target = tmp_path / "exists.bin"
+    target.write_bytes(b"already here")
+    explicitly_closed = []
+    real_close = atomicio.os.close
+    monkeypatch.setattr(
+        atomicio.os, "close", lambda fd: (explicitly_closed.append(fd), real_close(fd))
+    )
+    staged = []
+    real_mkstemp = atomicio.tempfile.mkstemp
+
+    def recording_mkstemp(**kwargs):
+        handle, name = real_mkstemp(**kwargs)
+        staged.append(handle)
+        return handle, name
+
+    monkeypatch.setattr(atomicio.tempfile, "mkstemp", recording_mkstemp)
+
+    # Exclusive publication against an existing target: os.link raises
+    # after the stream has closed the staging descriptor.
+    with pytest.raises(FileExistsError):
+        atomicio.write_bytes_atomic(target, b"new", 0o600, replace=False)
+
+    assert staged and staged[0] not in explicitly_closed
+    assert target.read_bytes() == b"already here"
+    # The staging file itself is still cleaned up.
+    assert list(tmp_path.glob(".exists.bin.*")) == []

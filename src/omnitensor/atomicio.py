@@ -78,9 +78,11 @@ def write_bytes_atomic(
         dir=target.parent,
         prefix=prefix if prefix is not None else f".{target.name}.",
     )
+    stream = None
     try:
         os.fchmod(handle, mode)
-        with os.fdopen(handle, "wb") as stream:
+        stream = os.fdopen(handle, "wb")
+        with stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
@@ -91,8 +93,15 @@ def write_bytes_atomic(
             with contextlib.suppress(OSError):
                 os.unlink(temporary_name)
     except BaseException:
-        with contextlib.suppress(OSError):
-            os.close(handle)
+        if stream is None:
+            # Only before fdopen took ownership is the raw descriptor ours
+            # to close. Closing it again after the stream had closed it
+            # freed a recycled number: with worker threads opening files
+            # beside the event loop, a failed replace could close somebody
+            # else's live descriptor — a control-socket connection, a lease
+            # (OMNI-0602).
+            with contextlib.suppress(OSError):
+                os.close(handle)
         with contextlib.suppress(OSError):
             os.unlink(temporary_name)
         raise
