@@ -21,7 +21,13 @@ MANIFESTS = ROOT / "plugin-manifests"
 # person makes, `bootstrap.require_artifact(...)` is one the workload makes for
 # itself.
 FIXED_ROLE = {
-    "ask-selected-files": {"bge-small-en-v1-5-ask-gpu"},
+    # The embedder and the OCR extraction pair (OMNI-0615) have fixed
+    # roles; the person chooses only the generation model.
+    "ask-selected-files": {
+        "bge-small-en-v1-5-ask-gpu",
+        "ppocrv6-medium-det",
+        "ppocrv6-medium-rec",
+    },
     "document-translation": {"dictalm2-hebrew-q4-k-m"},
     "selected-text-tools": {"dictalm2-hebrew-q4-k-m"},
     # The vision model became choosable in OMNI-0587/0588: the 9B is the
@@ -135,6 +141,8 @@ def test_the_inventory_says_of_every_artifact_whether_it_may_be_chosen():
         "qwen3-5-9b-iq4-xs": True,
         "qwen3-8b-q4-k-m": True,
         "bge-small-en-v1-5-ask-gpu": False,
+        "ppocrv6-medium-det": False,
+        "ppocrv6-medium-rec": False,
     }
     assert ArtifactReadiness("a", "1.0.0", "gguf", True, "").selectable is True
 

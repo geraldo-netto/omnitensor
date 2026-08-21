@@ -1,147 +1,207 @@
 {
-  "manifestVersion": 2,
-  "id": "ask-selected-files",
-  "version": "1.1.0",
-  "capabilities": ["explicit-file-selection", "grounded-document-question-answering"],
-  "plugin": {
-    "entryPoint": "ask-selected-files",
-    "protocol": {
-      "minimum": 1,
-      "maximum": 1,
-      "capabilities": ["cancel", "execute", "health", "progress"]
-    },
-    "schemas": {
-      "configuration": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "answerGuidance": {
-            "description": "Extra guidance for the answer, in the person's own words. Carried as a private instruction appended to their request, never as a system rule: it cannot move what the answer is grounded in or which sources are cited.",
-            "type": "string",
-            "default": ""
-          },
-          "answerLength": {
-            "description": "How long an answer is wanted. A preference stated to the model, not a ceiling on what it may return.",
-            "enum": ["brief", "standard", "thorough"],
-            "default": "standard"
-          }
-        }
-      },
-      "input": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["sources", "question"],
-        "properties": {
-          "sources": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 16,
-            "uniqueItems": true,
-            "items": {"type": "string", "minLength": 1, "maxLength": 4096}
-          },
-          "question": {"type": "string", "minLength": 1, "maxLength": 4096}
-        }
-      },
-      "output": {"$ref": "document-question-result.schema.json"}
-    },
-    "triggers": ["manual"],
-    "artifacts": [
-      {
-        "id": "qwen3-5-9b-iq4-xs",
-        "version": "1.0.0",
-        "format": "gguf",
-        "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
-        "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf",
-        "licenseSpdx": "Apache-2.0"
-      },
-      {
-        "id": "qwen3-8b-q4-k-m",
-        "version": "1.0.0",
-        "format": "gguf",
-        "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
-        "sourceUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
-        "licenseSpdx": "Apache-2.0"
-      },
-      {
-        "id": "bge-small-en-v1-5-ask-gpu",
-        "selectable": false,
-        "version": "1.0.0",
-        "format": "ncnn",
-        "sha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
-        "sourceUri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx",
-        "licenseSpdx": "MIT",
-        "companions": {
-          "model.bin": "44034070d5e86e6be4829dc4a69c1e959ee895b07877d89b34c98d2adcf9e994",
-          "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
-        }
-      }
-    ],
-    "permissions": ["accelerator:gpu", "files:read-selected"]
+ "manifestVersion": 2,
+ "id": "ask-selected-files",
+ "version": "1.1.0",
+ "capabilities": [
+  "explicit-file-selection",
+  "grounded-document-question-answering"
+ ],
+ "plugin": {
+  "entryPoint": "ask-selected-files",
+  "protocol": {
+   "minimum": 1,
+   "maximum": 1,
+   "capabilities": [
+    "cancel",
+    "execute",
+    "health",
+    "progress"
+   ]
   },
-  "requirements": {
-    "runtimeApi": 1,
-    "accelerator": "gpu",
-    "acceleratorPreference": ["gpu"],
-    "minimumDevices": 1,
-    "model": null
-  },
-  "ui": {
-    "title": "Ask selected files",
-    "group": "Local workflows",
-    "description": "BGE retrieval · grounded Qwen answers · exact citations",
-    "icon": "system-search-symbolic",
-    "order": 92
-  },
-  "defaults": {"enabled": false, "weight": 1},
-  "pipeline": {
-    "hostResponsibilities": [
-      "Broker only files selected for the current manual request",
-      "Build and discard a bounded private page-span index",
-      "Require exact file, page, span, and digest citations on every answer"
-    ]
-  },
-  "acceptance": [
-    {
-      "metric": "retrieval-recall",
-      "comparator": "at-least",
-      "target": 0.9,
-      "unit": "ratio",
-      "description": "Expected supporting files retrieved on the frozen public document-question corpus."
-    },
-    {
-      "metric": "grounded-term-recall",
-      "comparator": "at-least",
-      "target": 0.9,
-      "unit": "ratio",
-      "description": "Expected grounded answer facts retained on the frozen public corpus."
-    },
-    {
-      "metric": "citation-integrity",
-      "comparator": "equal",
-      "target": 1,
-      "unit": "ratio",
-      "description": "Every cited file, page, span, and digest must match selected input bytes exactly."
-    },
-    {
-      "metric": "p95-question-latency",
-      "comparator": "at-most",
-      "target": 30000,
-      "unit": "milliseconds",
-      "description": "End-to-end retrieval and grounded generation on the qualified named GPU."
-    },
-    {
-      "metric": "cancellation-latency",
-      "comparator": "at-most",
-      "target": 2000,
-      "unit": "milliseconds",
-      "description": "A cancelled selected-file question reaches a terminal result within this bound."
-    },
-    {
-      "metric": "grant-revocation-latency",
-      "comparator": "at-most",
-      "target": 500,
-      "unit": "milliseconds",
-      "description": "Revoked selected-file permission refuses queued work within this bound."
+  "schemas": {
+   "configuration": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "answerGuidance": {
+      "description": "Extra guidance for the answer, in the person's own words. Carried as a private instruction appended to their request, never as a system rule: it cannot move what the answer is grounded in or which sources are cited.",
+      "type": "string",
+      "default": ""
+     },
+     "answerLength": {
+      "description": "How long an answer is wanted. A preference stated to the model, not a ceiling on what it may return.",
+      "enum": [
+       "brief",
+       "standard",
+       "thorough"
+      ],
+      "default": "standard"
+     }
     }
+   },
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "sources",
+     "question"
+    ],
+    "properties": {
+     "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+       "type": "string",
+       "minLength": 1,
+       "maxLength": 4096
+      }
+     },
+     "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+     }
+    }
+   },
+   "output": {
+    "$ref": "document-question-result.schema.json"
+   }
+  },
+  "triggers": [
+   "manual"
+  ],
+  "artifacts": [
+   {
+    "id": "qwen3-5-9b-iq4-xs",
+    "version": "1.0.0",
+    "format": "gguf",
+    "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+    "sourceUri": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf",
+    "licenseSpdx": "Apache-2.0"
+   },
+   {
+    "id": "qwen3-8b-q4-k-m",
+    "version": "1.0.0",
+    "format": "gguf",
+    "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+    "sourceUri": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+    "licenseSpdx": "Apache-2.0"
+   },
+   {
+    "id": "bge-small-en-v1-5-ask-gpu",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ncnn",
+    "sha256": "8a27ec7beb314ba2824a8c03ced33f922f079a8d9dc8aefb712d4b1c165d33bb",
+    "sourceUri": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx",
+    "licenseSpdx": "MIT",
+    "companions": {
+     "model.bin": "44034070d5e86e6be4829dc4a69c1e959ee895b07877d89b34c98d2adcf9e994",
+     "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+    }
+   },
+   {
+    "id": "ppocrv6-medium-det",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ncnn",
+    "sha256": "cb793ea8234616c9c1469ac4ea4232d0da484eb88bc6c964f9a48a87d5478a74",
+    "sourceUri": "https://github.com/Avafly/PaddleOCR-ncnn-CPP/raw/v0.3.0/models/PP_OCRv6_medium_det.param",
+    "licenseSpdx": "MIT",
+    "companions": {
+     "model.bin": "cd94affa5d099a21fe709c7ab258b2bcf98463d4a6b502bf4678a0d25d1324f9"
+    }
+   },
+   {
+    "id": "ppocrv6-medium-rec",
+    "selectable": false,
+    "version": "1.0.0",
+    "format": "ncnn",
+    "sha256": "bf7c1cf8492af152754716dbc61bd58682a9e161c06479ca7d4e0522e3a6b2d5",
+    "sourceUri": "https://github.com/Avafly/PaddleOCR-ncnn-CPP/raw/v0.3.0/models/PP_OCRv6_medium_rec.param",
+    "licenseSpdx": "MIT",
+    "companions": {
+     "model.bin": "8245e47e944c0dff7d4583b2c8c11d362d99d7f144777439e2435e2e6b116b96",
+     "labels.txt": "e07ed91571983f5ee096df61ad7cb585eb79411715553ff14f5882b6052b24e0"
+    }
+   }
+  ],
+  "permissions": [
+   "accelerator:gpu",
+   "files:read-selected"
   ]
+ },
+ "requirements": {
+  "runtimeApi": 1,
+  "accelerator": "gpu",
+  "acceleratorPreference": [
+   "gpu"
+  ],
+  "minimumDevices": 1,
+  "model": null
+ },
+ "ui": {
+  "title": "Ask selected files",
+  "group": "Local workflows",
+  "description": "BGE retrieval · grounded Qwen answers · exact citations",
+  "icon": "system-search-symbolic",
+  "order": 92
+ },
+ "defaults": {
+  "enabled": false,
+  "weight": 1
+ },
+ "pipeline": {
+  "hostResponsibilities": [
+   "Broker only files selected for the current manual request",
+   "Build and discard a bounded private page-span index",
+   "Require exact file, page, span, and digest citations on every answer"
+  ]
+ },
+ "acceptance": [
+  {
+   "metric": "retrieval-recall",
+   "comparator": "at-least",
+   "target": 0.9,
+   "unit": "ratio",
+   "description": "Expected supporting files retrieved on the frozen public document-question corpus."
+  },
+  {
+   "metric": "grounded-term-recall",
+   "comparator": "at-least",
+   "target": 0.9,
+   "unit": "ratio",
+   "description": "Expected grounded answer facts retained on the frozen public corpus."
+  },
+  {
+   "metric": "citation-integrity",
+   "comparator": "equal",
+   "target": 1,
+   "unit": "ratio",
+   "description": "Every cited file, page, span, and digest must match selected input bytes exactly."
+  },
+  {
+   "metric": "p95-question-latency",
+   "comparator": "at-most",
+   "target": 30000,
+   "unit": "milliseconds",
+   "description": "End-to-end retrieval and grounded generation on the qualified named GPU."
+  },
+  {
+   "metric": "cancellation-latency",
+   "comparator": "at-most",
+   "target": 2000,
+   "unit": "milliseconds",
+   "description": "A cancelled selected-file question reaches a terminal result within this bound."
+  },
+  {
+   "metric": "grant-revocation-latency",
+   "comparator": "at-most",
+   "target": 500,
+   "unit": "milliseconds",
+   "description": "Revoked selected-file permission refuses queued work within this bound."
+  }
+ ]
 }

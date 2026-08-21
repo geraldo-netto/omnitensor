@@ -11,6 +11,9 @@ license = "MIT"
 dependencies = [
   "omnitensor-vulkan-runtime==0.2.0",
   "omnitensor-ncnn-embeddings==0.2.0",
+  # Verbatim OCR extraction for selected images and scans (OMNI-0615); the
+  # ncnn runtime it needs already arrives with the embedder above.
+  "vulkanocr>=0.1,<1",
 ]
 
 [project.entry-points."omnitensor.workloads"]

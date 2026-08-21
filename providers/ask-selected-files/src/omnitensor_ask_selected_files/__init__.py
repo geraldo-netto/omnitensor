@@ -12,8 +12,11 @@ from omnitensor_ncnn_embeddings import BgeVulkanEmbedder
 from omnitensor_vulkan_runtime import QualifiedWorkload, generation_context
 
 from omnitensor.plugins.document_qa import DocumentQuestionPlugin
+from omnitensor.plugins.ocr_extraction import VulkanOcrExtractionAdapter
 
 BGE_ARTIFACT_ID = "bge-small-en-v1-5-ask-gpu"
+OCR_DET_ARTIFACT_ID = "ppocrv6-medium-det"
+OCR_REC_ARTIFACT_ID = "ppocrv6-medium-rec"
 
 
 def create() -> QualifiedWorkload:
@@ -30,8 +33,21 @@ def create() -> QualifiedWorkload:
         bge.sha256,
         bootstrap.accelerator_lease_path,
     )
+    # Selected images and scanned pages become citable fragments through the
+    # VulkanOCR engine (OMNI-0615) — verbatim source text, never a vision
+    # model's claim about it. Found rather than required: without the pinned
+    # pair the previous adapters stand, and a selected image is refused the
+    # way it always was rather than the worker failing to start.
+    ocr_det = bootstrap.find_artifact(OCR_DET_ARTIFACT_ID)
+    ocr_rec = bootstrap.find_artifact(OCR_REC_ARTIFACT_ID)
+    adapters = None
+    if ocr_det is not None and ocr_rec is not None:
+        reader = VulkanOcrExtractionAdapter(
+            ocr_det.path, ocr_rec.path, ocr_rec.path.parent / "labels.txt"
+        )
+        adapters = dict.fromkeys((".pdf", ".png", ".jpg", ".jpeg", ".webp"), reader)
     return QualifiedWorkload(
-        DocumentQuestionPlugin(embedder, router, store),
+        DocumentQuestionPlugin(embedder, router, store, adapters=adapters),
         runtime,
         model.path,
         qualification,

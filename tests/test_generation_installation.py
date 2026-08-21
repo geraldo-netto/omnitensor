@@ -276,7 +276,14 @@ def test_cli_exposes_stable_installation_refusal(tmp_path, monkeypatch):
 # a manifest with no distribution at all — was not a failing test but an absent
 # one. `media-transcription` was absent exactly that way.
 DECLARED_ARTIFACTS = {
-    "ask-selected-files": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "bge-small-en-v1-5-ask-gpu"],
+    "ask-selected-files": [
+        "qwen3-5-9b-iq4-xs",
+        "qwen3-8b-q4-k-m",
+        "bge-small-en-v1-5-ask-gpu",
+        # The OCR extraction pair (OMNI-0615), fixed-role beside the embedder.
+        "ppocrv6-medium-det",
+        "ppocrv6-medium-rec",
+    ],
     "document-translation": [
         "qwen3-5-9b-iq4-xs",
         "qwen3-8b-q4-k-m",
