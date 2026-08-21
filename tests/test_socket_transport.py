@@ -236,7 +236,11 @@ def test_a_handler_failure_is_an_internal_error_not_a_dead_connection(socket_pat
     error = asyncio.run(scenario())
 
     assert error.code == "internal-error"
-    assert "scheduler exploded" in error.detail
+    # The wire gets the stable sentence; the raw exception text — which
+    # leaked absolute paths and platform wording — stays in the journal
+    # (OMNI-0553).
+    assert "scheduler exploded" not in error.detail
+    assert "the journal has the cause" in error.detail
 
 
 @pytest.mark.parametrize("method", ["submit-job", "describe-plugins"])

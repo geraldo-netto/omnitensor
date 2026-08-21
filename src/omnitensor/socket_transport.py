@@ -36,6 +36,7 @@ import contextlib
 import fcntl
 import itertools
 import json
+import logging
 import os
 import socket
 import struct
@@ -342,8 +343,19 @@ class SocketControlTransport:
             # that vocabulary cannot reach the wire as if it were stable.
             document = json.loads(refusal.text())
             return _error_reply(request_id, document["code"], document["message"])
-        except Exception as error:  # noqa: BLE001 - one request must not kill the connection
-            return _error_reply(request_id, "internal-error", f"{type(error).__name__}: {error}")
+        except Exception:  # noqa: BLE001 - one request must not kill the connection
+            # The wire gets the stable sentence, the journal gets the truth
+            # (OMNI-0553): raw platform text leaked absolute artifact paths
+            # and the platform's own wording to any local client, against
+            # the rule every other refusal here follows.
+            logging.getLogger(__name__).exception(
+                "control method %s failed internally", request["method"]
+            )
+            return _error_reply(
+                request_id,
+                "internal-error",
+                f"{request['method']} failed inside the service; the journal has the cause",
+            )
         return {"version": CONTROL_PROTOCOL_VERSION, "id": request_id, "result": result}
 
 
