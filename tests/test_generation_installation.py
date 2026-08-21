@@ -284,8 +284,8 @@ DECLARED_ARTIFACTS = {
     ],
     "event-extraction": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
     "file-organizer": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
-    # The 9B sits between them since OMNI-0587: the selectable vision model
-    # a person may choose over the default, measured better on Hebrew.
+    # Both vision models are selectable since OMNI-0587/0588 — the 9B is the
+    # default (measured more robust, covers Hebrew), the 7B the alternative.
     "media-transcription": [
         "qwen2-5-vl-7b-instruct",
         "qwen3-5-9b-q4-k-m",

@@ -24,7 +24,9 @@ FIXED_ROLE = {
     "ask-selected-files": {"bge-small-en-v1-5-ask-gpu"},
     "document-translation": {"dictalm2-hebrew-q4-k-m"},
     "selected-text-tools": {"dictalm2-hebrew-q4-k-m"},
-    "media-transcription": {"qwen2-5-vl-7b-instruct", "whisper-small-multilingual"},
+    # The vision model became choosable in OMNI-0587/0588: the 9B is the
+    # default and the 7B the alternative, so only the speech model is fixed.
+    "media-transcription": {"whisper-small-multilingual"},
     "event-extraction": set(),
     "file-organizer": set(),
 }

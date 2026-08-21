@@ -67,7 +67,7 @@
     "artifacts": [
       {
         "id": "qwen2-5-vl-7b-instruct",
-        "selectable": false,
+        "selectable": true,
         "version": "1.0.0",
         "format": "gguf",
         "sha256": "9258bf05b12686d097ff3b6b18d968ab393649780aa2b3cd67fec43d50554392",

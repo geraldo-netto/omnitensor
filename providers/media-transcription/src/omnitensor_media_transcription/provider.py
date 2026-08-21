@@ -44,7 +44,12 @@ from .presentations import (
 
 PLUGIN_ID = "media-transcription"
 PROVIDER_ID = "media-transcription-vulkan"
-VISION_ARTIFACT_ID = "qwen2-5-vl-7b-instruct"
+# The default vision model. Qwen3.5-9B by owner decision (2026-08-21,
+# OMNI-0588): measured the more robust reader on the benchmark corpus and the
+# only local model that reads Hebrew nearly perfectly. The 7B stays declared
+# and selectable, so switching back is one set-profile-model away.
+VISION_ARTIFACT_ID = "qwen3-5-9b-q4-k-m"
+LEGACY_VISION_ARTIFACT_ID = "qwen2-5-vl-7b-instruct"
 SPEECH_ARTIFACT_ID = "whisper-small-multilingual"
 VISION_PROJECTOR = "mmproj.gguf"
 
