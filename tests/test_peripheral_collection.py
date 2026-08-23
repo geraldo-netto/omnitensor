@@ -672,9 +672,7 @@ def test_more_devices_than_the_old_default_are_all_emitted():
     """OMNI-0392 regression: 50 allowlisted devices exceed the old default of 32."""
     identities = [f"device-{index:02d}" for index in range(50)]
     collector = PeripheralMetadataCollector(
-        ReplayPeripheralMetadataSource(
-            [snapshot(*(device(identity) for identity in identities))]
-        ),
+        ReplayPeripheralMetadataSource([snapshot(*(device(identity) for identity in identities))]),
         permission_view(*identities),
         tuple(identities),
     )

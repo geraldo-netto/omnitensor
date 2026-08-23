@@ -465,9 +465,7 @@ def test_more_links_than_the_old_default_are_all_emitted():
     """OMNI-0392 regression: 100 allowlisted links exceed the old default of 64."""
     identities = [f"link-{index:03d}" for index in range(100)]
     collector = NetworkMetadataCollector(
-        ReplayNetworkMetadataSource(
-            [snapshot(*(link(identity) for identity in identities))]
-        ),
+        ReplayNetworkMetadataSource([snapshot(*(link(identity) for identity in identities))]),
         permission_view(*identities),
         tuple(identities),
     )
