@@ -1130,11 +1130,11 @@ def test_the_span_index_and_the_answer_contract_are_their_own_modules():
     """OMNI-0528: one 731-line module held the plugin and three contracts."""
     import inspect
 
-    assert inspect.getsourcefile(page_spans).endswith("document_spans.py")
-    assert inspect.getsourcefile(retrieve_spans).endswith("document_spans.py")
-    assert inspect.getsourcefile(grounded_answer_document).endswith("document_answer.py")
-    assert inspect.getsourcefile(document_question_task).endswith("document_answer.py")
-    assert inspect.getsourcefile(DocumentQuestionPlugin).endswith("document_qa.py")
+    assert page_spans.__module__ == document_spans.__name__
+    assert retrieve_spans.__module__ == document_spans.__name__
+    assert grounded_answer_document.__module__ == document_answer.__name__
+    assert document_question_task.__module__ == document_answer.__name__
+    assert DocumentQuestionPlugin.__module__ == document_qa.__name__
 
     # And the file organiser depends on the index, not on the question module.
     organiser = inspect.getsource(__import__("omnitensor.plugins.file_organizer", fromlist=["x"]))
