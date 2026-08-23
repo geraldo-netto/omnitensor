@@ -182,7 +182,8 @@ def test_manifest_is_closed_and_coordinates_manual_private_workload():
             "format": "gguf",
             "sha256": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
             "sourceUri": (
-                "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-IQ4_XS.gguf"
+                "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/"
+                "3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-IQ4_XS.gguf"
             ),
             "licenseSpdx": "Apache-2.0",
         },

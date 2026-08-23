@@ -5,7 +5,6 @@
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
 | OMNI-0635 | open | medium | s | Restore agreement between the shipped generation catalog and its loader so the catalog loads and event artifact verification can run; the loader currently rejects the published provider lanes as incomplete. |
-| OMNI-0636 | open | low | xs | Update the event workload artifact contract test to expect the shipped revision-pinned Qwen3.5 URI instead of the mutable `main` branch URI. |
 | OMNI-0637 | open | medium | s | Restore mutation selector manifest completeness for the document-QA validation callable reported missing by the repository-wide campaign contract tests. |
 
 ## Blocked / Deferred
