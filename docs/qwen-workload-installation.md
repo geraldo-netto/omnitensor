@@ -7,8 +7,8 @@ workloads:
   evidence-backed event preview;
 - `ask-selected-files` retrieves BGE spans from selected documents and answers
   with exact file, page, span, and digest citations;
-- `selected-text-tools` explains, summarizes, rewrites, translates, or extracts
-  tasks from one explicit clipboard selection;
+- `selected-text-tools` answers a question, explains, summarizes, rewrites,
+  translates, or extracts tasks from one explicit clipboard selection;
 - `file-organizer` returns a review-only naming, tagging, folder, and exact
   duplicate plan. It cannot move, rename, overwrite, or delete a file.
 

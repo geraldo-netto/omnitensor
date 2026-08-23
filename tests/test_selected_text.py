@@ -17,13 +17,16 @@ from omnitensor.plugins.generation import (
 from omnitensor.plugins.protocol import PluginContext, PluginRequest, PluginResultStatus
 from omnitensor.plugins.selected_text import (
     MAX_LANGUAGE_CHARACTERS,
+    MAX_QUESTION_CHARACTERS,
     MAX_SELECTION_CHARACTERS,
     OPERATIONS,
     PLUGIN_ID,
     READ_ONCE_PERMISSION,
     SelectedTextError,
     SelectedTextPlugin,
+    _control_text,
     _validated_language,
+    _validated_question,
     grounded_selected_text_result,
     selected_text_task,
 )
@@ -54,6 +57,7 @@ class Worker:
         self.store = store
         self.mutate = mutate
         self.requests = []
+        self.controls = []
 
     async def generate(self, task, request, cancellation, progress):
         cancellation.raise_if_cancelled()
@@ -62,6 +66,7 @@ class Worker:
         control = self.store.resolve(request.request_id, request.content_references[0])
         selection = self.store.resolve(request.request_id, request.content_references[1])
         instruction = json.loads(control.text)
+        self.controls.append(control.text)
         assert control.reference == f"private:{request.request_id}:control"
         assert selection.reference == f"private:{request.request_id}:selection"
         assert control.source_sha256 == hashlib.sha256(control.text.encode()).hexdigest()
@@ -130,7 +135,13 @@ def described_worker(store, provider_id):
 async def test_every_selected_text_operation_is_one_shot_grounded_and_reviewable(operation):
     plugin, worker, store = await running()
     progress = Progress()
-    payload = {"language": "Italian"} if operation == "translate" else {}
+    payload = (
+        {"language": "Italian"}
+        if operation == "translate"
+        else {"question": "What does this say?"}
+        if operation == "ask"
+        else {}
+    )
 
     result = await plugin.execute(request(operation, **payload), CancellationController(), progress)
 
@@ -180,6 +191,38 @@ async def test_translation_control_is_private_bounded_and_exact():
     assert result.status is PluginResultStatus.SUCCEEDED
     generation = worker.requests[0][1]
     assert generation.content_references[0] == "private:job-1:control"
+
+
+@pytest.mark.asyncio
+async def test_question_is_private_bounded_and_only_sent_when_asking():
+    plugin, worker, _store = await running()
+
+    result = await plugin.execute(
+        request("ask", question="  Which system moved the rows?  "),
+        CancellationController(),
+        Progress(),
+    )
+
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert json.loads(worker.controls[0]) == {
+        "language": None,
+        "operation": "ask",
+        "question": "Which system moved the rows?",
+    }
+
+
+@pytest.mark.parametrize(
+    ("operation", "language", "expected"),
+    [
+        ("explain", None, '{"language":null,"operation":"explain"}'),
+        ("summarize", None, '{"language":null,"operation":"summarize"}'),
+        ("rewrite", None, '{"language":null,"operation":"rewrite"}'),
+        ("translate", "Italian", '{"language":"Italian","operation":"translate"}'),
+        ("extract-tasks", None, '{"language":null,"operation":"extract-tasks"}'),
+    ],
+)
+def test_existing_operation_control_bytes_do_not_move(operation, language, expected):
+    assert _control_text(operation, language, None) == expected
 
 
 @pytest.mark.asyncio
@@ -272,10 +315,14 @@ async def test_request_contract_requires_manual_grant_selection_operation_and_la
         request(selection="   "),
         request(selection="x" * (MAX_SELECTION_CHARACTERS + 1)),
         request("unknown"),
+        request("ask"),
+        request("ask", question="   "),
+        request("ask", question="x" * (MAX_QUESTION_CHARACTERS + 1)),
         request("translate"),
         request("translate", language="x!"),
         request("translate", language="x" * (MAX_LANGUAGE_CHARACTERS + 1)),
         request("summarize", language="Italian"),
+        request("summarize", question="Why?"),
         PluginRequest("job-1", "other", "manual", {}, 1, None),
         PluginRequest("job-1", PLUGIN_ID, "periodic", {}, 1, None),
     ]
@@ -316,6 +363,16 @@ async def test_request_refusals_publish_exact_stable_codes_and_details():
             "language-invalid",
             "language is accepted only for translation",
         ),
+        (
+            request("ask"),
+            "question-invalid",
+            f"question must contain 1-{MAX_QUESTION_CHARACTERS} characters",
+        ),
+        (
+            request("summarize", question="Why?"),
+            "question-invalid",
+            "a question is accepted only when asking",
+        ),
     ]
     for candidate, code, detail in cases:
         with pytest.raises(SelectedTextError) as captured:
@@ -336,7 +393,13 @@ async def test_request_refusals_publish_exact_stable_codes_and_details():
         selection,
         "summarize",
         None,
+        None,
     )
+
+
+@given(st.text(min_size=1, max_size=128).filter(str.strip))
+def test_any_bounded_nonblank_question_round_trips_privately(question):
+    assert _validated_question(question) == question.strip()
 
 
 @pytest.mark.asyncio

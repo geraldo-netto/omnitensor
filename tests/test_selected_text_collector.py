@@ -75,7 +75,7 @@ def _inventory(primary_id: str = "qwen3-8b-q4-k-m") -> str:
             "plugins": [
                 {
                     "id": "selected-text-tools",
-                    "version": "1.1.0",
+                    "version": "1.2.0",
                     "workerState": "ready",
                     "artifacts": [
                         {"id": primary_id, "ready": True},
@@ -166,7 +166,7 @@ def test_collector_accepts_every_artifact_the_manifest_declares():
             "plugins": [
                 {
                     "id": "selected-text-tools",
-                    "version": "1.1.0",
+                    "version": "1.2.0",
                     "workerState": "ready",
                     "artifacts": [{"id": identifier, "ready": True} for identifier in declared],
                 }
@@ -184,7 +184,7 @@ def test_receipt_selected_readiness_is_independent_of_inventory_order(artifact_i
         "plugins": [
             {
                 "id": "selected-text-tools",
-                "version": "1.1.0",
+                "version": "1.2.0",
                 "workerState": "ready",
                 "artifacts": [
                     {"id": artifact_id, "ready": artifact_id != "unused"}
@@ -227,7 +227,7 @@ def test_collector_names_the_routed_artifact_that_is_missing_or_unready(artifact
                 "plugins": [
                     {
                         "id": "selected-text-tools",
-                        "version": "1.1.0",
+                        "version": "1.2.0",
                         "workerState": "ready",
                         "artifacts": artifacts,
                     }

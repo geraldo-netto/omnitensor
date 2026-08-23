@@ -69,6 +69,7 @@ Trusted selected-text operation is "summarize". Summarize the selection concisel
     },
     "operation": {
       "enum": [
+        "ask",
         "explain",
         "summarize",
         "rewrite",

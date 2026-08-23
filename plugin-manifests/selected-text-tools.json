@@ -1,8 +1,12 @@
 {
   "manifestVersion": 2,
   "id": "selected-text-tools",
-  "version": "1.1.0",
-  "capabilities": ["explicit-selection", "selected-text-transformation"],
+  "version": "1.2.0",
+  "capabilities": [
+    "explicit-selection",
+    "selected-text-question-answering",
+    "selected-text-transformation"
+  ],
   "plugin": {
     "entryPoint": "selected-text-tools",
     "protocol": {
@@ -33,9 +37,17 @@
         "required": ["selection", "operation"],
         "properties": {
           "selection": {"type": "string", "minLength": 1, "maxLength": 32768},
-          "operation": {"enum": ["explain", "summarize", "rewrite", "translate", "extract-tasks"]},
-          "language": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^\\s*[^\\W\\d_][\\w '\\-]*\\s*$"}
-        }
+          "operation": {"enum": ["ask", "explain", "summarize", "rewrite", "translate", "extract-tasks"]},
+          "language": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^\\s*[^\\W\\d_][\\w '\\-]*\\s*$"},
+          "question": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"operation": {"const": "ask"}}, "required": ["operation"]},
+            "then": {"required": ["question"]},
+            "else": {"not": {"required": ["question"]}}
+          }
+        ]
       },
       "output": {"$ref": "selected-text-result.schema.json"}
     },
@@ -79,7 +91,7 @@
   "ui": {
     "title": "Selected-text tools",
     "group": "Local workflows",
-    "description": "Explain · summarize · rewrite · translate · extract tasks",
+    "description": "Ask · explain · summarize · rewrite · translate · extract tasks",
     "icon": "edit-copy-symbolic",
     "order": 93
   },
@@ -97,7 +109,7 @@
       "comparator": "at-least",
       "target": 0.9,
       "unit": "ratio",
-      "description": "Expected facts and actions retained across every selected-text operation on the frozen public corpus."
+      "description": "Expected facts and actions retained across the frozen selected-text transformation corpus."
     },
     {
       "metric": "hebrew-target-script-integrity",

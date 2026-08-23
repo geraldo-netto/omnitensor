@@ -190,7 +190,7 @@ def test_no_workload_hint_carries_private_text(workload_id):
     ],
 )
 def test_every_selected_text_operation_reaches_the_model_as_an_instruction(operation, required):
-    """The five buttons are one prompt plus this sentence.
+    """The five original transformations are one prompt plus this sentence.
 
     Without it the model is asked to apply an operation it was never told,
     and answers by echoing the selection back — which is what a person sees.
@@ -213,6 +213,32 @@ def test_every_selected_text_operation_reaches_the_model_as_an_instruction(opera
 
     assert f'operation is "{operation}"' in hint
     assert required in hint
+
+
+def test_an_inline_question_reaches_the_model_without_the_selection_entering_the_hint():
+    store = MemoryFragmentStore()
+    control = SourceFragment(
+        "private:job-1:control",
+        "a" * 64,
+        1,
+        json.dumps(
+            {"operation": "ask", "language": None, "question": "Which system moved the rows?"}
+        ),
+        "b" * 64,
+    )
+    selection = SourceFragment(
+        "private:job-1:selection", "c" * 64, 1, "The ledger service moved the rows.", "d" * 64
+    )
+    asyncio.run(store.publish("job-1", (control, selection)))
+    request = GenerationRequest(
+        "job-1", "selected-text-tools", (control.reference, selection.reference)
+    )
+
+    hint = SelectedTextPrompting().hint(selected_text_task(), request, store)
+
+    assert 'operation is "ask"' in hint
+    assert '"Which system moved the rows?"' in hint
+    assert selection.text not in hint
 
 
 def test_a_translation_names_the_language_it_was_asked_for():

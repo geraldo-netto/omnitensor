@@ -1,7 +1,7 @@
 # Selected-text tools
 
-`selected-text-tools` applies one requested transformation to text captured by
-an explicit user action. It never monitors the clipboard, installs a clipboard
+`selected-text-tools` answers one question or applies one requested
+transformation to text captured by an explicit user action. It never monitors the clipboard, installs a clipboard
 watcher, polls clipboard ownership, or retains selection history. The desktop
 host reads one selection only after the user chooses an operation and passes it
 to the workload under the `clipboard:read-once` permission.
@@ -9,6 +9,7 @@ to the workload under the `clipboard:read-once` permission.
 The supported operations are closed and versioned:
 
 - `explain`
+- `ask`, with one explicit question of at most 4,096 characters
 - `summarize`
 - `rewrite`
 - `translate`, with one explicit bounded target language
@@ -25,7 +26,7 @@ English as the normal path while making the one separately qualified target an
 operation-specific capability rather than a system-wide language preference.
 
 The selection is non-empty and at most 32,768 Unicode characters. OmniTensor
-places a closed operation/language control and the selection into two private
+places a closed operation-parameters control and the selection into two private
 ephemeral fragments. The generation request contains only their opaque
 references. Both fragments are discarded after success, refusal, error, or
 cancellation; progress, logs, public results, and runtime snapshots never
@@ -58,16 +59,18 @@ pinned DictaLM2.0 7B Instruct Q4_K_M artifact only for explicit Hebrew
 translation. All of these models are Apache-2.0 and are verified by exact
 digest before import. The workload contract itself remains provider-neutral.
 
-The frozen 16-case CC0 corpus covers all five operations, English default
+The frozen 16-case CC0 corpus covers the five original transformations, English default
 routing, Italian translation through Qwen, six explicit Hebrew translations,
 task extraction, and a prompt-injection translation. On 13 August 2026, the
 installed worker passed on the named RX 6600 XT with 37/37 Qwen layers
 and 33/33 DictaLM layers offloaded to Vulkan and no CPU fallback. The report
 recorded 0.923 operation-term recall, 1.0 task recall, Hebrew-script integrity,
 prompt-injection integrity, and provider-route integrity, an 18,048 ms p95,
-and 802 ms cancellation. These measurements qualify the frozen cases and exact
-artifact/runtime bytes; they do not claim arbitrary-selection quality or a
-different GPU/runtime.
+and 802 ms cancellation. Adding `ask` changed the task's output schema, so the
+runtime receipt records both Qwen/task pairs as `unmeasured` until an
+ask-inclusive GPU acceptance run exists. The historical measurements cover
+only the frozen transformations and exact artifact/runtime bytes; they do not
+claim ask quality, arbitrary-selection quality, or a different GPU/runtime.
 
 New collection never reconstructs accelerator claims from installed metadata
 or collector constants. After the worker has actually loaded both models, it
@@ -89,5 +92,5 @@ after separately qualifying its artifact, tokenizer, native runtime, output
 contract, and device behavior; pre-generation admission may then fall back to
 GPU. No CPU provider or CPU fallback is accepted. Until a complete worker
 advertises readiness, the workload remains disabled and the Cinnamon action is
-unavailable. Readiness version 1.1.0 requires both artifacts and the complete
-acceptance set; no global language setting is fixed to Hebrew or Russian.
+unavailable. Version 1.2.0 requires both artifacts; no global language setting
+is fixed to Hebrew or Russian.

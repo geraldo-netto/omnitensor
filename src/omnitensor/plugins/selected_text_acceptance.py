@@ -26,7 +26,7 @@ from .acceptance_kit import (
     validate_gpu_load,
 )
 from .generation import ProviderGenerationError
-from .selected_text import OPERATIONS
+from .operations import TRANSFORM_OPERATIONS
 
 MAX_CORPUS_BYTES = 256 * 1024
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
@@ -187,7 +187,7 @@ def load_selected_text_corpus(path: Path | str | None = None) -> SelectedTextCor
     cases = tuple(_parse_case(item) for item in _sequence(document["cases"], "cases"))
     if len(cases) < 10 or len({case.case_id for case in cases}) != len(cases):
         raise SelectedTextAcceptanceError("corpus-invalid", "corpus case ids are incomplete")
-    if {case.operation for case in cases} != OPERATIONS:
+    if {case.operation for case in cases} != TRANSFORM_OPERATIONS:
         raise SelectedTextAcceptanceError("corpus-invalid", "every operation must be represented")
     if not any(case.require_hebrew and case.injection_probe for case in cases):
         raise SelectedTextAcceptanceError("corpus-invalid", "Hebrew injection probe is required")
@@ -454,7 +454,9 @@ def _parse_case(value: object) -> SelectedTextCase:
         raise SelectedTextAcceptanceError("corpus-invalid", "case fields are invalid")
     operation = item["operation"]
     language = item.get("language")
-    if operation not in OPERATIONS or (operation == "translate") != isinstance(language, str):
+    if operation not in TRANSFORM_OPERATIONS or (operation == "translate") != isinstance(
+        language, str
+    ):
         raise SelectedTextAcceptanceError("corpus-invalid", "case operation is invalid")
     return SelectedTextCase(
         _identifier(item["caseId"], "case id", "corpus-invalid"),

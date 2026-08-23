@@ -58,6 +58,7 @@ from .generation import (
     generation_request,
 )
 from .operations import (
+    MAX_QUESTION_CHARACTERS,
     translation_route,
     validated_language,
     validated_translation_routes,
@@ -73,7 +74,6 @@ from .translation import TranslationError
 
 PLUGIN_ID = "ask-selected-files"
 READ_PERMISSION = "files:read-selected"
-MAX_QUESTION_CHARACTERS = 4_096
 
 
 class DocumentQuestionPlugin(ManagedPlugin):

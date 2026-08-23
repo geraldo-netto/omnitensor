@@ -748,7 +748,7 @@ def test_manifest_thresholds_match_the_selected_text_model_catalog():
     evaluation = catalog["evaluation"]
 
     assert validate_workload_document(manifest) == []
-    assert manifest["version"] == "1.1.0"
+    assert manifest["version"] == "1.2.0"
     assert targets == {
         "operation-term-recall": evaluation["minimumOperationTermRecall"],
         "task-term-recall": evaluation["minimumTaskTermRecall"],

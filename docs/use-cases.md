@@ -50,10 +50,12 @@ selected executor supports.
 Related external workflows remain manual and disabled until their complete
 providers advertise readiness. `selected-text-tools` processes only the text
 captured by an explicit action; it never monitors clipboard changes or stores
-selection history. Its five operations share the generation-provider contract
+selection history. Its six operations share the generation-provider contract
 and return reviewable output plus a digest/span evidence record. Its installed
-1.1.0 Vulkan worker passed the frozen 16-case gate on the RX 6600 XT with
-Qwen3-8B; the workload's configured Qwen model (default `qwen3-5-9b-iq4-xs`)
+1.1.0 Vulkan worker passed the frozen five-transformation, 16-case gate on the
+RX 6600 XT with Qwen3-8B. Version 1.2 adds questions and records both Qwen/task
+pairs as unmeasured until an ask-inclusive run exists. The workload's
+configured Qwen model (default `qwen3-5-9b-iq4-xs`)
 is primary for English and all routes except explicit Hebrew translation,
 which alone uses pinned DictaLM2. Language is never inferred from source text
 or fixed globally. Arbitrary-selection quality and NPU/TPU lanes are not

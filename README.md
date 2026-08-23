@@ -39,7 +39,7 @@ documents the ephemeral BGE span index, grounded Qwen answer contract, exact
 file/page/span citations, and GPU-first provider boundary.
 
 Using an explicit clipboard selection? [Selected-text tools](docs/selected-text-tools.md)
-documents the one-shot explain, summarize, rewrite, translate, and task-extraction
+documents one-shot questions, explanations, summaries, rewrites, translations, and task extraction
 contract, its private fragment boundary, and its mandatory provider dependencies.
 
 Organizing explicitly selected files? [File organizer](docs/file-organizer.md)

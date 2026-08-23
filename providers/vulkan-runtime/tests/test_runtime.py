@@ -607,6 +607,18 @@ def _passed_models(document, plugin_id):
     return tuple(model for model, record in models.items() if record["result"] == "passed")
 
 
+def test_selected_text_pairs_are_unmeasured_after_inline_ask_changes_the_task():
+    records = _receipt()["workloads"]["selected-text-tools"]["models"]
+
+    assert records == {
+        "qwen3-5-9b-iq4-xs": {"result": "unmeasured"},
+        "qwen3-8b-q4-k-m": {"result": "unmeasured"},
+    }
+    assert qualification.task_sha256(selected_text_task()) != (
+        "c6ab03dcf52b3f74abd68ac3fa8d44ec95d9c40a17c1a353d580bd18264f7a82"
+    )
+
+
 def _with_second_model(document, model_id, record):
     """The receipt as it looks once a second model has been qualified."""
     document["models"][model_id] = dict(document["models"]["qwen3-8b-q4-k-m"])

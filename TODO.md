@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0628 | open | low | s | **Operations core, stage 4, server half.** The client half shipped in xpuwlm (6de786e, 2026-08-21): ASK_ACTIONS question-fills became real `operation` values. Remaining here: ask over inline selection — `selected-text-tools` gains optional `operation="ask"` with `question` required iff ask, additively like stage 1 did for files; keep the five existing operation prompt bytes stable so digest `c6ab03…` survives, or record the pair honestly as unmeasured if the task moves. |
 
 ## Blocked / Deferred
 

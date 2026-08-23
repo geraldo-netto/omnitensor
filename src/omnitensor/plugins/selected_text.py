@@ -29,6 +29,7 @@ from .generation import (
 )
 from .operations import (
     ECHOED_SELECTION_REPROMPT,
+    MAX_QUESTION_CHARACTERS,
     OPERATIONS,
     RESTATEMENT_IS_A_NON_ANSWER,
     OperationPrompting,
@@ -126,14 +127,10 @@ class SelectedTextPlugin(ManagedPlugin):
         progress: ProgressReporter,
     ) -> PluginResult:
         """Publish the selection privately, generate, and ground the result."""
-        selection, operation, language = self._validate_request(request)
+        selection, operation, language, question = self._validate_request(request)
         cancellation.raise_if_cancelled()
         digest = hashlib.sha256(selection.encode("utf-8")).hexdigest()
-        control_text = json.dumps(
-            {"operation": operation, "language": language},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        control_text = _control_text(operation, language, question)
         control_digest = hashlib.sha256(control_text.encode("utf-8")).hexdigest()
         control = SourceFragment(
             f"private:{request.job_id}:control",
@@ -185,7 +182,7 @@ class SelectedTextPlugin(ManagedPlugin):
             detail="selected-text result ready for review",
         )
 
-    def _validate_request(self, request: PluginRequest) -> tuple[str, str, str | None]:
+    def _validate_request(self, request: PluginRequest) -> tuple[str, str, str | None, str | None]:
         if not isinstance(request, PluginRequest) or request.plugin_id != PLUGIN_ID:
             raise SelectedTextError("request-invalid", "request names another plugin")
         if request.trigger != "manual":
@@ -194,6 +191,7 @@ class SelectedTextPlugin(ManagedPlugin):
         selection = request.payload.get("selection")
         operation = request.payload.get("operation")
         language = request.payload.get("language")
+        question = request.payload.get("question")
         if (
             not isinstance(selection, str)
             or not selection.strip()
@@ -205,11 +203,8 @@ class SelectedTextPlugin(ManagedPlugin):
             )
         if operation not in OPERATIONS:
             raise SelectedTextError("operation-invalid", "selected-text operation is unsupported")
-        if operation == "translate":
-            language = _validated_language(language)
-        elif language is not None:
-            raise SelectedTextError("language-invalid", "language is accepted only for translation")
-        return selection, str(operation), language
+        language, question = _validated_parameters(str(operation), language, question)
+        return selection, str(operation), language, question
 
     def _route(self, operation: str, language: str | None) -> GenerationRouter:
         if operation != "translate" or language is None:
@@ -219,6 +214,38 @@ class SelectedTextPlugin(ManagedPlugin):
 
 def _validated_language(value: object) -> str:
     return validated_language(value, SelectedTextError, noun="translation language")
+
+
+def _validated_question(value: object) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > MAX_QUESTION_CHARACTERS:
+        raise SelectedTextError(
+            "question-invalid",
+            f"question must contain 1-{MAX_QUESTION_CHARACTERS} characters",
+        )
+    return value.strip()
+
+
+def _validated_parameters(
+    operation: str, language: object, question: object
+) -> tuple[str | None, str | None]:
+    if operation == "ask":
+        if language is not None:
+            raise SelectedTextError("language-invalid", "language is accepted only for translation")
+        return None, _validated_question(question)
+    if question is not None:
+        raise SelectedTextError("question-invalid", "a question is accepted only when asking")
+    if operation == "translate":
+        return _validated_language(language), None
+    if language is not None:
+        raise SelectedTextError("language-invalid", "language is accepted only for translation")
+    return None, None
+
+
+def _control_text(operation: str, language: str | None, question: str | None) -> str:
+    control = {"operation": operation, "language": language}
+    if operation == "ask":
+        control["question"] = question
+    return json.dumps(control, sort_keys=True, separators=(",", ":"))
 
 
 def _validated_translation_routes(
@@ -326,6 +353,7 @@ def _operation_instruction(operation: object, language: object) -> str:
 __all__ = [
     "ECHOED_SELECTION_REPROMPT",
     "MAX_LANGUAGE_CHARACTERS",
+    "MAX_QUESTION_CHARACTERS",
     "MAX_SELECTION_CHARACTERS",
     "OPERATIONS",
     "RESTATEMENT_IS_A_NON_ANSWER",

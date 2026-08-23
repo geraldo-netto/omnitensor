@@ -120,13 +120,27 @@ def test_a_payload_missing_a_required_field_is_refused_by_the_manifest(workload_
 
 
 def test_the_operations_the_client_offers_are_the_ones_the_manifest_allows():
-    """Five buttons in a window, one enum in a manifest. A sixth on either side
+    """Six operations in a window, one enum in a manifest. A seventh on either side
     is a refusal a person only sees after waiting for it."""
     schema = input_schema("selected-text-tools")
     declared = set(schema["properties"]["operation"]["enum"])
-    offered = {"explain", "summarize", "rewrite", "translate", "extract-tasks"}
+    offered = {"ask", "explain", "summarize", "rewrite", "translate", "extract-tasks"}
 
     assert declared == offered
+
+
+def test_inline_question_is_required_exactly_when_asking():
+    validator = Draft202012Validator(input_schema("selected-text-tools"))
+    base = {"selection": "The ledger service moved the rows."}
+
+    assert (
+        list(validator.iter_errors({**base, "operation": "ask", "question": "Which service?"}))
+        == []
+    )
+    assert list(validator.iter_errors({**base, "operation": "ask"}))
+    assert list(
+        validator.iter_errors({**base, "operation": "summarize", "question": "Which service?"})
+    )
 
 
 def test_the_client_workloads_and_the_shipped_manifests_agree_in_both_directions():

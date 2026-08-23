@@ -9,8 +9,9 @@ once. It is a NEW module on purpose: document_qa/document_spans/
 document_answer/fragments are pinned by mutation-selector paths and stay
 where they are.
 
-Nothing here changes a prompt byte: the qualification task digests of the
-measured workloads survive this extraction unchanged.
+The five transformation instructions retain their reviewed bytes. Adding
+inline ``ask`` widens the selected-text output schema, so that task's complete
+digest moves and its qualification receipt records the pair as unmeasured.
 """
 
 from __future__ import annotations
@@ -22,7 +23,9 @@ from .fragments import FragmentStoreError
 from .generation import GenerationRouter
 from .target_language import MAX_LANGUAGE_CHARACTERS, valid_target_language
 
-OPERATIONS = frozenset({"explain", "summarize", "rewrite", "translate", "extract-tasks"})
+TRANSFORM_OPERATIONS = frozenset({"explain", "summarize", "rewrite", "translate", "extract-tasks"})
+OPERATIONS = frozenset({"ask", *TRANSFORM_OPERATIONS})
+MAX_QUESTION_CHARACTERS = 4_096
 # The three that promise something other than what was handed in. A
 # translation into the language the selection is already in is legitimately
 # the same words, and an extraction that finds nothing says so in `tasks`.
@@ -38,7 +41,7 @@ ECHOED_SELECTION_REPROMPT = (
 )
 
 
-def operation_instruction(operation: object, language: object) -> str:
+def operation_instruction(operation: object, language: object, question: object = None) -> str:
     translate = (
         # `ensure_ascii=False`: a person asking for "Português" was quoting a
         # name the model then read as `"Portugu\u00eas"`, which is not the
@@ -57,6 +60,12 @@ def operation_instruction(operation: object, language: object) -> str:
     # are long enough that repeating one is obviously not a summary. Saying it
     # costs a clause and refuses nothing (OMNI-0571).
     return {
+        "ask": (
+            f"Answer {json.dumps(question, ensure_ascii=False)} using only the selection in "
+            "result; when the selection does not answer it, say so; tasks must be empty."
+            if isinstance(question, str) and question
+            else ""
+        ),
         "explain": (
             "Explain the selection clearly in result, in your own words; never return the "
             "selection unchanged, even when it is one sentence; tasks must be empty."
@@ -104,9 +113,24 @@ class OperationPrompting:
             )
         except (FragmentStoreError, UnicodeError, json.JSONDecodeError):
             return ""
-        if not isinstance(control, dict) or set(control) != {"language", "operation"}:
+        if not isinstance(control, dict):
             return ""
-        instruction = operation_instruction(control.get("operation"), control.get("language"))
+        operation = control.get("operation")
+        expected = (
+            {"language", "operation", "question"}
+            if operation == "ask"
+            else {
+                "language",
+                "operation",
+            }
+        )
+        if set(control) != expected:
+            return ""
+        instruction = operation_instruction(
+            operation,
+            control.get("language"),
+            control.get("question"),
+        )
         if not instruction:
             return ""
         return (
@@ -219,9 +243,11 @@ def translation_route(default, routes: Mapping[str, GenerationRouter], language:
 
 __all__ = [
     "ECHOED_SELECTION_REPROMPT",
+    "MAX_QUESTION_CHARACTERS",
     "OPERATIONS",
     "OperationPrompting",
     "RESTATEMENT_IS_A_NON_ANSWER",
+    "TRANSFORM_OPERATIONS",
     "operation_instruction",
     "translation_route",
     "validated_language",
