@@ -135,7 +135,7 @@ def test_public_corpus_and_report_contain_no_private_path_or_unbounded_claim():
     assert '"tpu": "not-qualified"' in report
 
 
-def test_qwen3_catalog_is_official_revision_pinned_and_gpu_default():
+def test_qwen3_catalog_is_official_revision_pinned_and_not_default():
     catalog = json.loads((ROOT / "generation-models/qwen3-8b.json").read_text())
     source = catalog["source"]
     revision = catalog["upstream"]["revision"]
@@ -152,7 +152,7 @@ def test_qwen3_catalog_is_official_revision_pinned_and_gpu_default():
         "sizeBytes": 5027783488,
     }
     assert [(item["accelerator"], item["default"]) for item in catalog["providers"]] == [
-        ("gpu", True),
+        ("gpu", False),
         ("npu", False),
     ]
 
