@@ -5,7 +5,7 @@
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
 | OMNI-0635 | open | medium | s | Restore agreement between the shipped generation catalog and its loader so the catalog loads and event artifact verification can run; the loader currently rejects the published provider lanes as incomplete. |
-| OMNI-0637 | open | medium | s | Restore mutation selector manifest completeness for the document-QA validation callable reported missing by the repository-wide campaign contract tests. |
+| OMNI-0640 | open | low | xs | Remove the duplicated snapshot-forecast explanation line from the mutation campaign contract test. |
 
 ## Blocked / Deferred
 

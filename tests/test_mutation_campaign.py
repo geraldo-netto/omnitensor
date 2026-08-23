@@ -115,7 +115,9 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
     # four `…Errorǁ__init__` selectors were the same three lines, and mutating
     # them four times measured one behaviour four times, so `runtime-contract`
     # tracks `StableError.__init__` once instead. `grounded-answer` follows
-    # `document_qa`'s split into the span index and the answer contract, and
+    # `document_qa`'s split into the span index and the answer contract, then
+    # grew the shared-operation parameter validator and language route when
+    # selected-file ask became one member of the file operation enum.
     # `scheduler` follows `_BackendQueue`'s arithmetic into `stride`, where the
     # weighting and the held-out clamp actually live now.
     #
@@ -142,7 +144,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         3,
         63,
         34,
-        18,
+        20,
         2,
         6,
         31,
@@ -151,7 +153,7 @@ def test_tracked_manifest_is_exact_complete_and_source_current():
         15,
         12,
     ]
-    assert sum(len(shard.selectors) for shard in manifest.shards) == 233
+    assert sum(len(shard.selectors) for shard in manifest.shards) == 235
     modules = {
         selector.split(".x", 1)[0] for shard in manifest.shards for selector in shard.selectors
     }
