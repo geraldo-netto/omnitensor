@@ -4,6 +4,7 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0644 | open | high | m | Replace media-similarity's hour-long silence allowance with work-driven progress during broker staging and frame/audio fingerprinting, plus resumable per-file checkpoints, so directory jobs may run for unbounded total time while a short liveness watchdog still detects stalled work. |
 
 ## Blocked / Deferred
 

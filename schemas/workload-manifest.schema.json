@@ -197,6 +197,21 @@
             }
           }
         },
+        "budgets": {
+          "description": "Optional liveness budget for one worker call. Progress resets this silence timer, so it does not bound the total job duration.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "callTimeoutSeconds"
+          ],
+          "properties": {
+            "callTimeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 3600
+            }
+          }
+        },
         "permissions": {
           "type": "array",
           "maxItems": 32,

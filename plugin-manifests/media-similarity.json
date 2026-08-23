@@ -55,6 +55,7 @@
     },
     "triggers": ["manual"],
     "artifacts": [],
+    "budgets": {"callTimeoutSeconds": 3600},
     "permissions": ["files:read-selected"]
   },
   "requirements": {

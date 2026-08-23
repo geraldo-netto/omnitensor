@@ -39,6 +39,7 @@ from omnitensor.executors.tpu import TpuExecutor
 from omnitensor.jobs import JobSubmissionService
 from omnitensor.outputcontract import MAX_TOP_K, OutputSpec, declared_output, reduce_output
 from omnitensor.plugins import supervisor_recovery
+from omnitensor.plugins.budgets import MAX_CALL_TIMEOUT_SECONDS
 from omnitensor.registry import merge_workloads, validate_document
 from omnitensor.scheduler import QueueFullError, Scheduler, _BackendQueue, _Job
 from omnitensor.service import build_executors
@@ -145,6 +146,29 @@ def test_plugin_permission_schema_matches_the_documented_wire_grammar(permission
     violations = validate_document("workload-manifest.schema.json", manifest)
     expected_valid = 3 <= len(permission) <= 160 and permission_pattern.fullmatch(permission)
     assert (violations == []) is bool(expected_valid)
+
+
+@given(
+    timeout=st.one_of(
+        st.integers(min_value=-2, max_value=int(MAX_CALL_TIMEOUT_SECONDS) + 2),
+        st.floats(
+            min_value=-2,
+            max_value=MAX_CALL_TIMEOUT_SECONDS + 2,
+            allow_nan=False,
+            allow_infinity=False,
+        ),
+        st.booleans(),
+        st.text(max_size=8),
+        st.none(),
+    )
+)
+def test_plugin_call_timeout_schema_matches_the_runtime_boundary(timeout):
+    manifest = sample_plugin_manifest()
+    manifest["plugin"]["budgets"] = {"callTimeoutSeconds": timeout}
+
+    violations = validate_document("workload-manifest.schema.json", manifest)
+    expected_valid = type(timeout) in (int, float) and 0 < timeout <= MAX_CALL_TIMEOUT_SECONDS
+    assert (violations == []) is expected_valid
 
 
 class CacheInterpreter:

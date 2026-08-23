@@ -1,5 +1,8 @@
 """Per-plugin call deadlines, derived from what a manifest declares."""
 
+import json
+from pathlib import Path
+
 from omnitensor.plugins.budgets import DEFAULT_CALL_TIMEOUT_SECONDS, MAX_CALL_TIMEOUT_SECONDS
 from omnitensor.plugins.worker_budgets import (
     FLOW_MARGIN_SECONDS,
@@ -52,6 +55,13 @@ class TestDeclaredBudget:
         for value in (0, -1, True, "60", None, MAX_CALL_TIMEOUT_SECONDS + 1):
             document = manifest(budgets={"callTimeoutSeconds": value})
             assert call_timeout_for(document) == DEFAULT_CALL_TIMEOUT_SECONDS
+
+    def test_media_similarity_may_fingerprint_one_large_video_for_an_hour_in_silence(self):
+        path = Path(__file__).parents[1] / "plugin-manifests" / "media-similarity.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+
+        assert call_timeout_for(document) == 3600.0
+        assert call_timeout_for(document) == MAX_CALL_TIMEOUT_SECONDS
 
 
 class TestFlowDeadline:
