@@ -14,7 +14,11 @@ from pathlib import Path
 
 from .supervisor_session import PluginWorkerError
 
-MAX_SELECTED_SOURCES = 32
+# Source cardinality belongs to each plugin's published input schema.  The
+# broker used to impose a second, hidden ceiling of thirty-two after schema
+# validation, so a directory workload accepting every selected media file was
+# still refused here.  ``None`` means the broker adds no policy of its own.
+MAX_SELECTED_SOURCES: int | None = None
 MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024
 _STAGING_COMPONENT = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
@@ -36,16 +40,21 @@ def stage_selected_sources(
     job_id: str,
     payload: Mapping[str, object],
     *,
-    copier: Callable[[str, Path, int, set[tuple[int, int]]], Path] | None = None,
-    maximum_sources: int = MAX_SELECTED_SOURCES,
+    copier: Callable[[str, Path, int, dict[tuple[int, int], Path]], Path] | None = None,
+    maximum_sources: int | None = MAX_SELECTED_SOURCES,
 ) -> tuple[dict, Path]:
     sources = payload.get("sources")
     if (
         not isinstance(sources, list)
-        or not 1 <= len(sources) <= maximum_sources
+        or not sources
+        or (maximum_sources is not None and len(sources) > maximum_sources)
         or not all(isinstance(source, str) and source for source in sources)
+        or len(set(sources)) != len(sources)
     ):
-        raise PluginWorkerError("selected-files-invalid", "sources must name 1-32 selected files")
+        limit = f"1-{maximum_sources}" if maximum_sources is not None else "one or more"
+        raise PluginWorkerError(
+            "selected-files-invalid", f"sources must name {limit} selected files"
+        )
     if (
         _STAGING_COMPONENT.fullmatch(plugin_id) is None
         or _STAGING_COMPONENT.fullmatch(job_id) is None
@@ -54,7 +63,7 @@ def stage_selected_sources(
     plugin_root = root / plugin_id
     plugin_root.mkdir(mode=0o700, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix=f"{job_id}-", dir=plugin_root))
-    observed: set[tuple[int, int]] = set()
+    observed: dict[tuple[int, int], Path] = {}
     copy_source = copier or copy_selected_source
     try:
         staged_sources = [
@@ -73,7 +82,7 @@ def copy_selected_source(
     source: str,
     staged: Path,
     index: int,
-    observed: set[tuple[int, int]],
+    observed: dict[tuple[int, int], Path],
     *,
     change_detector: Callable[[os.stat_result, os.stat_result, Path], bool] | None = None,
     maximum_bytes: int = MAX_SELECTED_SOURCE_BYTES,
@@ -101,11 +110,14 @@ def copy_selected_source(
                 raise PluginWorkerError(
                     "selected-file-changed", "selected source changed while it was copied"
                 )
-            if identity in observed:
-                raise PluginWorkerError(
-                    "selected-file-invalid", "the same selected file appears more than once"
-                )
-            observed.add(identity)
+            prior = observed.get(identity)
+            if prior is not None:
+                final_status = candidate.stat(follow_symlinks=False)
+                if changed(before, final_status, prior):
+                    raise PluginWorkerError(
+                        "selected-file-changed", "selected source changed while it was copied"
+                    )
+                return prior
             destination.parent.mkdir(mode=0o700)
             initial_digest = _stream_digest(reader, before.st_size)
             reader.seek(0)
@@ -134,6 +146,7 @@ def copy_selected_source(
                 raise PluginWorkerError(
                     "selected-file-changed", "selected source changed while it was copied"
                 )
+            observed[identity] = destination
     except OSError as error:
         raise PluginWorkerError(
             "selected-file-unavailable", "selected source cannot be copied"

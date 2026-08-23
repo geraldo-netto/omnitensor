@@ -1,0 +1,107 @@
+{
+  "manifestVersion": 2,
+  "id": "media-similarity",
+  "version": "1.0.0",
+  "capabilities": [
+    "directory-media-scan",
+    "explicit-file-selection",
+    "perceptual-audio-fingerprinting",
+    "perceptual-video-fingerprinting"
+  ],
+  "plugin": {
+    "entryPoint": "media-similarity",
+    "protocol": {
+      "minimum": 1,
+      "maximum": 1,
+      "capabilities": ["cancel", "execute", "health", "progress"]
+    },
+    "schemas": {
+      "configuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "relativePaths"],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+          },
+          "relativePaths": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\\\u0000]+$"
+            }
+          },
+          "minimumSimilarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.8
+          }
+        }
+      },
+      "output": {"$ref": "media-similarity-result.schema.json"}
+    },
+    "triggers": ["manual"],
+    "artifacts": [],
+    "permissions": ["files:read-selected"]
+  },
+  "requirements": {
+    "runtimeApi": 1,
+    "accelerator": "gpu",
+    "acceleratorPreference": ["gpu"],
+    "minimumDevices": 0,
+    "model": null
+  },
+  "ui": {
+    "title": "Media similarity",
+    "group": "Local workflows",
+    "description": "Scan one directory and group near-duplicate audio and video files",
+    "icon": "folder-videos-symbolic",
+    "order": 96
+  },
+  "defaults": {"enabled": false, "weight": 1},
+  "pipeline": {
+    "hostResponsibilities": [
+      "Broker every supported file selected through one directory scan",
+      "Decode every video frame incrementally and normalize it before perceptual hashing",
+      "Normalize audio into fixed-rate spectral windows",
+      "Fingerprint each file once and use compact indexes instead of exhaustive pairwise decoding",
+      "Return relative paths and content digests without exposing the selected absolute directory"
+    ]
+  },
+  "acceptance": [
+    {
+      "metric": "resolution-transcode-recall",
+      "comparator": "at-least",
+      "target": 0.95,
+      "unit": "ratio",
+      "description": "Same-content videos at different resolutions and codecs remain grouped."
+    },
+    {
+      "metric": "unrelated-media-false-positive-rate",
+      "comparator": "at-most",
+      "target": 0.02,
+      "unit": "ratio",
+      "description": "Unrelated frozen-corpus media is not grouped."
+    },
+    {
+      "metric": "malformed-media-isolation",
+      "comparator": "equal",
+      "target": 1,
+      "unit": "ratio",
+      "description": "Malformed files become per-file failures without aborting the directory scan."
+    }
+  ]
+}

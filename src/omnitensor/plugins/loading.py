@@ -839,7 +839,7 @@ def _copy_selected_source(
     source: str,
     staged: Path,
     index: int,
-    observed: set[tuple[int, int]],
+    observed: dict[tuple[int, int], Path],
 ) -> Path:
     return _staging.copy_selected_source(
         source,

@@ -195,7 +195,7 @@ def test_selected_copy_refuses_ancestor_swap_before_open(tmp_path, monkeypatch):
     monkeypatch.setattr(staging, "open_selected_source", swap_ancestor)
 
     with pytest.raises(PluginWorkerError) as changed:
-        staging.copy_selected_source(str(source), staged, 0, set())
+        staging.copy_selected_source(str(source), staged, 0, {})
 
     assert (changed.value.code, changed.value.detail) == (
         "selected-file-changed",
@@ -219,7 +219,7 @@ def test_selected_copy_refuses_same_size_content_change_with_restored_mtime(tmp_
     monkeypatch.setattr(staging.shutil, "copyfileobj", mutate_after_copy)
 
     with pytest.raises(PluginWorkerError) as changed:
-        staging.copy_selected_source(str(source), staged, 0, set())
+        staging.copy_selected_source(str(source), staged, 0, {})
 
     assert (changed.value.code, changed.value.detail) == (
         "selected-file-changed",
@@ -241,7 +241,7 @@ def test_selected_copy_bounds_concurrent_growth(tmp_path, monkeypatch):
     monkeypatch.setattr(staging.shutil, "copyfileobj", grow_before_copy)
 
     with pytest.raises(PluginWorkerError) as changed:
-        staging.copy_selected_source(str(source), staged, 0, set())
+        staging.copy_selected_source(str(source), staged, 0, {})
 
     assert (changed.value.code, changed.value.detail) == (
         "selected-file-changed",

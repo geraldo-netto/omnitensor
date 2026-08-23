@@ -1,4 +1,4 @@
-"""The five workloads the desktop client drives, checked against their manifests.
+"""The workloads the desktop client drives, checked against their manifests.
 
 `../xpuwlm` builds a payload per workload from a spec of its own: which fields
 exist, how many files are allowed, which suffixes a chooser offers. Those specs
@@ -51,6 +51,14 @@ CLIENT_PAYLOADS = {
     },
     "event-extraction": {"sources": ["/home/person/omnitensor-inputs/meeting.md"]},
     "media-transcription": {"sources": ["/home/person/omnitensor-inputs/clip.wav"]},
+    "media-similarity": {
+        "sources": [
+            "/home/person/omnitensor-inputs/library/a.mp4",
+            "/home/person/omnitensor-inputs/library/b.mkv",
+        ],
+        "relativePaths": ["a.mp4", "b.mkv"],
+        "minimumSimilarity": 0.8,
+    },
 }
 
 # Workloads this repository ships that the client does not drive yet, with the

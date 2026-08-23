@@ -483,6 +483,7 @@ WORKLOAD_GUIDES = {
     "event-extraction": "docs/event-extraction.md",
     "file-organizer": "docs/file-organizer.md",
     "media-transcription": "docs/media-transcription.md",
+    "media-similarity": "docs/media-similarity.md",
     "selected-text-tools": "docs/selected-text-tools.md",
 }
 

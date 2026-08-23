@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/omnitensor/media-similarity-result.schema.json",
+  "title": "Directory-wide perceptual media similarity groups",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "scannedFileCount",
+    "fingerprintedFileCount",
+    "similarFileCount",
+    "unmatchedFileCount",
+    "minimumSimilarity",
+    "groups",
+    "failures"
+  ],
+  "properties": {
+    "version": {"const": 1},
+    "scannedFileCount": {"type": "integer", "minimum": 1},
+    "fingerprintedFileCount": {"type": "integer", "minimum": 0},
+    "similarFileCount": {"type": "integer", "minimum": 0},
+    "unmatchedFileCount": {"type": "integer", "minimum": 0},
+    "minimumSimilarity": {"type": "number", "minimum": 0, "maximum": 1},
+    "groups": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/group"}
+    },
+    "failures": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/failure"}
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\\\u0000]+$"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "score", "basis", "files"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^group-[a-f0-9]{12}$"
+        },
+        "score": {"$ref": "#/$defs/score"},
+        "basis": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["exact", "visual", "audio"]}
+        },
+        "files": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/file"}
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "fileName",
+        "sha256",
+        "modality",
+        "durationMs",
+        "score",
+        "visualScore",
+        "audioScore",
+        "referenceCoverage",
+        "fileCoverage",
+        "offsetMs",
+        "exact"
+      ],
+      "properties": {
+        "relativePath": {"$ref": "#/$defs/relativePath"},
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "sha256": {"$ref": "#/$defs/digest"},
+        "modality": {"enum": ["audio", "video", "audio-video"]},
+        "durationMs": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "score": {"$ref": "#/$defs/score"},
+        "visualScore": {
+          "anyOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]
+        },
+        "audioScore": {
+          "anyOf": [{"$ref": "#/$defs/score"}, {"type": "null"}]
+        },
+        "referenceCoverage": {"$ref": "#/$defs/score"},
+        "fileCoverage": {"$ref": "#/$defs/score"},
+        "offsetMs": {"type": "integer"},
+        "exact": {"type": "boolean"}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "code"],
+      "properties": {
+        "relativePath": {"$ref": "#/$defs/relativePath"},
+        "code": {
+          "enum": [
+            "audio-invalid",
+            "media-invalid",
+            "media-unavailable",
+            "media-unsupported",
+            "video-invalid"
+          ]
+        }
+      }
+    }
+  }
+}

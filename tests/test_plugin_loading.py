@@ -1376,7 +1376,7 @@ def test_selected_source_broker_refuses_aliases_duplicates_and_missing_root(tmp_
 
     for sources, code in (
         ([str(alias)], "selected-file-invalid"),
-        ([str(source), str(source)], "selected-file-invalid"),
+        ([str(source), str(source)], "selected-files-invalid"),
     ):
         with pytest.raises(PluginWorkerError) as error:
             asyncio.run(
@@ -1971,14 +1971,14 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
         loading_module._prepare_selected_files_root(Path("relative"))
     assert str(relative.value) == "selected_files_root must be absolute"
 
-    for sources in (None, (), [], [""], [1], ["x"] * 33):
+    for sources in (None, (), [], [""], [1]):
         with pytest.raises(PluginWorkerError) as invalid:
             loading_module._stage_selected_sources(
                 prepared, "external-example", "job-1", {"sources": sources}
             )
         assert (invalid.value.code, invalid.value.detail) == (
             "selected-files-invalid",
-            "sources must name 1-32 selected files",
+            "sources must name one or more selected files",
         )
 
     source = tmp_path / "event.TXT"
@@ -2020,11 +2020,11 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
     rewritten, staged = loading_module._stage_selected_sources(
         prepared,
         "external-example",
-        "job-32",
-        {"sources": [f"/source-{index}" for index in range(32)]},
+        "job-all",
+        {"sources": [f"/source-{index}" for index in range(96)]},
     )
-    assert len(rewritten["sources"]) == 32
-    assert [call[2] for call in copied] == list(range(32))
+    assert len(rewritten["sources"]) == 96
+    assert [call[2] for call in copied] == list(range(96))
     assert all(call[1] == staged for call in copied)
     assert all(call[3] is copied[0][3] for call in copied)
     loading_module.shutil.rmtree(staged)
@@ -2047,7 +2047,7 @@ def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
     second = tmp_path / "second.bad-suffix-long"
     first.write_text("first", encoding="utf-8")
     second.write_text("second", encoding="utf-8")
-    observed = set()
+    observed = {}
     copy_calls = []
     real_copy = loading_module.shutil.copyfileobj
 
@@ -2065,12 +2065,11 @@ def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
     assert copy_calls == [1024 * 1024, 1024 * 1024]
     assert len(observed) == 2
 
-    with pytest.raises(PluginWorkerError) as duplicate:
-        loading_module._copy_selected_source(first, staged, 2, observed)
-    assert (duplicate.value.code, duplicate.value.detail) == (
-        "selected-file-invalid",
-        "the same selected file appears more than once",
-    )
+    hard_link = tmp_path / "same-content-different-name.txt"
+    hard_link.hardlink_to(first)
+    reused = loading_module._copy_selected_source(hard_link, staged, 2, observed)
+    assert reused == first_copy
+    assert copy_calls == [1024 * 1024, 1024 * 1024]
 
 
 def test_selected_file_broker_uses_safe_fallback_for_unrepresentable_basename(tmp_path):
@@ -2194,7 +2193,7 @@ def test_selected_file_copy_contains_race_and_copy_errors(tmp_path, monkeypatch)
 
     monkeypatch.setattr(loading_module, "_selected_source_changed", lambda *_args: True)
     with pytest.raises(PluginWorkerError) as changed:
-        loading_module._copy_selected_source(source, staged, 0, set())
+        loading_module._copy_selected_source(source, staged, 0, {})
     assert (changed.value.code, changed.value.detail) == (
         "selected-file-changed",
         "selected source changed while it was copied",
@@ -2207,7 +2206,7 @@ def test_selected_file_copy_contains_race_and_copy_errors(tmp_path, monkeypatch)
         lambda *_args, **_options: (_ for _ in ()).throw(OSError("disk")),
     )
     with pytest.raises(PluginWorkerError) as unavailable:
-        loading_module._copy_selected_source(source, staged, 1, set())
+        loading_module._copy_selected_source(source, staged, 1, {})
     assert (unavailable.value.code, unavailable.value.detail) == (
         "selected-file-unavailable",
         "selected source cannot be copied",

@@ -55,6 +55,11 @@ Transcribing one selected audio, image, video, document, or presentation file?
 formats, the pinned decoding boundary, the Vulkan Whisper build, and
 `omnitensor-install-media-artifacts`.
 
+Finding duplicate and near-duplicate media across one directory? [Media
+similarity](docs/media-similarity.md) documents its all-frame normalization,
+one-pass fingerprints, candidate index, relative-path result contract, and
+read-only boundary.
+
 Training a host-specific model? [Local model training](docs/local-training.md)
 documents bounded numeric recording, reproducible portable ONNX fitting,
 GPU/NPU compilation, immutable installation, restricted model bindings, and

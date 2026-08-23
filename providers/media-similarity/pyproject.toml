@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omnitensor-media-similarity"
+version = "0.1.0"
+description = "Directory-scale perceptual media similarity for OmniTensor"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "av>=14,<17",
+  "numpy>=1.24",
+  "omnitensor>=0.1,<1",
+  "Pillow>=11,<13",
+]
+
+[project.entry-points."omnitensor.workloads"]
+media-similarity = "omnitensor_media_similarity:create"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnitensor_media_similarity"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../plugin-manifests/media-similarity.json" = "omnitensor_media_similarity/omnitensor-plugin.json"
+
+[tool.coverage.report]
+fail_under = 80
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../../src"]
+asyncio_mode = "auto"
+
+[tool.mutmut]
+source_paths = ["src/omnitensor_media_similarity/"]
+pytest_add_cli_args_test_selection = ["tests/"]

@@ -368,6 +368,7 @@ DECLARED_ARTIFACTS = {
         "ppocrv6-medium-det",
         "ppocrv6-medium-rec",
     ],
+    "media-similarity": [],
     "selected-text-tools": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m", "dictalm2-hebrew-q4-k-m"],
 }
 
@@ -432,7 +433,11 @@ def test_provider_distribution_manifest_and_entry_point_identity_agree(plugin_id
                 }
             ],
         )
-    assert "accelerator:gpu" in manifest["plugin"]["permissions"]
+    permissions = manifest["plugin"]["permissions"]
+    if manifest["requirements"]["minimumDevices"] > 0:
+        assert "accelerator:gpu" in permissions
+    else:
+        assert not any(permission.startswith("accelerator:") for permission in permissions)
     assert validate_document("workload-manifest.schema.json", manifest) == []
     assert (
         force_include[f"../../plugin-manifests/{plugin_id}.json"]
@@ -604,7 +609,11 @@ def test_a_distribution_that_composes_rather_than_re_exports_states_its_own_chec
     """
     composed = composed_distributions()
 
-    assert set(composed) == {"omnitensor_ask_selected_files", "omnitensor_media_transcription"}
+    assert set(composed) == {
+        "omnitensor_ask_selected_files",
+        "omnitensor_media_similarity",
+        "omnitensor_media_transcription",
+    }
     for package, provider in composed.items():
         suites = sorted(path.name for path in (provider / "tests").glob("test_*.py"))
         assert suites, f"{package} states no check of its own"
