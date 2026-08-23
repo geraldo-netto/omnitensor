@@ -50,7 +50,7 @@ Transcribing one selected audio, image, video, document, or presentation file?
 formats, the pinned decoding boundary, the Vulkan Whisper build, and
 `omnitensor-install-media-artifacts`.
 
-Finding duplicate and near-duplicate media across one directory? [Media
+Finding duplicate and near-duplicate media across a folder or selected files? [Media
 similarity](docs/media-similarity.md) documents its all-frame normalization,
 one-pass fingerprints, candidate index, relative-path result contract, and
 read-only boundary.

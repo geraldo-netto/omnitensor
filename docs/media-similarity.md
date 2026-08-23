@@ -1,12 +1,13 @@
 # Media similarity
 
-`media-similarity` scans every supported audio and video file selected from one
-directory by the client. It groups exact duplicates and near-duplicate encodes;
-it does not claim that unrelated recordings about the same subject are
-semantically equivalent.
+`media-similarity` scans either every supported audio and video file below one
+folder or a set of media files selected directly by the client. It groups exact
+duplicates and near-duplicate encodes; it does not claim that unrelated
+recordings about the same subject are semantically equivalent.
 
-The client walks the chosen directory without following symbolic links and
-submits one ordered `sources` list plus the matching relative paths. The
+For a folder, the client walks it without following symbolic links. For direct
+selection, it keeps every chosen file as a separate source. Both routes submit
+one ordered `sources` list plus matching, unique relative display paths. The
 selected-file broker copies those files into the isolated worker in one job.
 No absolute source directory enters the result. The runtime's published
 `selectedFiles.maxBytes` remains the per-file staging boundary; the workload

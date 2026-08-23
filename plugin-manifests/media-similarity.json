@@ -67,14 +67,14 @@
   "ui": {
     "title": "Media similarity",
     "group": "Local workflows",
-    "description": "Scan one directory and group near-duplicate audio and video files",
+    "description": "Scan one folder or selected media files and group near-duplicates",
     "icon": "folder-videos-symbolic",
     "order": 96
   },
   "defaults": {"enabled": false, "weight": 1},
   "pipeline": {
     "hostResponsibilities": [
-      "Broker every supported file selected through one directory scan",
+      "Broker every supported file selected directly or through one folder scan",
       "Decode every video frame incrementally and normalize it before perceptual hashing",
       "Normalize audio into fixed-rate spectral windows",
       "Fingerprint each file once and use compact indexes instead of exhaustive pairwise decoding",
