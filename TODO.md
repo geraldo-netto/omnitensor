@@ -5,7 +5,6 @@
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
 | OMNI-0635 | open | medium | s | Restore agreement between the shipped generation catalog and its loader so the catalog loads and event artifact verification can run; the loader currently rejects the published provider lanes as incomplete. |
-| OMNI-0640 | open | low | xs | Remove the duplicated snapshot-forecast explanation line from the mutation campaign contract test. |
 
 ## Blocked / Deferred
 
@@ -76,6 +75,7 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
+| OMNI-0640 | rejected | low | xs | False positive: overlapping scan ranges printed the snapshot-forecast explanation line twice; the source and history contain it once. |
 | OMNI-0509 | wont_fix | medium | s | Do not gate jobs on OCR qualification: OMNI-0609 defines OCR as best-effort, so a gate would contradict lane semantics. Evidence remains in `scripts/measure-ocr-enrichment.py`, VulkanOCR corpus results, dispatcher tests, and OMNI-0624 sandbox verification. |
 | OMNI-0508 | wont_fix | medium | s | Do not add a standalone OCR workload manifest. OCR is an enrichment lane inside `media-transcription` and `ask-selected-files`; another manifest would duplicate their artifacts, contracts, and permissions. |
 | OMNI-0603 | rejected | low | xs | **The cleared wake is subsumed by the tick that follows.** `publish_loop.py:192-210`: a `request_publish` landing in `await_next`'s finally-gather window is indeed cleared without being consumed — but every return from `await_next` is followed by a full tick (`run:141-157`) that re-observes the mutated state and publishes it, and `request_publish` is documented to be called after the state change. No interleaving loses a change or delays it beyond the tick already underway; clearing there is what folds a burst of wakes into one rebuild. |
