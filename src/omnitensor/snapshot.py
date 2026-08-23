@@ -17,6 +17,7 @@ from omnitensor.plugins.telemetry import PLUGIN_TELEMETRY_CONTRACT_VERSION
 from .atomicio import remove_durable, write_json_atomic
 from .discovery import Device
 from .registry import validate_document
+from .selected_files import MAX_SELECTED_SOURCE_BYTES
 from .tensorref import DEFAULT_MAX_TENSOR_BYTES
 
 SNAPSHOT_VERSION = 1
@@ -53,13 +54,6 @@ def input_roots_document(
     read no referenced file at all.
     """
     return _roots_document(roots, max_bytes, "input roots", "one no consumer can use")
-
-
-# What a selected source may weigh, which is the same number the workloads
-# that read one already enforce. A bound on what a person selected rather than
-# on what they are told back: a file too large to read is a refusal that has to
-# arrive before a job exists, not after one has run.
-MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024
 
 
 def selected_files_document(

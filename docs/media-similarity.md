@@ -10,8 +10,9 @@ selection, it keeps every chosen file as a separate source. Both routes submit
 one ordered `sources` list plus matching, unique relative display paths. The
 selected-file broker copies those files into the isolated worker in one job.
 No absolute source directory enters the result. The runtime's published
-`selectedFiles.maxBytes` remains the per-file staging boundary; the workload
-adds no second file-count ceiling.
+`selectedFiles.maxBytes` remains the per-file staging boundary. The runtime
+publishes and enforces a 1 GiB ceiling so ordinary large video files can be
+scanned; the workload adds no second file-count ceiling.
 
 Supported suffixes are WAV, FLAC, MP3, OGG/Vorbis, Opus, M4A/AAC, MP4, WebM,
 MKV, MOV, AVI, and M4V. A malformed supported file becomes one result failure;

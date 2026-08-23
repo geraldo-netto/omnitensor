@@ -28,6 +28,7 @@ METRICS = {"queueDepth": 0, "runningProfiles": 0}
 
 def test_a_runtime_that_reads_no_selected_file_says_exactly_that():
     """Empty is the honest answer for a service nobody configured roots on."""
+    assert MAX_SELECTED_SOURCE_BYTES == 1024 * 1024 * 1024
     assert selected_files_document(()) == {"roots": [], "maxBytes": MAX_SELECTED_SOURCE_BYTES}
 
 

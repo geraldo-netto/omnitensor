@@ -12,6 +12,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from ..selected_files import MAX_SELECTED_SOURCE_BYTES
 from .supervisor_session import PluginWorkerError
 
 # Source cardinality belongs to each plugin's published input schema.  The
@@ -19,7 +20,6 @@ from .supervisor_session import PluginWorkerError
 # validation, so a directory workload accepting every selected media file was
 # still refused here.  ``None`` means the broker adds no policy of its own.
 MAX_SELECTED_SOURCES: int | None = None
-MAX_SELECTED_SOURCE_BYTES = 128 * 1024 * 1024
 _STAGING_COMPONENT = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 

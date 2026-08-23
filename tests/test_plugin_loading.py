@@ -5,6 +5,7 @@ import gc
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2183,6 +2184,22 @@ def test_selected_file_helpers_reject_exact_race_and_file_boundaries(tmp_path, m
     assert loading_module._selected_source_changed(regular, os.stat_result(changed), destination)
     destination.write_text("different", encoding="utf-8")
     assert loading_module._selected_source_changed(regular, regular, destination)
+
+
+@given(size=st.integers(min_value=1, max_value=loading_module.MAX_SELECTED_SOURCE_BYTES))
+def test_selected_file_broker_accepts_every_size_through_the_published_ceiling(size):
+    status = os.stat_result((stat.S_IFREG | 0o600, 1, 1, 1, 1, 1, size, 1, 1, 1))
+
+    loading_module._validate_selected_source_stat(status)
+
+
+def test_selected_file_broker_accepts_reported_large_video_size(tmp_path):
+    source = tmp_path / "video.mp4"
+    source.write_text("event", encoding="utf-8")
+    status = list(source.stat())
+    status[6] = 1_035_844_658
+
+    loading_module._validate_selected_source_stat(os.stat_result(status))
 
 
 def test_selected_file_copy_contains_race_and_copy_errors(tmp_path, monkeypatch):
