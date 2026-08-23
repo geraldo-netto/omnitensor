@@ -3,9 +3,9 @@
 `AGENTS.md` states the schema of `TODO.md` exactly — three tables, one column
 list, which statuses belong in which table, stable `OMNI-0001` ids, no
 duplicates — and no test read the file. Six rows had drifted into the wrong
-table by 2026-08-20: `blocked` findings sitting in `Findings`, where they read
-as work somebody could pick up, which is precisely what moving them to
-`Blocked` exists to prevent.
+table by 2026-08-20: `blocked` findings sitting in `Open`, where they read as
+work somebody could pick up, which is precisely what moving them to
+`Blocked / Deferred` exists to prevent.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ AGENTS = ROOT / "AGENTS.md"
 
 SCHEMA = "| id | status | severity | effort | description |"
 STATUSES = {
-    "Findings": {"open", "in_progress", "done"},
-    "Blocked": {"blocked"},
+    "Open": {"open", "in_progress"},
+    "Blocked / Deferred": {"blocked", "deferred"},
     "Rejected / Won't fix": {"rejected", "wont_fix"},
 }
 SEVERITIES = {"critical", "high", "medium", "low"}
@@ -75,7 +75,7 @@ def test_every_row_has_the_five_cells_and_nothing_else():
 
 
 def test_a_status_belongs_to_the_table_it_is_written_in():
-    """A `blocked` finding in `Findings` reads as work somebody could pick up."""
+    """A `blocked` finding in `Open` reads as work somebody could pick up."""
     misplaced = [
         f"{heading}:{row[0]}:{row[1]}" for heading, row in rows() if row[1] not in STATUSES[heading]
     ]
