@@ -48,6 +48,19 @@ class MediaFingerprintError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class MediaQuality:
+    """Comparable source properties read from container stream metadata."""
+
+    width: int | None = None
+    height: int | None = None
+    video_bitrate: int | None = None
+    audio_bitrate: int | None = None
+    audio_sample_rate: int | None = None
+    audio_channels: int | None = None
+    lossless_audio: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MediaFingerprint:
     relative_path: str
     file_name: str
@@ -56,6 +69,7 @@ class MediaFingerprint:
     duration_ms: int | None
     visual: tuple[int, ...]
     audio: tuple[int, ...]
+    quality: MediaQuality = MediaQuality()
 
 
 def fingerprint_file(source: Path, relative_path: str, cancellation) -> MediaFingerprint:
@@ -68,6 +82,7 @@ def fingerprint_file(source: Path, relative_path: str, cancellation) -> MediaFin
             has_video = bool(container.streams.video)
             has_audio = bool(container.streams.audio)
             duration_ms = _container_duration_ms(container)
+            quality = _media_quality(container)
     except Exception as error:
         raise MediaFingerprintError(
             "media-invalid", "selected media could not be opened"
@@ -95,7 +110,31 @@ def fingerprint_file(source: Path, relative_path: str, cancellation) -> MediaFin
         observed_duration,
         visual,
         audio,
+        quality,
     )
+
+
+def _media_quality(container) -> MediaQuality:
+    video = next(iter(container.streams.video), None)
+    audio = next(iter(container.streams.audio), None)
+    audio_codec = "" if audio is None else str(audio.codec_context.name or "").lower()
+    return MediaQuality(
+        width=_positive_int(getattr(video, "width", None)),
+        height=_positive_int(getattr(video, "height", None)),
+        video_bitrate=_positive_int(getattr(video, "bit_rate", None)),
+        audio_bitrate=_positive_int(getattr(audio, "bit_rate", None)),
+        audio_sample_rate=_positive_int(getattr(audio, "sample_rate", None)),
+        audio_channels=_positive_int(getattr(audio, "channels", None)),
+        lossless_audio=(
+            None
+            if audio is None
+            else audio_codec in {"alac", "flac", "wavpack"} or audio_codec.startswith("pcm_")
+        ),
+    )
+
+
+def _positive_int(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def perceptual_hash(gray: np.ndarray) -> int:
@@ -281,6 +320,7 @@ def _ending_ms(last_timestamp: int | None, step: int) -> int | None:
 __all__ = [
     "MediaFingerprint",
     "MediaFingerprintError",
+    "MediaQuality",
     "fingerprint_file",
     "perceptual_hash",
     "spectral_hash",

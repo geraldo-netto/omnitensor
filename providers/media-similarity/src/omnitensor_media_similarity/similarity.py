@@ -231,6 +231,7 @@ def _render_group(
     by_id: dict[str, MediaFingerprint],
     known_scores: dict[tuple[str, str], PairScore],
 ) -> dict:
+    members = tuple(sorted(members, key=lambda identifier: _preference_key(by_id[identifier])))
     representative = members[0]
     reference = by_id[representative]
     rendered = [
@@ -266,6 +267,27 @@ def _render_group(
         "basis": sorted(bases),
         "files": rendered,
     }
+
+
+def _preference_key(item: MediaFingerprint) -> tuple:
+    """Put best preservation candidate first without affecting matching."""
+    quality = item.quality
+    width = quality.width or 0
+    height = quality.height or 0
+    pixels = width * height
+    return (
+        -int(bool(item.visual)),
+        -pixels,
+        -min(width, height),
+        -(quality.video_bitrate or 0),
+        -int(quality.lossless_audio is True),
+        -(quality.audio_sample_rate or 0),
+        -(quality.audio_channels or 0),
+        -(quality.audio_bitrate or 0),
+        -(item.duration_ms or 0),
+        item.relative_path.casefold(),
+        item.relative_path,
+    )
 
 
 def _render_file(item: MediaFingerprint, score: PairScore) -> dict:

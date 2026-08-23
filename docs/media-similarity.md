@@ -34,7 +34,12 @@ Each file is decoded once per present stream, never once per candidate pair.
    pair expansion. Temporal comparison estimates an offset and reports content
    similarity plus coverage in both directions.
 5. Connected matches become groups. Every group and every member is returned;
-   no top-N display ceiling hides work.
+   no top-N display ceiling hides work. The first member is the preferred
+   preservation source. Video groups favor higher pixel resolution before
+   available stream bitrate; audio groups favor lossless streams before sample
+   rate, channels, and bitrate. Duration and path provide deterministic later
+   tie-breakers. These properties rank a completed group and never affect
+   similarity or membership.
 
 The fixed score threshold is published in each result. Component visual and
 audio scores, coverage, offset, digest, and exact-copy status remain visible so

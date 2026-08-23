@@ -15,6 +15,7 @@ from omnitensor_media_similarity import similarity as similarity_module
 from omnitensor_media_similarity.fingerprints import (
     MediaFingerprint,
     MediaFingerprintError,
+    MediaQuality,
     fingerprint_file,
     perceptual_hash,
     spectral_hash,
@@ -50,9 +51,19 @@ def media(
     *,
     visual: tuple[int, ...] = (),
     audio: tuple[int, ...] = (),
+    quality: MediaQuality | None = None,
 ) -> MediaFingerprint:
     modality = "audio-video" if visual and audio else "video" if visual else "audio"
-    return MediaFingerprint(name, Path(name).name, digest, modality, 2_000, visual, audio)
+    return MediaFingerprint(
+        name,
+        Path(name).name,
+        digest,
+        modality,
+        2_000,
+        visual,
+        audio,
+        quality or MediaQuality(),
+    )
 
 
 def test_perceptual_hash_ignores_source_resolution():
@@ -110,6 +121,66 @@ def test_fingerprint_time_rotation_and_bucket_helpers_have_exact_boundaries():
     )
     assert fingerprint_module._container_duration_ms(SimpleNamespace(duration=None)) is None
     assert fingerprint_module._container_duration_ms(SimpleNamespace(duration=1_250_000)) == 1_250
+
+
+def test_media_quality_reads_every_available_stream_property():
+    video = SimpleNamespace(width=1920, height=1080, bit_rate=4_000_000)
+    audio = SimpleNamespace(
+        bit_rate=800_000,
+        sample_rate=96_000,
+        channels=6,
+        codec_context=SimpleNamespace(name="flac"),
+    )
+    container = SimpleNamespace(streams=SimpleNamespace(video=(video,), audio=(audio,)))
+
+    assert fingerprint_module._media_quality(container) == MediaQuality(
+        width=1920,
+        height=1080,
+        video_bitrate=4_000_000,
+        audio_bitrate=800_000,
+        audio_sample_rate=96_000,
+        audio_channels=6,
+        lossless_audio=True,
+    )
+
+
+def test_media_quality_handles_absent_and_invalid_metadata():
+    empty = SimpleNamespace(streams=SimpleNamespace(video=(), audio=()))
+    invalid_video = SimpleNamespace(width=0, height=-1, bit_rate=True)
+    invalid_audio = SimpleNamespace(
+        bit_rate=0,
+        sample_rate=-1,
+        channels=False,
+        codec_context=SimpleNamespace(name=None),
+    )
+    invalid = SimpleNamespace(
+        streams=SimpleNamespace(video=(invalid_video,), audio=(invalid_audio,))
+    )
+
+    assert fingerprint_module._media_quality(empty) == MediaQuality()
+    assert fingerprint_module._media_quality(invalid) == MediaQuality(lossless_audio=False)
+
+
+@pytest.mark.parametrize("codec", ["alac", "flac", "wavpack", "pcm_s24le"])
+def test_media_quality_recognizes_supported_lossless_audio_codecs(codec):
+    audio = SimpleNamespace(
+        bit_rate=None,
+        sample_rate=None,
+        channels=None,
+        codec_context=SimpleNamespace(name=codec),
+    )
+    container = SimpleNamespace(streams=SimpleNamespace(video=(), audio=(audio,)))
+
+    assert fingerprint_module._media_quality(container).lossless_audio is True
+
+
+@pytest.mark.parametrize("value", [None, True, False, 0, -1, 1.5, "1"])
+def test_positive_int_rejects_non_positive_or_non_integer_metadata(value):
+    assert fingerprint_module._positive_int(value) is None
+
+
+def test_positive_int_preserves_a_positive_integer():
+    assert fingerprint_module._positive_int(1) == 1
 
 
 def test_audio_window_consumption_keeps_only_the_unconsumed_tail():
@@ -276,6 +347,142 @@ def test_exact_and_perceptual_matches_are_grouped_without_unrelated_file():
     ]
     assert compare_media(first, exact).exact is True
     assert compare_media(first, transcoded).score > 0.9
+
+
+def test_group_prefers_resolution_then_available_encode_quality():
+    fingerprints = (
+        media(
+            "low.mp4",
+            "a" * 64,
+            visual=(0x1234,) * 4,
+            quality=MediaQuality(width=640, height=360, video_bitrate=8_000_000),
+        ),
+        media(
+            "high-low-bitrate.mp4",
+            "b" * 64,
+            visual=(0x1234,) * 4,
+            quality=MediaQuality(width=1920, height=1080, video_bitrate=2_000_000),
+        ),
+        media(
+            "high-best-bitrate.mp4",
+            "c" * 64,
+            visual=(0x1234,) * 4,
+            quality=MediaQuality(width=1920, height=1080, video_bitrate=4_000_000),
+        ),
+    )
+
+    files = similarity_groups(fingerprints, 0.8)[0]["files"]
+
+    assert [item["relativePath"] for item in files] == [
+        "high-best-bitrate.mp4",
+        "high-low-bitrate.mp4",
+        "low.mp4",
+    ]
+
+
+def test_preference_key_records_every_tie_breaker_in_order():
+    item = media(
+        "Folder/Preferred.MP4",
+        "d" * 64,
+        visual=(0x1234,),
+        audio=(0x123,),
+        quality=MediaQuality(
+            width=1920,
+            height=1080,
+            video_bitrate=4_000_000,
+            audio_bitrate=800_000,
+            audio_sample_rate=96_000,
+            audio_channels=6,
+            lossless_audio=True,
+        ),
+    )
+
+    assert similarity_module._preference_key(item) == (
+        -1,
+        -2_073_600,
+        -1080,
+        -4_000_000,
+        -1,
+        -96_000,
+        -6,
+        -800_000,
+        -2_000,
+        "folder/preferred.mp4",
+        "Folder/Preferred.MP4",
+    )
+
+
+def test_preference_key_has_stable_empty_metadata_fallbacks():
+    item = media("audio.wav", "e" * 64, audio=(0x123,))
+
+    assert similarity_module._preference_key(item) == (
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        -2_000,
+        "audio.wav",
+        "audio.wav",
+    )
+
+
+def test_audio_group_prefers_lossless_then_sample_rate_and_bitrate():
+    fingerprints = (
+        media(
+            "lossy.mp3",
+            "a" * 64,
+            audio=(0x123,) * 2,
+            quality=MediaQuality(
+                audio_bitrate=320_000,
+                audio_sample_rate=48_000,
+                audio_channels=2,
+                lossless_audio=False,
+            ),
+        ),
+        media(
+            "lossless.flac",
+            "b" * 64,
+            audio=(0x123,) * 2,
+            quality=MediaQuality(
+                audio_bitrate=600_000,
+                audio_sample_rate=44_100,
+                audio_channels=2,
+                lossless_audio=True,
+            ),
+        ),
+    )
+
+    files = similarity_groups(fingerprints, 0.8)[0]["files"]
+
+    assert [item["relativePath"] for item in files] == ["lossless.flac", "lossy.mp3"]
+
+
+@given(
+    width=st.integers(min_value=1, max_value=8_192),
+    height=st.integers(min_value=1, max_value=8_192),
+    scale=st.integers(min_value=2, max_value=8),
+)
+def test_group_resolution_preference_holds_for_every_larger_variant(width, height, scale):
+    smaller = media(
+        "a-small.mp4",
+        "a" * 64,
+        visual=(0x1234,) * 2,
+        quality=MediaQuality(width=width, height=height),
+    )
+    larger = media(
+        "z-large.mp4",
+        "b" * 64,
+        visual=(0x1234,) * 2,
+        quality=MediaQuality(width=width * scale, height=height * scale),
+    )
+
+    assert similarity_groups((smaller, larger), 0.8)[0]["files"][0]["relativePath"] == (
+        "z-large.mp4"
+    )
 
 
 def test_similarity_math_and_band_boundaries_are_exact():
@@ -648,6 +855,12 @@ def test_real_video_fingerprint_survives_resolution_change(tmp_path):
     assert left.duration_ms == right.duration_ms == 2_000
     assert left.modality == right.modality == "video"
     assert left.sha256 == hashlib.sha256(first.read_bytes()).hexdigest()
+    assert left.quality.width == 64
+    assert left.quality.height == 48
+    assert right.quality.width == 192
+    assert right.quality.height == 144
+    assert left.quality.video_bitrate
+    assert right.quality.video_bitrate
     assert compare_media(left, right).visual_score > 0.9
 
 
