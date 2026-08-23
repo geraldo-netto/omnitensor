@@ -62,7 +62,7 @@
       }
     },
     "documents": {
-      "description": "The translated documents, present exactly when operation is translate; the shape document-translation-result states, folded in here.",
+      "description": "The translated documents, present exactly when operation is translate.",
       "type": "array",
       "minItems": 1,
       "items": {

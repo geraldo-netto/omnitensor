@@ -1,9 +1,8 @@
 """What a person may name as a target language, stated once.
 
-Two workloads translate — `selected-text-tools` into a language somebody
-types, `document-translation` into one it requires — and each stated the rule
-twice: in its manifest's input contract and again in its own module. Four
-copies of one sentence.
+Two workloads translate — `selected-text-tools` over inline text and
+`ask-selected-files` over chosen documents — and both use this one rule in
+their manifest and runtime validation.
 
 The rule itself used to be `^[A-Za-z][A-Za-z -]*$`, which refuses the name
 most people would write for their own language: "Português" is a refusal, and

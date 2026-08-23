@@ -45,11 +45,6 @@ contract, its private fragment boundary, and its mandatory provider dependencies
 Organizing explicitly selected files? [File organizer](docs/file-organizer.md)
 documents its evidence-bound review plan and strict no-action boundary.
 
-Translating documents you selected? [Document translation](docs/document-translation.md)
-documents the review-only, never-overwritten translation contract, the
-language-to-measured-model routing, and what "unmeasured" means on today's
-receipt.
-
 Transcribing one selected audio, image, video, document, or presentation file?
 [Media transcription](docs/media-transcription.md) documents the accepted
 formats, the pinned decoding boundary, the Vulkan Whisper build, and

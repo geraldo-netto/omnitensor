@@ -45,10 +45,6 @@ CLIENT_PAYLOADS = {
             "/home/person/omnitensor-inputs/notes.md",
         ],
     },
-    "document-translation": {
-        "sources": ["/home/person/omnitensor-inputs/contract.txt"],
-        "targetLanguage": "Português",
-    },
     "event-extraction": {"sources": ["/home/person/omnitensor-inputs/meeting.md"]},
     "media-transcription": {"sources": ["/home/person/omnitensor-inputs/clip.wav"]},
     "media-similarity": {
@@ -64,8 +60,7 @@ CLIENT_PAYLOADS = {
 # Workloads this repository ships that the client does not drive yet, with the
 # reason. Named rather than omitted: the check below is in both directions, so
 # a shipped workload is either transcribed above or listed here on purpose.
-# Empty is the state to be in, and `document-translation` was the last entry:
-# it left when the client shipped a spec, a window and a chooser for it.
+# Empty is the state to be in: every shipped workload has a client surface.
 NOT_CLIENT_DRIVEN: dict[str, str] = {}
 
 # The bounds the client refuses on before it submits anything, so a person is
@@ -140,8 +135,7 @@ def test_the_client_workloads_and_the_shipped_manifests_agree_in_both_directions
     A window for a workload this repository no longer ships is a button that
     fails on click — that is the direction this had. A workload this
     repository ships that the client never drives is the opposite: a manifest
-    published to a client that cannot reach it, and nothing said so when
-    `document-translation` landed.
+    published to a client that cannot reach it, and nothing says so.
     """
     shipped = {path.stem for path in MANIFESTS.glob("*.json")}
 

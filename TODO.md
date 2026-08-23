@@ -4,7 +4,6 @@
 
 | id | status | severity | effort | description |
 | --- | --- | --- | --- | --- |
-| OMNI-0627 | in_progress | medium | m | **Operations core, stage 3.** 3a shipped (2026-08-21): `create_document_translation` builds `DocumentTranslationAlias` — the file-side pipeline pinned to `operation="translate"`, `targetLanguage` mapped to `language`, result folded back under `document-translation-result.schema.json`; every pin untouched. 3b shipped in xpuwlm (6920ae4, same day): the client no longer ships a document-translation window, stored favourites redirect to `ask-selected-files`. Remaining: 3c only — the one guarded removal commit (manifest + wheel + `document_translation.py` + the alias + `document-translation-*` schemas + `docs/document-translation.md` together with every pin the map's §4 stage 3c lists; the both-direction checks in `test_generation_installation.py` and `test_client_workload_contracts.py` are the completeness guard). |
 | OMNI-0628 | open | low | s | **Operations core, stage 4, server half.** The client half shipped in xpuwlm (6de786e, 2026-08-21): ASK_ACTIONS question-fills became real `operation` values. Remaining here: ask over inline selection — `selected-text-tools` gains optional `operation="ask"` with `question` required iff ask, additively like stage 1 did for files; keep the five existing operation prompt bytes stable so digest `c6ab03…` survives, or record the pair honestly as unmeasured if the task moves. |
 
 ## Blocked / Deferred

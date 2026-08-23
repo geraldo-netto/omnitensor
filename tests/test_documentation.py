@@ -461,7 +461,7 @@ def qwen_distributions() -> dict[str, str]:
 def test_installation_guide_names_every_qwen_distribution_it_installs():
     guide = (ROOT / "docs/qwen-workload-installation.md").read_text(encoding="utf-8")
 
-    assert len(qwen_distributions()) >= 5
+    assert len(qwen_distributions()) == 4
     for workload_id, name in qwen_distributions().items():
         wheel = name.replace("-", "_")
         assert f"`{name}`" in guide, f"{name} is not in the wheel table"
@@ -479,7 +479,6 @@ def test_installation_guide_names_every_qwen_distribution_it_installs():
 # question a person has and the workload for what the runtime calls it.
 WORKLOAD_GUIDES = {
     "ask-selected-files": "docs/document-questions.md",
-    "document-translation": "docs/document-translation.md",
     "event-extraction": "docs/event-extraction.md",
     "file-organizer": "docs/file-organizer.md",
     "media-transcription": "docs/media-transcription.md",

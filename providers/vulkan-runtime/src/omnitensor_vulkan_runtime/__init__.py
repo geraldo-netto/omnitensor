@@ -2,7 +2,6 @@
 
 from .factories import (
     QualifiedWorkload,
-    create_document_translation,
     create_event_extraction,
     create_file_organizer,
     create_selected_text_tools,
@@ -13,7 +12,6 @@ from .factories import (
 
 __all__ = [
     "QualifiedWorkload",
-    "create_document_translation",
     "create_event_extraction",
     "create_file_organizer",
     "create_selected_text_tools",

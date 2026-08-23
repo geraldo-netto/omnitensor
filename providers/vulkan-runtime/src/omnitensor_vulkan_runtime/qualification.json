@@ -46,17 +46,6 @@
     }
    }
   },
-  "document-translation": {
-   "default": "qwen3-5-9b-iq4-xs",
-   "models": {
-    "qwen3-5-9b-iq4-xs": {
-     "result": "unmeasured"
-    },
-    "qwen3-8b-q4-k-m": {
-     "result": "unmeasured"
-    }
-   }
-  },
   "event-extraction": {
    "default": "qwen3-5-9b-iq4-xs",
    "models": {

@@ -27,7 +27,6 @@ from pathlib import Path
 import pytest
 
 from omnitensor.plugins.document_answer import document_question_task
-from omnitensor.plugins.document_translation import document_translation_task
 from omnitensor.plugins.event_workload import (
     EventPrompting,
     MemoryFragmentStore,
@@ -80,13 +79,6 @@ CANONICAL = {
         NO_PROMPTING,
         (("private:job-1:source:1", "invoice-2026-08.pdf"),),
     ),
-    "document-translation": (
-        NO_PROMPTING,
-        (
-            ("private:job-1:control", "Português"),
-            ("private:job-1:span:0-31", "The quarterly report is late."),
-        ),
-    ),
 }
 
 TASKS = {
@@ -94,7 +86,6 @@ TASKS = {
     "selected-text-tools": selected_text_task,
     "file-organizer": file_organizer_task,
     "event-extraction": event_generation_task,
-    "document-translation": document_translation_task,
 }
 
 

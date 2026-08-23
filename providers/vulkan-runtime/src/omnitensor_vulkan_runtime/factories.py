@@ -1,4 +1,4 @@
-"""Cheap entry-point factories for the four independently identified wheels."""
+"""Cheap entry-point factories shared by isolated workload wheels."""
 
 from __future__ import annotations
 
@@ -9,17 +9,12 @@ from typing import Protocol, runtime_checkable
 from omnitensor.atomicio import remove_durable, write_json_atomic
 from omnitensor.plugins.acceptance_kit import validate_gpu_load
 from omnitensor.plugins.document_answer import document_question_task
-from omnitensor.plugins.document_translation import (
-    DocumentTranslationAlias,
-    document_translation_task,
-)
 from omnitensor.plugins.event_workload import (
     EventExtractionPlugin,
     EventPrompting,
     EventRecoveryJournal,
     event_generation_task,
 )
-from omnitensor.plugins.file_operations import FileOperationsPrompting
 from omnitensor.plugins.file_organizer import FileOrganizerPlugin, file_organizer_task
 from omnitensor.plugins.fragments import MemoryFragmentStore
 from omnitensor.plugins.generation import (
@@ -292,7 +287,6 @@ def generation_context(plugin_id: str, prompting: TaskPrompting = NO_PROMPTING):
 
 _TASKS = {
     "ask-selected-files": document_question_task,
-    "document-translation": document_translation_task,
     "event-extraction": event_generation_task,
     "file-organizer": file_organizer_task,
     "selected-text-tools": selected_text_task,
@@ -357,35 +351,6 @@ def _hebrew_route(bootstrap, store):
 # in-tree factories use (OMNI-0617 stage 2); an underscore name was a promise
 # this package never made to another distribution.
 hebrew_route = _hebrew_route
-
-
-def create_document_translation() -> QualifiedWorkload:
-    """The compatibility alias for `document-translation` (OMNI-0617 stage 3a).
-
-    Same workload id, manifest, artifacts, and result schema as ever, but the
-    plugin underneath is the stage-2 file-side pipeline pinned to
-    ``operation="translate"`` — which is why this context carries the
-    file-side prompting: the alias runs the file-side task, and the
-    operations-core hint belongs to that task, not to this workload's id.
-    """
-    bootstrap, store, runtime, model, qualification, router = generation_context(
-        "document-translation", FileOperationsPrompting()
-    )
-    hebrew_router, hebrew_runtime, hebrew_model, hebrew_qualification = _hebrew_route(
-        bootstrap, store
-    )
-    plugin = DocumentTranslationAlias(
-        router,
-        store,
-        translation_routes={"Hebrew": hebrew_router},
-    )
-    return QualifiedWorkload(
-        plugin,
-        runtime,
-        model.path,
-        qualification,
-        additional_runtimes=((hebrew_runtime, hebrew_model.path, hebrew_qualification),),
-    )
 
 
 def create_selected_text_tools() -> QualifiedWorkload:

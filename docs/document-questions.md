@@ -15,8 +15,8 @@ means), `explain`, `summarize`, `rewrite`, `translate`, or `extract-tasks`. A
 `question` is required exactly when asking and a `language` exactly when
 translating. Ask keeps the retrieval-and-citation pipeline unchanged; the four
 transformations run over the whole extracted content with the shared
-per-operation instructions; translate runs the document-translation span
-pipeline, and an explicit Hebrew target rides the pinned DictaLM route exactly
+per-operation instructions; translate runs the shared span pipeline, and an
+explicit Hebrew target rides the pinned DictaLM route exactly
 as it does for selected text. Every operation answers in the one
 `document-question-result` envelope — `answer` and `citations` always,
 `documents` only for translate, `tasks` only for extract-tasks — so a result

@@ -16,7 +16,7 @@ ROOT = Path(__file__).parents[1]
 MANIFESTS = ROOT / "plugin-manifests"
 TRANSLATING = {
     "selected-text-tools": ("language",),
-    "document-translation": ("targetLanguage",),
+    "ask-selected-files": ("language",),
 }
 
 

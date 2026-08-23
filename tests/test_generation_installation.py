@@ -350,11 +350,6 @@ DECLARED_ARTIFACTS = {
         # for an explicit Hebrew target exactly as the inline side does.
         "dictalm2-hebrew-q4-k-m",
     ],
-    "document-translation": [
-        "qwen3-5-9b-iq4-xs",
-        "qwen3-8b-q4-k-m",
-        "dictalm2-hebrew-q4-k-m",
-    ],
     "event-extraction": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
     "file-organizer": ["qwen3-5-9b-iq4-xs", "qwen3-8b-q4-k-m"],
     # Both vision models are selectable since OMNI-0587/0588 — the 9B is the
@@ -578,7 +573,7 @@ def composed_distributions() -> dict[str, Path]:
 
 
 def test_the_shim_identity_suites_state_their_one_check_once():
-    """OMNI-0539: five byte-identical copies of the same file.
+    """OMNI-0539: byte-identical copies of the same file.
 
     Each said the same four structural things this module now derives from the
     tree, plus the one thing only an installed wheel can say. Reduced to that
@@ -586,7 +581,7 @@ def test_the_shim_identity_suites_state_their_one_check_once():
     single package name — so the next change to the shim contract is one edit
     rather than five that have to agree.
     """
-    assert len(shim_distributions()) == 4
+    assert len(shim_distributions()) == 3
 
     bodies = set()
     for package, provider in shim_distributions().items():

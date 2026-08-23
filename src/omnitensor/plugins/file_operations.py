@@ -4,8 +4,8 @@
 retrieval-and-citation pipeline untouched in :mod:`document_qa`, while
 explain/summarize/rewrite/extract-tasks run the per-operation instruction
 table from :mod:`operations` over the whole extracted content, and
-`translate` runs the span pipeline lifted (imported, never moved) from
-:mod:`document_translation`. One result envelope serves all of them —
+`translate` runs the shared span pipeline in :mod:`translation`. One result
+envelope serves all of them —
 `answer` and `citations` always, `documents` only for translate, `tasks`
 only for extract-tasks — so the client keeps a single result schema.
 
@@ -49,9 +49,7 @@ PLUGIN_ID = "ask-selected-files"
 # inline workload does not (yet) take a question; the manifests state each
 # side's own surface and the core states what they share.
 FILE_OPERATIONS = frozenset({"ask", *OPERATIONS})
-# Half the window for the source span, half for its translation — the same
-# arithmetic document-translation states, restated here because the constant
-# describes this task's window, not that module's.
+# Half the window for the source span, half for its translation.
 TRANSLATION_WINDOW_SHARE = 2
 
 
@@ -327,7 +325,7 @@ async def _translate_documents(
     language: str,
     extractions: Sequence[tuple[int, SelectedSource, object]],
 ) -> dict:
-    """The document-translation span pipeline, under the file-side envelope.
+    """The translation span pipeline, under the file-side envelope.
 
     Every span is translated or the job fails, progress is spans over spans,
     and cancellation lands between spans — the properties

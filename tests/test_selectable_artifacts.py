@@ -30,7 +30,6 @@ FIXED_ROLE = {
         "ppocrv6-medium-rec",
         "dictalm2-hebrew-q4-k-m",
     },
-    "document-translation": {"dictalm2-hebrew-q4-k-m"},
     "selected-text-tools": {"dictalm2-hebrew-q4-k-m"},
     # The vision model became choosable in OMNI-0587/0588: the 9B is the
     # default and the 7B the alternative, so only the speech model is fixed.

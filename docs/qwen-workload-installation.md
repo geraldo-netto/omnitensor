@@ -1,6 +1,6 @@
 # Installing the Qwen workload providers
 
-This is the operator procedure for the five local, manually triggered Qwen
+This is the operator procedure for the four local, manually triggered Qwen
 workloads:
 
 - `event-extraction` reads only files selected for that request and returns an
@@ -9,8 +9,6 @@ workloads:
   with exact file, page, span, and digest citations;
 - `selected-text-tools` explains, summarizes, rewrites, translates, or extracts
   tasks from one explicit clipboard selection;
-- `document-translation` translates selected documents into one requested
-  target language without writing the result back to disk; and
 - `file-organizer` returns a review-only naming, tagging, folder, and exact
   duplicate plan. It cannot move, rename, overwrite, or delete a file.
 
@@ -57,27 +55,26 @@ result contained no raw fragment field or absolute source path.
 
 ## Package and model layout
 
-The provider is seven wheels rather than one wheel with five entry points. An
+The provider is six wheels rather than one wheel with four entry points. An
 OmniTensor plugin distribution may own exactly one identity and exactly one
 `omnitensor-plugin.json`, so each workload needs an identity-isolated wheel.
-Five of them depend on the generation wheel; `ask-selected-files` also needs
+Four of them depend on the generation wheel; `ask-selected-files` also needs
 the embedder wheel, which is separate because BGE on ncnn is a different
 engine and no workload that only generates should install it:
 
 | Wheel | Responsibility | Pinned models |
 | --- | --- | --- |
-| `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, and four workload factories | runtime only |
+| `omnitensor-vulkan-runtime` | In-process llama.cpp/Vulkan generation, the shared GPU lease, and workload factories | runtime only |
 | `omnitensor-ncnn-embeddings` | BGE/ncnn retrieval on the same GPU lease | runtime only |
 | `omnitensor-qwen-event-extraction` | `event-extraction` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
 | `omnitensor-qwen-ask-selected-files` | `ask-selected-files` entry point, manifest, and the workload it assembles from the two runtime wheels | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus BGE-small-en-v1.5 |
 | `omnitensor-qwen-selected-text-tools` | `selected-text-tools` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus operation-specific DictaLM2 Hebrew |
 | `omnitensor-qwen-file-organizer` | `file-organizer` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M |
-| `omnitensor-qwen-document-translation` | `document-translation` entry point and manifest | Qwen3.5-9B IQ4_XS (default) and Qwen3-8B Q4_K_M, plus DictaLM2 for a Hebrew target |
 
 Each manifest declares more than one pinned generation artifact, and a person
 may choose any declared, installed model per workload (see
 [Choosing the model a workload runs](choosing-a-model.md)). The default for
-all five text workloads is `qwen3-5-9b-iq4-xs`, recorded in the runtime
+all four text workloads is `qwen3-5-9b-iq4-xs`, recorded in the runtime
 wheel's `qualification.json` with SHA-256
 `7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429`; the
 manifests declare its origin as the `unsloth/Qwen3.5-9B-GGUF`
@@ -140,8 +137,8 @@ ncnn export is not interchangeable with this graph.
 | A real Vulkan GPU, Vulkan loader, and vendor ICD | There is no CPU provider or CPU fallback; software Vulkan devices do not qualify |
 | Access to the selected `/dev/dri/renderD*` device | The sandbox mounts only the device granted to that worker |
 | The exact accepted `llama-cpp-python==0.3.34` Vulkan wheel | In-process Qwen execution inside the seccomp worker; startup verifies its native-library hashes, so an arbitrary rebuild or ordinary CPU wheel is not acceptable |
-| All seven provider wheels | The runtime, embedder, and five independently discoverable workload identities |
-| Both pinned Qwen generation GGUFs (the Qwen3.5-9B IQ4_XS default and Qwen3-8B Q4_K_M alternative) | Digest-locked generation artifacts declared by all five workload providers |
+| All six provider wheels | The runtime, embedder, and four independently discoverable workload identities |
+| Both pinned Qwen generation GGUFs (the Qwen3.5-9B IQ4_XS default and Qwen3-8B Q4_K_M alternative) | Digest-locked generation artifacts declared by all four workload providers |
 | The pinned DictaLM2.0 7B Instruct Q4_K_M GGUF | Explicit Hebrew translation for selected-text tools only |
 | `ncnn>=1.0.20260526`, `numpy>=1.24`, `tokenizers>=0.22`, and the pinned BGE files | Retrieval and tokenization for Ask selected files |
 | A user runtime directory (`$XDG_RUNTIME_DIR`) | The OmniTensor control socket and job-result surface |
@@ -236,7 +233,7 @@ mkdir -p "$OMNI_WHEELS"
 "$OMNI_BUILDER/pip" install --upgrade pip build hatchling wheel
 
 for provider in vulkan-runtime ncnn-embeddings event-extraction ask-selected-files \
-  selected-text-tools file-organizer document-translation; do
+  selected-text-tools file-organizer; do
   "$OMNI_BUILDER/pip" wheel --no-deps \
     "$OMNI_SOURCE/providers/$provider" --wheel-dir "$OMNI_WHEELS"
 done
@@ -261,8 +258,7 @@ OMNI_SERVICE=~/.local/share/omnitensor/venv/bin
   "$OMNI_WHEELS"/omnitensor_qwen_event_extraction-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_ask_selected_files-0.2.0-*.whl \
   "$OMNI_WHEELS"/omnitensor_qwen_selected_text_tools-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl \
-  "$OMNI_WHEELS"/omnitensor_qwen_document_translation-0.2.0-*.whl
+  "$OMNI_WHEELS"/omnitensor_qwen_file_organizer-0.2.0-*.whl
 ```
 
 Reinstalling the service alone is not an upgrade. The provider wheels import
@@ -406,10 +402,6 @@ explicit clipboard read:
 "$OMNI_SERVICE/omnitensor-grant" grant file-organizer files:read-selected \
   --reason 'review only files I explicitly select'
 
-"$OMNI_SERVICE/omnitensor-grant" grant document-translation accelerator:gpu \
-  --reason 'run the explicitly requested model on my GPU'
-"$OMNI_SERVICE/omnitensor-grant" grant document-translation files:read-selected \
-  --reason 'translate only documents I explicitly select'
 ```
 
 Grant changes are live. Revoking a declared permission refuses new and queued
@@ -647,18 +639,12 @@ them:
   --reason 'uninstalling the Qwen workload provider'
 "$OMNI_SERVICE/omnitensor-grant" revoke file-organizer files:read-selected \
   --reason 'uninstalling the Qwen workload provider'
-"$OMNI_SERVICE/omnitensor-grant" revoke document-translation accelerator:gpu \
-  --reason 'uninstalling the Qwen workload provider'
-"$OMNI_SERVICE/omnitensor-grant" revoke document-translation files:read-selected \
-  --reason 'uninstalling the Qwen workload provider'
-
 systemctl --user stop omnitensor.service
 "$OMNI_SERVICE/pip" uninstall -y \
   omnitensor-qwen-event-extraction \
   omnitensor-qwen-ask-selected-files \
   omnitensor-qwen-selected-text-tools \
-  omnitensor-qwen-file-organizer \
-  omnitensor-qwen-document-translation
+  omnitensor-qwen-file-organizer
 
 # Optional, only when nothing else depends on the shared provider runtime:
 "$OMNI_SERVICE/pip" uninstall -y \

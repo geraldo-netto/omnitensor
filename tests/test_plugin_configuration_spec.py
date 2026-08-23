@@ -222,7 +222,6 @@ GENERATION_WORKLOADS = (
     "selected-text-tools",
     "event-extraction",
     "file-organizer",
-    "document-translation",
 )
 
 

@@ -80,16 +80,6 @@ def _selected_text_control(control) -> None:
         raise ProviderGenerationError("request-invalid", _NOT_HEBREW, generation_started=False)
 
 
-def _document_translation_control(control) -> None:
-    """The document-translation control: the target language, as itself.
-
-    That workload translates whole documents and has no operation to choose,
-    so its control fragment is the language a person named and nothing else.
-    """
-    if not isinstance(control.text, str) or control.text.strip().casefold() != HEBREW_TARGET:
-        raise ProviderGenerationError("request-invalid", _NOT_HEBREW, generation_started=False)
-
-
 def _selected_text_answer(request: GenerationRequest, selection, translation: str) -> dict:
     return {
         "version": 1,
@@ -101,18 +91,6 @@ def _selected_text_answer(request: GenerationRequest, selection, translation: st
             "sourceRef": selection.reference,
             "sourceSha256": selection.source_sha256,
             "span": {"start": 0, "end": len(selection.text)},
-            "textSha256": selection.text_sha256,
-        },
-    }
-
-
-def _document_translation_answer(request: GenerationRequest, selection, translation: str) -> dict:
-    return {
-        "version": 1,
-        "requestId": request.request_id,
-        "translation": translation,
-        "evidence": {
-            "sourceRef": selection.reference,
             "textSha256": selection.text_sha256,
         },
     }
@@ -148,7 +126,6 @@ def _file_operations_answer(request: GenerationRequest, selection, translation: 
 _CONTRACTS: dict[str, tuple[Callable[..., None], Callable[..., dict]]] = {
     "selected-text-tools": (_selected_text_control, _selected_text_answer),
     "ask-selected-files": (_selected_text_control, _file_operations_answer),
-    "document-translation": (_document_translation_control, _document_translation_answer),
 }
 
 

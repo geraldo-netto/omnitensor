@@ -56,8 +56,6 @@ REQUIRED_SCHEMAS = (
     "selected-text-result.schema.json",
     "file-organizer-answer.schema.json",
     "file-organizer-result.schema.json",
-    "document-translation-answer.schema.json",
-    "document-translation-result.schema.json",
     "collected-output.schema.json",
 )
 DEFAULT_SNAPSHOT_MAX_AGE_MS = 30_000
