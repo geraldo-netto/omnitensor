@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -249,6 +250,13 @@ def test_catalog_pins_license_sources_and_gpu_default():
             default=False,
             status="requires-explicit-local-qualification",
         ),
+        ProviderTemplate(
+            provider_id="media-transcription-vulkan",
+            accelerator="gpu",
+            runtime="llama.cpp-vulkan",
+            default=False,
+            status="selectable-vision-model",
+        ),
     )
     assert catalog.evaluation.corpus == "event-extraction-v1.json"
     assert catalog.evaluation.policy == EventQualificationPolicy()
@@ -353,6 +361,22 @@ def test_catalog_rejects_unpinned_or_unsafe_changes(tmp_path, mutate):
         ),
         (lambda value: value["providers"][0].update(default=1), "provider default must be boolean"),
         (
+            lambda value: value["providers"][2].update(providerId="qwen-events-gpu"),
+            "catalog provider ids must be unique",
+        ),
+        (
+            lambda value: value["providers"].append(
+                {
+                    "providerId": "unsupported-consumer",
+                    "accelerator": "cpu",
+                    "runtime": "cpu",
+                    "default": False,
+                    "status": "unsupported",
+                }
+            ),
+            "catalog provider lane is unsupported",
+        ),
+        (
             lambda value: value["providers"][0].update(default=False),
             "GPU must be the sole default provider",
         ),
@@ -374,6 +398,29 @@ def test_catalog_rejects_unpinned_or_unsafe_changes(tmp_path, mutate):
 )
 def test_catalog_errors_are_stable_and_specific(tmp_path, mutate, detail):
     assert_catalog_error(tmp_path, mutate, detail)
+
+
+@given(provider_id=st.text(alphabet="abcdefghijklmnopqrstuvwxyz-", min_size=1, max_size=40))
+def test_catalog_preserves_unique_additional_gpu_consumers(provider_id):
+    source = Path(__file__).parents[1] / "generation-models" / "qwen2-5-vl-7b.json"
+    with tempfile.TemporaryDirectory() as directory:
+        path = write_changed_json(
+            Path(directory),
+            source,
+            lambda value: value["providers"].append(
+                {
+                    "providerId": f"consumer-{provider_id}",
+                    "accelerator": "gpu",
+                    "runtime": "llama.cpp-vulkan",
+                    "default": False,
+                    "status": "selectable",
+                }
+            ),
+        )
+
+        catalog = load_generation_catalog(path)
+
+    assert catalog.providers[-1].provider_id == f"consumer-{provider_id}"
 
 
 @pytest.mark.parametrize(

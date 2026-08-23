@@ -25,6 +25,11 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 _PACKAGED_MODELS = _PACKAGE_DIR.parent / "generation-models"
 _SOURCE_ROOT = _PACKAGE_DIR.parents[2] if _PACKAGE_DIR.parent.parent.name == "src" else None
 _DIGEST = frozenset("0123456789abcdef")
+_EVENT_PROVIDER_LANES = {
+    "qwen-events-gpu": ("gpu", "llama.cpp-vulkan"),
+    "qwen-events-npu": ("npu", "openvino-genai-npu"),
+}
+_SUPPORTED_PROVIDER_LANES = frozenset(_EVENT_PROVIDER_LANES.values())
 
 
 def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
@@ -64,17 +69,9 @@ def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
         raise GenerationProviderError(
             "catalog-invalid", "catalog needs one model and one projector"
         )
-    providers = tuple(
-        _provider_template(item)
-        for item in bounded_sequence(document["providers"], "providers", "catalog-invalid")
-    )
-    if len(providers) != 2 or {(item.accelerator, item.runtime) for item in providers} != {
-        ("gpu", "llama.cpp-vulkan"),
-        ("npu", "openvino-genai-npu"),
-    }:
-        raise GenerationProviderError("catalog-invalid", "catalog provider lanes are incomplete")
+    providers = _providers(document["providers"])
     defaults = [item for item in providers if item.default]
-    if len(defaults) != 1 or defaults[0].accelerator != "gpu":
+    if len(defaults) != 1 or defaults[0].provider_id != "qwen-events-gpu":
         raise GenerationProviderError("catalog-invalid", "GPU must be the sole default provider")
     evaluation = _evaluation(document["evaluation"])
     model_id = bounded_text(document["id"], "catalog model id", "catalog-invalid", 120)
@@ -99,6 +96,22 @@ def load_generation_catalog(path: Path | str | None = None) -> ModelCatalog:
         providers,
         evaluation,
     )
+
+
+def _providers(document: object) -> tuple[ProviderTemplate, ...]:
+    providers = tuple(
+        _provider_template(item)
+        for item in bounded_sequence(document, "providers", "catalog-invalid")
+    )
+    provider_ids = [item.provider_id for item in providers]
+    if len(provider_ids) != len(set(provider_ids)):
+        raise GenerationProviderError("catalog-invalid", "catalog provider ids must be unique")
+    provider_lanes = {item.provider_id: (item.accelerator, item.runtime) for item in providers}
+    if any(provider_lanes.get(name) != lane for name, lane in _EVENT_PROVIDER_LANES.items()):
+        raise GenerationProviderError("catalog-invalid", "catalog provider lanes are incomplete")
+    if any((item.accelerator, item.runtime) not in _SUPPORTED_PROVIDER_LANES for item in providers):
+        raise GenerationProviderError("catalog-invalid", "catalog provider lane is unsupported")
+    return providers
 
 
 def catalog_path(packaged_models: Path, source_root: Path | None) -> Path:
