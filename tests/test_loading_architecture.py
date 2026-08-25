@@ -116,7 +116,7 @@ def test_cancelled_runtime_waits_for_staging_thread_and_removes_result(tmp_path,
     started = threading.Event()
     release = threading.Event()
 
-    def delayed_stage(_root, _plugin_id, _job_id, payload):
+    def delayed_stage(_root, _plugin_id, _job_id, payload, _observer=None):
         created.mkdir()
         started.set()
         release.wait(timeout=5)
@@ -148,7 +148,7 @@ def test_repeated_cancellation_cannot_abandon_staging_result(tmp_path, monkeypat
     started = threading.Event()
     release = threading.Event()
 
-    def delayed_stage(_root, _plugin_id, _job_id, payload):
+    def delayed_stage(_root, _plugin_id, _job_id, payload, _observer=None):
         created.mkdir()
         started.set()
         release.wait(timeout=5)

@@ -10,6 +10,7 @@ import shutil
 import stat
 import tempfile
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..selected_files import MAX_SELECTED_SOURCE_BYTES
@@ -21,6 +22,21 @@ from .supervisor_session import PluginWorkerError
 # still refused here.  ``None`` means the broker adds no policy of its own.
 MAX_SELECTED_SOURCES: int | None = None
 _STAGING_COMPONENT = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+@dataclass(frozen=True, slots=True)
+class StagingProgress:
+    """One completed broker work unit, safe to publish without its source path."""
+
+    file_index: int
+    file_count: int
+    phase: str
+    completed_bytes: int
+    total_bytes: int
+
+
+StagingObserver = Callable[[StagingProgress], None]
+CopyObserver = Callable[[str, int, int], None]
 
 
 def prepare_selected_files_root(root: Path | None) -> Path | None:
@@ -40,7 +56,11 @@ def stage_selected_sources(
     job_id: str,
     payload: Mapping[str, object],
     *,
-    copier: Callable[[str, Path, int, dict[tuple[int, int], Path]], Path] | None = None,
+    copier: Callable[
+        [str, Path, int, dict[tuple[int, int], Path], CopyObserver | None], Path
+    ]
+    | None = None,
+    observer: StagingObserver | None = None,
     maximum_sources: int | None = MAX_SELECTED_SOURCES,
 ) -> tuple[dict, Path]:
     sources = payload.get("sources")
@@ -67,7 +87,15 @@ def stage_selected_sources(
     copy_source = copier or copy_selected_source
     try:
         staged_sources = [
-            str(copy_source(source, staged, index, observed))
+            str(
+                copy_source(
+                    source,
+                    staged,
+                    index,
+                    observed,
+                    _source_observer(observer, index + 1, len(sources)),
+                )
+            )
             for index, source in enumerate(sources)
         ]
     except BaseException:
@@ -83,6 +111,7 @@ def copy_selected_source(
     staged: Path,
     index: int,
     observed: dict[tuple[int, int], Path],
+    progress: CopyObserver | None = None,
     *,
     change_detector: Callable[[os.stat_result, os.stat_result, Path], bool] | None = None,
     maximum_bytes: int = MAX_SELECTED_SOURCE_BYTES,
@@ -112,6 +141,7 @@ def copy_selected_source(
                 )
             prior = observed.get(identity)
             if prior is not None:
+                _observe(progress, "reuse", before.st_size, before.st_size)
                 final_status = candidate.stat(follow_symlinks=False)
                 if changed(before, final_status, prior):
                     raise PluginWorkerError(
@@ -119,15 +149,15 @@ def copy_selected_source(
                     )
                 return prior
             destination.parent.mkdir(mode=0o700)
-            initial_digest = _stream_digest(reader, before.st_size)
+            initial_digest = _stream_digest(reader, before.st_size, progress, "digest")
             reader.seek(0)
             with destination.open("xb") as writer:
-                copied_bytes = _copy_bounded(reader, writer, before.st_size)
+                copied_bytes = _copy_bounded(reader, writer, before.st_size, progress)
             reader.seek(0)
-            final_digest = _stream_digest(reader, before.st_size)
+            final_digest = _stream_digest(reader, before.st_size, progress, "verify-source")
             after = os.fstat(reader.fileno())
             with destination.open("rb") as copied:
-                copied_digest = _stream_digest(copied, before.st_size)
+                copied_digest = _stream_digest(copied, before.st_size, progress, "verify-copy")
             try:
                 final_status = candidate.stat(follow_symlinks=False)
                 final_resolved = candidate.resolve(strict=True)
@@ -155,9 +185,17 @@ def copy_selected_source(
 
 
 class _BoundedReader:
-    def __init__(self, handle, maximum_bytes: int) -> None:
+    def __init__(
+        self,
+        handle,
+        maximum_bytes: int,
+        expected_bytes: int,
+        progress: CopyObserver | None,
+    ) -> None:
         self._handle = handle
         self._remaining = maximum_bytes
+        self._expected = expected_bytes
+        self._progress = progress
         self.bytes_read = 0
 
     def read(self, size: int = -1) -> bytes:
@@ -168,18 +206,28 @@ class _BoundedReader:
         chunk = self._handle.read(size)
         self._remaining -= len(chunk)
         self.bytes_read += len(chunk)
+        _observe(self._progress, "copy", min(self.bytes_read, self._expected), self._expected)
         return chunk
 
 
-def _copy_bounded(reader, writer, expected_size: int) -> int:
-    bounded = _BoundedReader(reader, expected_size + 1)
+def _copy_bounded(
+    reader, writer, expected_size: int, progress: CopyObserver | None = None
+) -> int:
+    _observe(progress, "copy", 0, expected_size)
+    bounded = _BoundedReader(reader, expected_size + 1, expected_size, progress)
     shutil.copyfileobj(bounded, writer, length=1024 * 1024)
     return bounded.bytes_read
 
 
-def _stream_digest(handle, expected_size: int) -> bytes:
+def _stream_digest(
+    handle,
+    expected_size: int,
+    progress: CopyObserver | None = None,
+    phase: str = "digest",
+) -> bytes:
     digest = hashlib.sha256()
     remaining = expected_size
+    _observe(progress, phase, 0, expected_size)
     while remaining:
         chunk = handle.read(min(1024 * 1024, remaining))
         if not chunk:
@@ -188,11 +236,33 @@ def _stream_digest(handle, expected_size: int) -> bytes:
             )
         digest.update(chunk)
         remaining -= len(chunk)
+        _observe(progress, phase, expected_size - remaining, expected_size)
     if handle.read(1):
         raise PluginWorkerError(
             "selected-file-changed", "selected source changed while it was copied"
         )
     return digest.digest()
+
+
+def _source_observer(
+    observer: StagingObserver | None, file_index: int, file_count: int
+) -> CopyObserver | None:
+    if observer is None:
+        return None
+
+    def publish(phase: str, completed_bytes: int, total_bytes: int) -> None:
+        observer(
+            StagingProgress(file_index, file_count, phase, completed_bytes, total_bytes)
+        )
+
+    return publish
+
+
+def _observe(
+    observer: CopyObserver | None, phase: str, completed_bytes: int, total_bytes: int
+) -> None:
+    if observer is not None:
+        observer(phase, completed_bytes, total_bytes)
 
 
 def staged_source_name(candidate: Path) -> str:
@@ -297,6 +367,7 @@ __all__ = [
     "open_selected_source",
     "prepare_selected_files_root",
     "selected_source_changed",
+    "StagingProgress",
     "stage_selected_sources",
     "staged_source_name",
     "validate_selected_source_stat",

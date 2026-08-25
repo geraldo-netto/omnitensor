@@ -46,6 +46,31 @@ The fixed score threshold is published in each result. Component visual and
 audio scores, coverage, offset, digest, and exact-copy status remain visible so
 the combined score is reviewable rather than a hidden verdict.
 
+## Long-running scans and recovery
+
+A scan has no total-duration ceiling. The runtime instead keeps its normal
+30-second silence watchdog and treats observable work as proof of life:
+
+- the selected-file broker reports digest, copy, source-verification, and
+  staged-copy-verification bytes while preparing every file;
+- the provider reports source-digest bytes, decoded video frames, and decoded
+  audio samples while fingerprinting; and
+- repeated work in one phase is rate-limited to one report every five seconds,
+  while phase changes and known completions are reported immediately.
+
+The watchdog therefore continues to detect a worker or broker stage that
+stops making progress, while a directory job that keeps working may run for as
+long as its inputs require.
+
+After each file is fingerprinted, the provider transactionally checkpoints
+that completed file in its sandbox-private plugin state. A checkpoint contains
+the relative display path, source SHA-256, compact visual/audio hashes,
+duration, modality, and quality metadata. It contains no media bytes, decoded
+frames, PCM, or absolute source path. An interrupted retry for the same ordered
+selection hashes each staged file again and reuses a checkpoint only when its
+relative path and source digest still match. Successfully completing the scan
+removes that selection's checkpoint rows.
+
 ## Safety and privacy
 
 The workload is read-only. It never deletes, renames, moves, or rewrites media.
@@ -53,7 +78,8 @@ It declares only `files:read-selected`, which remains revocable while the scan
 runs. Decoding and deterministic fingerprinting are host analysis, not a CPU
 inference backend or a fallback from an accelerator model. No source
 content, full frame, PCM window, or absolute path is persisted by this
-provider.
+provider; only the private, compact recovery data described above may survive
+an interrupted scan.
 
 Build and install `providers/media-similarity` beside the service, grant its
 selected-file permission, restart OmniTensor, then open the Media similarity

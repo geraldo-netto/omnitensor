@@ -15,16 +15,25 @@ from omnitensor.sdk import (
     PluginHealthStatus,
     PluginProgress,
     PluginRequest,
+    current_plugin_bootstrap,
     succeeded_result,
     workload_result,
 )
 
-from .fingerprints import MediaFingerprint, MediaFingerprintError, fingerprint_file
+from .checkpoints import FingerprintCheckpointStore, selection_key
+from .fingerprints import (
+    FingerprintProgress,
+    MediaFingerprint,
+    MediaFingerprintError,
+    file_digest,
+    fingerprint_file,
+)
 from .similarity import similarity_groups
 
 PLUGIN_ID = "media-similarity"
 READ_PERMISSION = "files:read-selected"
 DEFAULT_MINIMUM_SIMILARITY = 0.8
+DEFAULT_PROGRESS_INTERVAL_SECONDS = 5.0
 _SAFE_COMPONENT = re.compile(r"^[^/\\\x00]+$")
 
 
@@ -40,12 +49,18 @@ class MediaSimilarityPlugin(ManagedPlugin):
     def __init__(
         self,
         *,
-        extractor: Callable[[Path, str, object], MediaFingerprint] = fingerprint_file,
+        extractor: Callable[[Path, str, object], MediaFingerprint] | None = None,
+        checkpoints: FingerprintCheckpointStore | None = None,
         clock_ms: Callable[[], int] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        progress_interval_seconds: float = DEFAULT_PROGRESS_INTERVAL_SECONDS,
     ) -> None:
         super().__init__()
         self._extractor = extractor
+        self._checkpoints = checkpoints
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
+        self._monotonic = monotonic
+        self._progress_interval_seconds = progress_interval_seconds
 
     async def on_start(self) -> None:
         self.permissions.require(READ_PERMISSION)
@@ -73,33 +88,26 @@ class MediaSimilarityPlugin(ManagedPlugin):
         extracted: dict[Path, MediaFingerprint | MediaFingerprintError] = {}
         failures = []
         total = len(sources)
+        selection = selection_key(relative_paths)
         await self._report(request, progress, "fingerprint", 0.0, f"0 of {total} files")
         for index, (source, relative_path) in enumerate(
             zip(sources, relative_paths, strict=True), start=1
         ):
             cancellation.raise_if_cancelled()
             try:
-                selected = Path(source)
-                cached = extracted.get(selected)
-                if isinstance(cached, MediaFingerprintError):
-                    raise cached
-                fingerprint = cached
-                if fingerprint is None:
-                    try:
-                        fingerprint = await asyncio.to_thread(
-                            self._extractor, selected, relative_path, cancellation
-                        )
-                    except MediaFingerprintError as error:
-                        extracted[selected] = error
-                        raise
-                    extracted[selected] = fingerprint
-                elif fingerprint.relative_path != relative_path:
-                    fingerprint = replace(
-                        fingerprint,
-                        relative_path=relative_path,
-                        file_name=Path(relative_path).name,
+                found.append(
+                    await self._extract_one(
+                        request,
+                        progress,
+                        selection,
+                        Path(source),
+                        relative_path,
+                        cancellation,
+                        index,
+                        total,
+                        extracted,
                     )
-                found.append(fingerprint)
+                )
             except MediaFingerprintError as error:
                 failures.append({"relativePath": relative_path, "code": error.code})
             cancellation.raise_if_cancelled()
@@ -123,6 +131,8 @@ class MediaSimilarityPlugin(ManagedPlugin):
             "groups": list(groups),
             "failures": failures,
         }
+        if self._checkpoints is not None:
+            await asyncio.to_thread(self._checkpoints.clear, selection)
         await self._report(request, progress, "terminal", 1.0, "similarity groups ready")
         return succeeded_result(
             request,
@@ -130,6 +140,83 @@ class MediaSimilarityPlugin(ManagedPlugin):
             completed_at_ms=self._clock_ms(),
             detail="media similarity groups ready",
         )
+
+    async def _extract_one(
+        self,
+        request: PluginRequest,
+        progress,
+        selection: str,
+        selected: Path,
+        relative_path: str,
+        cancellation,
+        index: int,
+        total: int,
+        extracted: dict[Path, MediaFingerprint | MediaFingerprintError],
+    ) -> MediaFingerprint:
+        cached = extracted.get(selected)
+        if isinstance(cached, MediaFingerprintError):
+            raise cached
+        fingerprint = cached
+        if fingerprint is None:
+            try:
+                if self._extractor is not None:
+                    fingerprint = await asyncio.to_thread(
+                        self._extractor, selected, relative_path, cancellation
+                    )
+                else:
+                    observer = _FingerprintProgressRelay(
+                        request,
+                        progress,
+                        index,
+                        total,
+                        self._clock_ms,
+                        self._monotonic,
+                        self._progress_interval_seconds,
+                    )
+                    fingerprint = await asyncio.to_thread(
+                        self._resumable_fingerprint,
+                        selection,
+                        selected,
+                        relative_path,
+                        cancellation,
+                        observer,
+                    )
+            except MediaFingerprintError as error:
+                extracted[selected] = error
+                raise
+            extracted[selected] = fingerprint
+        elif fingerprint.relative_path != relative_path:
+            fingerprint = replace(
+                fingerprint,
+                relative_path=relative_path,
+                file_name=Path(relative_path).name,
+            )
+        return fingerprint
+
+    def _resumable_fingerprint(
+        self,
+        selection: str,
+        source: Path,
+        relative_path: str,
+        cancellation,
+        observer,
+    ) -> MediaFingerprint:
+        digest = file_digest(source, cancellation, observer)
+        if self._checkpoints is not None:
+            cached = self._checkpoints.load(selection, relative_path, digest)
+            if cached is not None:
+                observer(FingerprintProgress("checkpoint", 1, 1, "files"))
+                return cached
+        fingerprint = fingerprint_file(
+            source,
+            relative_path,
+            cancellation,
+            observer,
+            digest=digest,
+        )
+        if self._checkpoints is not None:
+            self._checkpoints.save(selection, fingerprint)
+        return fingerprint
 
     async def _report(self, request, progress, stage: str, fraction: float, detail: str) -> None:
         await progress.report(
@@ -174,8 +261,62 @@ def _safe_relative_path(value: object) -> bool:
     )
 
 
+class _FingerprintProgressRelay:
+    """Publish throttled worker-thread work units on the request's event loop."""
+
+    def __init__(
+        self,
+        request: PluginRequest,
+        progress,
+        file_index: int,
+        file_count: int,
+        clock_ms: Callable[[], int],
+        monotonic: Callable[[], float],
+        interval_seconds: float,
+    ) -> None:
+        self._request = request
+        self._progress = progress
+        self._file_index = file_index
+        self._file_count = file_count
+        self._clock_ms = clock_ms
+        self._monotonic = monotonic
+        self._interval = interval_seconds
+        self._loop = asyncio.get_running_loop()
+        self._last_stage: str | None = None
+        self._last_at = float("-inf")
+
+    def __call__(self, update: FingerprintProgress) -> None:
+        now = self._monotonic()
+        completed = update.total is not None and update.completed == update.total
+        if (
+            update.stage == self._last_stage
+            and not completed
+            and now - self._last_at < self._interval
+        ):
+            return
+        self._last_stage = update.stage
+        self._last_at = now
+        future = asyncio.run_coroutine_threadsafe(self._publish(update), self._loop)
+        future.result()
+
+    async def _publish(self, update: FingerprintProgress) -> None:
+        extent = f" of {update.total}" if update.total is not None else ""
+        await self._progress.report(
+            PluginProgress(
+                self._request.job_id,
+                f"fingerprint-{update.stage}",
+                0.9 * (self._file_index - 1) / self._file_count,
+                f"file {self._file_index} of {self._file_count}: {update.completed}"
+                f"{extent} {update.unit}",
+                self._clock_ms(),
+            )
+        )
+
+
 def create() -> MediaSimilarityPlugin:
-    return MediaSimilarityPlugin()
+    state_path = current_plugin_bootstrap(PLUGIN_ID).state_path
+    checkpoints = None if state_path is None else FingerprintCheckpointStore(state_path)
+    return MediaSimilarityPlugin(checkpoints=checkpoints)
 
 
 __all__ = ["MediaSimilarityError", "MediaSimilarityPlugin", "create"]

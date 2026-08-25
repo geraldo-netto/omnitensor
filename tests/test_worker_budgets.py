@@ -56,12 +56,12 @@ class TestDeclaredBudget:
             document = manifest(budgets={"callTimeoutSeconds": value})
             assert call_timeout_for(document) == DEFAULT_CALL_TIMEOUT_SECONDS
 
-    def test_media_similarity_may_fingerprint_one_large_video_for_an_hour_in_silence(self):
+    def test_media_similarity_uses_the_short_stall_watchdog(self):
         path = Path(__file__).parents[1] / "plugin-manifests" / "media-similarity.json"
         document = json.loads(path.read_text(encoding="utf-8"))
 
-        assert call_timeout_for(document) == 3600.0
-        assert call_timeout_for(document) == MAX_CALL_TIMEOUT_SECONDS
+        assert "budgets" not in document["plugin"]
+        assert call_timeout_for(document) == DEFAULT_CALL_TIMEOUT_SECONDS
 
 
 class TestFlowDeadline:

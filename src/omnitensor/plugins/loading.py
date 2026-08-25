@@ -11,6 +11,7 @@ import shutil
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextvars import copy_context
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -27,6 +28,7 @@ from .artifacts import ArtifactResolution as _ArtifactResolution
 from .configuration_spec import manifest_configuration_spec
 from .discovery import PluginSource, discover_plugin_metadata
 from .identity import PluginCatalog, ResolvedPlugin, resolve_plugin_identities
+from .liveness import report as _report_liveness
 from .manifest_compatibility import resolve_plugin_compatibility
 from .offloop import run_off_loop as _run_off_loop
 from .protocol import JsonObject, PluginProgress, PluginRequest, PluginResultStatus
@@ -81,6 +83,7 @@ _import_paths = _specs.worker_import_paths_tuple
 _trusted_runtime_paths = _specs.trusted_runtime_paths
 LOGGER = logging.getLogger(__name__)
 GRANT_REFRESH_SECONDS = 0.25
+STAGING_PROGRESS_INTERVAL_SECONDS = 5.0
 # How long a worker with nothing to do keeps its process, and its model, alive.
 # Long enough that a person working through a document does not pay the model
 # load again between questions; short enough that a machine left alone gets its
@@ -590,6 +593,7 @@ class InstalledPluginRuntime:
                 plugin_id,
                 job_id,
                 payload,
+                _StagingProgressRelay(job_id, self._progress_sink, self._clock_ms),
             )
         )
         try:
@@ -824,6 +828,7 @@ def _stage_selected_sources(
     plugin_id: str,
     job_id: str,
     payload: Mapping[str, object],
+    observer: _staging.StagingObserver | None = None,
 ) -> tuple[dict, Path]:
     return _staging.stage_selected_sources(
         root,
@@ -831,6 +836,7 @@ def _stage_selected_sources(
         job_id,
         payload,
         copier=_copy_selected_source,
+        observer=observer,
         maximum_sources=MAX_SELECTED_SOURCES,
     )
 
@@ -840,12 +846,14 @@ def _copy_selected_source(
     staged: Path,
     index: int,
     observed: dict[tuple[int, int], Path],
+    progress: _staging.CopyObserver | None = None,
 ) -> Path:
     return _staging.copy_selected_source(
         source,
         staged,
         index,
         observed,
+        progress,
         change_detector=_selected_source_changed,
         maximum_bytes=MAX_SELECTED_SOURCE_BYTES,
     )
@@ -865,3 +873,55 @@ class _ProgressSink:
     async def report(self, progress: PluginProgress) -> None:
         if self._sink is not None:
             self._sink(progress)
+
+
+class _StagingProgressRelay:
+    """Move broker-thread work units onto the job loop and its heartbeat."""
+
+    def __init__(
+        self,
+        job_id: str,
+        sink: Callable[[PluginProgress], None] | None,
+        clock_ms: Callable[[], int],
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        interval_seconds: float = STAGING_PROGRESS_INTERVAL_SECONDS,
+    ) -> None:
+        self._job_id = job_id
+        self._sink = sink
+        self._clock_ms = clock_ms
+        self._clock = clock
+        self._interval = interval_seconds
+        self._loop = asyncio.get_running_loop()
+        self._context = copy_context()
+        self._last_key: tuple[int, str] | None = None
+        self._last_at = float("-inf")
+
+    def __call__(self, update: _staging.StagingProgress) -> None:
+        key = (update.file_index, update.phase)
+        now = self._clock()
+        if (
+            key == self._last_key
+            and update.completed_bytes != update.total_bytes
+            and now - self._last_at < self._interval
+        ):
+            return
+        self._last_key = key
+        self._last_at = now
+        self._loop.call_soon_threadsafe(self._publish, update, context=self._context)
+
+    def _publish(self, update: _staging.StagingProgress) -> None:
+        _report_liveness()
+        if self._sink is None:
+            return
+        phase = update.phase.replace("-", " ")
+        self._sink(
+            PluginProgress(
+                self._job_id,
+                "staging",
+                0.0,
+                f"file {update.file_index} of {update.file_count}: {phase} "
+                f"{update.completed_bytes} of {update.total_bytes} bytes",
+                self._clock_ms(),
+            )
+        )

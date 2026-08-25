@@ -9,6 +9,7 @@ same rule with one-second spectral windows.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,11 +73,31 @@ class MediaFingerprint:
     quality: MediaQuality = MediaQuality()
 
 
-def fingerprint_file(source: Path, relative_path: str, cancellation) -> MediaFingerprint:
+@dataclass(frozen=True, slots=True)
+class FingerprintProgress:
+    """One completed fingerprint work unit, without a source path."""
+
+    stage: str
+    completed: int
+    total: int | None
+    unit: str
+
+
+FingerprintObserver = Callable[[FingerprintProgress], None]
+
+
+def fingerprint_file(
+    source: Path,
+    relative_path: str,
+    cancellation,
+    observer: FingerprintObserver | None = None,
+    *,
+    digest: str | None = None,
+) -> MediaFingerprint:
     """Decode one file once per stream and retain only compact descriptors."""
     if source.suffix.lower() not in _MEDIA_SUFFIXES:
         raise MediaFingerprintError("media-unsupported", "selected file type is unsupported")
-    digest = _file_digest(source, cancellation)
+    digest = digest or file_digest(source, cancellation, observer)
     try:
         with av.open(str(source), mode="r") as container:
             has_video = bool(container.streams.video)
@@ -89,8 +110,12 @@ def fingerprint_file(source: Path, relative_path: str, cancellation) -> MediaFin
         ) from error
     if not has_video and not has_audio:
         raise MediaFingerprintError("media-invalid", "selected media has no audio or video stream")
-    visual, visual_duration = _video_fingerprints(source, cancellation) if has_video else ((), None)
-    audio, audio_duration = _audio_fingerprints(source, cancellation) if has_audio else ((), None)
+    visual, visual_duration = (
+        _video_fingerprints(source, cancellation, observer) if has_video else ((), None)
+    )
+    audio, audio_duration = (
+        _audio_fingerprints(source, cancellation, observer) if has_audio else ((), None)
+    )
     observed_duration = duration_ms
     if observed_duration is None:
         observed_duration = max(
@@ -181,13 +206,20 @@ def spectral_hash(samples: np.ndarray) -> int:
     return result
 
 
-def _file_digest(source: Path, cancellation) -> str:
+def file_digest(
+    source: Path, cancellation, observer: FingerprintObserver | None = None
+) -> str:
     digest = hashlib.sha256()
     try:
+        total = source.stat().st_size
+        completed = 0
+        _notify(observer, "digest", completed, total, "bytes")
         with source.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 cancellation.raise_if_cancelled()
                 digest.update(chunk)
+                completed += len(chunk)
+                _notify(observer, "digest", completed, total, "bytes")
     except OSError as error:
         raise MediaFingerprintError(
             "media-unavailable", "selected media could not be read"
@@ -195,10 +227,15 @@ def _file_digest(source: Path, cancellation) -> str:
     return digest.hexdigest()
 
 
-def _video_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], int | None]:
+def _video_fingerprints(
+    source: Path,
+    cancellation,
+    observer: FingerprintObserver | None = None,
+) -> tuple[tuple[int, ...], int | None]:
     buckets: dict[int, list[int]] = {}
     last_timestamp = None
     try:
+        _notify(observer, "video", 0, None, "frames")
         with av.open(str(source), mode="r") as container:
             stream = next(iter(container.streams.video), None)
             if stream is None:
@@ -215,6 +252,7 @@ def _video_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], in
                     gray = np.rot90(gray, -(rotation // 90))
                 buckets.setdefault(timestamp // VIDEO_BUCKET_MS, []).append(perceptual_hash(gray))
                 last_timestamp = timestamp
+                _notify(observer, "video", index + 1, None, "frames")
     except MediaFingerprintError:
         raise
     except Exception as error:
@@ -224,11 +262,16 @@ def _video_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], in
     )
 
 
-def _audio_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], int | None]:
+def _audio_fingerprints(
+    source: Path,
+    cancellation,
+    observer: FingerprintObserver | None = None,
+) -> tuple[tuple[int, ...], int | None]:
     windows: list[int] = []
     pending = np.zeros(0, dtype=np.float32)
     samples_seen = 0
     try:
+        _notify(observer, "audio", 0, None, "samples")
         with av.open(str(source), mode="r") as container:
             stream = next(iter(container.streams.audio), None)
             if stream is None:
@@ -239,16 +282,24 @@ def _audio_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], in
                 for converted in _resampled(resampler.resample(frame)):
                     chunk = np.asarray(converted.to_ndarray(), dtype=np.float32).reshape(-1)
                     pending = np.concatenate((pending, chunk))
-                    pending, added = _consume_audio_windows(pending, windows)
+                    pending, added = _consume_audio_windows(pending, windows, observer)
                     samples_seen += added
+                    _notify(
+                        observer,
+                        "audio",
+                        samples_seen + int(pending.size),
+                        None,
+                        "samples",
+                    )
             for converted in _resampled(resampler.resample(None)):
                 chunk = np.asarray(converted.to_ndarray(), dtype=np.float32).reshape(-1)
                 pending = np.concatenate((pending, chunk))
-                pending, added = _consume_audio_windows(pending, windows)
+                pending, added = _consume_audio_windows(pending, windows, observer)
                 samples_seen += added
             if pending.size >= 128:
                 windows.append(spectral_hash(pending))
                 samples_seen += int(pending.size)
+                _notify(observer, "audio", samples_seen, None, "samples")
     except MediaFingerprintError:
         raise
     except Exception as error:
@@ -257,13 +308,29 @@ def _audio_fingerprints(source: Path, cancellation) -> tuple[tuple[int, ...], in
     return tuple(windows), duration
 
 
-def _consume_audio_windows(pending: np.ndarray, windows: list[int]) -> tuple[np.ndarray, int]:
+def _consume_audio_windows(
+    pending: np.ndarray,
+    windows: list[int],
+    observer: FingerprintObserver | None = None,
+) -> tuple[np.ndarray, int]:
     consumed = 0
     while pending.size >= AUDIO_WINDOW_SAMPLES:
         windows.append(spectral_hash(pending[:AUDIO_WINDOW_SAMPLES]))
         pending = pending[AUDIO_WINDOW_SAMPLES:]
         consumed += AUDIO_WINDOW_SAMPLES
+        _notify(observer, "audio", len(windows) * AUDIO_WINDOW_SAMPLES, None, "samples")
     return pending, consumed
+
+
+def _notify(
+    observer: FingerprintObserver | None,
+    stage: str,
+    completed: int,
+    total: int | None,
+    unit: str,
+) -> None:
+    if observer is not None:
+        observer(FingerprintProgress(stage, completed, total, unit))
 
 
 def _resampled(value) -> tuple:
@@ -321,6 +388,8 @@ __all__ = [
     "MediaFingerprint",
     "MediaFingerprintError",
     "MediaQuality",
+    "FingerprintProgress",
+    "file_digest",
     "fingerprint_file",
     "perceptual_hash",
     "spectral_hash",

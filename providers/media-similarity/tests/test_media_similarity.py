@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,12 +12,20 @@ import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from omnitensor_media_similarity import checkpoints as checkpoint_module
 from omnitensor_media_similarity import fingerprints as fingerprint_module
+from omnitensor_media_similarity import provider as provider_module
 from omnitensor_media_similarity import similarity as similarity_module
+from omnitensor_media_similarity.checkpoints import (
+    FingerprintCheckpointStore,
+    selection_key,
+)
 from omnitensor_media_similarity.fingerprints import (
+    FingerprintProgress,
     MediaFingerprint,
     MediaFingerprintError,
     MediaQuality,
+    file_digest,
     fingerprint_file,
     perceptual_hash,
     spectral_hash,
@@ -25,6 +35,7 @@ from omnitensor_media_similarity.provider import (
     MediaSimilarityPlugin,
     _safe_relative_path,
     _validated_request,
+    create,
 )
 from omnitensor_media_similarity.similarity import compare_media, similarity_groups
 
@@ -243,11 +254,16 @@ def test_audio_decode_flushes_the_resampler_and_counts_the_partial_window(monkey
     monkeypatch.setattr(fingerprint_module.av, "AudioResampler", Resampler)
     token = SimpleNamespace(raise_if_cancelled=lambda: calls.append("checked"))
 
-    windows, duration = fingerprint_module._audio_fingerprints(Path("/selected/audio.wav"), token)
+    progress = []
+    windows, duration = fingerprint_module._audio_fingerprints(
+        Path("/selected/audio.wav"), token, progress.append
+    )
 
     assert windows == (0, 0)
     assert duration == 1_025
     assert calls == ["checked"]
+    assert progress[0] == FingerprintProgress("audio", 0, None, "samples")
+    assert progress[-1] == FingerprintProgress("audio", 16_400, None, "samples")
 
 
 def test_audio_decode_reports_absent_and_invalid_streams(monkeypatch):
@@ -299,12 +315,38 @@ def test_video_decode_rotates_clockwise_buckets_frames_and_counts_checks(monkeyp
     checks = []
     token = SimpleNamespace(raise_if_cancelled=lambda: checks.append("checked"))
 
-    visual, duration = fingerprint_module._video_fingerprints(Path("video.mp4"), token)
+    progress = []
+    visual, duration = fingerprint_module._video_fingerprints(
+        Path("video.mp4"), token, progress.append
+    )
 
     assert visual == (1, 4)
     assert duration == 1_000
     assert checks == ["checked", "checked", "checked"]
     assert all(np.array_equal(item, np.rot90(pixels, -1)) for item in seen)
+    assert progress == [
+        FingerprintProgress("video", completed, None, "frames")
+        for completed in range(4)
+    ]
+
+
+def test_file_digest_reports_every_streamed_chunk_without_exposing_its_path(tmp_path):
+    source = tmp_path / "private-name.mp4"
+    source.write_bytes(b"a" * (1024 * 1024) + b"end")
+    checks = []
+    progress = []
+    token = SimpleNamespace(raise_if_cancelled=lambda: checks.append("checked"))
+
+    digest = file_digest(source, token, progress.append)
+
+    assert digest == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert checks == ["checked", "checked"]
+    assert progress == [
+        FingerprintProgress("digest", 0, source.stat().st_size, "bytes"),
+        FingerprintProgress("digest", 1024 * 1024, source.stat().st_size, "bytes"),
+        FingerprintProgress("digest", source.stat().st_size, source.stat().st_size, "bytes"),
+    ]
+    assert all(source.name not in repr(item) for item in progress)
 
 
 def test_video_decode_reports_absent_and_invalid_streams(monkeypatch):
@@ -600,6 +642,235 @@ def test_comparison_scores_are_bounded_and_symmetric(left_hashes, right_hashes):
     assert forward.score == reverse.score
     assert forward.left_coverage == reverse.right_coverage
     assert forward.right_coverage == reverse.left_coverage
+
+
+@given(st.lists(st.text(), max_size=20))
+def test_checkpoint_selection_identity_is_stable_and_path_private(relative_paths):
+    identity = selection_key(relative_paths)
+
+    assert identity == selection_key(tuple(relative_paths))
+    assert len(identity) == 64
+    assert all(character in "0123456789abcdef" for character in identity)
+
+
+def test_checkpoint_selection_identity_does_not_embed_relative_names():
+    assert "secret/family-video.mp4" not in selection_key(("secret/family-video.mp4",))
+
+
+def test_checkpoint_store_round_trips_private_fingerprints_and_clears_selection(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    store = FingerprintCheckpointStore(state.resolve())
+    identity = selection_key(("folder/video.mp4",))
+    fingerprint = media(
+        "folder/video.mp4",
+        "a" * 64,
+        visual=(1, 2),
+        audio=(3, 4),
+        quality=MediaQuality(
+            width=1920,
+            height=1080,
+            video_bitrate=4_000_000,
+            audio_bitrate=800_000,
+            audio_sample_rate=48_000,
+            audio_channels=2,
+            lossless_audio=False,
+        ),
+    )
+
+    store.save(identity, fingerprint)
+
+    assert store.path.stat().st_mode & 0o777 == 0o600
+    assert store.load(identity, fingerprint.relative_path, fingerprint.sha256) == fingerprint
+    assert store.load(identity, fingerprint.relative_path, "b" * 64) is None
+    assert str(tmp_path.resolve()) not in store.path.read_bytes().decode("utf-8", errors="ignore")
+
+    store.clear(identity)
+
+    assert store.load(identity, fingerprint.relative_path, fingerprint.sha256) is None
+
+
+def test_checkpoint_store_ignores_corruption_and_storage_failures(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    store = FingerprintCheckpointStore(state.resolve())
+    store.path.write_bytes(b"not sqlite")
+
+    assert store.load("selection", "video.mp4", "a" * 64) is None
+    store.clear("selection")
+    store.save("selection", media("video.mp4", "a" * 64, visual=(1,)))
+
+    def unavailable():
+        raise sqlite3.OperationalError("unavailable")
+
+    monkeypatch.setattr(store, "_connect", unavailable)
+    assert store.load("selection", "video.mp4", "a" * 64) is None
+    store.clear("selection")
+    store.save("selection", media("video.mp4", "a" * 64, visual=(1,)))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda document: [],
+        lambda document: {key: value for key, value in document.items() if key != "visual"},
+        lambda document: {**document, "version": 2},
+        lambda document: {**document, "sha256": "b" * 64},
+        lambda document: {**document, "modality": "image"},
+        lambda document: {**document, "durationMs": 0},
+        lambda document: {**document, "visual": [True]},
+        lambda document: {**document, "visual": [1 << 64]},
+        lambda document: {**document, "modality": "audio", "audio": []},
+        lambda document: {**document, "modality": "video", "audio": [2]},
+        lambda document: {**document, "modality": "audio-video", "audio": []},
+        lambda document: {**document, "quality": {}},
+        lambda document: {
+            **document,
+            "quality": {**document["quality"], "audio_channels": 0},
+        },
+        lambda document: {
+            **document,
+            "quality": {**document["quality"], "lossless_audio": "yes"},
+        },
+    ],
+)
+def test_checkpoint_decoder_rejects_every_untrusted_payload_boundary(change):
+    fingerprint = media("video.mp4", "a" * 64, visual=(1,))
+    document = json.loads(checkpoint_module._encode(fingerprint))
+
+    with pytest.raises((TypeError, ValueError)):
+        checkpoint_module._decode(
+            json.dumps(change(document)), fingerprint.relative_path, fingerprint.sha256
+        )
+
+
+def test_checkpoint_store_requires_an_existing_absolute_private_state_directory(tmp_path):
+    with pytest.raises(ValueError, match="absolute directory"):
+        FingerprintCheckpointStore(Path("relative"))
+    with pytest.raises(ValueError, match="absolute directory"):
+        FingerprintCheckpointStore((tmp_path / "missing").resolve())
+
+
+def test_provider_resumes_completed_files_then_clears_checkpoints_after_success(
+    tmp_path, monkeypatch
+):
+    sources = (tmp_path / "a.mp4", tmp_path / "b.mp4")
+    sources[0].write_bytes(b"first")
+    sources[1].write_bytes(b"second")
+    state = tmp_path / "state"
+    state.mkdir()
+    store = FingerprintCheckpointStore(state.resolve())
+    paths = ("a.mp4", "nested/b.mp4")
+    identity = selection_key(paths)
+    fingerprinted = []
+    abort_second = True
+
+    def digest(source, _cancellation, observer):
+        payload = source.read_bytes()
+        observer(FingerprintProgress("digest", len(payload), len(payload), "bytes"))
+        return hashlib.sha256(payload).hexdigest()
+
+    def extract(source, relative_path, _cancellation, observer, *, digest):
+        nonlocal abort_second
+        fingerprinted.append(relative_path)
+        if relative_path == "nested/b.mp4" and abort_second:
+            raise asyncio.CancelledError
+        observer(FingerprintProgress("video", 1, 1, "frames"))
+        return media(relative_path, digest, visual=(0x1234,) * 4)
+
+    monkeypatch.setattr(provider_module, "file_digest", digest)
+    monkeypatch.setattr(provider_module, "fingerprint_file", extract)
+    request = PluginRequest(
+        "job-resume",
+        "media-similarity",
+        "manual",
+        {"sources": [str(source) for source in sources], "relativePaths": list(paths)},
+        1,
+        None,
+    )
+
+    first = MediaSimilarityPlugin(checkpoints=store, clock_ms=lambda: 10)
+    asyncio.run(
+        first.start(
+            PluginContext(
+                "media-similarity", 1, {}, frozenset({"files:read-selected"})
+            )
+        )
+    )
+    interrupted = asyncio.run(first.execute(request, cancellation(), Progress()))
+
+    first_digest = hashlib.sha256(sources[0].read_bytes()).hexdigest()
+    assert interrupted.status is PluginResultStatus.CANCELLED
+    assert store.load(identity, paths[0], first_digest) is not None
+    abort_second = False
+    resumed_progress = Progress()
+    second = MediaSimilarityPlugin(checkpoints=store, clock_ms=lambda: 20)
+    asyncio.run(
+        second.start(
+            PluginContext(
+                "media-similarity", 1, {}, frozenset({"files:read-selected"})
+            )
+        )
+    )
+
+    result = asyncio.run(second.execute(request, cancellation(), resumed_progress))
+
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert fingerprinted == ["a.mp4", "nested/b.mp4", "nested/b.mp4"]
+    assert "fingerprint-checkpoint" in {item.stage for item in resumed_progress.items}
+    assert store.load(identity, paths[0], first_digest) is None
+
+
+def test_provider_checkpoint_is_invalidated_when_source_content_changes(tmp_path, monkeypatch):
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"new")
+    state = tmp_path / "state"
+    state.mkdir()
+    store = FingerprintCheckpointStore(state.resolve())
+    identity = selection_key(("video.mp4",))
+    store.save(identity, media("video.mp4", hashlib.sha256(b"old").hexdigest(), visual=(1,)))
+    calls = []
+
+    def extract(_source, relative_path, _cancellation, _observer, *, digest):
+        calls.append(digest)
+        return media(relative_path, digest, visual=(2,))
+
+    monkeypatch.setattr(provider_module, "fingerprint_file", extract)
+    plugin = MediaSimilarityPlugin(checkpoints=store, clock_ms=lambda: 10)
+    asyncio.run(
+        plugin.start(
+            PluginContext(
+                "media-similarity", 1, {}, frozenset({"files:read-selected"})
+            )
+        )
+    )
+
+    result = asyncio.run(
+        plugin.execute(
+            request(
+                {"sources": [str(source)], "relativePaths": ["video.mp4"]}
+            ),
+            cancellation(),
+            Progress(),
+        )
+    )
+
+    assert result.status is PluginResultStatus.SUCCEEDED
+    assert calls == [hashlib.sha256(b"new").hexdigest()]
+
+
+def test_create_uses_worker_private_state_for_checkpoints(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    monkeypatch.setattr(
+        provider_module,
+        "current_plugin_bootstrap",
+        lambda plugin_id: SimpleNamespace(plugin_id=plugin_id, state_path=state.resolve()),
+    )
+
+    plugin = create()
+
+    assert plugin._checkpoints.path.parent == state.resolve()
 
 
 def test_provider_scans_every_source_once_and_keeps_per_file_failures():

@@ -54,6 +54,8 @@ from omnitensor.plugins import (
 from omnitensor.plugins import loading as loading_module
 from omnitensor.plugins import worker as worker_module
 from omnitensor.plugins import worker_specs as worker_specs_module
+from omnitensor.plugins.liveness import CallHeartbeat, beating
+from omnitensor.plugins.loading_staging import StagingProgress
 from omnitensor.plugins.protocol import (
     PluginContext,
     PluginHealth,
@@ -1994,11 +1996,13 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
             "request identity is invalid",
         )
 
+    progress = []
     rewritten, staged = loading_module._stage_selected_sources(
         prepared,
         "external-example",
         "job-1",
         {"sources": [str(source)], "locale": "en"},
+        progress.append,
     )
     assert staged.name.startswith("job-1-")
     assert staged.parent == prepared / "external-example"
@@ -2009,12 +2013,24 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
     }
     assert (staged / "00" / "event.TXT").read_text(encoding="utf-8") == "event"
     assert (staged / "00").stat().st_mode & 0o777 == 0o700
+    assert {item.phase for item in progress} == {
+        "digest",
+        "copy",
+        "verify-source",
+        "verify-copy",
+    }
+    assert all(
+        item.file_index == item.file_count == 1
+        and 0 <= item.completed_bytes <= item.total_bytes == len("event")
+        for item in progress
+    )
+    assert all(str(source) not in repr(item) for item in progress)
     loading_module.shutil.rmtree(staged)
 
     copied = []
 
-    def fake_copy(path, destination, index, observed):
-        copied.append((path, destination, index, observed))
+    def fake_copy(path, destination, index, observed, progress):
+        copied.append((path, destination, index, observed, progress))
         return destination / f"{index:02d}" / "source.txt"
 
     monkeypatch.setattr(loading_module, "_copy_selected_source", fake_copy)
@@ -2028,6 +2044,7 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
     assert [call[2] for call in copied] == list(range(96))
     assert all(call[1] == staged for call in copied)
     assert all(call[3] is copied[0][3] for call in copied)
+    assert all(call[4] is None for call in copied)
     loading_module.shutil.rmtree(staged)
 
     def fail_copy(*_arguments):
@@ -2039,6 +2056,38 @@ def test_selected_file_broker_contract_boundaries_and_cleanup(tmp_path, monkeypa
             prepared, "external-example", "job-fail", {"sources": [str(source)]}
         )
     assert list((prepared / "external-example").iterdir()) == []
+
+
+def test_staging_progress_relay_throttles_work_units_and_beats_flow_heartbeat():
+    progress = []
+    heartbeat = CallHeartbeat()
+    ticks = iter((0.0, 1.0, 6.0, 7.0))
+
+    async def scenario():
+        with beating(heartbeat):
+            relay = loading_module._StagingProgressRelay(
+                "job-1",
+                progress.append,
+                lambda: 12,
+                clock=lambda: next(ticks),
+                interval_seconds=5.0,
+            )
+
+            def publish():
+                for completed in (0, 10, 20, 100):
+                    relay(StagingProgress(1, 2, "copy", completed, 100))
+
+            await asyncio.to_thread(publish)
+            await asyncio.sleep(0)
+            assert heartbeat.consume() is True
+
+    asyncio.run(scenario())
+
+    assert [(item.stage, item.fraction, item.detail) for item in progress] == [
+        ("staging", 0.0, "file 1 of 2: copy 0 of 100 bytes"),
+        ("staging", 0.0, "file 1 of 2: copy 20 of 100 bytes"),
+        ("staging", 0.0, "file 1 of 2: copy 100 of 100 bytes"),
+    ]
 
 
 def test_selected_file_copy_contracts_are_exact(tmp_path, monkeypatch):
